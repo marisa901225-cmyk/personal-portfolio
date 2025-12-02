@@ -1,16 +1,21 @@
 import React, { useState } from 'react';
-import { Asset, AssetCategory } from '../types';
+import { Asset, AssetCategory, TradeType } from '../types';
 import { formatCurrency } from '../constants';
 import { Trash2, Search, Filter, Download } from 'lucide-react';
 
 interface AssetListProps {
   assets: Asset[];
   onDelete: (id: string) => void;
+  onTrade: (id: string, type: TradeType, quantity: number, price: number) => void;
 }
 
-export const AssetList: React.FC<AssetListProps> = ({ assets, onDelete }) => {
+export const AssetList: React.FC<AssetListProps> = ({ assets, onDelete, onTrade }) => {
   const [filter, setFilter] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
+   const [activeTradeId, setActiveTradeId] = useState<string | null>(null);
+   const [tradeType, setTradeType] = useState<TradeType>('BUY');
+   const [tradeQuantity, setTradeQuantity] = useState<string>('');
+   const [tradePrice, setTradePrice] = useState<string>('');
 
   const filteredAssets = assets.filter(asset => {
     const matchesCategory = filter === 'ALL' || asset.category === filter;
@@ -24,7 +29,7 @@ export const AssetList: React.FC<AssetListProps> = ({ assets, onDelete }) => {
   const handleDownloadExcel = () => {
     // Excel requires BOM (\uFEFF) for correct Korean character encoding
     const BOM = '\uFEFF';
-    const headers = ['자산명', '티커', '카테고리', '수량', '매수평균가', '현재가', '평가금액', '수익률(%)'];
+    const headers = ['자산명', '티커', '카테고리', '수량', '매수평균가', '현재가', '평가금액', '실현손익', '수익률(%)'];
     
     const csvRows = filteredAssets.map(asset => {
       const profitRate = asset.purchasePrice 
@@ -42,6 +47,7 @@ export const AssetList: React.FC<AssetListProps> = ({ assets, onDelete }) => {
         asset.purchasePrice || 0,
         asset.currentPrice,
         asset.amount * asset.currentPrice,
+        asset.realizedProfit || 0,
         profitRate.toFixed(2)
       ].join(',');
     });
@@ -59,6 +65,30 @@ export const AssetList: React.FC<AssetListProps> = ({ assets, onDelete }) => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const openTrade = (asset: Asset, type: TradeType) => {
+    setActiveTradeId(asset.id);
+    setTradeType(type);
+    setTradeQuantity('');
+    setTradePrice(asset.currentPrice.toString());
+  };
+
+  const closeTrade = () => {
+    setActiveTradeId(null);
+    setTradeQuantity('');
+    setTradePrice('');
+  };
+
+  const submitTrade = (asset: Asset) => {
+    const qty = Number(tradeQuantity);
+    const price = Number(tradePrice);
+    if (Number.isNaN(qty) || Number.isNaN(price)) {
+      alert('수량과 가격을 올바르게 입력해주세요.');
+      return;
+    }
+    onTrade(asset.id, tradeType, qty, price);
+    closeTrade();
   };
 
   return (
@@ -124,6 +154,8 @@ export const AssetList: React.FC<AssetListProps> = ({ assets, onDelete }) => {
                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">매수평균가</th>
                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">현재가</th>
                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">평가금액</th>
+                <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-right">실현손익</th>
+                <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">매수/매도</th>
                 <th className="p-4 text-xs font-semibold text-slate-500 uppercase tracking-wider text-center">관리</th>
                 </tr>
             </thead>
@@ -135,8 +167,10 @@ export const AssetList: React.FC<AssetListProps> = ({ assets, onDelete }) => {
                         : 0;
                     const isProfitable = profitRate > 0;
                     const isLoss = profitRate < 0;
+                    const realized = asset.realizedProfit || 0;
 
                     return (
+                      <>
                         <tr key={asset.id} className="hover:bg-slate-50 transition-colors group">
                             <td className="p-4">
                                 <div>
@@ -170,6 +204,29 @@ export const AssetList: React.FC<AssetListProps> = ({ assets, onDelete }) => {
                             <td className="p-4 text-right font-bold text-slate-800">
                                 {formatCurrency(totalValue)}
                             </td>
+                            <td className="p-4 text-right">
+                              <div className={`font-medium ${realized > 0 ? 'text-red-500' : realized < 0 ? 'text-blue-500' : 'text-slate-500'}`}>
+                                {realized > 0 ? '+' : ''}{formatCurrency(Math.abs(realized))}
+                              </div>
+                            </td>
+                            <td className="p-4 text-center">
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => openTrade(asset, 'BUY')}
+                                  className="px-2 py-1 rounded-lg text-[11px] font-medium bg-red-50 text-red-600 hover:bg-red-100"
+                                >
+                                  매수
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => openTrade(asset, 'SELL')}
+                                  className="px-2 py-1 rounded-lg text-[11px] font-medium bg-blue-50 text-blue-600 hover:bg-blue-100"
+                                >
+                                  매도
+                                </button>
+                              </div>
+                            </td>
                             <td className="p-4 text-center">
                                 <button 
                                     onClick={() => onDelete(asset.id)}
@@ -179,6 +236,66 @@ export const AssetList: React.FC<AssetListProps> = ({ assets, onDelete }) => {
                                 </button>
                             </td>
                         </tr>
+                        {activeTradeId === asset.id && (
+                          <tr className="bg-slate-50">
+                            <td colSpan={8} className="p-4">
+                              <div className="flex flex-col md:flex-row md:items-end gap-3 text-sm">
+                                <div className="font-medium text-slate-700">
+                                  {asset.name}{' '}
+                                  {asset.ticker && (
+                                    <span className="text-[11px] text-slate-500 ml-1">
+                                      ({asset.ticker})
+                                    </span>
+                                  )}
+                                  <span className="ml-2 text-[11px] px-2 py-0.5 rounded bg-slate-200 text-slate-600">
+                                    {tradeType === 'BUY' ? '매수' : '매도'}
+                                  </span>
+                                </div>
+                                <div className="flex-1 grid grid-cols-2 md:grid-cols-4 gap-3">
+                                  <div>
+                                    <label className="block text-[11px] text-slate-500 mb-1">수량</label>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="any"
+                                      className="w-full px-3 py-1.5 rounded-lg border border-slate-200 text-sm"
+                                      value={tradeQuantity}
+                                      onChange={(e) => setTradeQuantity(e.target.value)}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[11px] text-slate-500 mb-1">가격</label>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="any"
+                                      className="w-full px-3 py-1.5 rounded-lg border border-slate-200 text-sm"
+                                      value={tradePrice}
+                                      onChange={(e) => setTradePrice(e.target.value)}
+                                    />
+                                  </div>
+                                  <div className="md:col-span-2 flex items-center gap-2 mt-2 md:mt-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => submitTrade(asset)}
+                                      className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700"
+                                    >
+                                      적용
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={closeTrade}
+                                      className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-600 text-sm hover:bg-slate-200"
+                                    >
+                                      취소
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </>
                     );
                 })}
             </tbody>

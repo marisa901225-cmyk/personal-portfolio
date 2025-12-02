@@ -1,19 +1,29 @@
-import React, { useState } from 'react';
-import { LayoutDashboard, List, PlusCircle, Bell, Menu, X, Settings, RefreshCw, Server } from 'lucide-react';
-import { Asset, ViewState, AppSettings } from './types';
-import { INITIAL_ASSETS } from './constants';
+import React, { useState, useEffect } from 'react';
+import { LayoutDashboard, List, PlusCircle, Bell, Menu, X, Settings, RefreshCw } from 'lucide-react';
+import { Asset, ViewState, AppSettings, TradeType, TradeRecord } from './types';
+import { INITIAL_ASSETS, formatCurrency } from './constants';
 import { Dashboard } from './components/Dashboard';
 import { AssetList } from './components/AssetList';
 import { AddAssetForm } from './components/AddAssetForm';
+import { SettingsPanel } from './components/SettingsPanel';
 
 const App: React.FC = () => {
   const [assets, setAssets] = useState<Asset[]>(INITIAL_ASSETS);
   const [currentView, setCurrentView] = useState<ViewState>('DASHBOARD');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [tradeHistory, setTradeHistory] = useState<TradeRecord[]>([]);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [settings, setSettings] = useState<AppSettings>({
-    serverUrl: 'http://100.x.y.z:8000' // Default example
+    serverUrl: 'http://100.99.67.34:8000', // Tailscale Home Server
+    targetIndexAllocations: [
+      { indexGroup: 'S&P500', targetWeight: 6 },
+      { indexGroup: 'NASDAQ100', targetWeight: 3 },
+      { indexGroup: 'BOND+ETC', targetWeight: 1 },
+    ],
   });
   const [isSyncing, setIsSyncing] = useState(false);
+  const [authInput, setAuthInput] = useState('');
+  const [showAuthModal, setShowAuthModal] = useState(true);
 
   const handleAddAsset = (newAsset: Asset) => {
     setAssets([...assets, newAsset]);
@@ -24,6 +34,90 @@ const App: React.FC = () => {
     if (window.confirm('정말 이 자산을 삭제하시겠습니까?')) {
       setAssets(assets.filter(a => a.id !== id));
     }
+  };
+
+  const handleTradeAsset = (id: string, type: TradeType, quantity: number, price: number) => {
+    if (quantity <= 0 || price <= 0) {
+      alert('수량과 가격은 0보다 커야 합니다.');
+      return;
+    }
+
+    const targetAsset = assets.find(a => a.id === id);
+    if (!targetAsset) return;
+
+    if (type === 'SELL' && quantity > targetAsset.amount) {
+      alert('보유 수량보다 많이 매도할 수 없습니다.');
+      return;
+    }
+
+    let realizedDelta: number | undefined;
+    if (type === 'SELL') {
+      const avgCost = targetAsset.purchasePrice ?? targetAsset.currentPrice;
+      realizedDelta = (price - avgCost) * quantity;
+    }
+
+    setAssets(prevAssets =>
+      prevAssets.reduce((acc: Asset[], asset) => {
+        if (asset.id !== id) {
+          acc.push(asset);
+          return acc;
+        }
+
+        const qty = quantity;
+        const tradePrice = price;
+
+        if (type === 'BUY') {
+          const prevAmount = asset.amount;
+          const prevPurchasePrice = asset.purchasePrice ?? asset.currentPrice;
+          const newAmount = prevAmount + qty;
+          const newPurchasePrice =
+            newAmount > 0
+              ? (prevAmount * prevPurchasePrice + qty * tradePrice) / newAmount
+              : prevPurchasePrice;
+
+          acc.push({
+            ...asset,
+            amount: newAmount,
+            purchasePrice: newPurchasePrice,
+          });
+        } else {
+          const prevAmount = asset.amount;
+          const prevPurchasePrice = asset.purchasePrice ?? asset.currentPrice;
+          const newAmount = prevAmount - qty;
+          const avgCost = prevPurchasePrice;
+          const prevRealized = asset.realizedProfit || 0;
+          const delta = (tradePrice - avgCost) * qty;
+          const updatedRealized = prevRealized + delta;
+
+          // 전량 매도인 경우 자산 목록에서 제거
+          if (newAmount <= 0) {
+            return acc;
+          }
+
+          acc.push({
+            ...asset,
+            amount: newAmount,
+            purchasePrice: prevPurchasePrice,
+            realizedProfit: updatedRealized,
+          });
+        }
+
+        return acc;
+      }, [])
+    );
+
+    const record: TradeRecord = {
+      id: Date.now().toString(),
+      assetId: targetAsset.id,
+      assetName: targetAsset.name,
+      ticker: targetAsset.ticker,
+      type,
+      quantity,
+      price,
+      timestamp: new Date().toISOString(),
+      realizedDelta,
+    };
+    setTradeHistory(prev => [record, ...prev].slice(0, 20));
   };
 
   // Sync with Home Server
@@ -42,11 +136,16 @@ const App: React.FC = () => {
 
     setIsSyncing(true);
     try {
+        const headers: HeadersInit = {
+            'Content-Type': 'application/json',
+        };
+        if (settings.apiToken) {
+          headers['X-API-Token'] = settings.apiToken;
+        }
+
         const response = await fetch(`${settings.serverUrl}/api/prices`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers,
             body: JSON.stringify({ tickers }),
         });
 
@@ -85,11 +184,59 @@ const App: React.FC = () => {
     >
       <Icon size={20} />
       <span className="font-medium">{label}</span>
-    </button>
+      </button>
   );
+
+  // 초기 로드 시 한 번 자동 가격 동기화 시도
+  useEffect(() => {
+    const hasTickers = assets.some(a => !!a.ticker);
+    if (!settings.serverUrl || !hasTickers || !settings.apiToken) {
+      return;
+    }
+    // 실패해도 사용자는 우측 상단 버튼으로 다시 시도 가능
+    void handleSyncPrices();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleAuthSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!authInput.trim()) return;
+    setSettings(prev => ({ ...prev, apiToken: authInput.trim() }));
+    setShowAuthModal(false);
+    setAuthInput('');
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
+      {showAuthModal && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm p-6">
+            <h2 className="text-lg font-bold text-slate-900 mb-2">API 비밀번호 입력</h2>
+            <p className="text-xs text-slate-500 mb-4">
+              백엔드 서버의 <code>API_TOKEN</code> 값과 동일한 비밀번호를 입력하세요.
+              브라우저를 새로고침하면 다시 입력해야 합니다.
+            </p>
+            <form onSubmit={handleAuthSubmit} className="space-y-3">
+              <div>
+                <input
+                  type="password"
+                  autoFocus
+                  className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
+                  placeholder="API 비밀번호"
+                  value={authInput}
+                  onChange={(e) => setAuthInput(e.target.value)}
+                />
+              </div>
+              <button
+                type="submit"
+                className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 transition-colors"
+              >
+                포트폴리오 들어가기
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
       {/* Sidebar (Desktop) */}
       <aside className="hidden md:flex flex-col w-64 bg-white border-r border-slate-200 h-screen sticky top-0">
         <div className="p-6 border-b border-slate-100">
@@ -170,68 +317,111 @@ const App: React.FC = () => {
                     <span className="hidden md:inline font-medium">가격 동기화</span>
                 </button>
                 
-                <button className="p-2 bg-white rounded-full border border-slate-200 text-slate-400 hover:text-indigo-600 hover:border-indigo-200 transition-all shadow-sm relative">
-                    <Bell size={20} />
+                <button
+                  onClick={() => setIsHistoryOpen(prev => !prev)}
+                  className="p-2 bg-white rounded-full border border-slate-200 text-slate-400 hover:text-indigo-600 hover:border-indigo-200 transition-all shadow-sm relative"
+                >
+                  <Bell size={20} />
+                  {tradeHistory.length > 0 && (
                     <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white"></span>
+                  )}
                 </button>
             </div>
         </header>
 
-        {currentView === 'DASHBOARD' && <Dashboard assets={assets} />}
-        {currentView === 'LIST' && <AssetList assets={assets} onDelete={handleDeleteAsset} />}
+        {isHistoryOpen && (
+          <section className="mb-6 animate-fade-in-up">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-slate-800">최근 거래 내역</h2>
+                <button
+                  type="button"
+                  onClick={() => setIsHistoryOpen(false)}
+                  className="text-xs text-slate-400 hover:text-slate-600"
+                >
+                  닫기
+                </button>
+              </div>
+              {tradeHistory.length === 0 ? (
+                <p className="text-xs text-slate-400">아직 기록된 거래가 없습니다.</p>
+              ) : (
+                <ul className="divide-y divide-slate-100 text-xs max-h-60 overflow-y-auto">
+                  {tradeHistory.map((trade) => {
+                    const isBuy = trade.type === 'BUY';
+                    const ts = new Date(trade.timestamp);
+                    const labelTime = ts.toLocaleString('ko-KR', {
+                      month: '2-digit',
+                      day: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    });
+                    const pnl = trade.realizedDelta ?? 0;
+                    return (
+                      <li key={trade.id} className="py-2 flex items-center justify-between gap-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                isBuy ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'
+                              }`}
+                            >
+                              {isBuy ? '매수' : '매도'}
+                            </span>
+                            <span className="text-[11px] text-slate-500">{labelTime}</span>
+                          </div>
+                          <div className="mt-0.5 text-[13px] text-slate-800">
+                            {trade.assetName}
+                            {trade.ticker && (
+                              <span className="ml-1 text-[10px] text-slate-500">({trade.ticker})</span>
+                            )}
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-slate-500">
+                            {trade.quantity.toLocaleString()}개 @ {formatCurrency(trade.price)}
+                          </div>
+                        </div>
+                        {!isBuy && (
+                          <div
+                            className={`text-right text-[11px] font-semibold ${
+                              pnl > 0 ? 'text-red-500' : pnl < 0 ? 'text-blue-500' : 'text-slate-400'
+                            }`}
+                          >
+                            {pnl > 0 ? '+' : pnl < 0 ? '-' : ''}
+                            {formatCurrency(Math.abs(pnl))}
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </section>
+        )}
+
+        {currentView === 'DASHBOARD' && (
+          <Dashboard assets={assets} targetIndexAllocations={settings.targetIndexAllocations} />
+        )}
+        {currentView === 'LIST' && (
+          <AssetList
+            assets={assets}
+            onDelete={handleDeleteAsset}
+            onTrade={handleTradeAsset}
+          />
+        )}
         {currentView === 'ADD' && (
             <AddAssetForm 
                 onSave={handleAddAsset} 
                 onCancel={() => setCurrentView('DASHBOARD')} 
+                serverUrl={settings.serverUrl}
+                apiToken={settings.apiToken}
             />
         )}
         {currentView === 'SETTINGS' && (
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-lg mx-auto animate-fade-in-up">
-                <div className="flex items-center space-x-3 mb-6 pb-4 border-b border-slate-100">
-                    <div className="p-2 bg-slate-100 rounded-lg">
-                        <Server size={24} className="text-slate-600" />
-                    </div>
-                    <div>
-                        <h2 className="text-lg font-bold text-slate-800">홈서버 연결 설정</h2>
-                        <p className="text-sm text-slate-500">Tailscale을 통한 백엔드 연결</p>
-                    </div>
-                </div>
-                
-                <div className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-2">홈서버 API URL</label>
-                        <input 
-                            type="text" 
-                            className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors font-mono text-sm"
-                            placeholder="http://100.x.y.z:8000"
-                            value={settings.serverUrl}
-                            onChange={(e) => setSettings({ ...settings, serverUrl: e.target.value })}
-                        />
-                        <p className="text-xs text-slate-500 mt-2">
-                            * Tailscale Machine IP와 Port를 입력하세요.<br/>
-                            * 예: http://100.101.102.103:8000
-                        </p>
-                    </div>
-                    
-                    <div className="bg-blue-50 p-4 rounded-xl">
-                        <h4 className="font-semibold text-blue-800 text-sm mb-2">사용 팁</h4>
-                        <ul className="text-xs text-blue-700 space-y-1 list-disc list-inside">
-                            <li>홈서버에 Python Backend가 실행 중이어야 합니다.</li>
-                            <li>자산 추가 시 '티커(Ticker)'를 입력해야 가격이 갱신됩니다.</li>
-                            <li>우측 상단의 '가격 동기화' 버튼을 눌러 업데이트하세요.</li>
-                        </ul>
-                    </div>
-
-                    <div className="pt-4">
-                        <button 
-                            onClick={() => setCurrentView('DASHBOARD')}
-                            className="w-full py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all"
-                        >
-                            설정 저장 및 돌아가기
-                        </button>
-                    </div>
-                </div>
-            </div>
+          <SettingsPanel
+            settings={settings}
+            onSettingsChange={setSettings}
+            onBackToDashboard={() => setCurrentView('DASHBOARD')}
+          />
         )}
       </main>
 
