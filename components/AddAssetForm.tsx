@@ -5,9 +5,11 @@ import { X } from 'lucide-react';
 interface AddAssetFormProps {
   onSave: (asset: Asset) => void;
   onCancel: () => void;
+  serverUrl?: string;
+  apiToken?: string;
 }
 
-export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel }) => {
+export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, serverUrl, apiToken }) => {
   const [formData, setFormData] = useState<Partial<Asset>>({
     name: '',
     ticker: '',
@@ -15,8 +17,11 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel }) 
     amount: 0,
     currentPrice: 0,
     purchasePrice: 0,
-    currency: 'KRW'
+    currency: 'KRW',
+    indexGroup: ''
   });
+  const [isResolvingTicker, setIsResolvingTicker] = useState(false);
+  const [tickerHint, setTickerHint] = useState<string | null>(null);
 
   const handleChange = (field: keyof Asset, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -35,9 +40,55 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel }) 
       currentPrice: Number(formData.currentPrice),
       // If purchasePrice is not entered, assume it matches currentPrice (bought now)
       purchasePrice: Number(formData.purchasePrice) || Number(formData.currentPrice),
-      currency: 'KRW'
+      currency: 'KRW',
+      realizedProfit: 0,
+      indexGroup: formData.indexGroup?.trim() || undefined
     };
     onSave(newAsset);
+  };
+
+  const handleResolveTicker = async () => {
+    if (!serverUrl) {
+      alert('먼저 환경 설정에서 홈서버 URL을 입력해주세요.');
+      return;
+    }
+    if (!formData.name || !formData.name.trim()) {
+      alert('종목명을 먼저 입력해주세요.');
+      return;
+    }
+
+    setIsResolvingTicker(true);
+    setTickerHint(null);
+
+    try {
+      const headers: HeadersInit = {};
+      if (apiToken) {
+        headers['X-API-Token'] = apiToken;
+      }
+
+      const response = await fetch(
+        `${serverUrl}/api/search_ticker?q=${encodeURIComponent(formData.name.trim())}`,
+        { headers }
+      );
+      if (!response.ok) {
+        throw new Error('Failed to search ticker');
+      }
+      const data = await response.json();
+
+      if (!data.results || data.results.length === 0) {
+        alert('해당 종목명을 찾지 못했습니다. 티커를 직접 입력해주세요.');
+        return;
+      }
+
+      const best = data.results[0];
+      handleChange('ticker', best.symbol);
+      setTickerHint(`${best.name} (${best.symbol}${best.exchange ? `, ${best.exchange}` : ''})`);
+    } catch (error) {
+      console.error('Ticker resolve error:', error);
+      alert('티커 자동 조회 중 오류가 발생했습니다. 나중에 다시 시도해주세요.');
+    } finally {
+      setIsResolvingTicker(false);
+    }
   };
 
   return (
@@ -83,7 +134,21 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel }) 
             />
             </div>
             <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">티커/종목코드 (선택)</label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-slate-700">
+                티커/종목코드 (선택)
+              </label>
+              <button
+                type="button"
+                onClick={handleResolveTicker}
+                disabled={isResolvingTicker}
+                className={`text-[11px] px-2 py-1 rounded-md border text-slate-600 hover:border-indigo-400 hover:text-indigo-600 transition-colors ${
+                  isResolvingTicker ? 'opacity-60 cursor-not-allowed' : ''
+                }`}
+              >
+                {isResolvingTicker ? '조회 중...' : '자동 채우기'}
+              </button>
+            </div>
             <input
                 type="text"
                 className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors uppercase"
@@ -91,8 +156,29 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel }) 
                 value={formData.ticker || ''}
                 onChange={(e) => handleChange('ticker', e.target.value)}
             />
+            {tickerHint && (
+              <p className="text-[10px] text-slate-500 mt-1">
+                자동 선택: {tickerHint}
+              </p>
+            )}
             <p className="text-[10px] text-slate-400 mt-1">홈서버 연동 시 사용됩니다 (Yahoo Finance 기준)</p>
             </div>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-2">
+            지수 그룹 (선택)
+          </label>
+          <input
+            type="text"
+            className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+            placeholder="예: S&P500, NASDAQ100, KOSPI200"
+            value={formData.indexGroup || ''}
+            onChange={(e) => handleChange('indexGroup', e.target.value)}
+          />
+          <p className="text-[11px] text-slate-400 mt-1">
+            같은 지수에 묶인 국내/해외 ETF를 함께 관리할 때 사용합니다.
+          </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

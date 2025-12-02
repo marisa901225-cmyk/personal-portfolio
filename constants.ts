@@ -25,16 +25,6 @@ export const INITIAL_ASSETS: Asset[] = [
   },
   {
     id: '3',
-    name: 'Bitcoin',
-    ticker: 'BTC-USD',
-    category: AssetCategory.CRYPTO,
-    amount: 0.15,
-    currentPrice: 85000000,
-    currency: 'KRW',
-    purchasePrice: 50000000
-  },
-  {
-    id: '4',
     name: '강남 아파트 전세금',
     category: AssetCategory.REAL_ESTATE,
     amount: 1,
@@ -43,7 +33,7 @@ export const INITIAL_ASSETS: Asset[] = [
     purchasePrice: 800000000
   },
   {
-    id: '5',
+    id: '4',
     name: 'CMA 통장',
     category: AssetCategory.CASH,
     amount: 1,

@@ -1,31 +1,49 @@
 import React, { useMemo } from 'react';
-import { Asset, PortfolioSummary } from '../types';
+import { Asset, PortfolioSummary, TargetIndexAllocation } from '../types';
 import { formatCurrency, COLORS, MOCK_HISTORY_DATA } from '../constants';
 import { PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { TrendingUp, Wallet, PieChart as PieIcon, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 
 interface DashboardProps {
   assets: Asset[];
+  targetIndexAllocations?: TargetIndexAllocation[];
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ assets }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ assets, targetIndexAllocations }) => {
   const summary: PortfolioSummary = useMemo(() => {
     let totalValue = 0;
     let totalInvested = 0;
+    let realizedProfitTotal = 0;
     const catMap = new Map<string, number>();
+    const indexMap = new Map<string, number>();
 
     assets.forEach(asset => {
       const val = asset.amount * asset.currentPrice;
       const invested = asset.amount * (asset.purchasePrice || asset.currentPrice);
+      const realized = asset.realizedProfit || 0;
       
       totalValue += val;
       totalInvested += invested;
+      realizedProfitTotal += realized;
 
       const currentCatVal = catMap.get(asset.category) || 0;
       catMap.set(asset.category, currentCatVal + val);
+
+      if (asset.indexGroup) {
+        const currentIndexVal = indexMap.get(asset.indexGroup) || 0;
+        indexMap.set(asset.indexGroup, currentIndexVal + val);
+      }
     });
 
+    const unrealizedProfitTotal = totalValue - totalInvested;
+
     const categoryDistribution = Array.from(catMap.entries()).map(([name, value], index) => ({
+      name,
+      value,
+      color: COLORS[index % COLORS.length]
+    })).sort((a, b) => b.value - a.value);
+
+    const indexDistribution = Array.from(indexMap.entries()).map(([name, value], index) => ({
       name,
       value,
       color: COLORS[index % COLORS.length]
@@ -34,14 +52,53 @@ export const Dashboard: React.FC<DashboardProps> = ({ assets }) => {
     return {
       totalValue,
       totalInvested,
+      realizedProfitTotal,
+      unrealizedProfitTotal,
       categoryDistribution,
+      indexDistribution,
       historyData: MOCK_HISTORY_DATA // In a real app, this would be derived from historical snapshots
     };
   }, [assets]);
 
-  const profit = summary.totalValue - summary.totalInvested;
-  const profitRate = summary.totalInvested > 0 ? (profit / summary.totalInvested) * 100 : 0;
-  const isPositive = profit >= 0;
+  const totalProfit = summary.realizedProfitTotal + summary.unrealizedProfitTotal;
+  const profitRate = summary.totalInvested > 0 ? (totalProfit / summary.totalInvested) * 100 : 0;
+  const isPositive = totalProfit >= 0;
+
+  const rebalanceNotices: string[] = useMemo(() => {
+    if (!targetIndexAllocations || targetIndexAllocations.length === 0) return [];
+    if (summary.totalValue <= 0 || summary.indexDistribution.length === 0) return [];
+
+    const positiveTargets = targetIndexAllocations.filter(a => a.targetWeight > 0 && a.indexGroup.trim());
+    if (positiveTargets.length === 0) return [];
+
+    const totalTargetWeight = positiveTargets.reduce((sum, a) => sum + a.targetWeight, 0);
+    if (totalTargetWeight <= 0) return [];
+
+    const targetShareMap = new Map<string, number>();
+    positiveTargets.forEach(a => {
+      targetShareMap.set(a.indexGroup.trim(), a.targetWeight / totalTargetWeight);
+    });
+
+    const actualShareMap = new Map<string, number>();
+    summary.indexDistribution.forEach(item => {
+      actualShareMap.set(item.name, item.value / summary.totalValue);
+    });
+
+    const threshold = 0.05; // 5%p 이상 차이 나면 알림
+    const messages: string[] = [];
+
+    targetShareMap.forEach((targetShare, name) => {
+      const actualShare = actualShareMap.get(name) ?? 0;
+      const diff = actualShare - targetShare;
+      if (Math.abs(diff) >= threshold) {
+        const diffPercent = Math.abs(diff * 100).toFixed(1);
+        const direction = diff > 0 ? '높습니다' : '낮습니다';
+        messages.push(`${name} 비중이 목표 대비 약 ${diffPercent}%p ${direction}.`);
+      }
+    });
+
+    return messages;
+  }, [summary.totalValue, summary.indexDistribution, targetIndexAllocations]);
 
   return (
     <div className="space-y-6 pb-20 md:pb-0 animate-fade-in">
@@ -69,9 +126,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ assets }) => {
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
           <div className="flex justify-between items-start">
             <div>
-              <p className="text-sm font-medium text-slate-500 mb-1">평가 손익</p>
+              <p className="text-sm font-medium text-slate-500 mb-1">손익 (실현 + 평가)</p>
               <h2 className={`text-2xl md:text-3xl font-bold ${isPositive ? 'text-slate-900' : 'text-red-600'}`}>
-                {isPositive ? '+' : ''}{formatCurrency(profit)}
+                {isPositive ? '+' : ''}{formatCurrency(totalProfit)}
               </h2>
             </div>
             <div className="p-2 bg-green-50 rounded-lg text-green-600">
@@ -80,6 +137,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ assets }) => {
           </div>
           <div className="mt-4 text-sm text-slate-400">
             총 투자 원금: {formatCurrency(summary.totalInvested)}
+          </div>
+          <div className="mt-1 text-xs text-slate-500">
+            실현손익: <span className={summary.realizedProfitTotal >= 0 ? 'text-red-500 font-semibold' : 'text-blue-500 font-semibold'}>
+              {summary.realizedProfitTotal > 0 ? '+' : summary.realizedProfitTotal < 0 ? '-' : ''}
+              {formatCurrency(Math.abs(summary.realizedProfitTotal))}
+            </span>{' '}
+            / 평가손익:{' '}
+            <span className={summary.unrealizedProfitTotal >= 0 ? 'text-red-500 font-semibold' : 'text-blue-500 font-semibold'}>
+              {summary.unrealizedProfitTotal > 0 ? '+' : summary.unrealizedProfitTotal < 0 ? '-' : ''}
+              {formatCurrency(Math.abs(summary.unrealizedProfitTotal))}
+            </span>
           </div>
         </div>
 
@@ -140,6 +208,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ assets }) => {
                  </div>
              ))}
           </div>
+
+          {summary.indexDistribution.length > 0 && summary.totalValue > 0 && (
+            <div className="mt-5 pt-4 border-t border-slate-100">
+              <h4 className="text-xs font-semibold text-slate-500 mb-3">
+                지수별 비중
+              </h4>
+              <div className="space-y-2">
+                {summary.indexDistribution.map((item, idx) => (
+                  <div key={idx} className="flex items-center text-xs">
+                    <div
+                      className="w-2.5 h-2.5 rounded-full mr-2"
+                      style={{ backgroundColor: item.color }}
+                    />
+                    <span className="text-slate-600 flex-1 truncate">
+                      {item.name}
+                    </span>
+                    <span className="font-medium text-slate-900">
+                      {((item.value / summary.totalValue) * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* History Chart */}
@@ -184,6 +276,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ assets }) => {
           </div>
         </div>
       </div>
+
+      {rebalanceNotices.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
+          <p className="font-semibold mb-1">목표 비중 점검</p>
+          <ul className="list-disc list-inside space-y-0.5">
+            {rebalanceNotices.map((msg, idx) => (
+              <li key={idx}>{msg} 리밸런싱이 필요한지 한 번 점검해 보세요.</li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 };
