@@ -1,15 +1,16 @@
 import React, { useState } from 'react';
 import { Asset, AssetCategory, TradeType } from '../types';
 import { formatCurrency } from '../constants';
-import { Trash2, Search, Filter, Download } from 'lucide-react';
+import { Trash2, Search, Filter, Download, Edit3 } from 'lucide-react';
 
 interface AssetListProps {
   assets: Asset[];
   onDelete: (id: string) => void;
   onTrade: (id: string, type: TradeType, quantity: number, price: number) => void;
+  onUpdateTicker: (id: string, ticker?: string) => void;
 }
 
-export const AssetList: React.FC<AssetListProps> = ({ assets, onDelete, onTrade }) => {
+export const AssetList: React.FC<AssetListProps> = ({ assets, onDelete, onTrade, onUpdateTicker }) => {
   const [filter, setFilter] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
    const [activeTradeId, setActiveTradeId] = useState<string | null>(null);
@@ -89,6 +90,14 @@ export const AssetList: React.FC<AssetListProps> = ({ assets, onDelete, onTrade 
     }
     onTrade(asset.id, tradeType, qty, price);
     closeTrade();
+  };
+
+  const handleEditTicker = (asset: Asset) => {
+    const current = asset.ticker || '';
+    const next = window.prompt('티커를 입력하세요 (예: 005930.KS, AAPL)', current);
+    if (next === null) return;
+    const trimmed = next.trim();
+    onUpdateTicker(asset.id, trimmed || undefined);
   };
 
   return (
@@ -228,12 +237,23 @@ export const AssetList: React.FC<AssetListProps> = ({ assets, onDelete, onTrade 
                               </div>
                             </td>
                             <td className="p-4 text-center">
-                                <button 
-                                    onClick={() => onDelete(asset.id)}
-                                    className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-all"
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => handleEditTicker(asset)}
+                                  className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-all"
+                                  title="티커 수정"
                                 >
-                                    <Trash2 size={16} />
+                                  <Edit3 size={16} />
                                 </button>
+                                <button 
+                                  onClick={() => onDelete(asset.id)}
+                                  className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-all"
+                                  title="자산 삭제"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
                             </td>
                         </tr>
                         {activeTradeId === asset.id && (

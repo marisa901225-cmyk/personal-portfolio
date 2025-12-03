@@ -7,9 +7,14 @@ import { TrendingUp, Wallet, PieChart as PieIcon, ArrowUpRight, ArrowDownRight }
 interface DashboardProps {
   assets: Asset[];
   targetIndexAllocations?: TargetIndexAllocation[];
+  historyData?: { date: string; value: number }[];
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ assets, targetIndexAllocations }) => {
+export const Dashboard: React.FC<DashboardProps> = ({
+  assets,
+  targetIndexAllocations,
+  historyData,
+}) => {
   const summary: PortfolioSummary = useMemo(() => {
     let totalValue = 0;
     let totalInvested = 0;
@@ -49,6 +54,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ assets, targetIndexAllocat
       color: COLORS[index % COLORS.length]
     })).sort((a, b) => b.value - a.value);
 
+    const history = (historyData && historyData.length > 0 ? historyData : MOCK_HISTORY_DATA);
+
     return {
       totalValue,
       totalInvested,
@@ -56,9 +63,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ assets, targetIndexAllocat
       unrealizedProfitTotal,
       categoryDistribution,
       indexDistribution,
-      historyData: MOCK_HISTORY_DATA // In a real app, this would be derived from historical snapshots
+      historyData: history,
     };
-  }, [assets]);
+  }, [assets, historyData]);
 
   const totalProfit = summary.realizedProfitTotal + summary.unrealizedProfitTotal;
   const profitRate = summary.totalInvested > 0 ? (totalProfit / summary.totalInvested) * 100 : 0;

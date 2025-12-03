@@ -8,8 +8,10 @@ export enum AssetCategory {
 
 export interface Asset {
   id: string;
+  /** 백엔드 SQLite 자산 ID (서버 연동용, 선택) */
+  backendId?: number;
   name: string;
-  ticker?: string; // Yahoo Finance Ticker (e.g., 005930.KS, AAPL)
+  ticker?: string; // 시세 조회용 티커 (예: 005930, NAS:AAPL)
   category: AssetCategory;
   amount: number; // Quantity (current holding)
   currentPrice: number; // Price per unit
