@@ -71,7 +71,23 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
         { headers }
       );
       if (!response.ok) {
-        throw new Error('Failed to search ticker');
+        if (response.status === 401) {
+          alert('API 비밀번호가 올바르지 않습니다.\n백엔드 서버의 API_TOKEN 값과 동일한 비밀번호를 입력했는지 확인해주세요.');
+          return;
+        }
+
+        if (response.status === 429) {
+          alert('시세 제공자가 너무 많은 요청을 받아 잠시 차단했습니다.\n잠시 후 다시 시도해주세요.');
+          return;
+        }
+
+        if (response.status >= 500 && response.status < 600) {
+          alert('홈서버 또는 시세 제공자에서 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.');
+          return;
+        }
+
+        alert(`티커 검색에 실패했습니다. (HTTP ${response.status})`);
+        return;
       }
       const data = await response.json();
 
@@ -152,7 +168,7 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
             <input
                 type="text"
                 className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors uppercase"
-                placeholder="예: 005930.KS, AAPL"
+                placeholder="예: 005930, NAS:AAPL"
                 value={formData.ticker || ''}
                 onChange={(e) => handleChange('ticker', e.target.value)}
             />
@@ -161,7 +177,9 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
                 자동 선택: {tickerHint}
               </p>
             )}
-            <p className="text-[10px] text-slate-400 mt-1">홈서버 연동 시 사용됩니다 (Yahoo Finance 기준)</p>
+            <p className="text-[10px] text-slate-400 mt-1">
+              홈서버 연동 시 사용됩니다 (국내: 6자리 종목코드, 해외: EXCD:티커 형식, 예: NAS:AAPL)
+            </p>
             </div>
         </div>
 

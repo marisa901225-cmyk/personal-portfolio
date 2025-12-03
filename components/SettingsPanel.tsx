@@ -52,6 +52,41 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     });
   };
 
+  const handleCheckHealth = async () => {
+    if (!settings.serverUrl || !settings.serverUrl.trim()) {
+      alert('먼저 홈서버 API URL을 입력해주세요.');
+      return;
+    }
+
+    const baseUrl = settings.serverUrl.replace(/\/+$/, '');
+
+    try {
+      const response = await fetch(`${baseUrl}/health`);
+      if (!response.ok) {
+        alert(`서버에 연결했지만 상태 코드가 ${response.status} 입니다.`);
+        return;
+      }
+
+      let data: any = null;
+      try {
+        data = await response.json();
+      } catch {
+        // JSON 파싱 실패는 무시 (단순 텍스트 응답일 수 있음)
+      }
+
+      if (data && data.status === 'ok') {
+        alert('백엔드 서버가 정상적으로 응답하고 있습니다.');
+      } else {
+        alert('서버와 연결은 되었지만 /health 응답이 예상과 다릅니다.');
+      }
+    } catch (error) {
+      console.error('Health check error', error);
+      alert(
+        '백엔드 서버에 연결할 수 없습니다.\n홈서버가 켜져 있고 Tailscale이 연결되어 있는지, 그리고 URL이 올바른지 확인하세요.',
+      );
+    }
+  };
+
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-lg mx-auto animate-fade-in-up">
       <div className="flex items-center space-x-3 mb-6 pb-4 border-b border-slate-100">
@@ -84,6 +119,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <br />
             * 예: http://100.101.102.103:8000
           </p>
+          <button
+            type="button"
+            onClick={handleCheckHealth}
+            className="mt-3 inline-flex items-center px-3 py-1.5 rounded-lg border border-slate-200 text-[11px] text-slate-600 hover:border-indigo-400 hover:text-indigo-600 transition-colors"
+          >
+            백엔드 서버 상태 확인
+          </button>
         </div>
 
         <div className="bg-blue-50 p-4 rounded-xl">
