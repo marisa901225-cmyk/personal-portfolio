@@ -1,25 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { LayoutDashboard, List, PlusCircle, Bell, Menu, X, Settings, RefreshCw } from 'lucide-react';
-import { Asset, ViewState, AppSettings, TradeType, TradeRecord } from './types';
+import { Asset, ViewState, TradeType, TradeRecord } from './types';
 import { formatCurrency } from './constants';
 import { Dashboard } from './components/Dashboard';
 import { AssetList } from './components/AssetList';
 import { AddAssetForm } from './components/AddAssetForm';
 import { SettingsPanel } from './components/SettingsPanel';
 import { usePortfolio } from './hooks/usePortfolio';
+import { useSettings } from './hooks/useSettings';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>('DASHBOARD');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [settings, setSettings] = useState<AppSettings>({
-    serverUrl: 'https://dlckdgn-nucboxg3-plus.tail5c2348.ts.net',
-    targetIndexAllocations: [
-      { indexGroup: 'S&P500', targetWeight: 6 },
-      { indexGroup: 'NASDAQ100', targetWeight: 3 },
-      { indexGroup: 'BOND+ETC', targetWeight: 1 },
-    ],
-  });
+  const { settings, setSettings, saveSettingsToServer } = useSettings();
   const [authInput, setAuthInput] = useState('');
   const [showAuthModal, setShowAuthModal] = useState(true);
 
@@ -32,7 +26,8 @@ const App: React.FC = () => {
     deleteAsset,
     tradeAsset,
     syncPrices,
-    updateTicker,
+     updateTicker,
+    updateCashBalance,
   } = usePortfolio(settings);
 
   const handleAddAsset = async (newAsset: Asset) => {
@@ -79,6 +74,8 @@ const App: React.FC = () => {
     setShowAuthModal(false);
     setAuthInput('');
   };
+
+  // settings persistence & backend sync are handled by useSettings
 
   const NavItem = ({ view, icon: Icon, label }: { view: ViewState; icon: any; label: string }) => (
     <button
@@ -316,6 +313,9 @@ const App: React.FC = () => {
             assets={assets}
             targetIndexAllocations={settings.targetIndexAllocations}
             historyData={historyData}
+            dividendTotalYear={settings.dividendTotalYear}
+            dividendYear={settings.dividendYear}
+            dividends={settings.dividends}
           />
         )}
         {currentView === 'LIST' && (
@@ -324,21 +324,104 @@ const App: React.FC = () => {
             onDelete={handleDeleteAsset}
             onTrade={handleTradeAsset}
             onUpdateTicker={handleUpdateTicker}
+            onUpdateCash={updateCashBalance}
           />
         )}
         {currentView === 'ADD' && (
-          <AddAssetForm
-            onSave={handleAddAsset}
-            onCancel={() => setCurrentView('DASHBOARD')}
-            serverUrl={settings.serverUrl}
-            apiToken={settings.apiToken}
-          />
+          <div className="space-y-4">
+            <AddAssetForm
+              onSave={handleAddAsset}
+              onCancel={() => setCurrentView('DASHBOARD')}
+              serverUrl={settings.serverUrl}
+              apiToken={settings.apiToken}
+            />
+            <section className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 max-w-2xl mx-auto">
+              <h2 className="text-sm font-semibold text-slate-800 mb-2">배당금 기록 (수동 입력)</h2>
+              <p className="text-xs text-slate-500 mb-3">
+                토스 등에서 특정 연도 세후 배당금 총액을 확인한 뒤, 연도와 합계를 한 번에 입력하면 대시보드 손익 카드에서 같이 보여줍니다.
+                실제 예비금/자산 잔액은 별도로 맞춰주세요.
+              </p>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    className="w-20 px-3 py-2 rounded-lg border border-slate-200 text-xs focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    placeholder={new Date().getFullYear().toString()}
+                    min={2000}
+                    max={2100}
+                    value={settings.dividendYear ?? ''}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        dividendYear: e.target.value ? Number(e.target.value) || undefined : undefined,
+                      }))
+                    }
+                  />
+                  <input
+                    type="number"
+                    className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-xs focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                    placeholder="예: 250000"
+                    min={0}
+                    value={settings.dividendTotalYear ?? ''}
+                    onChange={(e) =>
+                      setSettings((prev) => ({
+                        ...prev,
+                        dividendTotalYear: e.target.value
+                          ? Number(e.target.value) || undefined
+                          : undefined,
+                      }))
+                    }
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!settings.dividendYear || !settings.dividendTotalYear) {
+                        alert('연도와 배당 합계를 모두 입력해주세요.');
+                        return;
+                      }
+                      setSettings((prev) => {
+                        const year = prev.dividendYear;
+                        const total = prev.dividendTotalYear;
+                        if (!year || !total) return prev;
+                        const others = (prev.dividends || []).filter((d) => d.year !== year);
+                        return {
+                          ...prev,
+                          dividends: [...others, { year, total }],
+                        };
+                      });
+                    }}
+                    className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-[11px] font-medium hover:bg-indigo-700 whitespace-nowrap"
+                  >
+                    연도별 합계에 추가
+                  </button>
+                </div>
+                {settings.dividends && settings.dividends.length > 0 && (
+                  <div className="mt-1 border-t border-slate-100 pt-2">
+                    <p className="text-[11px] text-slate-500 mb-1">연도별 배당 합계</p>
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-600">
+                      {[...settings.dividends]
+                        .slice()
+                        .sort((a, b) => b.year - a.year)
+                        .map((d) => (
+                          <span key={d.year}>
+                            {d.year}: +{formatCurrency(d.total)}
+                          </span>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
         )}
         {currentView === 'SETTINGS' && (
           <SettingsPanel
             settings={settings}
             onSettingsChange={setSettings}
-            onBackToDashboard={() => setCurrentView('DASHBOARD')}
+            onBackToDashboard={() => {
+              void saveSettingsToServer(settings);
+              setCurrentView('DASHBOARD');
+            }}
           />
         )}
       </main>

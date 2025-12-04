@@ -116,10 +116,11 @@ class Setting(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
 
-    target_index_allocations: Mapped[Optional[dict]] = mapped_column(
-        JSON, nullable=True
-    )
+    target_index_allocations: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     server_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    dividend_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    dividend_total: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    dividends: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False

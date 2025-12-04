@@ -34,6 +34,73 @@
 
 ---
 
+## 🔁 배포 / 업데이트 (복붙용 치트시트)
+
+### 1. 프론트엔드(Vercel) 다시 배포
+
+로컬(개인 PC)에서 프로젝트 폴더로 이동한 뒤:
+
+```bash
+cd /path/to/personal-portfolio
+npx vercel --prod
+```
+
+- 이미 Vercel 프로젝트랑 연결해 둔 상태라면 위 두 줄만 실행하면 새 버전이 배포됩니다.
+- 처음 연결하는 거라면 한 번은 `npx vercel`만 실행해서 프로젝트 링크를 먼저 만들어야 합니다.
+
+GitHub 연동을 써도 된다면:
+
+```bash
+cd /path/to/personal-portfolio
+git add .
+git commit -m "update frontend"
+git push
+```
+
+만 해도 Vercel이 자동으로 새 빌드를 올립니다.
+
+### 2. 백엔드 코드 갱신 + 재시작 (systemd)
+
+홈서버에서 (FastAPI 백엔드가 systemd 서비스로 돌아가는 상태라고 가정):
+
+```bash
+cd /path/to/personal-portfolio
+git pull
+sudo systemctl restart myportfolio-backend.service
+```
+
+- `myportfolio-backend.service` 부분은 실제 서비스 이름에 맞게 한 번만 바꿔 두면 됩니다.
+- 유닛 파일(.service)을 수정한 게 아니라면 `daemon-reload`는 필요 없습니다.
+
+서비스 상태 확인:
+
+```bash
+sudo systemctl status myportfolio-backend.service
+```
+
+### 3. 포트폴리오 스냅샷(히스토리) 자동 기록 설정
+
+백엔드에는 이미 `POST /api/portfolio/snapshots` 엔드포인트가 있어서 스냅샷을 한 번 찍을 수 있습니다.  
+`backend/snapshot_cron.sh` 스크립트를 이용해서 매일 새벽 한 번씩 자동 호출하도록 설정하면,  
+대시보드의 6개월 자산 추이 그래프에 데이터가 차곡차곡 쌓입니다.
+
+1) 스크립트 실행 권한 부여 (한 번만):
+
+```bash
+cd /path/to/personal-portfolio
+chmod +x backend/snapshot_cron.sh
+```
+
+2) 크론 등록 (홈서버에서 `crontab -e`):
+
+```cron
+0 3 * * * API_TOKEN=여기에_API_TOKEN BACKEND_URL=http://127.0.0.1:8000 /path/to/personal-portfolio/backend/snapshot_cron.sh >/dev/null 2>&1
+```
+
+- `API_TOKEN`은 백엔드 환경변수 `API_TOKEN`과 동일한 값으로 넣습니다.
+- 백엔드가 다른 포트/주소에서 돌면 `BACKEND_URL`만 바꿔 주면 됩니다.
+- 위 한 줄만 설정해 두면, 매일 새벽 3시에 스냅샷이 1건씩 기록됩니다.
+
 ## 📝 최근 업데이트 (Change Log)
 
 > 기능을 수정하거나 추가할 때마다 여기에 기록합니다.

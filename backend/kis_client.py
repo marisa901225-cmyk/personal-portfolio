@@ -4,7 +4,7 @@ import logging
 import re
 import sys
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 
 from functools import lru_cache
 
@@ -211,6 +211,37 @@ def fetch_kis_prices_krw(tickers: Iterable[str]) -> Dict[str, float]:
         prices[t] = value
 
     return prices
+
+
+def fetch_usdkrw_rate() -> Optional[float]:
+    """
+    해외주식 현재가상세 API를 이용해 USD/KRW 당일 환율을 조회한다.
+
+    - 구현 단순화를 위해 미국 나스닥 상장 종목(AAPL)을 기준으로 환율(t_rate)을 사용한다.
+    - KIS 기준 환율이므로, 단순 추세 확인용으로 사용한다.
+    """
+    _ensure_auth()
+
+    try:
+        df = _overseas_price_detail(auth="", excd="NAS", symb="AAPL")
+    except Exception as exc:  # pragma: no cover - 외부 API 예외
+        logger.warning("USD/KRW 환율 조회 실패 (price_detail 호출 오류): %s", exc)
+        return None
+
+    if df is None or df.empty:
+        logger.warning("USD/KRW 환율 조회 실패: empty dataframe")
+        return None
+
+    raw = df.iloc[0].get("t_rate")
+    if raw is None or raw == "":
+        logger.warning("USD/KRW 환율 t_rate 값 없음")
+        return None
+
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        logger.warning("USD/KRW 환율 값 파싱 실패 raw=%r", raw)
+        return None
 
 
 @lru_cache

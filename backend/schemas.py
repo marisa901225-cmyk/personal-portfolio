@@ -11,6 +11,11 @@ class TargetIndexAllocation(BaseModel):
     target_weight: float = Field(..., description="상대 비중 (예: 6, 3, 1)")
 
 
+class DividendRecord(BaseModel):
+    year: int
+    total: float
+
+
 class AssetBase(BaseModel):
     name: str
     ticker: Optional[str] = None
@@ -75,11 +80,17 @@ class SettingsRead(BaseModel):
 
     target_index_allocations: Optional[List[TargetIndexAllocation]] = None
     server_url: Optional[str] = None
+    dividend_year: Optional[int] = None
+    dividend_total: Optional[float] = None
+    dividends: Optional[List[DividendRecord]] = None
 
 
 class SettingsUpdate(BaseModel):
     target_index_allocations: Optional[List[TargetIndexAllocation]] = None
     server_url: Optional[str] = None
+    dividends: Optional[List[DividendRecord]] = None
+    dividend_year: Optional[int] = None
+    dividend_total: Optional[float] = None
 
 
 class DistributionItem(BaseModel):
