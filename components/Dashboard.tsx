@@ -26,7 +26,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const val = asset.amount * asset.currentPrice;
       const invested = asset.amount * (asset.purchasePrice || asset.currentPrice);
       const realized = asset.realizedProfit || 0;
-      
+
       totalValue += val;
       totalInvested += invested;
       realizedProfitTotal += realized;
@@ -54,7 +54,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       color: COLORS[index % COLORS.length]
     })).sort((a, b) => b.value - a.value);
 
-    const history = (historyData && historyData.length > 0 ? historyData : MOCK_HISTORY_DATA);
+    const history = historyData || [];
 
     return {
       totalValue,
@@ -122,11 +122,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </div>
           <div className="mt-4 flex items-center text-sm">
-             <span className={`flex items-center font-semibold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
-                {isPositive ? <ArrowUpRight size={16} className="mr-1"/> : <ArrowDownRight size={16} className="mr-1"/>}
-                {Math.abs(profitRate).toFixed(2)}%
-             </span>
-             <span className="text-slate-400 ml-2">수익률</span>
+            <span className={`flex items-center font-semibold ${isPositive ? 'text-green-600' : 'text-red-600'}`}>
+              {isPositive ? <ArrowUpRight size={16} className="mr-1" /> : <ArrowDownRight size={16} className="mr-1" />}
+              {Math.abs(profitRate).toFixed(2)}%
+            </span>
+            <span className="text-slate-400 ml-2">수익률</span>
           </div>
         </div>
 
@@ -159,7 +159,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-            <div className="flex justify-between items-start">
+          <div className="flex justify-between items-start">
             <div>
               <p className="text-sm font-medium text-slate-500 mb-1">자산 구성</p>
               <h2 className="text-2xl font-bold text-slate-900">
@@ -170,7 +170,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <PieIcon size={24} />
             </div>
           </div>
-           <div className="mt-4 text-sm text-slate-400">
+          <div className="mt-4 text-sm text-slate-400">
             가장 큰 비중: <span className="font-medium text-slate-700">{summary.categoryDistribution[0]?.name || '-'}</span>
           </div>
         </div>
@@ -197,23 +197,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
                   ))}
                 </Pie>
-                <Tooltip 
-                    formatter={(value: number) => formatCurrency(value)}
-                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                <Tooltip
+                  formatter={(value: number) => formatCurrency(value)}
+                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                 />
               </PieChart>
             </ResponsiveContainer>
           </div>
           <div className="grid grid-cols-2 gap-2 mt-4">
-             {summary.categoryDistribution.map((item, idx) => (
-                 <div key={idx} className="flex items-center text-sm">
-                     <div className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: item.color }}></div>
-                     <span className="text-slate-600 flex-1 truncate">{item.name}</span>
-                     <span className="font-medium text-slate-900">
-                         {((item.value / summary.totalValue) * 100).toFixed(1)}%
-                     </span>
-                 </div>
-             ))}
+            {summary.categoryDistribution.map((item, idx) => (
+              <div key={idx} className="flex items-center text-sm">
+                <div className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: item.color }}></div>
+                <span className="text-slate-600 flex-1 truncate">{item.name}</span>
+                <span className="font-medium text-slate-900">
+                  {((item.value / summary.totalValue) * 100).toFixed(1)}%
+                </span>
+              </div>
+            ))}
           </div>
 
           {summary.indexDistribution.length > 0 && summary.totalValue > 0 && (
@@ -244,42 +244,48 @@ export const Dashboard: React.FC<DashboardProps> = ({
         {/* History Chart */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
           <h3 className="text-lg font-bold text-slate-800 mb-6">자산 추이 (6개월)</h3>
-          <div className="h-[300px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={summary.historyData}>
-                <defs>
-                  <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2}/>
-                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis 
-                    dataKey="date" 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{fill: '#94a3b8', fontSize: 12}} 
+          <div className="h-[300px] w-full flex items-center justify-center">
+            {summary.historyData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={summary.historyData}>
+                  <defs>
+                    <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis
+                    dataKey="date"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fill: '#94a3b8', fontSize: 12 }}
                     dy={10}
-                />
-                <YAxis 
-                    hide={true} 
-                    domain={['dataMin', 'dataMax']} 
-                />
-                <Tooltip 
+                  />
+                  <YAxis
+                    hide={true}
+                    domain={['dataMin', 'dataMax']}
+                  />
+                  <Tooltip
                     formatter={(value: number) => formatCurrency(value)}
                     labelStyle={{ color: '#64748b' }}
                     contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                />
-                <Area 
-                    type="monotone" 
-                    dataKey="value" 
-                    stroke="#6366f1" 
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="value"
+                    stroke="#6366f1"
                     strokeWidth={3}
-                    fillOpacity={1} 
-                    fill="url(#colorValue)" 
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+                    fillOpacity={1}
+                    fill="url(#colorValue)"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="text-slate-400 text-sm">
+                아직 자산 추이 데이터가 충분하지 않습니다.
+              </div>
+            )}
           </div>
         </div>
       </div>

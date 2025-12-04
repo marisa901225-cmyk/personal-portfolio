@@ -23,23 +23,37 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
   const [isResolvingTicker, setIsResolvingTicker] = useState(false);
   const [tickerHint, setTickerHint] = useState<string | null>(null);
 
+  const isCashCategory = formData.category === AssetCategory.CASH;
+  const supportsTicker =
+    formData.category === AssetCategory.STOCK_KR || formData.category === AssetCategory.STOCK_US;
+
   const handleChange = (field: keyof Asset, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.name || !formData.amount || !formData.currentPrice) return;
+    const isCash = formData.category === AssetCategory.CASH;
+
+    if (!formData.name || !formData.currentPrice || (!isCash && !formData.amount)) {
+      return;
+    }
+
+    const currentPrice = Number(formData.currentPrice);
+    const amount = isCash ? 1 : Number(formData.amount);
+    const purchasePrice = isCash
+      ? currentPrice
+      : Number(formData.purchasePrice) || currentPrice;
 
     const newAsset: Asset = {
       id: Date.now().toString(),
       name: formData.name,
       ticker: formData.ticker,
       category: formData.category as AssetCategory,
-      amount: Number(formData.amount),
-      currentPrice: Number(formData.currentPrice),
+      amount,
+      currentPrice,
       // If purchasePrice is not entered, assume it matches currentPrice (bought now)
-      purchasePrice: Number(formData.purchasePrice) || Number(formData.currentPrice),
+      purchasePrice,
       currency: 'KRW',
       realizedProfit: 0,
       indexGroup: formData.indexGroup?.trim() || undefined
@@ -144,43 +158,45 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
                 type="text"
                 required
                 className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                placeholder="예: 삼성전자"
+                placeholder={isCashCategory ? '예: 카카오뱅크 통장' : '예: 삼성전자'}
                 value={formData.name}
                 onChange={(e) => handleChange('name', e.target.value)}
             />
             </div>
-            <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-slate-700">
-                티커/종목코드 (선택)
-              </label>
-              <button
-                type="button"
-                onClick={handleResolveTicker}
-                disabled={isResolvingTicker}
-                className={`text-[11px] px-2 py-1 rounded-md border text-slate-600 hover:border-indigo-400 hover:text-indigo-600 transition-colors ${
-                  isResolvingTicker ? 'opacity-60 cursor-not-allowed' : ''
-                }`}
-              >
-                {isResolvingTicker ? '조회 중...' : '자동 채우기'}
-              </button>
-            </div>
-            <input
-                type="text"
-                className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors uppercase"
-                placeholder="예: 005930, NAS:AAPL"
-                value={formData.ticker || ''}
-                onChange={(e) => handleChange('ticker', e.target.value)}
-            />
-            {tickerHint && (
-              <p className="text-[10px] text-slate-500 mt-1">
-                자동 선택: {tickerHint}
-              </p>
+            {supportsTicker && (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-slate-700">
+                    티커/종목코드 (선택)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleResolveTicker}
+                    disabled={isResolvingTicker}
+                    className={`text-[11px] px-2 py-1 rounded-md border text-slate-600 hover:border-indigo-400 hover:text-indigo-600 transition-colors ${
+                      isResolvingTicker ? 'opacity-60 cursor-not-allowed' : ''
+                    }`}
+                  >
+                    {isResolvingTicker ? '조회 중...' : '자동 채우기'}
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors uppercase"
+                  placeholder="예: 005930, NAS:AAPL"
+                  value={formData.ticker || ''}
+                  onChange={(e) => handleChange('ticker', e.target.value)}
+                />
+                {tickerHint && (
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    자동 선택: {tickerHint}
+                  </p>
+                )}
+                <p className="text-[10px] text-slate-400 mt-1">
+                  홈서버 연동 시 사용됩니다 (국내: 6자리 종목코드, 해외: EXCD:티커 형식, 예: NAS:AAPL)
+                </p>
+              </div>
             )}
-            <p className="text-[10px] text-slate-400 mt-1">
-              홈서버 연동 시 사용됩니다 (국내: 6자리 종목코드, 해외: EXCD:티커 형식, 예: NAS:AAPL)
-            </p>
-            </div>
         </div>
 
         <div>
@@ -194,27 +210,16 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
             value={formData.indexGroup || ''}
             onChange={(e) => handleChange('indexGroup', e.target.value)}
           />
-          <p className="text-[11px] text-slate-400 mt-1">
+            <p className="text-[11px] text-slate-400 mt-1">
             같은 지수에 묶인 국내/해외 ETF를 함께 관리할 때 사용합니다.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {isCashCategory ? (
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">수량</label>
-            <input
-              type="number"
-              required
-              min="0"
-              step="any"
-              className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-              placeholder="0"
-              value={formData.amount || ''}
-              onChange={(e) => handleChange('amount', e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">현재 단가 (KRW)</label>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              보유 금액 (KRW)
+            </label>
             <input
               type="number"
               required
@@ -224,23 +229,56 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
               value={formData.currentPrice || ''}
               onChange={(e) => handleChange('currentPrice', e.target.value)}
             />
-          </div>
-        </div>
-
-        <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">매수 평균가 (선택)</label>
-            <input
-              type="number"
-              min="0"
-              className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-              placeholder="입력 시 수익률이 계산됩니다."
-              value={formData.purchasePrice || ''}
-              onChange={(e) => handleChange('purchasePrice', e.target.value)}
-            />
             <p className="text-xs text-slate-500 mt-1">
-                * 입력하지 않으면 현재가와 동일하게 설정됩니다.
+              * 현금/예금은 입력한 금액이 그대로 평가금액으로 사용됩니다.
             </p>
-        </div>
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">수량</label>
+                <input
+                  type="number"
+                  required
+                  min="0"
+                  step="any"
+                  className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                  placeholder="0"
+                  value={formData.amount || ''}
+                  onChange={(e) => handleChange('amount', e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">현재 단가 (KRW)</label>
+                <input
+                  type="number"
+                  required
+                  min="0"
+                  className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                  placeholder="0"
+                  value={formData.currentPrice || ''}
+                  onChange={(e) => handleChange('currentPrice', e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">매수 평균가 (선택)</label>
+              <input
+                type="number"
+                min="0"
+                className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                placeholder="입력 시 수익률이 계산됩니다."
+                value={formData.purchasePrice || ''}
+                onChange={(e) => handleChange('purchasePrice', e.target.value)}
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                * 입력하지 않으면 현재가와 동일하게 설정됩니다.
+              </p>
+            </div>
+          </>
+        )}
 
         <div className="pt-4 flex gap-4">
           <button

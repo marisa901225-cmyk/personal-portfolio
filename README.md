@@ -1,241 +1,55 @@
-# MyAsset Portfolio
+# 내 포트폴리오 (MyAsset Portfolio)
 
-개인용 자산 포트폴리오를 관리하기 위한 웹 애플리케이션입니다.  
-프론트엔드는 Vite + React 19 + TypeScript, 백엔드는 FastAPI + SQLite로 구성되어 있으며,  
-Tailscale을 이용해 홈 서버에만 private하게 접근하도록 설계했습니다.
+개인 자산 관리를 위해 직접 만든 웹 서비스입니다.  
+집에 있는 서버(홈서버)에 데이터를 안전하게 저장하고, 어디서든(Tailscale 연결 시) 내 자산을 확인할 수 있습니다.
 
-## 주요 기능
+---
 
-### 포트폴리오 관리
-- **자산 추가/수정/삭제**
-  - 자산명, 티커, 카테고리(국내/해외/현금/부동산/기타), 수량, 단가 입력
-  - 선택적으로 지수 그룹(S&P500, NASDAQ100, KOSPI200 등)을 지정해 지수별 비중 관리
-  - SQLite DB에 영구 저장
+## 🚀 주요 기능
 
-- **매수/매도 거래**
-  - 자산 목록에서 인라인으로 매수/매도 입력
-  - 매수 시 수량 가중 평균으로 평단가 자동 계산
-  - 매도 시 실현손익 자동 계산 및 누적 관리
-  - 전량 매도 시 해당 종목은 자동으로 포트폴리오에서 제거(소프트 삭제)
-  - 모든 거래 내역은 `trades` 테이블에 영구 기록
+### 1. 자산 관리
+- **자산 추가**: 주식, ETF, 현금, 부동산 등 내 모든 자산을 등록할 수 있습니다.
+- **매수/매도**: 자산을 사고팔 때마다 기록하면, 평균단가와 실현손익을 자동으로 계산해 줍니다.
+- **자동 시세 연동**: 한국투자증권 API를 통해 국내/해외 주식의 현재 가격을 실시간으로 불러옵니다. (티커만 입력하면 끝!)
 
-### 대시보드 & 분석
-- **손익 요약**
-  - 총 자산, 총 원금, 전체 수익률
-  - 실현손익 / 평가손익 분리 표시
-  - 카테고리별 비중 차트 (Recharts)
+### 2. 대시보드 (한눈에 보기)
+- **총 자산 & 수익률**: 내 돈이 얼마나 불어났는지 바로 확인할 수 있습니다.
+- **자산 추이 그래프**: 지난 6개월간 내 자산이 어떻게 변했는지 그래프로 보여줍니다. (매일 밤 자동 기록)
+- **포트폴리오 비중**: 어떤 자산에 얼마나 투자했는지 파이 차트로 보여줍니다.
+- **리밸런싱 알림**: 내가 정한 목표 비중(예: 미국주식 60%, 채권 40%)에서 많이 벗어나면 알려줍니다.
 
-- **지수별 비중 관리**
-  - 지수 그룹별 자산 비중 계산
-  - 목표 지수 비중 설정 (예: S&P500 60% / NASDAQ100 30% / BOND+ETC 10%)
-  - 목표 대비 실제 비중 차이가 5%p 이상일 때 리밸런싱 알림
+### 3. 보안 & 백업
+- **비밀번호 잠금**: 앱을 켤 때마다 내가 설정한 API 비밀번호를 입력해야만 내용이 보입니다.
+- **안전한 접속**: Tailscale이라는 보안 네트워크를 통해서만 접속할 수 있어, 해킹 걱정이 없습니다.
+- **자동 백업**: 소중한 자산 데이터는 매일 새벽 자동으로 깃허브(GitHub) 비공개 저장소에 백업됩니다.
 
-- **최근 거래 내역**
-  - 상단 벨 아이콘을 눌러 최근 20개 거래 기록 확인
-  - 각 거래별 실현손익 표시
+---
 
-### 한국투자증권 API 연동
-- **티커 자동 검색**
-  - 자산명(종목명)을 입력하면 KIS 종목 마스터 기반으로 티커 자동 채우기
-  - 국내: 6자리 숫자 코드 (예: `005930`)
-  - 해외: `EXCD:SYMB` 형식 (예: `NAS:AAPL`)
+## 🛠️ 사용 방법
 
-- **실시간 가격 동기화**
-  - 한국투자증권 Open API로 국내/해외 실거래 시세 조회
-  - 모든 가격은 KRW 기준으로 통일
-  - 페이지 로드 시 자동 동기화 + 수동 동기화 버튼
+1. **접속하기**: Tailscale이 켜진 기기(폰, 노트북)에서 배포된 주소(Vercel)로 들어갑니다.
+2. **로그인**: 설정해둔 API 비밀번호를 입력합니다.
+3. **서버 연결**: 처음 한 번만 '설정' 메뉴에서 홈서버 주소(`http://100.x.x.x:8000`)를 입력해 줍니다.
+4. **자산 등록**: '자산 추가' 버튼을 눌러 내 종목들을 등록합니다. (이름만 치면 티커는 자동!)
 
-## 프로젝트 구조
+---
 
-### 프론트엔드 (`src/`)
-- `App.tsx` – 메인 앱 / 뷰 전환 / 상태 관리
-- `components/`
-  - `Dashboard.tsx` – 대시보드 및 비중/손익 요약 (Recharts 차트)
-  - `AssetList.tsx` – 자산 목록, 검색/필터, 매수/매도 인라인 폼
-  - `AddAssetForm.tsx` – 자산 추가 폼 (티커 자동 검색 기능 포함)
-  - `SettingsPanel.tsx` – 서버 URL 및 목표 지수 비중 설정
-- `types.ts` – TypeScript 타입 정의
+## 📝 최근 업데이트 (Change Log)
 
-### 백엔드 (`backend/`)
-- `main.py` – FastAPI 애플리케이션 진입점
-- `db.py` – SQLite 연결 및 세션 관리
-- `models.py` – SQLAlchemy ORM 모델 (`User`, `Asset`, `Trade`, `Setting`)
-- `schemas.py` – Pydantic 스키마 (API 요청/응답 모델)
-- `auth.py` – API 토큰 인증 로직
-- `kis_client.py` – 한국투자증권 API 클라이언트
-- `routers/portfolio.py` – 포트폴리오 관련 API 엔드포인트
-- `requirements.txt` – 백엔드 의존성
-- `portfolio.db` – SQLite 데이터베이스 파일 (Git으로 백업)
+> 기능을 수정하거나 추가할 때마다 여기에 기록합니다.
 
-## 로컬 실행 방법
+### 2025-12-03
+- **자산 추이 그래프 수정**: 
+  - 처음 시작한 날에도 6개월치 그래프가 뜨는 오류를 고쳤습니다.
+  - 데이터가 쌓이기 전에는 "데이터 부족"이라고 뜨게 바꿨습니다.
+- **보안 강화**: API 비밀번호를 입력하지 않으면 아예 자산 정보를 볼 수 없게 막았습니다.
+- **세션 노트 정리**: 개발 진행 상황을 깔끔하게 요약해서 정리했습니다.
 
-### 1. 프론트엔드 (Vite + React)
+---
 
-```bash
-cd personal-portfolio
+## ℹ️ 개발 정보 (참고용)
 
-npm install
-npm run dev
-```
-
-브라우저에서 `http://localhost:5173` (또는 Vite가 안내하는 주소)로 접속합니다.
-
-### 2. 백엔드 (FastAPI + SQLite)
-
-가상환경을 만들고 의존성을 설치합니다.
-
-```bash
-cd personal-portfolio
-
-python3 -m venv backend/.venv
-source backend/.venv/bin/activate
-pip install -r backend/requirements.txt
-```
-
-`.env` 파일 또는 환경변수로 API 토큰을 설정합니다.
-
-```env
-API_TOKEN=원하는_비밀번호
-DATABASE_URL=sqlite:///./backend/portfolio.db
-```
-
-**개발 서버 실행** (자동 리로드, 포트 8001):
-
-```bash
-cd personal-portfolio
-source backend/.venv/bin/activate
-uvicorn backend.main:app --reload --host 0.0.0.0 --port 8001
-```
-
-**운영 서버 실행** (포트 8000):
-
-```bash
-cd personal-portfolio
-source backend/.venv/bin/activate
-uvicorn backend.main:app --host 0.0.0.0 --port 8000
-```
-
-- 헬스 체크: `http://서버IP:8000/health`
-- API 문서: `http://서버IP:8000/docs` (FastAPI 자동 생성)
-
-**SQLite 데이터베이스**
-- 첫 실행 시 `backend/portfolio.db` 파일이 자동 생성됩니다.
-- 테이블 구조: `users`, `assets`, `trades`, `settings`
-- SQLite 설정: `PRAGMA foreign_keys=ON`, `PRAGMA journal_mode=WAL`
-
-## API 엔드포인트
-
-### KIS 관련 (기존 유지)
-- `GET /health` – 헬스 체크
-- `POST /api/kis/prices` – 티커 목록으로 KIS 시세 조회 (KRW 기준)
-- `GET /api/search_ticker?q={종목명}` – 종목명으로 티커 검색
-
-### 포트폴리오 관리 (SQLite 기반)
-- `GET /api/portfolio` – 전체 포트폴리오 스냅샷 (자산 + 거래 + 요약)
-- `POST /api/assets` – 새 자산 추가
-- `PATCH /api/assets/{asset_id}` – 자산 정보 수정
-- `DELETE /api/assets/{asset_id}` – 자산 삭제 (소프트 삭제)
-- `POST /api/assets/{asset_id}/trades` – 매수/매도 거래 처리
-- `GET /api/trades/recent?limit=20` – 최근 거래 내역 조회
-- `GET /api/settings` – 앱 설정 조회 (목표 지수 비중 등)
-- `PUT /api/settings` – 앱 설정 업데이트
-
-## 인증 / 보안 (개인용)
-
-### 백엔드 인증
-- 환경변수 `API_TOKEN`이 설정되어 있으면 모든 API 요청 시 헤더 `X-API-Token` 검증
-- 토큰이 틀리거나 없으면 HTTP 401 (`invalid api token`) 반환
-- `API_TOKEN`이 비어 있으면 인증 강제하지 않음 (개발/테스트 모드)
-
-### 프론트엔드 인증
-- 앱 최초 접속 시 전체 화면 로그인 팝업에서 API 비밀번호 입력
-- 입력된 토큰은 브라우저 메모리 상태로만 보관 (localStorage 미사용)
-- 새로고침 시 재입력 필요
-
-### 네트워크 보안
-- **Tailscale 전용 설계**: 홈서버는 Tailscale 네트워크 내에서만 접근 가능
-- **UFW 방화벽 설정**:
-  ```bash
-  sudo ufw allow in on tailscale0 to any port 8000 proto tcp
-  ```
-  - 일반 인터넷에서는 8000 포트가 보이지 않음
-  - Tailscale 100.x.x.x 대역에서만 백엔드 접근 가능
-
-> **주의**: Tailscale을 사용하는 전제이므로, 외부 인터넷에 완전 공개할 계획이라면 추가적인 인증/권한 설계가 필요합니다.
-
-## 배포 전략
-
-### 프론트엔드 (Vercel)
-- `npm run build` 결과물을 Vercel 등 정적 호스팅에 배포
-- 사용자는 브라우저에서 Vercel 도메인 접속
-- Settings 패널에서 `serverUrl`을 Tailscale IP로 설정 (예: `http://100.99.67.34:8000`)
-
-### 백엔드 (홈서버 + systemd)
-- **개발 환경**: `uvicorn backend.main:app --reload --port 8001`
-- **운영 환경**: systemd 서비스로 등록 (포트 8000)
-
-**systemd 서비스 예시** (`/etc/systemd/system/portfolio-api.service`):
-```ini
-[Unit]
-Description=Personal Portfolio API
-After=network.target
-
-[Service]
-Type=simple
-User=dlckdgn
-WorkingDirectory=/home/dlckdgn/personal-portfolio
-Environment="API_TOKEN=your_secret_token"
-Environment="DATABASE_URL=sqlite:///./backend/portfolio.db"
-ExecStart=/home/dlckdgn/personal-portfolio/backend/.venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8000
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-서비스 관리:
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable portfolio-api
-sudo systemctl start portfolio-api
-sudo systemctl status portfolio-api
-```
-
-### 통신 흐름
-1. 사용자가 Vercel 도메인에서 프론트엔드 접속
-2. 브라우저(Tailscale 연결 상태)에서 `http://100.99.67.34:8000` API 호출
-3. 홈서버 백엔드가 SQLite DB 조회 후 응답
-
-## 백업 전략
-
-### GitHub 자동 백업
-- **레포지토리**: 비공개 GitHub 레포
-- **백업 대상**: `backend/portfolio.db` (SQLite 데이터베이스)
-- **SSH 인증**: 서버에서 SSH 키 생성 및 GitHub 등록 완료
-
-**백업 스크립트 예시** (`tools/backup_db.sh`):
-```bash
-#!/bin/bash
-cd /home/dlckdgn/personal-portfolio
-git add backend/portfolio.db
-git commit -m "Auto backup: $(date '+%Y-%m-%d %H:%M:%S')"
-git push origin main
-```
-
-**cron 설정** (매일 새벽 3시 자동 백업):
-```bash
-0 3 * * * /home/dlckdgn/personal-portfolio/tools/backup_db.sh
-```
-
-### 복구 시나리오
-1. 새 서버에서 `git clone <private-repo>` 실행
-2. 코드 + `backend/portfolio.db` 함께 복구됨
-3. venv 재설정 및 uvicorn 실행으로 즉시 서비스 재개
-
-## 사용 방법
-
-1. Tailscale 연결 상태에서 Vercel 도메인 접속
-2. 로그인 팝업에서 `API_TOKEN` 입력
-3. Settings에서 `serverUrl`을 홈서버 Tailscale IP로 설정 (예: `http://100.99.67.34:8000`)
-4. 자산 추가, 매수/매도, 대시보드 확인 등 모든 기능 사용 가능
-5. 모든 데이터는 SQLite DB에 영구 저장되며, GitHub에 자동 백업됨
+- **프론트엔드**: React (Vercel 배포)
+- **백엔드**: Python FastAPI (홈서버 실행)
+- **데이터베이스**: SQLite (파일로 저장)
+- **네트워크**: Tailscale (사설망)
