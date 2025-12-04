@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Asset, AppSettings, TradeRecord, TradeType } from '../types';
+import { Asset, AppSettings, AssetCategory, TradeRecord, TradeType } from '../types';
 import {
   STORAGE_KEYS,
   loadAssetsFromStorage,
@@ -29,6 +29,7 @@ interface UsePortfolioResult {
   tradeAsset: (id: string, type: TradeType, quantity: number, price: number) => Promise<void>;
   syncPrices: () => Promise<void>;
   updateTicker: (id: string, ticker?: string) => Promise<void>;
+   updateCashBalance: (id: string, newBalance: number) => Promise<void>;
 }
 
 export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
@@ -515,6 +516,77 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
     }
   };
 
+  const updateCashBalance = async (id: string, newBalance: number): Promise<void> => {
+    if (newBalance < 0) {
+      alert('예비금은 0원보다 작을 수 없습니다.');
+      return;
+    }
+
+    const target = assets.find((a) => a.id === id);
+    if (!target) return;
+    if (target.category !== AssetCategory.CASH) {
+      alert('예비금 잔액 수정은 "현금/예금" 자산에만 사용할 수 있습니다.');
+      return;
+    }
+
+    const applyLocal = () => {
+      setAssets((prev) =>
+        prev.map((asset) =>
+          asset.id === id
+            ? {
+                ...asset,
+                amount: 1,
+                currentPrice: newBalance,
+                purchasePrice: newBalance,
+                realizedProfit: 0,
+              }
+            : asset,
+        ),
+      );
+    };
+
+    if (target.backendId && isRemoteEnabled) {
+      const headers = createHeaders(true);
+
+      try {
+        const resp = await fetch(
+          `${settings.serverUrl}/api/assets/${target.backendId}`,
+          {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({
+              amount: 1,
+              current_price: newBalance,
+              purchase_price: newBalance,
+              realized_profit: 0,
+            }),
+          },
+        );
+
+        if (!resp.ok) {
+          console.error('Failed to update cash balance on server', await resp.text());
+          alert(
+            '서버에 예비금 잔액을 저장하지 못했습니다.\n잠시 후 다시 시도해주세요.',
+          );
+        } else {
+          const backendAsset = await resp.json();
+          const mapped = mapBackendAssetToFrontend(backendAsset);
+          setAssets((prev) =>
+            prev.map((asset) => (asset.id === id ? mapped : asset)),
+          );
+          return;
+        }
+      } catch (error) {
+        console.error('Update cash balance error', error);
+        alert(
+          '서버와 통신 중 오류가 발생했습니다.\n현재 세션에서는 로컬로만 반영됩니다.',
+        );
+      }
+    }
+
+    applyLocal();
+  };
+
   return {
     assets,
     tradeHistory,
@@ -577,5 +649,6 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
 
       applyLocal();
     },
+    updateCashBalance,
   };
 };

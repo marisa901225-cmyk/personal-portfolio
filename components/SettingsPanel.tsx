@@ -87,6 +87,54 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   };
 
+  const handleFetchFxRate = async () => {
+    if (!settings.serverUrl || !settings.serverUrl.trim()) {
+      alert('먼저 홈서버 API URL을 입력해주세요.');
+      return;
+    }
+    if (!settings.apiToken) {
+      alert('먼저 API 비밀번호를 입력해주세요.');
+      return;
+    }
+
+    const baseUrl = settings.serverUrl.replace(/\/+$/, '');
+
+    try {
+      const response = await fetch(`${baseUrl}/api/kis/fx/usdkrw`, {
+        method: 'GET',
+        headers: {
+          'X-API-Token': settings.apiToken,
+        },
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          alert('API 비밀번호가 올바르지 않습니다.\n백엔드 서버의 API_TOKEN 값과 동일한 비밀번호를 입력했는지 확인해주세요.');
+          return;
+        }
+        alert(`환율을 불러오지 못했습니다. (HTTP ${response.status})`);
+        return;
+      }
+
+      const data = await response.json();
+      const rawRate = (data && (data.rate ?? data.fx_rate)) as number | string | undefined;
+      const rateNum = typeof rawRate === 'number' ? rawRate : Number(rawRate);
+
+      if (!rateNum || !Number.isFinite(rateNum)) {
+        alert('응답에서 환율 값을 읽지 못했습니다.');
+        return;
+      }
+
+      onSettingsChange({
+        ...settings,
+        usdFxNow: rateNum,
+      });
+    } catch (error) {
+      console.error('FX rate fetch error', error);
+      alert('증권사 환율을 불러오는 중 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.');
+    }
+  };
+
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-lg mx-auto animate-fade-in-up">
       <div className="flex items-center space-x-3 mb-6 pb-4 border-b border-slate-100">
@@ -135,6 +183,59 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <li>자산 추가 시 '티커(Ticker)'를 입력해야 가격이 갱신됩니다.</li>
             <li>우측 상단의 '가격 동기화' 버튼을 눌러 업데이트하세요.</li>
           </ul>
+        </div>
+
+        <div className="pt-2 border-t border-slate-100">
+          <h3 className="text-sm font-semibold text-slate-800 mb-2">환율 설정 (대략적인 환차익/손)</h3>
+          <p className="text-xs text-slate-500 mb-3">
+            USD 자산 기준으로, 기준 환율과 현재 환율을 입력하면 대시보드에서 추정 환차익/환차손을 보여줍니다.
+            정확한 값은 아니고, 대략적인 추세 확인용입니다.
+          </p>
+          <div className="flex items-center gap-2">
+            <div className="flex-1">
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                기준 USD/KRW
+              </label>
+              <input
+                type="number"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-xs focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="예: 1300"
+                min={0}
+                value={settings.usdFxBase ?? ''}
+                onChange={(e) =>
+                  onSettingsChange({
+                    ...settings,
+                    usdFxBase: e.target.value ? Number(e.target.value) || undefined : undefined,
+                  })
+                }
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                현재 USD/KRW
+              </label>
+              <input
+                type="number"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-xs focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="예: 1350"
+                min={0}
+                value={settings.usdFxNow ?? ''}
+                onChange={(e) =>
+                  onSettingsChange({
+                    ...settings,
+                    usdFxNow: e.target.value ? Number(e.target.value) || undefined : undefined,
+                  })
+                }
+              />
+            </div>
+            <button
+              type="button"
+              onClick={handleFetchFxRate}
+              className="px-3 py-2 rounded-lg border border-slate-200 text-[11px] text-slate-600 hover:border-indigo-400 hover:text-indigo-600 whitespace-nowrap"
+            >
+              증권사에서 불러오기
+            </button>
+          </div>
         </div>
 
         <div className="pt-2 border-t border-slate-100">

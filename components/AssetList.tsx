@@ -8,9 +8,10 @@ interface AssetListProps {
   onDelete: (id: string) => void;
   onTrade: (id: string, type: TradeType, quantity: number, price: number) => void;
   onUpdateTicker: (id: string, ticker?: string) => void;
+  onUpdateCash: (id: string, newBalance: number) => void;
 }
 
-export const AssetList: React.FC<AssetListProps> = ({ assets, onDelete, onTrade, onUpdateTicker }) => {
+export const AssetList: React.FC<AssetListProps> = ({ assets, onDelete, onTrade, onUpdateTicker, onUpdateCash }) => {
   const [filter, setFilter] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
    const [activeTradeId, setActiveTradeId] = useState<string | null>(null);
@@ -92,9 +93,26 @@ export const AssetList: React.FC<AssetListProps> = ({ assets, onDelete, onTrade,
     closeTrade();
   };
 
-  const handleEditTicker = (asset: Asset) => {
+  const handleEditTickerOrCash = (asset: Asset) => {
+    if (asset.category === AssetCategory.CASH) {
+      const currentTotal = asset.amount * asset.currentPrice;
+      const next = window.prompt(
+        '예비금(현금/예금) 잔액을 입력하세요 (KRW)',
+        Math.round(currentTotal).toString(),
+      );
+      if (next === null) return;
+      const trimmed = next.replace(/,/g, '').trim();
+      const value = Number(trimmed);
+      if (!Number.isFinite(value) || value < 0) {
+        alert('올바른 금액을 입력해주세요.');
+        return;
+      }
+      onUpdateCash(asset.id, value);
+      return;
+    }
+
     const current = asset.ticker || '';
-    const next = window.prompt('티커를 입력하세요 (예: 005930.KS, AAPL)', current);
+    const next = window.prompt('티커를 입력하세요 (예: 005930, NAS:AAPL)', current);
     if (next === null) return;
     const trimmed = next.trim();
     onUpdateTicker(asset.id, trimmed || undefined);
@@ -240,9 +258,9 @@ export const AssetList: React.FC<AssetListProps> = ({ assets, onDelete, onTrade,
                               <div className="flex items-center justify-center gap-2">
                                 <button
                                   type="button"
-                                  onClick={() => handleEditTicker(asset)}
+                                  onClick={() => handleEditTickerOrCash(asset)}
                                   className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-all"
-                                  title="티커 수정"
+                                  title={asset.category === AssetCategory.CASH ? '예비금 잔액 수정' : '티커 수정'}
                                 >
                                   <Edit3 size={16} />
                                 </button>

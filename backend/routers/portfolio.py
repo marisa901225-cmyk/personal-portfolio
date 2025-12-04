@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from sqlalchemy import inspect, text
+
 from ..auth import verify_api_token
 from ..db import get_db, engine
 from ..models import Base, Asset, Trade, Setting, User, PortfolioSnapshot
@@ -22,13 +24,45 @@ from ..schemas import (
     DistributionItem,
     TargetIndexAllocation,
     PortfolioSnapshotRead,
+    DividendRecord,
 )
 
 router = APIRouter(prefix="/api", tags=["portfolio"], dependencies=[Depends(verify_api_token)])
 
 
-# --- 초기 스키마 생성 ---
+# --- 초기 스키마 생성 및 간단한 마이그레이션 ---
 Base.metadata.create_all(bind=engine)
+
+
+def _migrate_settings_table() -> None:
+    """
+    기존 SQLite settings 테이블에 누락된 컬럼(dividend_year, dividend_total, dividends)이 있으면 추가한다.
+
+    - 개인 프로젝트용 간단 마이그레이션이므로, ALTER TABLE만 수행.
+    """
+    inspector = inspect(engine)
+    try:
+        columns = {col["name"] for col in inspector.get_columns("settings")}
+    except Exception:
+        return
+
+    statements: list[str] = []
+    if "dividend_year" not in columns:
+        statements.append("ALTER TABLE settings ADD COLUMN dividend_year INTEGER")
+    if "dividend_total" not in columns:
+        statements.append("ALTER TABLE settings ADD COLUMN dividend_total FLOAT")
+    if "dividends" not in columns:
+        statements.append("ALTER TABLE settings ADD COLUMN dividends JSON")
+
+    if not statements:
+        return
+
+    with engine.begin() as conn:
+        for stmt in statements:
+            conn.execute(text(stmt))
+
+
+_migrate_settings_table()
 
 
 def _get_or_create_single_user(db: Session) -> User:
@@ -302,9 +336,19 @@ def get_settings(db: Session = Depends(get_db)) -> SettingsRead:
     allocations = [
         TargetIndexAllocation(**item) for item in allocations_raw  # type: ignore[arg-type]
     ]
+
+    dividends_raw = setting.dividends or []
+    if not dividends_raw and setting.dividend_year is not None and setting.dividend_total is not None:
+        dividends_raw = [{"year": setting.dividend_year, "total": setting.dividend_total}]
+    dividends = [
+        DividendRecord(**item) for item in dividends_raw  # type: ignore[arg-type]
+    ]
     return SettingsRead(
         target_index_allocations=allocations,
         server_url=setting.server_url,
+        dividend_year=setting.dividend_year,
+        dividend_total=setting.dividend_total,
+        dividends=dividends,
     )
 
 
@@ -330,6 +374,12 @@ def update_settings(
         ]
     if payload.server_url is not None:
         setting.server_url = payload.server_url
+    if payload.dividends is not None:
+        setting.dividends = [item.model_dump() for item in payload.dividends]
+    if payload.dividend_year is not None:
+        setting.dividend_year = payload.dividend_year
+    if payload.dividend_total is not None:
+        setting.dividend_total = payload.dividend_total
 
     setting.updated_at = datetime.utcnow()
     db.commit()
@@ -339,9 +389,19 @@ def update_settings(
     allocations = [
         TargetIndexAllocation(**item) for item in allocations_raw  # type: ignore[arg-type]
     ]
+
+    dividends_raw = setting.dividends or []
+    if not dividends_raw and setting.dividend_year is not None and setting.dividend_total is not None:
+        dividends_raw = [{"year": setting.dividend_year, "total": setting.dividend_total}]
+    dividends = [
+        DividendRecord(**item) for item in dividends_raw  # type: ignore[arg-type]
+    ]
     return SettingsRead(
         target_index_allocations=allocations,
         server_url=setting.server_url,
+        dividend_year=setting.dividend_year,
+        dividend_total=setting.dividend_total,
+        dividends=dividends,
     )
 
 

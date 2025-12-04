@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Asset, PortfolioSummary, TargetIndexAllocation } from '../types';
+import { Asset, AssetCategory, PortfolioSummary, TargetIndexAllocation, DividendEntry } from '../types';
 import { formatCurrency, COLORS, MOCK_HISTORY_DATA } from '../constants';
 import { PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
 import { TrendingUp, Wallet, PieChart as PieIcon, ArrowUpRight, ArrowDownRight } from 'lucide-react';
@@ -8,12 +8,18 @@ interface DashboardProps {
   assets: Asset[];
   targetIndexAllocations?: TargetIndexAllocation[];
   historyData?: { date: string; value: number }[];
+  dividendTotalYear?: number;
+  dividendYear?: number;
+  dividends?: DividendEntry[];
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
   assets,
   targetIndexAllocations,
   historyData,
+  dividendTotalYear,
+  dividendYear,
+  dividends,
 }) => {
   const summary: PortfolioSummary = useMemo(() => {
     let totalValue = 0;
@@ -70,6 +76,94 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const totalProfit = summary.realizedProfitTotal + summary.unrealizedProfitTotal;
   const profitRate = summary.totalInvested > 0 ? (totalProfit / summary.totalInvested) * 100 : 0;
   const isPositive = totalProfit >= 0;
+
+  const dividendInfo = useMemo(() => {
+    const list: DividendEntry[] = (dividends || []).filter(
+      (d) => typeof d.year === 'number' && typeof d.total === 'number' && d.total > 0,
+    );
+
+    if (list.length > 0) {
+      const sorted = [...list].sort((a, b) => b.year - a.year);
+      const targetYear = dividendYear ?? sorted[0].year;
+      const main =
+        sorted.find((d) => d.year === targetYear) ??
+        sorted[0];
+      return {
+        mainYear: main.year,
+        mainTotal: main.total,
+        list: sorted,
+      };
+    }
+
+    if (typeof dividendTotalYear === 'number' && dividendTotalYear > 0) {
+      const year = dividendYear || new Date().getFullYear();
+      return {
+        mainYear: year,
+        mainTotal: dividendTotalYear,
+        list: [{ year, total: dividendTotalYear }],
+      };
+    }
+
+    return null;
+  }, [dividends, dividendTotalYear, dividendYear]);
+
+  const fxInfo = useMemo(() => {
+    const usdAssetsValue = assets
+      .filter((asset) => asset.category === AssetCategory.STOCK_US)
+      .reduce((sum, asset) => sum + asset.amount * asset.currentPrice, 0);
+
+    // 환율 값은 SettingsPanel/App에서 관리되며, AppSettings를 통해 전달된다.
+    // localStorage에는 전체 settings가 저장되므로, 여기서는 간단히 읽어서 사용한다.
+    if (typeof window === 'undefined') {
+      return {
+        enabled: false,
+        usdAssetsValue: 0,
+        fxPnl: 0,
+        fxRateChange: 0,
+        usdFxBase: 0,
+        usdFxNow: 0,
+      };
+    }
+
+    let usdFxBase = 0;
+    let usdFxNow = 0;
+    try {
+      const raw = window.localStorage.getItem('myportfolio_settings');
+      if (raw) {
+        const parsed = JSON.parse(raw) as { usdFxBase?: number; usdFxNow?: number } | null;
+        if (parsed && typeof parsed === 'object') {
+          usdFxBase = typeof parsed.usdFxBase === 'number' ? parsed.usdFxBase : 0;
+          usdFxNow = typeof parsed.usdFxNow === 'number' ? parsed.usdFxNow : 0;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    const enabled = usdAssetsValue > 0 && usdFxBase > 0 && usdFxNow > 0;
+    if (!enabled) {
+      return {
+        enabled: false,
+        usdAssetsValue,
+        fxPnl: 0,
+        fxRateChange: 0,
+        usdFxBase,
+        usdFxNow,
+      };
+    }
+
+    const fxPnl = (usdAssetsValue * (usdFxNow - usdFxBase)) / usdFxNow;
+    const fxRateChange = (usdFxNow / usdFxBase - 1) * 100;
+
+    return {
+      enabled: true,
+      usdAssetsValue,
+      fxPnl,
+      fxRateChange,
+      usdFxBase,
+      usdFxNow,
+    };
+  }, [assets]);
 
   const rebalanceNotices: string[] = useMemo(() => {
     if (!targetIndexAllocations || targetIndexAllocations.length === 0) return [];
@@ -128,6 +222,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </span>
             <span className="text-slate-400 ml-2">수익률</span>
           </div>
+          {fxInfo.enabled && (
+            <div className="mt-2 text-xs text-slate-500">
+              추정 환차{fxInfo.fxPnl >= 0 ? '익' : '손'} (USD 자산 기준){' '}
+              <span
+                className={`font-semibold ${
+                  fxInfo.fxPnl > 0 ? 'text-red-500' : fxInfo.fxPnl < 0 ? 'text-blue-500' : 'text-slate-500'
+                }`}
+              >
+                {fxInfo.fxPnl > 0 ? '+' : fxInfo.fxPnl < 0 ? '-' : ''}
+                {formatCurrency(Math.abs(fxInfo.fxPnl))}
+              </span>
+              <span className="ml-1 text-[10px] text-slate-400">
+                (환율 {fxInfo.usdFxBase?.toFixed(0)} → {fxInfo.usdFxNow?.toFixed(0)})
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
@@ -146,7 +256,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
             총 투자 원금: {formatCurrency(summary.totalInvested)}
           </div>
           <div className="mt-1 text-xs text-slate-500">
-            실현손익: <span className={summary.realizedProfitTotal >= 0 ? 'text-red-500 font-semibold' : 'text-blue-500 font-semibold'}>
+            실현손익:{' '}
+            <span className={summary.realizedProfitTotal >= 0 ? 'text-red-500 font-semibold' : 'text-blue-500 font-semibold'}>
               {summary.realizedProfitTotal > 0 ? '+' : summary.realizedProfitTotal < 0 ? '-' : ''}
               {formatCurrency(Math.abs(summary.realizedProfitTotal))}
             </span>{' '}
@@ -156,6 +267,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
               {formatCurrency(Math.abs(summary.unrealizedProfitTotal))}
             </span>
           </div>
+          {dividendInfo && (
+            <div className="mt-1 text-xs text-slate-500">
+              {dividendInfo.mainYear}년 배당금(수동 입력):{' '}
+              <span className="font-semibold text-emerald-600">
+                +{formatCurrency(dividendInfo.mainTotal)}
+              </span>
+            </div>
+          )}
+          {dividendInfo && dividendInfo.list.length > 1 && (
+            <div className="mt-1 text-[11px] text-slate-400 space-x-2">
+              {dividendInfo.list.map((d) => (
+                <span key={d.year}>
+                  {d.year}: +{formatCurrency(d.total)}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">

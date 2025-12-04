@@ -37,6 +37,12 @@ class TickerSearchResponse(BaseModel):
     results: List[TickerInfo]
 
 
+class FxRateResponse(BaseModel):
+    base: str
+    quote: str
+    rate: float
+
+
 app.add_middleware(
     CORSMiddleware,
     # Backend는 Tailscale 등 사설 망 뒤에 두는 것을 전제로 하고,
@@ -125,6 +131,37 @@ async def search_ticker(q: str = Query(..., min_length=1)) -> TickerSearchRespon
         )
 
     return TickerSearchResponse(query=q, results=results)
+
+
+@app.get(
+    "/api/kis/fx/usdkrw",
+    response_model=FxRateResponse,
+    dependencies=[Depends(verify_api_token)],
+)
+async def get_usdkrw_fx_rate() -> FxRateResponse:
+    """
+    한국투자증권 해외 현재가 상세 API를 사용해 USD/KRW 당일 환율을 조회한다.
+
+    - 구현 단순화를 위해 미국 나스닥 상장 AAPL의 t_rate(당일환율)을 사용.
+    - 참고용 환율이며, 실제 환전/과세 기준 환율과는 다를 수 있다.
+    """
+    try:
+        rate = await asyncio.to_thread(kis_client.fetch_usdkrw_rate)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"KIS FX fetch failed: {exc}",
+        ) from exc
+
+    if rate is None:
+        raise HTTPException(
+            status_code=502,
+            detail="no FX rate found from KIS",
+        )
+
+    return FxRateResponse(base="USD", quote="KRW", rate=rate)
 
 
 @app.get("/health")

@@ -68,6 +68,10 @@ Deployed on Vercel. Connects to the backend via `settings.serverUrl`.
   - Create new assets.
   - Features "Auto-fill" for Ticker using Backend API (`/api/search_ticker`).
   - When category is **현금/예금**, hides stock-specific fields (ticker, quantity, avg price) and treats the entered amount as the cash balance (amount=1, price=입력금액).
+  - App-level settings (server URL, target index allocations) are persisted to `localStorage` and, when backend is configured, also synced with `GET/PUT /api/settings` so 그룹 비중이 새로고침/기기 간에도 유지됨.
+  - Settings now include optional `usdFxBase` / `usdFxNow` (기준/현재 USD-KRW 환율). Dashboard reads these and, for 해외주식(US) 자산 합계 기준으로 대략적인 환차익/환차손을 별도 표기한다 (정확한 값 아님, 추세 확인용).
+  - `현금/예금` 자산(예비금)은 자산 목록에서 기존 연필 아이콘을 눌렀을 때 티커 대신 잔액 입력창이 뜨도록 바꿨고, 서버 연결 시 `PATCH /api/assets/{id}`로 amount=1, current_price/purchase_price=잔액, realized_profit=0 형태로 동기화된다 (거래 기록 없이 잔액만 바로 맞추는 용도).
+  - Settings에 `dividendTotalYear`(배당금 세후 총액, 수동 입력), `dividendYear`(연도), `dividends`(연도별 합계 리스트)를 추가했고, "자산 추가" 화면 하단의 작은 카드에서 연도+합계를 입력한 뒤 "연도별 합계에 추가"를 누르면 settings.dividends에 `{year,total}`가 누적된다. 대시보드는 최신/선택 연도 1개를 강조하고, 하단에 연도별 배당 리스트를 함께 보여준다. 값은 localStorage와 백엔드 `settings` 테이블(`dividend_year`/`dividend_total`/`dividends` JSON)에 모두 저장되며, `GET/PUT /api/settings`로 동기화된다.
 
 ### State Management (`hooks/usePortfolio.ts`)
 - **Dual Mode**:
@@ -111,6 +115,7 @@ Runs on Home Server (Ubuntu). Listens on port `8000` (Tailscale interface recomm
   - Firewall (UFW) should restrict port 8000 to Tailscale interface.
 
 ## 6. Future Roadmap
-- **Cron Job**: Set up a daily cron job to call `POST /api/portfolio/snapshots` for accumulating history data.
+- **Cron Job**: Set up a daily cron job to call `POST /api/portfolio/snapshots` for accumulating history data. A helper script `backend/snapshot_cron.sh` is provided; example (server에서 crontab):  
+  `0 3 * * * API_TOKEN=your_token BACKEND_URL=http://127.0.0.1:8000 /path/to/repo/backend/snapshot_cron.sh >/dev/null 2>&1`
 - **Multi-Portfolio**: Support multiple accounts/portfolios.
 - **Advanced Analytics**: Currency effect analysis, dividend tracking.
