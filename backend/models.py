@@ -62,6 +62,8 @@ class Asset(Base):
     purchase_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     realized_profit: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     index_group: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # 발행어음/CMA 세후 이자 자동 계산 설정 (JSON)
+    cma_config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False

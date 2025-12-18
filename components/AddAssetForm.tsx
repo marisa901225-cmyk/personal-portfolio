@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Asset, AssetCategory } from '../types';
 import { X } from 'lucide-react';
+import { ApiClient } from '../backendClient';
+import { alertError } from '../errors';
 
 interface AddAssetFormProps {
   onSave: (asset: Asset) => void;
@@ -75,37 +77,9 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
     setTickerHint(null);
 
     try {
-      const headers: HeadersInit = {};
-      if (apiToken) {
-        headers['X-API-Token'] = apiToken;
-      }
-
-      const response = await fetch(
-        `${serverUrl}/api/search_ticker?q=${encodeURIComponent(formData.name.trim())}`,
-        { headers }
-      );
-      if (!response.ok) {
-        if (response.status === 401) {
-          alert('API 비밀번호가 올바르지 않습니다.\n백엔드 서버의 API_TOKEN 값과 동일한 비밀번호를 입력했는지 확인해주세요.');
-          return;
-        }
-
-        if (response.status === 429) {
-          alert('시세 제공자가 너무 많은 요청을 받아 잠시 차단했습니다.\n잠시 후 다시 시도해주세요.');
-          return;
-        }
-
-        if (response.status >= 500 && response.status < 600) {
-          alert('홈서버 또는 시세 제공자에서 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.');
-          return;
-        }
-
-        alert(`티커 검색에 실패했습니다. (HTTP ${response.status})`);
-        return;
-      }
-      const data = await response.json();
-
-      if (!data.results || data.results.length === 0) {
+      const client = new ApiClient(serverUrl, apiToken);
+      const data = await client.searchTicker(formData.name.trim());
+      if (!Array.isArray(data.results) || data.results.length === 0) {
         alert('해당 종목명을 찾지 못했습니다. 티커를 직접 입력해주세요.');
         return;
       }
@@ -114,8 +88,13 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
       handleChange('ticker', best.symbol);
       setTickerHint(`${best.name} (${best.symbol}${best.exchange ? `, ${best.exchange}` : ''})`);
     } catch (error) {
-      console.error('Ticker resolve error:', error);
-      alert('티커 자동 조회 중 오류가 발생했습니다. 나중에 다시 시도해주세요.');
+      alertError('Ticker resolve error', error, {
+        default: '티커 자동 조회 중 오류가 발생했습니다.\n나중에 다시 시도해주세요.',
+        unauthorized:
+          'API 비밀번호가 올바르지 않습니다.\n백엔드 서버의 API_TOKEN 값과 동일한 비밀번호를 입력했는지 확인해주세요.',
+        rateLimited: '시세 제공자가 너무 많은 요청을 받아 잠시 차단했습니다.\n잠시 후 다시 시도해주세요.',
+        network: '서버와 통신할 수 없습니다.\n서버 연결을 확인해주세요.',
+      });
     } finally {
       setIsResolvingTicker(false);
     }

@@ -1,33 +1,39 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, List, PlusCircle, Bell, Menu, X, Settings, RefreshCw } from 'lucide-react';
-import { Asset, ViewState, TradeType, TradeRecord } from './types';
+import { LayoutDashboard, List, PlusCircle, Bell, Settings, RefreshCw, Lock, KeyRound } from 'lucide-react';
+import { Asset, ViewState, TradeType, TradeRecord, AssetCategory } from './types';
 import { formatCurrency } from './constants';
 import { Dashboard } from './components/Dashboard';
 import { AssetList } from './components/AssetList';
 import { AddAssetForm } from './components/AddAssetForm';
 import { SettingsPanel } from './components/SettingsPanel';
+
+import { DividendEditModal } from './components/DividendEditModal';
+import { InvestmentQuote } from './components/InvestmentQuote';
 import { usePortfolio } from './hooks/usePortfolio';
 import { useSettings } from './hooks/useSettings';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>('DASHBOARD');
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [hasUnreadHistory, setHasUnreadHistory] = useState(false);
   const { settings, setSettings, saveSettingsToServer } = useSettings();
   const [authInput, setAuthInput] = useState('');
   const [showAuthModal, setShowAuthModal] = useState(true);
+  const [isDividendModalOpen, setIsDividendModalOpen] = useState(false);
 
   const {
     assets,
     tradeHistory,
     historyData,
+    summaryFromServer,
     isSyncing,
     addAsset,
     deleteAsset,
     tradeAsset,
     syncPrices,
-     updateTicker,
+    updateAsset,
     updateCashBalance,
+    restoreFromBackup,
   } = usePortfolio(settings);
 
   const handleAddAsset = async (newAsset: Asset) => {
@@ -44,8 +50,8 @@ const App: React.FC = () => {
     void tradeAsset(id, type, quantity, price);
   };
 
-  const handleUpdateTicker = (id: string, ticker?: string) => {
-    void updateTicker(id, ticker);
+  const handleUpdateAsset = (id: string, updates: { ticker?: string; indexGroup?: string }) => {
+    void updateAsset(id, updates);
   };
 
   const handleSyncPrices = async () => {
@@ -67,6 +73,17 @@ const App: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 새 거래 내역이 생기면 알림 점 표시 (히스토리 패널이 닫혀 있을 때만)
+  useEffect(() => {
+    if (tradeHistory.length === 0) {
+      setHasUnreadHistory(false);
+      return;
+    }
+    if (!isHistoryOpen) {
+      setHasUnreadHistory(true);
+    }
+  }, [tradeHistory, isHistoryOpen]);
+
   const handleAuthSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!authInput.trim()) return;
@@ -81,43 +98,87 @@ const App: React.FC = () => {
     <button
       onClick={() => {
         setCurrentView(view);
-        setIsMobileMenuOpen(false);
       }}
-      className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all w-full md:w-auto ${
-        currentView === view
-          ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200'
-          : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
-      }`}
+      className={`flex items-center space-x-3 px-4 py-3 rounded-xl transition-all w-full md:w-auto ${currentView === view
+        ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200'
+        : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
+        }`}
     >
       <Icon size={20} />
       <span className="font-medium">{label}</span>
     </button>
   );
 
+  // 배경 스타일 계산
+  const bgStyle: React.CSSProperties = settings.bgEnabled && settings.bgImageUrl
+    ? {
+      backgroundImage: `url(${settings.bgImageUrl})`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      backgroundAttachment: 'fixed',
+    }
+    : {};
+
+  // 카드에 적용할 글래스 클래스
+  const cardGlassClass = settings.bgEnabled
+    ? `backdrop-blur-[${settings.bgBlur ?? 8}px] bg-white/${settings.cardOpacity ?? 85}`
+    : '';
+
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col md:flex-row">
+    <div
+      className={`min-h-screen flex flex-col md:flex-row ${!settings.bgEnabled ? 'bg-slate-50' : ''}`}
+      style={bgStyle}
+    >
       {showAuthModal && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4">
-          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm p-6">
-            <h2 className="text-lg font-bold text-slate-900 mb-2">API 비밀번호 입력</h2>
-            <p className="text-xs text-slate-500 mb-4">
-              백엔드 서버의 <code>API_TOKEN</code> 값과 동일한 비밀번호를 입력하세요.
-              브라우저를 새로고침하면 다시 입력해야 합니다.
-            </p>
-            <form onSubmit={handleAuthSubmit} className="space-y-3">
-              <div>
-                <input
-                  type="password"
-                  autoFocus
-                  className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm"
-                  placeholder="API 비밀번호"
-                  value={authInput}
-                  onChange={(e) => setAuthInput(e.target.value)}
-                />
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center px-4 animate-fade-in"
+        >
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all">
+            {/* Header with gradient */}
+            <div className="relative bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-600 p-6 text-white overflow-hidden">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16"></div>
+              <div className="absolute bottom-0 left-0 w-24 h-24 bg-white/10 rounded-full -ml-12 -mb-12"></div>
+
+              <div className="relative flex items-center gap-3">
+                <div className="p-2.5 bg-white/20 backdrop-blur-sm rounded-xl">
+                  <Lock size={24} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold">포트폴리오 로그인</h3>
+                  <p className="text-sm text-indigo-100 mt-0.5">비밀번호를 입력하세요</p>
+                </div>
               </div>
+            </div>
+
+            <form onSubmit={handleAuthSubmit} className="p-6 space-y-6">
+              <div className="space-y-3">
+                <label className="block text-sm font-semibold text-slate-700">
+                  API 비밀번호
+                </label>
+
+                <div className="relative">
+                  <input
+                    type="password"
+                    autoFocus
+                    className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                    placeholder="비밀번호 입력"
+                    value={authInput}
+                    onChange={(e) => setAuthInput(e.target.value)}
+                  />
+                  <div className="absolute right-4 top-1/2 transform -translate-y-1/2 text-slate-400 pointer-events-none">
+                    <KeyRound size={18} />
+                  </div>
+                </div>
+
+                <p className="text-xs text-slate-400 flex items-center gap-1">
+                  <span className="w-1 h-1 bg-slate-400 rounded-full"></span>
+                  백엔드 서버의 <code className="px-1 py-0.5 bg-slate-100 rounded text-slate-600">API_TOKEN</code> 값과 동일한 비밀번호를 입력하세요
+                </p>
+              </div>
+
               <button
                 type="submit"
-                className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-medium hover:bg-indigo-700 transition-colors"
+                className="w-full py-3 bg-gradient-to-r from-indigo-500 to-violet-600 text-white text-sm font-semibold rounded-xl hover:shadow-lg hover:scale-[1.02] transition-all duration-200"
               >
                 포트폴리오 들어가기
               </button>
@@ -127,14 +188,15 @@ const App: React.FC = () => {
       )}
 
       {/* Sidebar (Desktop) */}
-      <aside className="hidden md:flex flex-col w-64 bg-white border-r border-slate-200 h-screen sticky top-0">
-        <div className="p-6 border-b border-slate-100">
-          <div className="flex items-center space-x-2 text-indigo-600">
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold text-lg">P</span>
-            </div>
-            <span className="text-xl font-bold tracking-tight text-slate-900">MyPortfolio</span>
-          </div>
+      <aside
+        className={`hidden md:flex flex-col w-64 border-r h-screen sticky top-0 ${settings.bgEnabled
+          ? 'bg-white/80 backdrop-blur-md border-white/20'
+          : 'bg-white border-slate-200'
+          }`}
+        style={settings.bgEnabled ? { backdropFilter: `blur(${settings.bgBlur ?? 8}px)` } : {}}
+      >
+        <div className={`p-6 ${settings.bgEnabled ? 'border-b border-white/20' : 'border-b border-slate-100'}`}>
+          <InvestmentQuote />
         </div>
 
         <nav className="flex-1 p-4 space-y-2">
@@ -143,50 +205,19 @@ const App: React.FC = () => {
           <NavItem view="ADD" icon={PlusCircle} label="자산 추가" />
         </nav>
 
-        <div className="p-4 border-t border-slate-100">
+        <div className={`p-4 ${settings.bgEnabled ? 'border-t border-white/20' : 'border-t border-slate-100'}`}>
           <button
             onClick={() => setCurrentView('SETTINGS')}
-            className={`flex items-center space-x-3 px-4 py-3 w-full rounded-xl transition-colors ${
-              currentView === 'SETTINGS'
-                ? 'bg-slate-100 text-slate-900'
-                : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
-            }`}
+            className={`flex items-center space-x-3 px-4 py-3 w-full rounded-xl transition-colors ${currentView === 'SETTINGS'
+              ? 'bg-slate-100 text-slate-900'
+              : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+              }`}
           >
             <Settings size={20} />
-            <span className="font-medium">서버 설정</span>
+            <span className="font-medium">설정</span>
           </button>
         </div>
       </aside>
-
-      {/* Mobile Header */}
-      <div className="md:hidden bg-white border-b border-slate-200 p-4 sticky top-0 z-50 flex justify-between items-center">
-        <div className="flex items-center space-x-2 text-indigo-600">
-          <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-lg">P</span>
-          </div>
-          <span className="text-lg font-bold text-slate-900">MyPortfolio</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setCurrentView('SETTINGS')} className="p-2 text-slate-600">
-            <Settings size={24} />
-          </button>
-          <button
-            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="p-2 text-slate-600"
-          >
-            {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
-          </button>
-        </div>
-      </div>
-
-      {/* Mobile Menu Overlay */}
-      {isMobileMenuOpen && (
-        <div className="md:hidden fixed inset-0 bg-white z-40 pt-20 px-4 space-y-2 animate-fade-in">
-          <NavItem view="DASHBOARD" icon={LayoutDashboard} label="대시보드" />
-          <NavItem view="LIST" icon={List} label="자산 목록" />
-          <NavItem view="ADD" icon={PlusCircle} label="자산 추가" />
-        </div>
-      )}
 
       {/* Main Content */}
       <main className="flex-1 p-4 md:p-8 max-w-6xl mx-auto w-full">
@@ -196,24 +227,36 @@ const App: React.FC = () => {
               {currentView === 'DASHBOARD'
                 ? '대시보드'
                 : currentView === 'LIST'
-                ? '보유 자산'
-                : currentView === 'ADD'
-                ? '자산 추가'
-                : '서버 설정'}
+                  ? '보유 자산'
+                  : currentView === 'ADD'
+                    ? '자산 추가'
+                    : '서버 설정'}
             </h1>
             <p className="text-sm text-slate-500 mt-1">
-              나만 보는 개인 포트폴리오 대시보드
+              {currentView === 'DASHBOARD'
+                ? '자산 현황 한눈에 보기'
+                : currentView === 'LIST'
+                  ? '자산 관리 및 거래'
+                  : currentView === 'ADD'
+                    ? '새로운 자산 등록'
+                    : '연결 및 환경 설정'}
             </p>
           </div>
 
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => setIsHistoryOpen(!isHistoryOpen)}
+              onClick={() => {
+                const next = !isHistoryOpen;
+                setIsHistoryOpen(next);
+                if (next) {
+                  setHasUnreadHistory(false);
+                }
+              }}
               className="relative p-2 rounded-full border border-slate-200 bg-white text-slate-600 hover:border-indigo-400 hover:text-indigo-600 transition-colors"
             >
               <Bell size={20} />
-              {tradeHistory.length > 0 && (
+              {hasUnreadHistory && (
                 <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full" />
               )}
             </button>
@@ -265,9 +308,8 @@ const App: React.FC = () => {
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
                             <span
-                              className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                                isBuy ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'
-                              }`}
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${isBuy ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'
+                                }`}
                             >
                               {isBuy ? '매수' : '매도'}
                             </span>
@@ -287,13 +329,12 @@ const App: React.FC = () => {
                         </div>
                         {!isBuy && (
                           <div
-                            className={`text-right text-[11px] font-semibold ${
-                              pnl > 0
-                                ? 'text-red-500'
-                                : pnl < 0
+                            className={`text-right text-[11px] font-semibold ${pnl > 0
+                              ? 'text-red-500'
+                              : pnl < 0
                                 ? 'text-blue-500'
                                 : 'text-slate-400'
-                            }`}
+                              }`}
                           >
                             {pnl > 0 ? '+' : pnl < 0 ? '-' : ''}
                             {formatCurrency(Math.abs(pnl))}
@@ -311,11 +352,15 @@ const App: React.FC = () => {
         {currentView === 'DASHBOARD' && (
           <Dashboard
             assets={assets}
+            backendSummary={summaryFromServer}
+            usdFxBase={settings.usdFxBase}
+            usdFxNow={settings.usdFxNow}
             targetIndexAllocations={settings.targetIndexAllocations}
             historyData={historyData}
             dividendTotalYear={settings.dividendTotalYear}
             dividendYear={settings.dividendYear}
             dividends={settings.dividends}
+            onUpdateDividends={() => setIsDividendModalOpen(true)}
           />
         )}
         {currentView === 'LIST' && (
@@ -323,8 +368,11 @@ const App: React.FC = () => {
             assets={assets}
             onDelete={handleDeleteAsset}
             onTrade={handleTradeAsset}
-            onUpdateTicker={handleUpdateTicker}
+            onUpdateAsset={handleUpdateAsset}
             onUpdateCash={updateCashBalance}
+            onRestoreFromBackup={restoreFromBackup}
+            usdFxNow={settings.usdFxNow}
+            indexGroupOptions={settings.targetIndexAllocations?.map(a => a.indexGroup) || []}
           />
         )}
         {currentView === 'ADD' && (
@@ -335,83 +383,6 @@ const App: React.FC = () => {
               serverUrl={settings.serverUrl}
               apiToken={settings.apiToken}
             />
-            <section className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 max-w-2xl mx-auto">
-              <h2 className="text-sm font-semibold text-slate-800 mb-2">배당금 기록 (수동 입력)</h2>
-              <p className="text-xs text-slate-500 mb-3">
-                토스 등에서 특정 연도 세후 배당금 총액을 확인한 뒤, 연도와 합계를 한 번에 입력하면 대시보드 손익 카드에서 같이 보여줍니다.
-                실제 예비금/자산 잔액은 별도로 맞춰주세요.
-              </p>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    className="w-20 px-3 py-2 rounded-lg border border-slate-200 text-xs focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    placeholder={new Date().getFullYear().toString()}
-                    min={2000}
-                    max={2100}
-                    value={settings.dividendYear ?? ''}
-                    onChange={(e) =>
-                      setSettings((prev) => ({
-                        ...prev,
-                        dividendYear: e.target.value ? Number(e.target.value) || undefined : undefined,
-                      }))
-                    }
-                  />
-                  <input
-                    type="number"
-                    className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-xs focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    placeholder="예: 250000"
-                    min={0}
-                    value={settings.dividendTotalYear ?? ''}
-                    onChange={(e) =>
-                      setSettings((prev) => ({
-                        ...prev,
-                        dividendTotalYear: e.target.value
-                          ? Number(e.target.value) || undefined
-                          : undefined,
-                      }))
-                    }
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!settings.dividendYear || !settings.dividendTotalYear) {
-                        alert('연도와 배당 합계를 모두 입력해주세요.');
-                        return;
-                      }
-                      setSettings((prev) => {
-                        const year = prev.dividendYear;
-                        const total = prev.dividendTotalYear;
-                        if (!year || !total) return prev;
-                        const others = (prev.dividends || []).filter((d) => d.year !== year);
-                        return {
-                          ...prev,
-                          dividends: [...others, { year, total }],
-                        };
-                      });
-                    }}
-                    className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-[11px] font-medium hover:bg-indigo-700 whitespace-nowrap"
-                  >
-                    연도별 합계에 추가
-                  </button>
-                </div>
-                {settings.dividends && settings.dividends.length > 0 && (
-                  <div className="mt-1 border-t border-slate-100 pt-2">
-                    <p className="text-[11px] text-slate-500 mb-1">연도별 배당 합계</p>
-                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-slate-600">
-                      {[...settings.dividends]
-                        .slice()
-                        .sort((a, b) => b.year - a.year)
-                        .map((d) => (
-                          <span key={d.year}>
-                            {d.year}: +{formatCurrency(d.total)}
-                          </span>
-                        ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </section>
           </div>
         )}
         {currentView === 'SETTINGS' && (
@@ -426,33 +397,15 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Mobile Bottom Navigation */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-6 py-3 flex justify-between items-center z-50 pb-safe">
-        <button
-          onClick={() => setCurrentView('DASHBOARD')}
-          className={`flex flex-col items-center space-y-1 ${
-            currentView === 'DASHBOARD' ? 'text-indigo-600' : 'text-slate-400'
-          }`}
-        >
-          <LayoutDashboard size={24} />
-          <span className="text-[10px] font-medium">홈</span>
-        </button>
-        <button
-          onClick={() => setCurrentView('ADD')}
-          className="flex flex-col items-center justify-center w-12 h-12 bg-indigo-600 rounded-full text-white shadow-lg shadow-indigo-200 -mt-6"
-        >
-          <PlusCircle size={24} />
-        </button>
-        <button
-          onClick={() => setCurrentView('LIST')}
-          className={`flex flex-col items-center space-y-1 ${
-            currentView === 'LIST' ? 'text-indigo-600' : 'text-slate-400'
-          }`}
-        >
-          <List size={24} />
-          <span className="text-[10px] font-medium">목록</span>
-        </button>
-      </div>
+      <DividendEditModal
+        isOpen={isDividendModalOpen}
+        onClose={() => setIsDividendModalOpen(false)}
+        dividends={settings.dividends || []}
+        onSave={(updated) => {
+          setSettings((prev) => ({ ...prev, dividends: updated }));
+          void saveSettingsToServer({ ...settings, dividends: updated });
+        }}
+      />
     </div>
   );
 };

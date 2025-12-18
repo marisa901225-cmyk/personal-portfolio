@@ -2,15 +2,19 @@ from __future__ import annotations
 
 from typing import Dict, List
 import asyncio
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, RootModel
+from sqlalchemy.orm import Session
 
 from . import kis_client
 from .auth import verify_api_token
-from .routers.portfolio import router as portfolio_router
+from .db import get_db
+from .models import Asset
+from .routers.portfolio import router as portfolio_router, _get_or_create_single_user
 
 app = FastAPI(title="MyAsset Portfolio Backend")
 
@@ -57,8 +61,15 @@ app.add_middleware(
 app.include_router(portfolio_router)
 
 
-@app.post("/api/kis/prices", response_model=PricesResponse, dependencies=[Depends(verify_api_token)])
-async def get_kis_prices(req: PricesRequest) -> PricesResponse:
+@app.post(
+    "/api/kis/prices",
+    response_model=PricesResponse,
+    dependencies=[Depends(verify_api_token)],
+)
+async def get_kis_prices(
+    req: PricesRequest,
+    db: Session = Depends(get_db),
+) -> PricesResponse:
     """
     한국투자증권 Open API 기준으로 국내/해외 시세를 조회한다.
 
@@ -87,6 +98,34 @@ async def get_kis_prices(req: PricesRequest) -> PricesResponse:
             status_code=502,
             detail="no prices found for given tickers via KIS",
         )
+
+    # --- 가격을 포트폴리오 자산에도 반영 ---
+    try:
+        user = _get_or_create_single_user(db)
+        tickers = list(prices.keys())
+        if tickers:
+            assets = (
+                db.query(Asset)
+                .filter(
+                    Asset.user_id == user.id,
+                    Asset.deleted_at.is_(None),
+                    Asset.ticker.in_(tickers),
+                )
+                .all()
+            )
+
+            now = datetime.utcnow()
+            for asset in assets:
+                if asset.ticker and asset.ticker in prices:
+                    asset.current_price = prices[asset.ticker]
+                    asset.updated_at = now
+
+            if assets:
+                db.commit()
+    except Exception as exc:  # 저장 실패해도 시세 조회 응답은 유지
+        # 로그만 남기고 조용히 무시
+        # (개인용 프로젝트이므로 간단히 처리)
+        print(f"[WARN] failed to persist synced prices: {exc}")
 
     return PricesResponse(root=prices)
 
