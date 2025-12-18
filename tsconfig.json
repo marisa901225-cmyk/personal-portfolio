@@ -9,9 +9,12 @@
       "DOM",
       "DOM.Iterable"
     ],
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "types": [
-      "node"
+      "node",
+      "vitest/globals"
     ],
     "moduleResolution": "bundler",
     "isolatedModules": true,

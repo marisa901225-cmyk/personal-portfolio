@@ -30,10 +30,6 @@ from ..schemas import (
 router = APIRouter(prefix="/api", tags=["portfolio"], dependencies=[Depends(verify_api_token)])
 
 
-# --- 초기 스키마 생성 및 간단한 마이그레이션 ---
-Base.metadata.create_all(bind=engine)
-
-
 def _migrate_settings_table() -> None:
     """
     기존 SQLite settings 테이블에 누락된 컬럼(dividend_year, dividend_total, dividends)이 있으면 추가한다.
@@ -62,7 +58,32 @@ def _migrate_settings_table() -> None:
             conn.execute(text(stmt))
 
 
+def _migrate_assets_table() -> None:
+    """
+    기존 SQLite assets 테이블에 누락된 컬럼(cma_config)이 있으면 추가한다.
+    """
+    inspector = inspect(engine)
+    try:
+        columns = {col["name"] for col in inspector.get_columns("assets")}
+    except Exception:
+        return
+
+    statements: list[str] = []
+    if "cma_config" not in columns:
+        statements.append("ALTER TABLE assets ADD COLUMN cma_config JSON")
+
+    if not statements:
+        return
+
+    with engine.begin() as conn:
+        for stmt in statements:
+            conn.execute(text(stmt))
+
+
+# --- 초기 스키마 생성 및 간단한 마이그레이션 ---
+Base.metadata.create_all(bind=engine)
 _migrate_settings_table()
+_migrate_assets_table()
 
 
 def _get_or_create_single_user(db: Session) -> User:
@@ -81,7 +102,10 @@ def _to_asset_read(asset: Asset) -> AssetRead:
 
 
 def _to_trade_read(trade: Trade) -> TradeRead:
-    return TradeRead.model_validate(trade)
+    payload = TradeRead.model_validate(trade).model_dump()
+    payload["asset_name"] = trade.asset.name if trade.asset else None
+    payload["asset_ticker"] = trade.asset.ticker if trade.asset else None
+    return TradeRead(**payload)
 
 
 def _calculate_summary(assets: List[Asset]) -> PortfolioSummary:
@@ -172,6 +196,7 @@ def create_asset(payload: AssetCreate, db: Session = Depends(get_db)) -> AssetRe
         purchase_price=payload.purchase_price,
         realized_profit=payload.realized_profit,
         index_group=payload.index_group,
+        cma_config=payload.cma_config.model_dump() if payload.cma_config is not None else None,
     )
     db.add(asset)
     db.commit()
@@ -190,7 +215,8 @@ def update_asset(asset_id: int, payload: AssetUpdate, db: Session = Depends(get_
     if not asset:
         raise HTTPException(status_code=404, detail="asset not found")
 
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    for field, value in data.items():
         setattr(asset, field, value)
     asset.updated_at = datetime.utcnow()
 

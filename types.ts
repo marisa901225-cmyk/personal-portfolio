@@ -6,6 +6,8 @@ export enum AssetCategory {
   OTHER = '기타'
 }
 
+import type { CmaConfig } from './cmaConfig';
+
 export interface Asset {
   id: string;
   /** 백엔드 SQLite 자산 ID (서버 연동용, 선택) */
@@ -20,6 +22,8 @@ export interface Asset {
   realizedProfit?: number; // Realized P&L
   /** 어떤 지수/테마에 속하는지 (예: S&P500, NASDAQ100, KOSPI200) */
   indexGroup?: string;
+  /** 발행어음/CMA 세후 이자 자동 계산 설정 (선택) */
+  cmaConfig?: CmaConfig;
 }
 
 export type TradeType = 'BUY' | 'SELL';
@@ -38,7 +42,7 @@ export interface TradeRecord {
 
 export interface TargetIndexAllocation {
   indexGroup: string;
-  /** 상대 비중 (예: 6, 3, 1) */
+  /** 목표 비중 값 (예: 6, 3, 1 또는 60, 30, 10 — 합계가 100이면 %로 해석) */
   targetWeight: number;
 }
 
@@ -73,4 +77,13 @@ export interface AppSettings {
   dividendYear?: number;
   /** 연도별 배당 합계 리스트 (서버/로컬에 함께 저장) */
   dividends?: DividendEntry[];
+  // 외관 설정
+  /** 배경 이미지 사용 여부 */
+  bgEnabled?: boolean;
+  /** 배경 이미지 URL */
+  bgImageUrl?: string;
+  /** 카드 불투명도 (0~100, 기본 85) */
+  cardOpacity?: number;
+  /** 배경 흐림 강도 (0~20, 기본 8) */
+  bgBlur?: number;
 }

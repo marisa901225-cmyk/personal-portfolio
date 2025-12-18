@@ -120,3 +120,108 @@ chmod +x backend/snapshot_cron.sh
 - **백엔드**: Python FastAPI (홈서버 실행)
 - **데이터베이스**: SQLite (파일로 저장)
 - **네트워크**: Tailscale (사설망)
+
+---
+
+# 3개월 뒤 나를 위한 1페이지 가이드 (설치/실행/운영)
+
+## 설치/실행 방법
+
+### 프론트엔드 (로컬 개발)
+
+```bash
+npm ci
+npm run dev
+```
+
+- 기본 접속: `http://localhost:5173`
+- 백엔드 주소(`http://<tailscale-ip>:8000`)와 API 토큰은 **앱의 설정 화면에서 입력**(로컬 저장)
+
+### 백엔드 (로컬/서버 실행)
+
+```bash
+python -m venv backend/.venv
+source backend/.venv/bin/activate
+pip install -r backend/requirements.txt
+
+# (선택) 환경변수 설정 후
+uvicorn backend.main:app --host 0.0.0.0 --port 8000
+```
+
+systemd로 운영 중이면:
+
+```bash
+sudo systemctl restart myasset-backend.service
+sudo systemctl status myasset-backend.service
+```
+
+## 환경변수 (.env) / 설정 파일
+
+### 백엔드 환경변수
+
+- `API_TOKEN` (권장): API 인증 토큰. 요청 헤더 `X-API-Token`과 일치해야 함 (미설정 시 인증 비활성화)
+- `DATABASE_URL` (선택): 기본은 `backend/portfolio.db` (SQLite). 예: `sqlite:////absolute/path/portfolio.db`
+
+### 운영 스크립트용 환경변수
+
+- `backend/backup_db.sh`
+  - `DB_PATH` (선택): 기본 `backend/portfolio.db`
+  - `BACKUP_DIR` (선택): 기본 `/mnt/one-touch/personal-portfolio-backend-backup`
+- `backend/snapshot_cron.sh`
+  - `API_TOKEN` (필수): 백엔드 `API_TOKEN`과 동일 값
+  - `BACKEND_URL` (선택): 기본 `http://127.0.0.1:8000`
+
+### KIS(한국투자증권) 연동 설정
+
+`/api/kis/*` 호출은 `open-trading-api/examples_llm/kis_auth.py` 설정을 사용합니다.
+
+- `~/KIS/config/kis_devlp.yaml` 파일이 필요
+- 템플릿: `open-trading-api/kis_devlp.yaml`
+- KIS 앱키/시크릿/계좌번호/HTS ID는 이 YAML 파일에만 설정하며, 백엔드 `.env`의 `KIS_*` 환경변수는 현재 코드에서 사용하지 않습니다. (개인 메모용으로만 사용 가능)
+- 따라서 필수 백엔드 환경변수 목록에는 KIS 키를 포함하지 않습니다.
+
+## 백업/복원 방법 (SQLite)
+
+### 백업
+
+```bash
+./backend/backup_db.sh
+```
+
+- 기본 백업 위치: `/mnt/one-touch/personal-portfolio-backend-backup`
+- `sqlite3`가 있으면 핫 백업(`.backup`)으로 단일 파일을 생성
+
+### 복원
+
+1) 백엔드 중지
+
+```bash
+sudo systemctl stop myasset-backend.service
+```
+
+2) 백업 DB를 `backend/portfolio.db`로 덮어쓰기 (DATABASE_URL을 쓰면 해당 경로로)
+
+```bash
+cp /mnt/one-touch/personal-portfolio-backend-backup/portfolio_YYYYmmdd_HHMMSS.db backend/portfolio.db
+```
+
+3) 권한 정리(서비스 실행 유저 기준)
+
+```bash
+sudo chown -R <service-user>:<service-user> backend/portfolio.db*
+```
+
+4) 백엔드 재시작
+
+```bash
+sudo systemctl start myasset-backend.service
+```
+
+## 자주 터지는 문제 / 해결
+
+- `systemctl` 경고(`daemon-reload`): `sudo systemctl daemon-reload` 후 `sudo systemctl restart myasset-backend.service`
+- 포트 충돌(8000): `sudo ss -ltnp | rg ':8000'`로 점유 프로세스 확인 후 종료/포트 변경
+- DB 권한 오류: 서비스 유저가 `backend/portfolio.db`(및 `-wal`, `-shm`)에 쓰기 권한이 있어야 함 (`chown/chmod` 확인)
+- 401 `invalid api token`: 프론트 설정의 토큰 ↔ 서버의 `API_TOKEN`이 불일치(또는 systemd에서 환경변수 로딩 안 됨). `systemctl cat myasset-backend.service`로 `Environment=`/`EnvironmentFile=` 확인
+- KIS 인증 실패: `~/KIS/config/kis_devlp.yaml` 누락/값 오류 (템플릿은 `open-trading-api/kis_devlp.yaml`)
+- 티커 검색 실패(마스터 파일): `open-trading-api/stocks_info`에 `kospi_code.xlsx`, `kosdaq_code.xlsx`, `overseas_stock_code(all).xlsx` 등이 필요 (없으면 해당 디렉터리의 생성 스크립트 실행)

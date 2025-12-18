@@ -1,18 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Asset, AppSettings, AssetCategory, TradeRecord, TradeType } from '../types';
 import {
-  STORAGE_KEYS,
-  loadAssetsFromStorage,
-  loadTradesFromStorage,
-  showLocalStorageBackupWarning,
-} from '../storage';
-import {
+  ApiClient,
   BackendPortfolioResponse,
-  BackendSnapshot,
   BackendTrade,
   mapBackendAssetToFrontend,
   mapBackendTradesToFrontend,
+  BackendPortfolioSummary,
 } from '../backendClient';
+import { CmaConfig } from '../cmaConfig';
+import type { ImportedAssetSnapshot } from './portfolioTypes';
+import { syncPortfolioPrices } from './portfolioSync';
+import { restorePortfolioFromBackup } from './portfolioBackup';
+import { alertError } from '../errors';
 
 interface HistoryPoint {
   date: string;
@@ -23,143 +23,45 @@ interface UsePortfolioResult {
   assets: Asset[];
   tradeHistory: TradeRecord[];
   historyData: HistoryPoint[];
+  summaryFromServer?: BackendPortfolioSummary;
   isSyncing: boolean;
   addAsset: (newAsset: Asset) => Promise<void>;
   deleteAsset: (id: string) => Promise<void>;
   tradeAsset: (id: string, type: TradeType, quantity: number, price: number) => Promise<void>;
   syncPrices: () => Promise<void>;
-  updateTicker: (id: string, ticker?: string) => Promise<void>;
-   updateCashBalance: (id: string, newBalance: number) => Promise<void>;
+  updateAsset: (id: string, updates: { ticker?: string; indexGroup?: string }) => Promise<void>;
+  updateCashBalance: (id: string, newBalance: number, cmaConfig?: CmaConfig | null) => Promise<void>;
+  restoreFromBackup: (snapshot: ImportedAssetSnapshot[]) => Promise<void>;
 }
 
 export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
   const [assets, setAssets] = useState<Asset[]>([]);
   const [tradeHistory, setTradeHistory] = useState<TradeRecord[]>([]);
   const [historyData, setHistoryData] = useState<HistoryPoint[]>([]);
+  const [summaryFromServer, setSummaryFromServer] = useState<BackendPortfolioSummary | undefined>(undefined);
   const [isSyncing, setIsSyncing] = useState(false);
 
   const isRemoteEnabled = Boolean(settings.serverUrl && settings.apiToken);
 
-  const loadFromLocal = () => {
-    const localAssets = loadAssetsFromStorage();
-    const localTrades = loadTradesFromStorage();
-    setAssets(localAssets);
-    setTradeHistory(localTrades);
-    if (localAssets.length > 0) {
-      showLocalStorageBackupWarning();
-    }
-  };
+  const apiClient = useMemo(
+    () => new ApiClient(settings.serverUrl, settings.apiToken),
+    [settings.serverUrl, settings.apiToken]
+  );
 
-  const createHeaders = (withJson: boolean): HeadersInit => {
-    const headers: HeadersInit = withJson ? { 'Content-Type': 'application/json' } : {};
-    if (settings.apiToken) {
-      headers['X-API-Token'] = settings.apiToken;
-    }
-    return headers;
-  };
-
-  const loadPortfolioFromServer = async (options?: {
-    migrateFromLocalIfEmpty?: boolean;
-  }): Promise<void> => {
-    const { migrateFromLocalIfEmpty = false } = options ?? {};
-
-    if (!isRemoteEnabled) {
-      loadFromLocal();
-      return;
-    }
-
-    const headers = createHeaders(false);
-
+  const loadPortfolioFromServer = async (): Promise<void> => {
     try {
-      const response = await fetch(`${settings.serverUrl}/api/portfolio`, {
-        method: 'GET',
-        headers,
-      });
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          alert('포트폴리오를 불러오지 못했습니다.\nAPI 비밀번호가 올바른지 확인해주세요.');
-        }
-        loadFromLocal();
-        return;
-      }
-
-      const data: BackendPortfolioResponse = await response.json();
-
-      if (data.assets.length === 0 && migrateFromLocalIfEmpty) {
-        const localAssets = loadAssetsFromStorage();
-        const localTrades = loadTradesFromStorage();
-
-        if (localAssets.length > 0) {
-          const confirmUpload = window.confirm(
-            '서버에 저장된 포트폴리오가 없습니다.\n이 브라우저의 기존 포트폴리오 데이터를 홈서버로 업로드할까요?',
-          );
-          if (confirmUpload) {
-            try {
-              for (const asset of localAssets) {
-                const createPayload = {
-                  name: asset.name,
-                  ticker: asset.ticker,
-                  category: asset.category,
-                  currency: asset.currency,
-                  amount: asset.amount,
-                  current_price: asset.currentPrice,
-                  purchase_price: asset.purchasePrice,
-                  realized_profit: asset.realizedProfit ?? 0,
-                  index_group: asset.indexGroup,
-                };
-
-                const createResp = await fetch(
-                  `${settings.serverUrl}/api/assets`,
-                  {
-                    method: 'POST',
-                    headers: createHeaders(true),
-                    body: JSON.stringify(createPayload),
-                  },
-                );
-
-                if (!createResp.ok) {
-                  console.error('Asset upload failed', await createResp.text());
-                }
-              }
-
-              const refreshed = await fetch(`${settings.serverUrl}/api/portfolio`, {
-                method: 'GET',
-                headers,
-              });
-              if (refreshed.ok) {
-                const refreshedData: BackendPortfolioResponse = await refreshed.json();
-                const mappedAssets = refreshedData.assets.map(mapBackendAssetToFrontend);
-                const mappedTrades = mapBackendTradesToFrontend(
-                  refreshedData.trades,
-                  mappedAssets,
-                );
-                setAssets(mappedAssets);
-                setTradeHistory(mappedTrades);
-                alert('기존 localStorage 포트폴리오를 서버로 업로드했습니다.');
-                return;
-              }
-            } catch (uploadError) {
-              console.error('Migration upload error', uploadError);
-            }
-          }
-
-          setAssets(localAssets);
-          setTradeHistory(localTrades);
-          if (localAssets.length > 0) {
-            showLocalStorageBackupWarning();
-          }
-          return;
-        }
-      }
-
+      const data = await apiClient.fetchPortfolio();
       const mappedAssets = data.assets.map(mapBackendAssetToFrontend);
       const mappedTrades = mapBackendTradesToFrontend(data.trades, mappedAssets);
       setAssets(mappedAssets);
       setTradeHistory(mappedTrades);
+      setSummaryFromServer(data.summary);
     } catch (error) {
-      console.error('Failed to load portfolio from server', error);
-      loadFromLocal();
+      alertError('Failed to load portfolio from server', error, {
+        default: '포트폴리오를 불러오지 못했습니다.\n서버 상태를 확인해주세요.',
+        unauthorized: '포트폴리오를 불러오지 못했습니다.\nAPI 비밀번호가 올바른지 확인해주세요.',
+        network: '포트폴리오를 불러오지 못했습니다.\n서버 연결을 확인해주세요.',
+      });
     }
   };
 
@@ -169,23 +71,8 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
       return;
     }
 
-    const headers = createHeaders(false);
-
     try {
-      const response = await fetch(
-        `${settings.serverUrl}/api/portfolio/snapshots?days=180`,
-        {
-          method: 'GET',
-          headers,
-        },
-      );
-
-      if (!response.ok) {
-        console.warn('Failed to load portfolio snapshots', response.status);
-        return;
-      }
-
-      const data: BackendSnapshot[] = await response.json();
+      const data = await apiClient.fetchSnapshots(180);
       const mapped = data.map((snap) => {
         const d = new Date(snap.snapshot_at);
         const label = d.toLocaleDateString('ko-KR', {
@@ -199,47 +86,27 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
       });
       setHistoryData(mapped);
     } catch (error) {
-      console.error('Failed to load portfolio history from server', error);
+      console.warn('Failed to load portfolio snapshots', error);
     }
   };
 
   useEffect(() => {
     if (!isRemoteEnabled) {
-      loadFromLocal();
       setHistoryData([]);
+      setSummaryFromServer(undefined);
       return;
     }
 
-    void loadPortfolioFromServer({ migrateFromLocalIfEmpty: true });
+    void loadPortfolioFromServer();
     void loadHistoryFromServer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settings.serverUrl, settings.apiToken]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      window.localStorage.setItem(STORAGE_KEYS.ASSETS, JSON.stringify(assets));
-    } catch {
-      // ignore
-    }
-  }, [assets]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      window.localStorage.setItem(STORAGE_KEYS.TRADES, JSON.stringify(tradeHistory));
-    } catch {
-      // ignore
-    }
-  }, [tradeHistory]);
+  }, [isRemoteEnabled, apiClient]); // apiClient changes when settings change
 
   const addAsset = async (newAsset: Asset): Promise<void> => {
     if (!isRemoteEnabled) {
       setAssets((prev) => [...prev, newAsset]);
       return;
     }
-
-    const headers = createHeaders(true);
 
     try {
       const payload = {
@@ -252,32 +119,27 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
         purchase_price: newAsset.purchasePrice,
         realized_profit: newAsset.realizedProfit ?? 0,
         index_group: newAsset.indexGroup,
+        cma_config: newAsset.cmaConfig
+          ? {
+            principal: newAsset.cmaConfig.principal,
+            annual_rate: newAsset.cmaConfig.annualRate,
+            tax_rate: newAsset.cmaConfig.taxRate,
+            start_date: newAsset.cmaConfig.startDate,
+          }
+          : null,
       };
 
-      const resp = await fetch(`${settings.serverUrl}/api/assets`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(payload),
-      });
-
-      if (!resp.ok) {
-        console.error('Failed to create asset on server', await resp.text());
-        setAssets((prev) => [...prev, newAsset]);
-        alert(
-          '자산을 서버에 저장하지 못했습니다.\n이 세션에서는 브라우저(localStorage)에만 저장됩니다.',
-        );
-        return;
-      }
-
-      const backendAsset = await resp.json();
-      const mapped = mapBackendAssetToFrontend(backendAsset);
-      setAssets((prev) => [...prev, mapped]);
+      await apiClient.createAsset(payload);
+      await loadPortfolioFromServer();
     } catch (error) {
-      console.error('Create asset error', error);
+      alertError('Create asset error', error, {
+        default:
+          '자산을 서버에 저장하지 못했습니다 (또는 서버 연결 실패).\n현재 세션에서만 브라우저에 임시로 반영됩니다.',
+        unauthorized: '자산을 저장하지 못했습니다.\nAPI 비밀번호가 올바른지 확인해주세요.',
+        network:
+          '자산을 서버에 저장하지 못했습니다.\n서버 연결을 확인해주세요.\n현재 세션에서만 브라우저에 임시로 반영됩니다.',
+      });
       setAssets((prev) => [...prev, newAsset]);
-      alert(
-        '서버 연결에 실패했습니다.\n이 세션에서는 브라우저(localStorage)에만 저장됩니다.',
-      );
     }
   };
 
@@ -285,22 +147,15 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
     const target = assets.find((a) => a.id === id);
 
     if (target?.backendId && isRemoteEnabled) {
-      const headers = createHeaders(false);
       try {
-        const resp = await fetch(
-          `${settings.serverUrl}/api/assets/${target.backendId}`,
-          {
-            method: 'DELETE',
-            headers,
-          },
-        );
-        if (!resp.ok) {
-          console.error('Failed to delete asset on server', await resp.text());
-        } else {
-          await loadPortfolioFromServer();
-        }
+        await apiClient.deleteAsset(target.backendId);
+        await loadPortfolioFromServer();
       } catch (error) {
-        console.error('Delete asset error', error);
+        alertError('Delete asset error', error, {
+          default: '자산을 서버에서 삭제하지 못했습니다.\n현재 세션에서는 로컬로만 반영됩니다.',
+          unauthorized: '자산을 삭제하지 못했습니다.\nAPI 비밀번호가 올바른지 확인해주세요.',
+          network: '자산을 서버에서 삭제하지 못했습니다.\n서버 연결을 확인해주세요.',
+        });
       }
     }
 
@@ -327,53 +182,37 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
     }
 
     if (targetAsset.backendId && isRemoteEnabled) {
-      const headers = createHeaders(true);
-
       try {
-        const payload = {
+        const backendTrade = await apiClient.createTrade(
+          targetAsset.backendId,
           type,
           quantity,
-          price,
-        };
-
-        const resp = await fetch(
-          `${settings.serverUrl}/api/assets/${targetAsset.backendId}/trades`,
-          {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(payload),
-          },
+          price
         );
 
-        if (!resp.ok) {
-          const text = await resp.text();
-          console.error('Trade POST failed', text);
-          alert('매수/매도 정보를 서버에 저장하지 못했습니다.');
-        } else {
-          const backendTrade: BackendTrade = await resp.json();
+        await loadPortfolioFromServer();
 
-          await loadPortfolioFromServer();
-
-          setTradeHistory((prev) => {
-            const record: TradeRecord = {
-              id: backendTrade.id.toString(),
-              assetId: backendTrade.asset_id.toString(),
-              assetName: targetAsset.name,
-              ticker: targetAsset.ticker,
-              type: backendTrade.type,
-              quantity: backendTrade.quantity,
-              price: backendTrade.price,
-              timestamp: backendTrade.timestamp,
-              realizedDelta: backendTrade.realized_delta ?? undefined,
-            };
-            return [record, ...prev].slice(0, 20);
-          });
-
-          return;
-        }
+        setTradeHistory((prev) => {
+          const record: TradeRecord = {
+            id: backendTrade.id.toString(),
+            assetId: backendTrade.asset_id.toString(),
+            assetName: targetAsset.name,
+            ticker: targetAsset.ticker,
+            type: backendTrade.type,
+            quantity: backendTrade.quantity,
+            price: backendTrade.price,
+            timestamp: backendTrade.timestamp,
+            realizedDelta: backendTrade.realized_delta ?? undefined,
+          };
+          return [record, ...prev].slice(0, 20);
+        });
+        return;
       } catch (error) {
-        console.error('Trade request error', error);
-        alert('서버와 통신 중 오류가 발생했습니다. 현재 세션에서는 로컬로만 반영됩니다.');
+        alertError('Trade request error', error, {
+          default: '서버와 통신 중 오류가 발생했습니다.\n현재 세션에서는 로컬로만 반영됩니다.',
+          unauthorized: '거래를 저장하지 못했습니다.\nAPI 비밀번호가 올바른지 확인해주세요.',
+          network: '서버와 통신할 수 없습니다.\n현재 세션에서는 로컬로만 반영됩니다.',
+        });
       }
     }
 
@@ -447,76 +286,29 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
   };
 
   const syncPrices = async (): Promise<void> => {
-    if (!settings.serverUrl) {
-      alert('설정에서 홈서버 URL을 입력해주세요.');
-      return;
-    }
-
-    const tickers = assets.filter((a) => a.ticker).map((a) => a.ticker as string);
-    if (tickers.length === 0) {
-      alert('티커가 등록된 자산이 없습니다.');
-      return;
-    }
-
-    setIsSyncing(true);
-    try {
-      const headers = createHeaders(true);
-
-      const response = await fetch(`${settings.serverUrl}/api/kis/prices`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ tickers }),
-      });
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          alert(
-            'API 비밀번호가 올바르지 않습니다.\n백엔드 서버의 API_TOKEN 값과 동일한 비밀번호를 입력했는지 확인해주세요.',
-          );
-          return;
-        }
-
-        if (response.status === 429) {
-          alert(
-            '시세 제공자가 너무 많은 요청을 받아 잠시 차단했습니다.\n잠시 후 다시 시도해주세요.',
-          );
-          return;
-        }
-
-        if (response.status >= 500 && response.status < 600) {
-          alert(
-            '홈서버 또는 시세 제공자에서 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.',
-          );
-          return;
-        }
-
-        alert(`가격 동기화에 실패했습니다. (HTTP ${response.status})`);
-        return;
-      }
-
-      const priceMap = await response.json();
-
-      setAssets((prevAssets) =>
-        prevAssets.map((asset) => {
-          if (asset.ticker && priceMap[asset.ticker]) {
-            return { ...asset, currentPrice: priceMap[asset.ticker] };
-          }
-          return asset;
-        }),
-      );
-
-      alert('최신 가격 정보를 업데이트했습니다.');
-    } catch (error) {
-      console.error('Sync Error:', error);
-      alert(
-        `서버 연결 실패.\nURL: ${settings.serverUrl}\n홈서버가 켜져있고 Tailscale이 연결되었는지 확인하세요.`,
-      );
-    } finally {
-      setIsSyncing(false);
-    }
+    await syncPortfolioPrices({
+      settings,
+      assets,
+      apiClient,
+      isRemoteEnabled,
+      setAssets,
+      setIsSyncing,
+      loadPortfolioFromServer,
+    });
   };
 
-  const updateCashBalance = async (id: string, newBalance: number): Promise<void> => {
+  const restoreFromBackup = async (snapshot: ImportedAssetSnapshot[]): Promise<void> => {
+    await restorePortfolioFromBackup({
+      snapshot,
+      isRemoteEnabled,
+      apiClient,
+      setAssets,
+      setTradeHistory,
+      loadPortfolioFromServer,
+    });
+  };
+
+  const updateCashBalance = async (id: string, newBalance: number, cmaConfig?: CmaConfig | null): Promise<void> => {
     if (newBalance < 0) {
       alert('예비금은 0원보다 작을 수 없습니다.');
       return;
@@ -524,63 +316,108 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
 
     const target = assets.find((a) => a.id === id);
     if (!target) return;
-    if (target.category !== AssetCategory.CASH) {
-      alert('예비금 잔액 수정은 "현금/예금" 자산에만 사용할 수 있습니다.');
+    const isCash = target.category === AssetCategory.CASH;
+    const isRealEstate = target.category === AssetCategory.REAL_ESTATE;
+    if (!isCash && !isRealEstate) {
+      alert('금액 직접 수정은 "현금/예금" 또는 "부동산" 자산에만 사용할 수 있습니다.');
       return;
     }
+
+    const nextAmount = isCash ? 1 : target.amount > 0 ? target.amount : 1;
+    const nextCurrentPrice = isCash ? newBalance : newBalance / nextAmount;
 
     const applyLocal = () => {
       setAssets((prev) =>
         prev.map((asset) =>
           asset.id === id
             ? {
-                ...asset,
-                amount: 1,
-                currentPrice: newBalance,
-                purchasePrice: newBalance,
-                realizedProfit: 0,
-              }
+              ...asset,
+              amount: nextAmount,
+              currentPrice: nextCurrentPrice,
+              purchasePrice: isCash ? newBalance : asset.purchasePrice,
+              realizedProfit: isCash ? 0 : asset.realizedProfit,
+              cmaConfig: isCash ? (cmaConfig || undefined) : undefined,
+            }
             : asset,
         ),
       );
     };
 
     if (target.backendId && isRemoteEnabled) {
-      const headers = createHeaders(true);
-
       try {
-        const resp = await fetch(
-          `${settings.serverUrl}/api/assets/${target.backendId}`,
-          {
-            method: 'PATCH',
-            headers,
-            body: JSON.stringify({
-              amount: 1,
-              current_price: newBalance,
-              purchase_price: newBalance,
-              realized_profit: 0,
-            }),
-          },
-        );
+        const payload: Record<string, unknown> = {
+          current_price: nextCurrentPrice,
+        };
 
-        if (!resp.ok) {
-          console.error('Failed to update cash balance on server', await resp.text());
-          alert(
-            '서버에 예비금 잔액을 저장하지 못했습니다.\n잠시 후 다시 시도해주세요.',
-          );
+        if (isCash) {
+          payload.amount = 1;
+          payload.purchase_price = newBalance;
+          payload.realized_profit = 0;
+          payload.cma_config = cmaConfig
+            ? {
+              principal: cmaConfig.principal,
+              annual_rate: cmaConfig.annualRate,
+              tax_rate: cmaConfig.taxRate,
+              start_date: cmaConfig.startDate,
+            }
+            : null;
         } else {
-          const backendAsset = await resp.json();
-          const mapped = mapBackendAssetToFrontend(backendAsset);
-          setAssets((prev) =>
-            prev.map((asset) => (asset.id === id ? mapped : asset)),
-          );
-          return;
+          if (target.amount <= 0) {
+            payload.amount = 1;
+          }
+          payload.cma_config = null;
         }
+
+        await apiClient.updateAsset(target.backendId, payload);
+        await loadPortfolioFromServer();
+        return;
       } catch (error) {
-        console.error('Update cash balance error', error);
-        alert(
-          '서버와 통신 중 오류가 발생했습니다.\n현재 세션에서는 로컬로만 반영됩니다.',
+        alertError('Update cash balance error', error, {
+          default: '서버와 통신 중 오류가 발생했습니다.\n현재 세션에서는 로컬로만 반영됩니다.',
+          unauthorized: '잔액을 저장하지 못했습니다.\nAPI 비밀번호가 올바른지 확인해주세요.',
+          network: '서버와 통신할 수 없습니다.\n현재 세션에서는 로컬로만 반영됩니다.',
+        });
+      }
+    }
+
+    applyLocal();
+  };
+
+  const updateAsset = async (id: string, updates: { ticker?: string; indexGroup?: string }): Promise<void> => {
+    const target = assets.find((a) => a.id === id);
+    if (!target) return;
+
+    const applyLocal = () => {
+      setAssets((prev) =>
+        prev.map((asset) => {
+          if (asset.id !== id) return asset;
+          return {
+            ...asset,
+            ticker: updates.ticker !== undefined ? updates.ticker : asset.ticker,
+            indexGroup: updates.indexGroup !== undefined ? updates.indexGroup : asset.indexGroup,
+          };
+        }),
+      );
+    };
+
+    if (target.backendId && isRemoteEnabled) {
+      try {
+        const payload: any = {};
+        if (updates.ticker !== undefined) payload.ticker = updates.ticker || null;
+        if (updates.indexGroup !== undefined) payload.index_group = updates.indexGroup || null;
+
+        const backendAsset = await apiClient.updateAsset(target.backendId, payload);
+        const mapped = mapBackendAssetToFrontend(backendAsset);
+        setAssets((prev) =>
+          prev.map((asset) => (asset.id === id ? mapped : asset)),
         );
+        return;
+      } catch (error) {
+        alertError('Update asset error', error, {
+          default: '서버와 통신 중 오류가 발생했습니다.\n현재 세션에서는 로컬로만 반영됩니다.',
+          unauthorized: '자산 정보를 저장하지 못했습니다.\nAPI 비밀번호가 올바른지 확인해주세요.',
+          network: '서버와 통신할 수 없습니다.\n현재 세션에서는 로컬로만 반영됩니다.',
+        });
       }
     }
 
@@ -591,64 +428,14 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
     assets,
     tradeHistory,
     historyData,
+    summaryFromServer,
     isSyncing,
     addAsset,
     deleteAsset,
     tradeAsset,
     syncPrices,
-    updateTicker: async (id: string, ticker?: string): Promise<void> => {
-      const trimmed = ticker?.trim() || undefined;
-      const target = assets.find((a) => a.id === id);
-
-      const applyLocal = () => {
-        setAssets((prev) =>
-          prev.map((asset) =>
-            asset.id === id ? { ...asset, ticker: trimmed } : asset,
-          ),
-        );
-      };
-
-      if (!target) {
-        applyLocal();
-        return;
-      }
-
-      if (target.backendId && isRemoteEnabled) {
-        const headers = createHeaders(true);
-
-        try {
-          const resp = await fetch(
-            `${settings.serverUrl}/api/assets/${target.backendId}`,
-            {
-              method: 'PATCH',
-              headers,
-              body: JSON.stringify({ ticker: trimmed ?? null }),
-            },
-          );
-
-          if (!resp.ok) {
-            console.error('Failed to update ticker on server', await resp.text());
-            alert(
-              '서버에 티커를 저장하지 못했습니다.\n잠시 후 다시 시도해주세요.',
-            );
-          } else {
-            const backendAsset = await resp.json();
-            const mapped = mapBackendAssetToFrontend(backendAsset);
-            setAssets((prev) =>
-              prev.map((asset) => (asset.id === id ? mapped : asset)),
-            );
-            return;
-          }
-        } catch (error) {
-          console.error('Update ticker error', error);
-          alert(
-            '서버와 통신 중 오류가 발생했습니다.\n현재 세션에서는 로컬로만 반영됩니다.',
-          );
-        }
-      }
-
-      applyLocal();
-    },
+    updateAsset,
     updateCashBalance,
+    restoreFromBackup,
   };
 };

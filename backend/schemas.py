@@ -16,6 +16,13 @@ class DividendRecord(BaseModel):
     total: float
 
 
+class CmaConfig(BaseModel):
+    principal: float
+    annual_rate: float
+    tax_rate: float
+    start_date: str  # YYYY-MM-DD
+
+
 class AssetBase(BaseModel):
     name: str
     ticker: Optional[str] = None
@@ -26,6 +33,7 @@ class AssetBase(BaseModel):
     purchase_price: Optional[float] = None
     realized_profit: float = 0.0
     index_group: Optional[str] = None
+    cma_config: Optional[CmaConfig] = None
 
 
 class AssetCreate(AssetBase):
@@ -42,6 +50,7 @@ class AssetUpdate(BaseModel):
     purchase_price: Optional[float] = None
     realized_profit: Optional[float] = None
     index_group: Optional[str] = None
+    cma_config: Optional[CmaConfig] = None
 
 
 class AssetRead(AssetBase):
@@ -69,6 +78,8 @@ class TradeRead(TradeBase):
 
     id: int
     asset_id: int
+    asset_name: Optional[str] = None
+    asset_ticker: Optional[str] = None
     user_id: int
     realized_delta: Optional[float] = None
     created_at: datetime
