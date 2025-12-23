@@ -29,3 +29,8 @@ backend/__pycache__/
 *.sln
 *.sw?
 .vercel
+
+# Private Backup Files
+backend/crontab.bak
+backend/backups/
+**/kis_devlp.yaml

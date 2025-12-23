@@ -312,6 +312,19 @@ export class ApiClient {
 
   // --- Trades ---
 
+  async fetchTrades(params?: {
+    limit?: number;
+    beforeId?: number;
+    assetId?: number;
+  }): Promise<BackendTrade[]> {
+    const search = new URLSearchParams();
+    if (params?.limit != null) search.set('limit', params.limit.toString());
+    if (params?.beforeId != null) search.set('before_id', params.beforeId.toString());
+    if (params?.assetId != null) search.set('asset_id', params.assetId.toString());
+    const qs = search.toString();
+    return this.request<BackendTrade[]>(`/api/trades${qs ? `?${qs}` : ''}`, { method: 'GET' });
+  }
+
   async createTrade(
     assetId: number,
     type: TradeType,

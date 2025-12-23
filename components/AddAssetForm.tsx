@@ -3,6 +3,7 @@ import { Asset, AssetCategory } from '../types';
 import { X } from 'lucide-react';
 import { ApiClient } from '../backendClient';
 import { alertError } from '../errors';
+import { inferCategoryFromTicker } from '../tickerUtils';
 
 interface AddAssetFormProps {
   onSave: (asset: Asset) => void;
@@ -30,7 +31,17 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
     formData.category === AssetCategory.STOCK_KR || formData.category === AssetCategory.STOCK_US;
 
   const handleChange = (field: keyof Asset, value: any) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData(prev => {
+      const updated = { ...prev, [field]: value };
+      // 티커 변경 시 카테고리 자동 추론
+      if (field === 'ticker' && typeof value === 'string') {
+        const inferred = inferCategoryFromTicker(value, prev.category || AssetCategory.STOCK_KR);
+        if (inferred !== prev.category) {
+          updated.category = inferred;
+        }
+      }
+      return updated;
+    });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -118,11 +129,10 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
                 key={cat}
                 type="button"
                 onClick={() => handleChange('category', cat)}
-                className={`py-2 px-3 rounded-lg text-sm border transition-all ${
-                  formData.category === cat
+                className={`py-2 px-3 rounded-lg text-sm border transition-all ${formData.category === cat
                     ? 'border-indigo-600 bg-indigo-50 text-indigo-700 font-medium'
                     : 'border-slate-200 text-slate-600 hover:border-indigo-300'
-                }`}
+                  }`}
               >
                 {cat}
               </button>
@@ -131,51 +141,50 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
+          <div>
             <label className="block text-sm font-medium text-slate-700 mb-2">자산명</label>
             <input
-                type="text"
-                required
-                className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
-                placeholder={isCashCategory ? '예: 카카오뱅크 통장' : '예: 삼성전자'}
-                value={formData.name}
-                onChange={(e) => handleChange('name', e.target.value)}
+              type="text"
+              required
+              className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              placeholder={isCashCategory ? '예: 카카오뱅크 통장' : '예: 삼성전자'}
+              value={formData.name}
+              onChange={(e) => handleChange('name', e.target.value)}
             />
-            </div>
-            {supportsTicker && (
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm font-medium text-slate-700">
-                    티커/종목코드 (선택)
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleResolveTicker}
-                    disabled={isResolvingTicker}
-                    className={`text-[11px] px-2 py-1 rounded-md border text-slate-600 hover:border-indigo-400 hover:text-indigo-600 transition-colors ${
-                      isResolvingTicker ? 'opacity-60 cursor-not-allowed' : ''
+          </div>
+          {supportsTicker && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-slate-700">
+                  티커/종목코드 (선택)
+                </label>
+                <button
+                  type="button"
+                  onClick={handleResolveTicker}
+                  disabled={isResolvingTicker}
+                  className={`text-[11px] px-2 py-1 rounded-md border text-slate-600 hover:border-indigo-400 hover:text-indigo-600 transition-colors ${isResolvingTicker ? 'opacity-60 cursor-not-allowed' : ''
                     }`}
-                  >
-                    {isResolvingTicker ? '조회 중...' : '자동 채우기'}
-                  </button>
-                </div>
-                <input
-                  type="text"
-                  className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors uppercase"
-                  placeholder="예: 005930, NAS:AAPL"
-                  value={formData.ticker || ''}
-                  onChange={(e) => handleChange('ticker', e.target.value)}
-                />
-                {tickerHint && (
-                  <p className="text-[10px] text-slate-500 mt-1">
-                    자동 선택: {tickerHint}
-                  </p>
-                )}
-                <p className="text-[10px] text-slate-400 mt-1">
-                  홈서버 연동 시 사용됩니다 (국내: 6자리 종목코드, 해외: EXCD:티커 형식, 예: NAS:AAPL)
-                </p>
+                >
+                  {isResolvingTicker ? '조회 중...' : '자동 채우기'}
+                </button>
               </div>
-            )}
+              <input
+                type="text"
+                className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors uppercase"
+                placeholder="예: 005930, NAS:AAPL"
+                value={formData.ticker || ''}
+                onChange={(e) => handleChange('ticker', e.target.value)}
+              />
+              {tickerHint && (
+                <p className="text-[10px] text-slate-500 mt-1">
+                  자동 선택: {tickerHint}
+                </p>
+              )}
+              <p className="text-[10px] text-slate-400 mt-1">
+                홈서버 연동 시 사용됩니다 (국내: 6자리 종목코드, 해외: EXCD:티커 형식, 예: NAS:AAPL)
+              </p>
+            </div>
+          )}
         </div>
 
         <div>
@@ -189,7 +198,7 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
             value={formData.indexGroup || ''}
             onChange={(e) => handleChange('indexGroup', e.target.value)}
           />
-            <p className="text-[11px] text-slate-400 mt-1">
+          <p className="text-[11px] text-slate-400 mt-1">
             같은 지수에 묶인 국내/해외 ETF를 함께 관리할 때 사용합니다.
           </p>
         </div>

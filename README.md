@@ -12,13 +12,17 @@
 - **매수/매도**: 자산을 사고팔 때마다 기록하면, 평균단가와 실현손익을 자동으로 계산해 줍니다.
 - **자동 시세 연동**: 한국투자증권 API를 통해 국내/해외 주식의 현재 가격을 실시간으로 불러옵니다. (티커만 입력하면 끝!)
 
-### 2. 대시보드 (한눈에 보기)
+### 2. 거래 내역 (전체 조회)
+- **전체 거래기록**: 거래가 많이 쌓여도 과거 기록까지 페이지로 계속 조회할 수 있습니다.
+- **검색/필터**: 자산명/티커 검색 + 매수/매도 필터로 빠르게 찾을 수 있습니다.
+
+### 3. 대시보드 (한눈에 보기)
 - **총 자산 & 수익률**: 내 돈이 얼마나 불어났는지 바로 확인할 수 있습니다.
 - **자산 추이 그래프**: 지난 6개월간 내 자산이 어떻게 변했는지 그래프로 보여줍니다. (매일 밤 자동 기록)
 - **포트폴리오 비중**: 어떤 자산에 얼마나 투자했는지 파이 차트로 보여줍니다.
 - **리밸런싱 알림**: 내가 정한 목표 비중(예: 미국주식 60%, 채권 40%)에서 많이 벗어나면 알려줍니다.
 
-### 3. 보안 & 백업
+### 4. 보안 & 백업
 - **비밀번호 잠금**: 앱을 켤 때마다 내가 설정한 API 비밀번호를 입력해야만 내용이 보입니다.
 - **안전한 접속**: Tailscale이라는 보안 네트워크를 통해서만 접속할 수 있어, 해킹 걱정이 없습니다.
 - **자동 백업**: 소중한 자산 데이터는 매일 새벽 자동으로 깃허브(GitHub) 비공개 저장소에 백업됩니다.
@@ -31,6 +35,7 @@
 2. **로그인**: 설정해둔 API 비밀번호를 입력합니다.
 3. **서버 연결**: 처음 한 번만 '설정' 메뉴에서 홈서버 주소(`http://100.x.x.x:8000`)를 입력해 줍니다.
 4. **자산 등록**: '자산 추가' 버튼을 눌러 내 종목들을 등록합니다. (이름만 치면 티커는 자동!)
+5. **거래 내역 보기**: '거래 내역' 메뉴에서 과거 거래까지 모두 조회합니다. (검색/필터/더 불러오기 지원)
 
 ---
 
@@ -111,6 +116,9 @@ chmod +x backend/snapshot_cron.sh
   - 데이터가 쌓이기 전에는 "데이터 부족"이라고 뜨게 바꿨습니다.
 - **보안 강화**: API 비밀번호를 입력하지 않으면 아예 자산 정보를 볼 수 없게 막았습니다.
 - **세션 노트 정리**: 개발 진행 상황을 깔끔하게 요약해서 정리했습니다.
+
+### 2025-12-18
+- **거래 내역 메뉴 추가**: 최근 20건만 보이는 문제를 해결하기 위해, 전체 거래기록을 페이지로 계속 조회할 수 있는 화면을 추가했습니다.
 
 ---
 
@@ -225,3 +233,34 @@ sudo systemctl start myasset-backend.service
 - 401 `invalid api token`: 프론트 설정의 토큰 ↔ 서버의 `API_TOKEN`이 불일치(또는 systemd에서 환경변수 로딩 안 됨). `systemctl cat myasset-backend.service`로 `Environment=`/`EnvironmentFile=` 확인
 - KIS 인증 실패: `~/KIS/config/kis_devlp.yaml` 누락/값 오류 (템플릿은 `open-trading-api/kis_devlp.yaml`)
 - 티커 검색 실패(마스터 파일): `open-trading-api/stocks_info`에 `kospi_code.xlsx`, `kosdaq_code.xlsx`, `overseas_stock_code(all).xlsx` 등이 필요 (없으면 해당 디렉터리의 생성 스크립트 실행)
+
+## Cron (예약 작업) 백업/복원 설정
+
+이 홈서버에는 총 3가지의 중요한 Cron 작업(백업, 시세 동기화, 타 앱용 메일)이 돌고 있습니다.
+혹시 모를 설정 삭제 사고에 대비해 백업/복구 방법을 정리해 둡니다.
+
+> **현재 설정 파일 위치**: `backend/crontab.bak` (git으로 관리됨)
+
+### 1) 현재 설정 (복붙용)
+```bash
+# 1. 스위치기어 견적서 앱 메일 전송 (월요일 09:00)
+0 9 * * 1 cd /path/to/switchgear-estimate-app/backend && /usr/bin/node send-db-email.js >> /path/to/switchgear-estimate-app/backend/send-db-email.log 2>&1
+
+# 2. 포트폴리오 로컬 백업 (일요일 04:00)
+0 4 * * 0 /usr/bin/env bash /path/to/personal-portfolio/backend/scripts/backup_db.sh >> /path/to/personal-portfolio/backend/backup_db.log 2>&1
+
+# 3. 미국장 마감 후 시세 동기화 + 스냅샷 (화~토 06:30 KST)
+30 6 * * 2-6 API_TOKEN=YOUR_SECRET_API_TOKEN BACKEND_URL=http://127.0.0.1:8000 /path/to/personal-portfolio/backend/scripts/sync_prices.sh >> /path/to/personal-portfolio/backend/sync.log 2>&1
+```
+
+### 2) 백업하기 (현재 설정을 파일로 저장)
+```bash
+crontab -l > backend/crontab.bak
+```
+
+### 3) 복구하기 (파일을 시스템에 적용)
+```bash
+crontab backend/crontab.bak
+```
+- 주의: 기존 설정을 모두 덮어쓰므로 신중하게 실행하세요.
+

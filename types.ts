@@ -56,7 +56,7 @@ export interface PortfolioSummary {
   historyData: { date: string; value: number }[];
 }
 
-export type ViewState = 'DASHBOARD' | 'LIST' | 'ADD' | 'SETTINGS';
+export type ViewState = 'DASHBOARD' | 'LIST' | 'TRADES' | 'ADD' | 'SETTINGS';
 
 export interface DividendEntry {
   year: number;
