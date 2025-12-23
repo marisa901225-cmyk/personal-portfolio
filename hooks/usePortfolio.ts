@@ -29,7 +29,17 @@ interface UsePortfolioResult {
   deleteAsset: (id: string) => Promise<void>;
   tradeAsset: (id: string, type: TradeType, quantity: number, price: number) => Promise<void>;
   syncPrices: () => Promise<void>;
-  updateAsset: (id: string, updates: { ticker?: string; indexGroup?: string }) => Promise<void>;
+  updateAsset: (
+    id: string,
+    updates: {
+      name?: string;
+      ticker?: string;
+      indexGroup?: string;
+      category?: AssetCategory;
+      amount?: number;
+      purchasePrice?: number;
+    },
+  ) => Promise<void>;
   updateCashBalance: (id: string, newBalance: number, cmaConfig?: CmaConfig | null) => Promise<void>;
   restoreFromBackup: (snapshot: ImportedAssetSnapshot[]) => Promise<void>;
 }
@@ -383,7 +393,17 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
     applyLocal();
   };
 
-  const updateAsset = async (id: string, updates: { ticker?: string; indexGroup?: string }): Promise<void> => {
+  const updateAsset = async (
+    id: string,
+    updates: {
+      name?: string;
+      ticker?: string;
+      indexGroup?: string;
+      category?: AssetCategory;
+      amount?: number;
+      purchasePrice?: number;
+    },
+  ): Promise<void> => {
     const target = assets.find((a) => a.id === id);
     if (!target) return;
 
@@ -393,8 +413,13 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
           if (asset.id !== id) return asset;
           return {
             ...asset,
+            name: updates.name !== undefined ? updates.name : asset.name,
             ticker: updates.ticker !== undefined ? updates.ticker : asset.ticker,
             indexGroup: updates.indexGroup !== undefined ? updates.indexGroup : asset.indexGroup,
+            category: updates.category !== undefined ? updates.category : asset.category,
+            amount: updates.amount !== undefined ? updates.amount : asset.amount,
+            purchasePrice:
+              updates.purchasePrice !== undefined ? updates.purchasePrice : asset.purchasePrice,
           };
         }),
       );
@@ -403,8 +428,12 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
     if (target.backendId && isRemoteEnabled) {
       try {
         const payload: any = {};
+        if (updates.name !== undefined) payload.name = updates.name;
         if (updates.ticker !== undefined) payload.ticker = updates.ticker || null;
         if (updates.indexGroup !== undefined) payload.index_group = updates.indexGroup || null;
+        if (updates.category !== undefined) payload.category = updates.category;
+        if (updates.amount !== undefined) payload.amount = updates.amount;
+        if (updates.purchasePrice !== undefined) payload.purchase_price = updates.purchasePrice;
 
         const backendAsset = await apiClient.updateAsset(target.backendId, payload);
         const mapped = mapBackendAssetToFrontend(backendAsset);

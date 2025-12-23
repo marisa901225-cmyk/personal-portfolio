@@ -3,12 +3,20 @@ import { X, Edit3, Wallet, Tag, Home } from 'lucide-react';
 import { Asset, AssetCategory } from '../types';
 import { formatCurrency } from '../constants';
 import { calculateCmaBalance, CmaConfig } from '../cmaConfig';
+import { inferCategoryFromTicker } from '../tickerUtils';
 
 interface AssetEditModalProps {
     isOpen: boolean;
     onClose: () => void;
     asset: Asset | null;
-    onUpdateAsset: (id: string, updates: { ticker?: string; indexGroup?: string }) => void;
+    onUpdateAsset: (id: string, updates: {
+        name?: string;
+        ticker?: string;
+        indexGroup?: string;
+        category?: AssetCategory;
+        amount?: number;
+        purchasePrice?: number;
+    }) => void;
     onUpdateCash: (id: string, newBalance: number, cmaConfig?: CmaConfig | null) => void | Promise<void>;
     /** 설정에서 정의된 지수 그룹 목록 (드롭다운에 표시) */
     indexGroupOptions?: string[];
@@ -24,6 +32,10 @@ export const AssetEditModal: React.FC<AssetEditModalProps> = ({
 }) => {
     const [indexGroup, setIndexGroup] = useState('');
     const [inputValue, setInputValue] = useState('');
+    const [assetName, setAssetName] = useState('');
+    const [amountInput, setAmountInput] = useState('');
+    const [purchasePriceInput, setPurchasePriceInput] = useState('');
+    const [category, setCategory] = useState<AssetCategory>(AssetCategory.STOCK_KR);
     const [isCmaEnabled, setIsCmaEnabled] = useState(false);
     const [annualRate, setAnnualRate] = useState('');
     const [taxRate, setTaxRate] = useState('15.4');
@@ -39,10 +51,13 @@ export const AssetEditModal: React.FC<AssetEditModalProps> = ({
     useEffect(() => {
         if (isOpen && asset) {
             setIndexGroup(asset.indexGroup || '');
+            setAssetName(asset.name);
             if (asset.category === AssetCategory.CASH || asset.category === AssetCategory.REAL_ESTATE) {
                 // 현금/부동산 자산: 현재 총액(평가금액)을 표시
                 const currentTotal = asset.amount * asset.currentPrice;
                 setInputValue(Math.round(currentTotal).toString());
+                setAmountInput('');
+                setPurchasePriceInput('');
 
                 const cfg = asset.cmaConfig;
                 if (cfg) {
@@ -59,6 +74,9 @@ export const AssetEditModal: React.FC<AssetEditModalProps> = ({
             } else {
                 // 일반 자산: 티커 표시
                 setInputValue(asset.ticker || '');
+                setAmountInput(asset.amount.toString());
+                setPurchasePriceInput(asset.purchasePrice != null ? asset.purchasePrice.toString() : '');
+                setCategory(asset.category);
                 setIsCmaEnabled(false);
                 setAnnualRate('');
                 setTaxRate('15.4');
@@ -89,6 +107,14 @@ export const AssetEditModal: React.FC<AssetEditModalProps> = ({
     }
 
     const handleSave = () => {
+        const trimmedName = assetName.trim();
+        if (!trimmedName) {
+            alert('자산명을 입력해주세요.');
+            return;
+        }
+
+        const nameChanged = trimmedName !== asset.name;
+
         if (isCash || isRealEstate) {
             // 현금 또는 부동산: 시세 직접 입력
             const trimmed = inputValue.replace(/,/g, '').trim();
@@ -119,13 +145,63 @@ export const AssetEditModal: React.FC<AssetEditModalProps> = ({
 
             // 현금/부동산 시세 업데이트
             onUpdateCash(asset.id, value, nextCmaConfig);
+            if (nameChanged) {
+                onUpdateAsset(asset.id, { name: trimmedName });
+            }
         } else {
-            // 주식/펀드 등: 티커 및 지수 그룹 업데이트
+            // 주식/펀드 등: 티커, 지수 그룹, 카테고리 업데이트
             const trimmed = inputValue.trim();
-            onUpdateAsset(asset.id, {
-                ticker: trimmed || undefined,
-                indexGroup: indexGroup !== (asset.indexGroup || '') ? indexGroup : undefined
-            });
+            const updates: {
+                name?: string;
+                ticker?: string;
+                indexGroup?: string;
+                category?: AssetCategory;
+                amount?: number;
+                purchasePrice?: number;
+            } = {};
+
+            if (nameChanged) {
+                updates.name = trimmedName;
+            }
+            if (trimmed !== (asset.ticker || '')) {
+                updates.ticker = trimmed || undefined;
+            }
+            if (indexGroup !== (asset.indexGroup || '')) {
+                updates.indexGroup = indexGroup || undefined;
+            }
+            if (category !== asset.category) {
+                updates.category = category;
+            }
+
+            const amountTrimmed = amountInput.trim();
+            if (!amountTrimmed) {
+                alert('보유 수량을 입력해주세요.');
+                return;
+            }
+            const amountValue = Number(amountTrimmed);
+            if (!Number.isFinite(amountValue) || amountValue < 0) {
+                alert('보유 수량을 올바르게 입력해주세요.');
+                return;
+            }
+            if (amountValue !== asset.amount) {
+                updates.amount = amountValue;
+            }
+
+            const purchaseTrimmed = purchasePriceInput.trim();
+            if (purchaseTrimmed !== '') {
+                const purchaseValue = Number(purchaseTrimmed);
+                if (!Number.isFinite(purchaseValue) || purchaseValue < 0) {
+                    alert('매수 평균가를 올바르게 입력해주세요.');
+                    return;
+                }
+                if ((asset.purchasePrice ?? undefined) !== purchaseValue) {
+                    updates.purchasePrice = purchaseValue;
+                }
+            }
+
+            if (Object.keys(updates).length > 0) {
+                onUpdateAsset(asset.id, updates);
+            }
         }
         onClose();
     };
@@ -167,6 +243,27 @@ export const AssetEditModal: React.FC<AssetEditModalProps> = ({
 
                 <div className="p-6 space-y-6">
                     <div className="space-y-3">
+                        <div>
+                            <label className="block text-sm font-semibold text-slate-700">
+                                자산명
+                            </label>
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                                    placeholder="예: 삼성전자"
+                                    value={assetName}
+                                    onChange={(e) => setAssetName(e.target.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') handleSave();
+                                    }}
+                                    autoFocus
+                                />
+                                <div className="absolute right-4 top-1/2 transform -translate-y-1/2 text-slate-400 pointer-events-none">
+                                    <Edit3 size={18} />
+                                </div>
+                            </div>
+                        </div>
                         {/* 부동산 자산: 현재 시세 편집 */}
                         {isRealEstate && (
                             <>
@@ -184,7 +281,6 @@ export const AssetEditModal: React.FC<AssetEditModalProps> = ({
                                         onKeyDown={(e) => {
                                             if (e.key === 'Enter') handleSave();
                                         }}
-                                        autoFocus
                                     />
                                     <div className="absolute right-4 top-1/2 transform -translate-y-1/2 text-slate-400 pointer-events-none">
                                         <Edit3 size={18} />
@@ -214,10 +310,43 @@ export const AssetEditModal: React.FC<AssetEditModalProps> = ({
                                         onKeyDown={(e) => {
                                             if (e.key === 'Enter') handleSave();
                                         }}
-                                        autoFocus
                                     />
                                     <div className="absolute right-4 top-1/2 transform -translate-y-1/2 text-slate-400 pointer-events-none">
                                         <Edit3 size={18} />
+                                    </div>
+                                </div>
+
+                                <p className="text-xs text-slate-400">
+                                    정확한 시세 조회를 위해 올바른 티커를 입력해주세요.
+                                </p>
+
+                                <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-semibold text-slate-700 mb-2">
+                                            보유 수량
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            step="any"
+                                            className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                                            placeholder="0"
+                                            value={amountInput}
+                                            onChange={(e) => setAmountInput(e.target.value)}
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-semibold text-slate-700 mb-2">
+                                            매수 평균가 (선택)
+                                        </label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                                            placeholder="입력 시 수익률이 계산됩니다."
+                                            value={purchasePriceInput}
+                                            onChange={(e) => setPurchasePriceInput(e.target.value)}
+                                        />
                                     </div>
                                 </div>
 
@@ -241,9 +370,21 @@ export const AssetEditModal: React.FC<AssetEditModalProps> = ({
                                     <p className="text-xs text-slate-400 mt-1">포트폴리오 비중 계산에 사용됩니다. 직접 입력하거나 선택하세요.</p>
                                 </div>
 
-                                <p className="text-xs text-slate-400">
-                                    정확한 시세 조회를 위해 올바른 티커를 입력해주세요.
-                                </p>
+                                <div className="mt-4">
+                                    <label className="block text-sm font-semibold text-slate-700 mb-2">
+                                        자산 카테고리
+                                    </label>
+                                    <select
+                                        className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all bg-white"
+                                        value={category}
+                                        onChange={(e) => setCategory(e.target.value as AssetCategory)}
+                                    >
+                                        <option value={AssetCategory.STOCK_KR}>국내주식</option>
+                                        <option value={AssetCategory.STOCK_US}>해외주식</option>
+                                        <option value={AssetCategory.OTHER}>기타</option>
+                                    </select>
+                                    <p className="text-xs text-slate-400 mt-1">재분류가 필요한 경우 선택하세요. 해외주식으로 변경하면 매수 시 USD 입력 필드가 표시됩니다.</p>
+                                </div>
                             </>
                         )}
 
@@ -264,7 +405,6 @@ export const AssetEditModal: React.FC<AssetEditModalProps> = ({
                                         onKeyDown={(e) => {
                                             if (e.key === 'Enter') handleSave();
                                         }}
-                                        autoFocus
                                     />
                                     <div className="absolute right-4 top-1/2 transform -translate-y-1/2 text-slate-400 pointer-events-none">
                                         <Edit3 size={18} />
@@ -364,4 +504,3 @@ export const AssetEditModal: React.FC<AssetEditModalProps> = ({
         </div>
     );
 };
-

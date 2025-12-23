@@ -1,11 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, List, PlusCircle, Bell, Settings, RefreshCw, Lock, KeyRound } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { LayoutDashboard, List, PlusCircle, Bell, Settings, RefreshCw, Lock, KeyRound, ScrollText } from 'lucide-react';
 import { Asset, ViewState, TradeType, TradeRecord, AssetCategory } from './types';
 import { formatCurrency } from './constants';
 import { Dashboard } from './components/Dashboard';
 import { AssetList } from './components/AssetList';
 import { AddAssetForm } from './components/AddAssetForm';
 import { SettingsPanel } from './components/SettingsPanel';
+import { TradeHistoryAll } from './components/TradeHistoryAll';
 
 import { DividendEditModal } from './components/DividendEditModal';
 import { InvestmentQuote } from './components/InvestmentQuote';
@@ -50,7 +51,17 @@ const App: React.FC = () => {
     void tradeAsset(id, type, quantity, price);
   };
 
-  const handleUpdateAsset = (id: string, updates: { ticker?: string; indexGroup?: string }) => {
+  const handleUpdateAsset = (
+    id: string,
+    updates: {
+      name?: string;
+      ticker?: string;
+      indexGroup?: string;
+      category?: AssetCategory;
+      amount?: number;
+      purchasePrice?: number;
+    },
+  ) => {
     void updateAsset(id, updates);
   };
 
@@ -74,15 +85,17 @@ const App: React.FC = () => {
   }, []);
 
   // 새 거래 내역이 생기면 알림 점 표시 (히스토리 패널이 닫혀 있을 때만)
+  const prevTradeCountRef = useRef(tradeHistory.length);
   useEffect(() => {
-    if (tradeHistory.length === 0) {
-      setHasUnreadHistory(false);
-      return;
-    }
-    if (!isHistoryOpen) {
+    const prevCount = prevTradeCountRef.current;
+    const currentCount = tradeHistory.length;
+    prevTradeCountRef.current = currentCount;
+
+    // 실제로 새 거래가 추가되었을 때만 빨간불 켜기
+    if (currentCount > prevCount && !isHistoryOpen) {
       setHasUnreadHistory(true);
     }
-  }, [tradeHistory, isHistoryOpen]);
+  }, [tradeHistory.length, isHistoryOpen]);
 
   const handleAuthSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -202,6 +215,7 @@ const App: React.FC = () => {
         <nav className="flex-1 p-4 space-y-2">
           <NavItem view="DASHBOARD" icon={LayoutDashboard} label="대시보드" />
           <NavItem view="LIST" icon={List} label="자산 목록" />
+          <NavItem view="TRADES" icon={ScrollText} label="거래 내역" />
           <NavItem view="ADD" icon={PlusCircle} label="자산 추가" />
         </nav>
 
@@ -228,18 +242,22 @@ const App: React.FC = () => {
                 ? '대시보드'
                 : currentView === 'LIST'
                   ? '보유 자산'
-                  : currentView === 'ADD'
-                    ? '자산 추가'
-                    : '서버 설정'}
+                  : currentView === 'TRADES'
+                    ? '거래 내역'
+                    : currentView === 'ADD'
+                      ? '자산 추가'
+                      : '서버 설정'}
             </h1>
             <p className="text-sm text-slate-500 mt-1">
               {currentView === 'DASHBOARD'
                 ? '자산 현황 한눈에 보기'
                 : currentView === 'LIST'
                   ? '자산 관리 및 거래'
-                  : currentView === 'ADD'
-                    ? '새로운 자산 등록'
-                    : '연결 및 환경 설정'}
+                  : currentView === 'TRADES'
+                    ? '전체 거래 기록 조회'
+                    : currentView === 'ADD'
+                      ? '새로운 자산 등록'
+                      : '연결 및 환경 설정'}
             </p>
           </div>
 
@@ -281,13 +299,26 @@ const App: React.FC = () => {
             <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold text-slate-800">최근 거래 내역</h2>
-                <button
-                  type="button"
-                  onClick={() => setIsHistoryOpen(false)}
-                  className="text-xs text-slate-400 hover:text-slate-600"
-                >
-                  닫기
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCurrentView('TRADES');
+                      setIsHistoryOpen(false);
+                      setHasUnreadHistory(false);
+                    }}
+                    className="text-xs text-indigo-600 hover:text-indigo-700"
+                  >
+                    전체 보기
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsHistoryOpen(false)}
+                    className="text-xs text-slate-400 hover:text-slate-600"
+                  >
+                    닫기
+                  </button>
+                </div>
               </div>
               {tradeHistory.length === 0 ? (
                 <p className="text-xs text-slate-400">아직 기록된 거래가 없습니다.</p>
@@ -373,6 +404,14 @@ const App: React.FC = () => {
             onRestoreFromBackup={restoreFromBackup}
             usdFxNow={settings.usdFxNow}
             indexGroupOptions={settings.targetIndexAllocations?.map(a => a.indexGroup) || []}
+          />
+        )}
+        {currentView === 'TRADES' && (
+          <TradeHistoryAll
+            variant="page"
+            assets={assets}
+            serverUrl={settings.serverUrl}
+            apiToken={settings.apiToken}
           />
         )}
         {currentView === 'ADD' && (
