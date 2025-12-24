@@ -12,6 +12,7 @@ interface SyncPortfolioPricesParams {
   setAssets: Dispatch<SetStateAction<Asset[]>>;
   setIsSyncing: Dispatch<SetStateAction<boolean>>;
   loadPortfolioFromServer: () => Promise<void>;
+  onSuccess?: () => void;
 }
 
 export const syncPortfolioPrices = async ({
@@ -22,6 +23,7 @@ export const syncPortfolioPrices = async ({
   setAssets,
   setIsSyncing,
   loadPortfolioFromServer,
+  onSuccess,
 }: SyncPortfolioPricesParams): Promise<void> => {
   if (!settings.serverUrl) {
     alert('설정에서 홈서버 URL을 입력해주세요.');
@@ -98,7 +100,9 @@ export const syncPortfolioPrices = async ({
       );
     }
 
-    alert('최신 가격 정보를 업데이트했습니다.');
+    if (onSuccess) {
+      onSuccess();
+    }
   } catch (error) {
     alertError('Sync Error', error, {
       default: `서버 연결 실패 (또는 오류 발생).\nURL: ${settings.serverUrl}`,

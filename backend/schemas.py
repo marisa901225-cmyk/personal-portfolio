@@ -163,6 +163,15 @@ class PortfolioResponse(BaseModel):
     summary: PortfolioSummary
 
 
+class PortfolioRestoreRequest(BaseModel):
+    assets: List[AssetCreate]
+
+
+class PortfolioRestoreResponse(BaseModel):
+    restored: int
+    deleted: int
+
+
 class PortfolioSnapshotRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -172,3 +181,10 @@ class PortfolioSnapshotRead(BaseModel):
     total_invested: float
     realized_profit_total: float
     unrealized_profit_total: float
+
+
+class TransactionResult(BaseModel):
+    """간단한 트랜잭션 결과 표현: 향후 원자적 API 응답에서 사용."""
+    success: bool = True
+    applied: int = 0
+    message: Optional[str] = None

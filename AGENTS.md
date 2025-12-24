@@ -2,6 +2,45 @@
 
 This repository contains a Vite + React TypeScript frontend with a FastAPI backend. Use this guide to keep contributions consistent and easy to review.
 
+> **🚨 CODING LAW (STRICTLY FOLLOW)**
+>
+> Your goal is to implement new features WITHOUT making the codebase unnecessarily larger or more complex.
+>
+> **1. Reuse existing abstractions**
+> - Before creating new functions/hooks/utils/components, look for existing ones that can be reused or slightly extended.
+> - If similar logic already exists (API calls, header building, error handling, form validation, conditional branches), integrate with that instead of duplicating it.
+>
+> **2. Function/component size and responsibility**
+> - Each function/component should have a single, clear responsibility.
+> - If it grows beyond ~30–40 lines or the nesting depth exceeds 3 levels, consider splitting it into smaller, meaningful units.
+> - Do NOT extract functions just to reduce line count if you cannot give them a clear, meaningful name.
+>
+> **3. Minimize duplication (DRY)**
+> - If the same (or almost the same) code appears 2+ times, consider extracting it into a shared helper/custom hook/utility.
+> - However, avoid over-abstracting: do not create helpers that are used only once and add no real semantic clarity.
+>
+> **4. Avoid unnecessary abstraction**
+> - Do NOT introduce wrapper components/hooks, highly generic utilities, or complex generics that are only used in one place.
+> - Do NOT add “future-proof” options/parameters/layers that are not required by the current feature.
+>
+> **5. Minimize change surface**
+> - Keep the change set as small and local as possible while satisfying the feature requirements.
+> - Avoid touching many files for a single feature if a focused change in one or two modules is enough.
+>
+> **6. Prefer readability over cleverness**
+> - Do NOT sacrifice readability just to shorten the code (e.g., overly compact one-liners, nested ternaries).
+> - Use clear, descriptive names and stay consistent with the existing naming/style in the project.
+>
+> **7. Diff-friendly changes**
+> - Follow the existing style and structure of the file instead of reformatting everything.
+> - Avoid purely cosmetic changes that bloat the diff (e.g., moving code around or changing quote styles without functional reason).
+>
+> **After implementing the change, briefly explain:**
+> - Where you reduced duplication,
+> - Where you reused existing code,
+> - Where you explicitly avoided over-abstraction.
+
+
 ## Project Structure & Module Organization
 
 - `App.tsx` and `index.tsx` are the React entry points for the frontend.
@@ -44,7 +83,7 @@ This repository contains a Vite + React TypeScript frontend with a FastAPI backe
 
 - Do not commit secrets; API tokens and backend URLs are provided via runtime settings or environment variables (e.g., `API_TOKEN`, `BACKEND_URL`).
 - If you add new config, document it in `README.md`.
-
+  파일지울때 휴지통으로 보내세요 지우는건 금지
 ## Task Completion Notification
 
 - **작업 완료 후 반드시 텔레그램으로 알림을 보내세요.**

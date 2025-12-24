@@ -7,6 +7,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="$SCRIPT_DIR/.."
 DB_PATH="${DB_PATH:-"$BASE_DIR/portfolio.db"}"
 
+# 환경변수 로드 (.env)
+ENV_FILE="$BASE_DIR/.env"
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  source "$ENV_FILE"
+  set +a
+fi
+
 # 로컬 백업 경로 (안정성 확보를 위해 우선 로컬에 저장)
 LOCAL_BACKUP_DIR="$BASE_DIR/backups"
 # 외장하드 경로 (옵션)
@@ -25,18 +33,25 @@ backup_time="$(date +'%Y-%m-%d %H:%M:%S')"
 base_name="portfolio_${timestamp}"
 # 확장자
 ext=".db"
+archive_extension=".gz"
+archive_password="${BACKUP_ARCHIVE_PASSWORD:-${BACKEND_ZIP_PASSWORD:-}}"
+
+if [[ -n "$archive_password" ]]; then
+  archive_extension=".zip"
+fi
 
 # 순차적 파일명 생성 (예: portfolio_2025-12-23.db -> portfolio_2025-12-23(1).db)
 backup_file_base="${base_name}${ext}"
 count=1
 
-while [[ -f "$LOCAL_BACKUP_DIR/$backup_file_base" || -f "$LOCAL_BACKUP_DIR/${backup_file_base}.gz" ]]; do
+while [[ -f "$LOCAL_BACKUP_DIR/$backup_file_base" || -f "$LOCAL_BACKUP_DIR/${backup_file_base}.gz" || -f "$LOCAL_BACKUP_DIR/${backup_file_base}.zip" ]]; do
   backup_file_base="${base_name}(${count})${ext}"
   ((count++))
 done
 
 backup_path="$LOCAL_BACKUP_DIR/$backup_file_base"
-compressed_path="${backup_path}.gz"
+archive_name="${backup_file_base}${archive_extension}"
+archive_path="$LOCAL_BACKUP_DIR/$archive_name"
 
 # --- 1. 로컬 백업 및 압축 ---
 echo "INFO: 로컬 백업 시작 ($LOCAL_BACKUP_DIR)"
@@ -51,24 +66,28 @@ else
   if [[ -f "${DB_PATH}-shm" ]]; then cp "${DB_PATH}-shm" "${backup_path}-shm"; fi
 fi
 
-# 압축 (gzip)
-echo "INFO: 파일 압축 중..."
-gzip -f -n "$backup_path"
-echo "백업 및 압축 완료: $compressed_path"
+# 압축 (gzip 또는 zip+password)
+if [[ -n "$archive_password" ]]; then
+  if ! command -v zip >/dev/null 2>&1; then
+    echo "ERROR: BACKUP_ARCHIVE_PASSWORD 설정됨, 하지만 zip 명령어를 찾을 수 없습니다." >&2
+    exit 1
+  fi
+  echo "INFO: 비밀번호 압축(zip) 중..."
+  zip -j -P "$archive_password" "$archive_path" "$backup_path" >/dev/null
+  rm -f "$backup_path"
+else
+  echo "INFO: 파일 압축 중..."
+  gzip -f -n "$backup_path"
+fi
+echo "백업 및 압축 완료: $archive_path"
 
 # --- 2. 텔레그램 전송 (분할 전송 포함) ---
-ENV_FILE="$BASE_DIR/.env"
-if [[ -f "$ENV_FILE" ]]; then
-  set -a
-  source "$ENV_FILE"
-  set +a
-fi
 
 if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
   echo "INFO: 텔레그램 전송 준비..."
 
   # 파일 크기 확인 (bytes)
-  file_size=$(stat -c%s "$compressed_path")
+  file_size=$(stat -c%s "$archive_path")
   # 49MB (안전 마진 포함)
   MAX_SIZE=$((49 * 1024 * 1024))
 
@@ -77,7 +96,7 @@ if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
     echo "INFO: 용량 적합 ($file_size bytes). 단일 파일 전송."
     curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
          -F chat_id="${TELEGRAM_CHAT_ID}" \
-         -F document=@"${compressed_path}" \
+         -F document=@"${archive_path}" \
          -F caption="📦 DB 백업 완료 (${backup_time})" > /dev/null
     echo "INFO: 전송 완료."
   else
@@ -87,7 +106,7 @@ if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
     # 임시 분할 폴더
     split_dir=$(mktemp -d)
     # 분할 수행 (파일명 뒤에 .partaa, .partab ... 붙음)
-    split -b 49m "$compressed_path" "$split_dir/${backup_file_base}.gz.part"
+    split -b 49m "$archive_path" "$split_dir/${archive_name}.part"
     
     for part in "$split_dir"/*; do
       part_name=$(basename "$part")
@@ -123,7 +142,7 @@ if [[ -n "${DROPBOX_APP_KEY:-}" ]] && [[ -n "${DROPBOX_APP_SECRET:-}" ]] && [[ -
   if [[ -n "$access_token" ]]; then
     # 2) 파일 업로드
     # 드롭박스는 파일명이 경로에 포함됨. /폴더명/파일명
-    dropbox_path="/marin-db-backup/${backup_file_base}.gz"
+    dropbox_path="/marin-db-backup/${archive_name}"
     
     # 50MB 이상 분할된 경우 폴더째로 올릴 수는 없으니, 여기선 단순화를 위해 원본 압축파일 하나만 올림
     # 요청당 150MB 미만 권장/제한. 그 이상은 upload session으로 분할 업로드(파일 전체는 훨씬 큰 용량까지 가능
@@ -136,7 +155,7 @@ if [[ -n "${DROPBOX_APP_KEY:-}" ]] && [[ -n "${DROPBOX_APP_SECRET:-}" ]] && [[ -
       -H "Authorization: Bearer $access_token" \
       -H "Dropbox-API-Arg: $upload_arg" \
       -H "Content-Type: application/octet-stream" \
-      --data-binary @"$compressed_path")
+      --data-binary @"$archive_path")
       
     if [[ "$http_code" == "200" ]]; then
       echo "INFO: 드롭박스 업로드 성공"
@@ -156,7 +175,7 @@ fi
 # --- 4. 외장하드 복사 (옵션) ---
 if [[ -d "$EXTERNAL_BACKUP_DIR" ]]; then
   echo "INFO: 외장하드 감지됨. 백업 복사 중..."
-  cp "$compressed_path" "$EXTERNAL_BACKUP_DIR/"
+  cp "$archive_path" "$EXTERNAL_BACKUP_DIR/"
   echo "INFO: 외장하드 복사 완료."
 else
   echo "WARN: 외장하드 경로($EXTERNAL_BACKUP_DIR)에 접근할 수 없어 복사를 건너뜁니다."
@@ -164,5 +183,5 @@ fi
 
 # (선택) 로컬 백업 정리: 드롭박스 업로드 성공 시 2일 초과 파일 삭제
 if [[ "$dropbox_upload_ok" == "true" ]]; then
-  find "$LOCAL_BACKUP_DIR" -name "portfolio_*.db.gz" -mmin +2880 -delete
+  find "$LOCAL_BACKUP_DIR" \( -name "portfolio_*.db.gz" -o -name "portfolio_*.db.zip" \) -mmin +2880 -delete
 fi
