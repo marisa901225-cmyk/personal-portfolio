@@ -39,6 +39,8 @@ export const useSettings = () => {
         year: d.year,
         total: d.total,
       })),
+      usd_fx_base: current.usdFxBase ?? null,
+      usd_fx_now: current.usdFxNow ?? null,
     };
 
     try {
@@ -71,6 +73,14 @@ export const useSettings = () => {
         setSettings((prev) => ({
           ...prev,
           dividends: mappedDividends,
+        }));
+      }
+
+      if (data.usd_fx_base !== undefined || data.usd_fx_now !== undefined) {
+        setSettings((prev) => ({
+          ...prev,
+          usdFxBase: data.usd_fx_base ?? undefined,
+          usdFxNow: data.usd_fx_now ?? undefined,
         }));
       }
     } catch (error) {
@@ -120,6 +130,14 @@ export const useSettings = () => {
             dividends: mappedDividends,
           }));
         }
+
+        if (data.usd_fx_base !== undefined || data.usd_fx_now !== undefined) {
+          setSettings((prev) => ({
+            ...prev,
+            usdFxBase: data.usd_fx_base ?? undefined,
+            usdFxNow: data.usd_fx_now ?? undefined,
+          }));
+        }
       } catch (error) {
         alertError('Failed to load settings from server', error, {
           default: '설정을 불러오지 못했습니다.\n서버 상태를 확인해주세요.',
@@ -130,6 +148,40 @@ export const useSettings = () => {
     };
 
     void load();
+  }, [settings.serverUrl, settings.apiToken]);
+
+  useEffect(() => {
+    if (!settings.serverUrl || !settings.apiToken) {
+      return;
+    }
+
+    let isActive = true;
+    const apiClient = new ApiClient(settings.serverUrl, settings.apiToken);
+
+    const fetchFxNow = async () => {
+      try {
+        const data = await apiClient.fetchUsdKrwFxRate();
+        const rateNum = data?.rate;
+        if (!rateNum || !Number.isFinite(rateNum)) {
+          return;
+        }
+        if (isActive) {
+          setSettings((prev) => ({
+            ...prev,
+            usdFxNow: rateNum,
+          }));
+        }
+      } catch {
+        // 자동 갱신 실패는 조용히 무시
+      }
+    };
+
+    void fetchFxNow();
+    const interval = window.setInterval(fetchFxNow, 10 * 60 * 1000);
+    return () => {
+      isActive = false;
+      window.clearInterval(interval);
+    };
   }, [settings.serverUrl, settings.apiToken]);
 
   return { settings, setSettings, saveSettingsToServer };

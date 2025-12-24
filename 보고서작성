@@ -1,0 +1,302 @@
+# 🔧 프로젝트 분석 및 보고서 작성 요청
+
+현재 열린 **personal-portfolio** 프로젝트를 분석하고, **아래 세 파일에 직접 보고서를 작성**해주세요.
+
+## 🚨 필수 규칙: 파일 직접 수정 (텍스트 응답 금지)
+
+> **⛔ 절대 금지 사항:**
+> - 채팅으로 코드나 보고서 내용을 텍스트로 보여주는 것
+> - "다음과 같이 수정하세요" 라고 말만 하는 것
+> - 코드 블록으로 변경사항을 표시만 하는 것
+> 
+> **✅ 반드시 해야 하는 것:**
+> - `replace_string_in_file` 또는 `create_file` 도구를 사용하여 **직접 파일 수정**
+> - 모든 변경사항을 **실제 파일에 반영**
+> - 파일 수정 후 "파일을 수정했습니다" 라고 확인
+
+### 수정할 파일 목록:
+
+1. **평가 보고서**: `/home/dlckdgn/personal-portfolio/devplan/Project_Evaluation_Report.md`
+2. **개선 보고서**: `/home/dlckdgn/personal-portfolio/devplan/Project_Improvement_Exploration_Report.md`
+3. **프롬프트 파일**: `/home/dlckdgn/personal-portfolio/devplan/Prompt.md`
+
+**❗ 이 프롬프트를 받으면 즉시 파일 수정 도구를 호출하세요. 설명만 하지 마세요.**
+
+## 📝 대용량 파일 수정 지침
+
+**⚠️ 파일이 너무 클 경우 순차적으로 파트를 나눠서 수정하세요:**
+
+1. **파일 크기 확인**: 보고서 파일이 길면 한 번에 전체를 수정하지 마세요.
+2. **섹션별 수정**: `<!-- AUTO-*-START -->` 마커로 구분된 섹션을 하나씩 수정하세요.
+3. **수정 순서**:
+   - 1차: `<!-- AUTO-OVERVIEW-START -->` ~ `<!-- AUTO-OVERVIEW-END -->` (프로젝트 개요)
+   - 2차: `<!-- AUTO-SCORE-START -->` ~ `<!-- AUTO-SCORE-END -->` (점수 섹션)
+   - 3차: `<!-- AUTO-SUMMARY-START -->` ~ `<!-- AUTO-SUMMARY-END -->` (요약 섹션)
+   - 4차: `<!-- AUTO-SESSION-LOG-START -->` ~ `<!-- AUTO-SESSION-LOG-END -->` (세션 로그)
+   - 5차: `<!-- AUTO-IMPROVEMENT-LIST-START -->` ~ `<!-- AUTO-IMPROVEMENT-LIST-END -->` (개선 항목)
+4. **oldString 최소화**: 수정 시 oldString에 3~5줄의 컨텍스트만 포함하세요.
+5. **다중 수정**: 가능하면 multi_replace_string_in_file 도구로 여러 수정을 한 번에 처리하세요.
+
+---
+
+## 📋 프로젝트 현황
+
+- **프로젝트명**: personal-portfolio
+- **파일 수**: 108개
+- **디렉토리 수**: 19개
+- **주요 언어**: py(26), ts(18), tsx(14), json(6), sh(3)
+- **프로젝트 버전**: 0.0.0
+- **주요 의존성**: lucide-react, react, react-dom, recharts, vercel
+
+---
+
+## 📊 작성 요청 1: 종합 평가 보고서
+
+**파일 경로**: `/home/dlckdgn/personal-portfolio/devplan/Project_Evaluation_Report.md`
+
+### 필수 포함 섹션:
+
+#### 1. 프로젝트 목표 및 비전
+- 프로젝트의 목적과 핵심 목표
+- 대상 사용자
+
+#### 2. 현재 구현된 기능
+테이블 형식으로 작성:
+```
+| 기능 | 상태 | 설명 | 평가 |
+|------|------|------|------|
+| 기능명 | ✅ 완료/🔄 부분/❌ 미구현 | 설명 | 🟢 우수/🟡 양호/🔴 미흡 |
+```
+
+#### 3. 종합 점수 테이블
+`<!-- AUTO-SCORE-START -->` 와 `<!-- AUTO-SCORE-END -->` 마커 사이에 작성:
+```
+| 항목 | 점수 (100점 만점) | 등급 | 변화 |
+|------|------------------|------|------|
+| 코드 품질 | ? | 🔵 B | ⬆️ +? |
+| ... | ... | ... | ... |
+```
+
+#### 4. 기능별 상세 평가
+각 주요 모듈/서비스별로:
+- 기능 완성도, 코드 품질, 에러 처리, 성능 점수
+- 강점과 약점
+
+#### 5. 현재 상태 요약
+`<!-- AUTO-SUMMARY-START -->` 와 `<!-- AUTO-SUMMARY-END -->` 마커 사이에 작성
+
+#### 6. 세션 로그 업데이트
+`<!-- AUTO-SESSION-LOG-START -->` 마커 사이에:
+- 현재 세션 정보를 **맨 앞에** 추가 (기존 로그 유지)
+- 날짜, 분석 내용, 주요 변경사항 기록
+
+---
+
+## 🚀 작성 요청 2: 개선 제안 보고서
+
+**파일 경로**: `/home/dlckdgn/personal-portfolio/devplan/Project_Improvement_Exploration_Report.md`
+
+### ⚠️ 핵심 원칙: 미적용 항목만 표시
+
+**❌ 절대 금지:**
+- 이미 적용 완료된 항목을 보고서에 표시하지 마세요
+- "✅ 적용 완료" 섹션을 만들지 마세요
+- 완료된 항목의 히스토리를 개선 목록에 남기지 마세요
+
+**✅ 올바른 방법:**
+- 현재 시점에서 **아직 적용되지 않은** 개선 항목만 작성
+- 코드를 분석하여 **새로운 개선점** 발굴
+- 기존 미적용 항목 + 새 발견 항목만 포함
+
+### 필수 포함 섹션:
+
+#### 1. 전체 개선 현황 요약
+`<!-- AUTO-SUMMARY-START -->` 마커 사이에:
+- 현황 개요 테이블 (P1/P2/P3 **미적용** 개수만)
+- 카테고리별 분포
+- 우선순위별 한줄 요약
+- **적용 완료 항목 개수는 세션 로그에만 기록** (요약에서는 총 개수만 언급)
+
+#### 2. 🔧 기능 개선 항목 (기존 기능 개선)
+`<!-- AUTO-IMPROVEMENT-LIST-START -->` 마커 사이에:
+
+**미적용 항목만** 아래 형식으로 작성 (**코드 제외, 설명만**):
+```
+### 🟡 중요 (P2)
+
+#### [P2-1] 항목명
+| 항목 | 내용 |
+|------|------|
+| **ID** | `고유-id` |
+| **카테고리** | 🧪 테스트 / 🔒 보안 / 🧹 코드 품질 등 |
+| **복잡도** | Low / Medium / High |
+| **대상 파일** | 파일 경로 |
+
+**현재 상태:** ...
+**개선 내용:** ...
+**기대 효과:** ...
+```
+
+#### 3. ✨ 기능 추가 항목 (새 기능)
+`<!-- AUTO-FEATURE-LIST-START -->` 마커 사이에:
+- 위와 동일한 형식으로 새 기능 제안 (**미적용 항목만**)
+
+#### 4. 세션 로그 업데이트
+`<!-- AUTO-SESSION-LOG-START -->` 마커 사이에:
+- 현재 세션 정보 **맨 앞에** 추가
+- 날짜, 분석 내용, 새로 발견된 항목 수, 적용 완료된 항목 수 기록
+
+---
+
+## 🤖 Request 3: AI Prompt File (Write in English)
+
+**File Path**: `/home/dlckdgn/personal-portfolio/devplan/Prompt.md`
+
+### ⚠️ CRITICAL: Based on Improvement Report
+
+**Prompt.md MUST be generated from the Improvement Report's pending items:**
+- Read `Project_Improvement_Exploration_Report.md` first
+- Extract ONLY the pending (not applied) items from P1/P2/P3 sections
+- Create prompts for EACH pending item with complete implementation code
+- DO NOT include prompts for already completed items
+
+### ⚠️ CRITICAL: Sequential Execution Structure
+
+The Prompt.md file MUST be structured so that when copied entirely and given to an AI agent,
+the agent will execute ALL prompts sequentially without stopping after the first one.
+
+### ⚠️ CRITICAL: No Useless Headers or Descriptions
+
+**DO NOT include any of these at the top of Prompt.md:**
+- Generic descriptions like "This file contains ready-to-use prompts"
+- Instructions like "Copy any section and paste it into Copilot Chat"
+- Any introductory text that is not directly actionable
+
+**START DIRECTLY with the mandatory execution rules.**
+
+### Required File Structure:
+
+````markdown
+# 🤖 AI Agent Improvement Prompts
+
+> ## 🚨 MANDATORY: FILE MODIFICATION REQUIRED
+> 
+> **⛔ DO NOT just respond with text or code blocks.**
+> **⛔ DO NOT say "you can modify like this" without actually modifying.**
+> **⛔ DO NOT explain what needs to be done without doing it.**
+> 
+> **✅ YOU MUST use file editing tools (`replace_string_in_file`, `create_file`, `multi_replace_string_in_file`) to directly modify files.**
+> **✅ After each prompt, confirm "I have modified the file(s)" with the actual changes made.**
+> 
+> ---
+> 
+> **Process ALL prompts below SEQUENTIALLY. Do NOT stop after completing one prompt.**
+
+---
+
+## 📋 Execution Checklist
+
+| # | Prompt ID | Title | Priority | Status |
+|:---:|:---|:---|:---:|:---:|
+| 1 | PROMPT-001 | [Title from P2-1 in Improvement Report] | P2 | ⬜ Pending |
+| 2 | PROMPT-002 | [Title from P2-2 in Improvement Report] | P2 | ⬜ Pending |
+| 3 | PROMPT-003 | [Title from P3-1 in Improvement Report] | P3 | ⬜ Pending |
+| ... | ... | ... | ... | ... |
+
+**Total: X prompts** | **Completed: 0** | **Remaining: X**
+
+---
+
+## 🔴 Priority 1 (Critical) - Execute First
+
+### [PROMPT-001] Title Here
+
+> **🚨 REQUIRED: Use `replace_string_in_file` or `create_file` to make changes. Do NOT just show code.**
+
+**Task**: Clear one-sentence description of what needs to be done
+**Files to Modify**: `src/path/to/file.ts`
+
+#### Instructions:
+
+1. Open `src/path/to/file.ts`
+2. Locate the specific section to modify
+3. Apply the changes shown below
+
+#### Implementation Code:
+
+```typescript
+// FULL implementation code here - NO abbreviations
+// Include ALL necessary imports
+// Include COMPLETE function/class definitions
+```
+
+#### Verification:
+- Run: `pnpm run compile`
+- Expected: No compilation errors
+
+**✅ After completing this prompt, proceed to [PROMPT-002]**
+
+---
+
+### [PROMPT-002] Next Title
+
+**⏱️ Execute this prompt now, then proceed to PROMPT-003**
+
+[Continue with same structure...]
+
+---
+
+## 🟡 Priority 2 (High) - Execute Second
+
+[P2 prompts with same structure...]
+
+---
+
+## 🟢 Priority 3 (Medium) - Execute Last
+
+[P3 prompts with same structure...]
+
+**🎉 ALL PROMPTS COMPLETED! Run final verification.**
+````
+
+### ⚠️ MANDATORY Requirements for Each Prompt:
+
+1. **Header**: `**⏱️ Execute this prompt now, then proceed to PROMPT-XXX**`
+2. **Complete Code**: NO `// ... existing code ...` or `/* omitted */`
+3. **Full Context**: Include imports, class definitions, everything needed
+4. **Verification Step**: Include command to run after implementation
+5. **Footer**: `**✅ After completing this prompt, proceed to [PROMPT-XXX]**`
+6. **Final Prompt**: End with `**🎉 ALL PROMPTS COMPLETED!**`
+
+### ❌ NEVER Include:
+- Abbreviated code blocks
+- Placeholder comments like `// add implementation here`
+- References to "see above" or "similar to previous"
+- Incomplete function bodies
+- "Previously Completed Prompts" section or any completed prompt history
+- Any list or mention of already completed/applied improvements
+- Historical data about past prompts or previous sessions
+
+### 📌 IMPORTANT: Prompt.md Content Rule
+- Prompt.md should ONLY contain PENDING prompts that need to be executed
+- DO NOT add any section showing completed or previously applied prompts
+- Each run should generate fresh prompts based on current improvement report
+- No historical tracking of completed prompts in this file
+
+---
+
+## ✅ 작성 완료 체크리스트
+
+- [ ] `/home/dlckdgn/personal-portfolio/devplan/Project_Evaluation_Report.md` - 프로젝트 목표, 기능 테이블, 점수, 상세 평가 (한국어)
+- [ ] `/home/dlckdgn/personal-portfolio/devplan/Project_Improvement_Exploration_Report.md` - 전체 요약, 기능 개선/추가 분리, 코드 제외 (한국어)
+- [ ] `/home/dlckdgn/personal-portfolio/devplan/Prompt.md` - Sequential AI prompts with COMPLETE code (English)
+
+### Prompt.md 필수 검증:
+- [ ] 모든 프롬프트에 "Execute this prompt now, then proceed to PROMPT-XXX" 헤더가 있는가?
+- [ ] 모든 프롬프트에 "After completing this prompt, proceed to [PROMPT-XXX]" 푸터가 있는가?
+- [ ] Execution Checklist 테이블이 모든 프롬프트를 포함하는가?
+- [ ] 모든 코드가 완전하고 축약 없이 작성되었는가?
+- [ ] 마지막 프롬프트가 "ALL PROMPTS COMPLETED"로 끝나는가?
+- [ ] 이미 적용된 개선사항이 제외되었는가?
+
+개인프로젝트 기준으로 평가할것

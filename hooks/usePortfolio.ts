@@ -28,7 +28,7 @@ interface UsePortfolioResult {
   addAsset: (newAsset: Asset) => Promise<void>;
   deleteAsset: (id: string) => Promise<void>;
   tradeAsset: (id: string, type: TradeType, quantity: number, price: number) => Promise<void>;
-  syncPrices: () => Promise<void>;
+  syncPrices: (options?: { createSnapshot?: boolean }) => Promise<void>;
   updateAsset: (
     id: string,
     updates: {
@@ -295,7 +295,7 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
     setTradeHistory((prev) => [record, ...prev].slice(0, 20));
   };
 
-  const syncPrices = async (): Promise<void> => {
+  const syncPrices = async (options?: { createSnapshot?: boolean }): Promise<void> => {
     await syncPortfolioPrices({
       settings,
       assets,
@@ -305,6 +305,23 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
       setIsSyncing,
       loadPortfolioFromServer,
     });
+
+    if (!options?.createSnapshot) return;
+    if (!isRemoteEnabled) {
+      alert('서버 연결이 필요합니다.');
+      return;
+    }
+
+    try {
+      await apiClient.createSnapshot();
+      await loadHistoryFromServer();
+    } catch (error) {
+      alertError('Create snapshot error', error, {
+        default: '스냅샷 저장 중 오류가 발생했습니다.\n서버 상태를 확인해주세요.',
+        unauthorized: '스냅샷 저장에 실패했습니다.\nAPI 비밀번호가 올바른지 확인해주세요.',
+        network: '서버와 통신할 수 없습니다.\n스냅샷 저장에 실패했습니다.',
+      });
+    }
   };
 
   const restoreFromBackup = async (snapshot: ImportedAssetSnapshot[]): Promise<void> => {

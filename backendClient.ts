@@ -1,4 +1,4 @@
-import { Asset, TradeRecord, TradeType } from './types';
+import { Asset, TradeRecord, TradeType, FxTransactionRecord, FxTransactionType } from './types';
 
 // --- 백엔드 포트폴리오 API 응답 타입 (프론트 전용 타입) ---
 
@@ -46,6 +46,8 @@ export interface BackendSettings {
   dividend_year?: number | null;
   dividend_total?: number | null;
   dividends?: BackendDividend[] | null;
+  usd_fx_base?: number | null;
+  usd_fx_now?: number | null;
 }
 
 export interface BackendAsset {
@@ -75,6 +77,21 @@ export interface BackendTrade {
   price: number;
   timestamp: string;
   realized_delta?: number | null;
+  note?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BackendFxTransaction {
+  id: number;
+  user_id: number;
+  trade_date: string;
+  type: 'BUY' | 'SELL' | 'SETTLEMENT';
+  currency: 'KRW' | 'USD';
+  fx_amount?: number | null;
+  krw_amount?: number | null;
+  rate?: number | null;
+  description?: string | null;
   note?: string | null;
   created_at: string;
   updated_at: string;
@@ -180,6 +197,20 @@ export const mapBackendTradesToFrontend = (
   });
 };
 
+export const mapBackendFxToFrontend = (
+  backend: BackendFxTransaction,
+): FxTransactionRecord => ({
+  id: backend.id.toString(),
+  tradeDate: backend.trade_date,
+  type: backend.type,
+  currency: backend.currency,
+  fxAmount: backend.fx_amount ?? undefined,
+  krwAmount: backend.krw_amount ?? undefined,
+  rate: backend.rate ?? undefined,
+  description: backend.description ?? undefined,
+  note: backend.note ?? undefined,
+});
+
 // --- API Client ---
 
 export class ApiClient {
@@ -248,6 +279,12 @@ export class ApiClient {
       `/api/portfolio/snapshots?days=${days}`,
       { method: 'GET' },
     );
+  }
+
+  async createSnapshot(): Promise<BackendSnapshot> {
+    return this.request<BackendSnapshot>('/api/portfolio/snapshots', {
+      method: 'POST',
+    });
   }
 
   // --- Health ---
@@ -334,6 +371,68 @@ export class ApiClient {
     return this.request<BackendTrade>(`/api/assets/${assetId}/trades`, {
       method: 'POST',
       body: JSON.stringify({ type, quantity, price }),
+    });
+  }
+
+  // --- FX Transactions ---
+
+  async fetchFxTransactions(params?: {
+    limit?: number;
+    beforeId?: number;
+    kind?: FxTransactionType;
+    startDate?: string;
+    endDate?: string;
+  }): Promise<BackendFxTransaction[]> {
+    const search = new URLSearchParams();
+    if (params?.limit != null) search.set('limit', params.limit.toString());
+    if (params?.beforeId != null) search.set('before_id', params.beforeId.toString());
+    if (params?.kind != null) search.set('kind', params.kind);
+    if (params?.startDate) search.set('start_date', params.startDate);
+    if (params?.endDate) search.set('end_date', params.endDate);
+    const qs = search.toString();
+    return this.request<BackendFxTransaction[]>(`/api/exchanges${qs ? `?${qs}` : ''}`, {
+      method: 'GET',
+    });
+  }
+
+  async createFxTransaction(payload: {
+    trade_date: string;
+    type: FxTransactionType;
+    currency: 'KRW' | 'USD';
+    fx_amount?: number | null;
+    krw_amount?: number | null;
+    rate?: number | null;
+    description?: string | null;
+    note?: string | null;
+  }): Promise<BackendFxTransaction> {
+    return this.request<BackendFxTransaction>('/api/exchanges', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateFxTransaction(
+    recordId: number,
+    payload: {
+      trade_date?: string;
+      type?: FxTransactionType;
+      currency?: 'KRW' | 'USD';
+      fx_amount?: number | null;
+      krw_amount?: number | null;
+      rate?: number | null;
+      description?: string | null;
+      note?: string | null;
+    },
+  ): Promise<BackendFxTransaction> {
+    return this.request<BackendFxTransaction>(`/api/exchanges/${recordId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteFxTransaction(recordId: number): Promise<void> {
+    return this.request<void>(`/api/exchanges/${recordId}`, {
+      method: 'DELETE',
     });
   }
 }

@@ -12,11 +12,19 @@ from sqlalchemy.orm import Session
 
 from . import kis_client
 from .auth import verify_api_token
+from .db_migrations import ensure_schema
 from .db import get_db
 from .models import Asset
-from .routers.portfolio import router as portfolio_router, _get_or_create_single_user
+from .routers.assets import router as assets_router
+from .routers.exchanges import router as exchanges_router
+from .routers.portfolio import router as portfolio_router
+from .routers.settings import router as settings_router
+from .routers.snapshots import router as snapshots_router
+from .routers.trades import router as trades_router
+from .services.users import get_or_create_single_user
 
 app = FastAPI(title="MyAsset Portfolio Backend")
+ensure_schema()
 
 
 class PricesRequest(BaseModel):
@@ -59,6 +67,11 @@ app.add_middleware(
 )
 
 app.include_router(portfolio_router)
+app.include_router(assets_router)
+app.include_router(trades_router)
+app.include_router(exchanges_router)
+app.include_router(settings_router)
+app.include_router(snapshots_router)
 
 
 @app.post(
@@ -101,7 +114,7 @@ async def get_kis_prices(
 
     # --- 가격을 포트폴리오 자산에도 반영 ---
     try:
-        user = _get_or_create_single_user(db)
+        user = get_or_create_single_user(db)
         tickers = list(prices.keys())
         if tickers:
             assets = (

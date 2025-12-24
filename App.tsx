@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, List, PlusCircle, Bell, Settings, RefreshCw, Lock, KeyRound, ScrollText } from 'lucide-react';
+import { LayoutDashboard, List, PlusCircle, Bell, Settings, RefreshCw, Lock, KeyRound, ScrollText, ArrowLeftRight } from 'lucide-react';
 import { Asset, ViewState, TradeType, TradeRecord, AssetCategory } from './types';
 import { formatCurrency } from './constants';
 import { Dashboard } from './components/Dashboard';
@@ -7,6 +7,7 @@ import { AssetList } from './components/AssetList';
 import { AddAssetForm } from './components/AddAssetForm';
 import { SettingsPanel } from './components/SettingsPanel';
 import { TradeHistoryAll } from './components/TradeHistoryAll';
+import { ExchangeHistory } from './components/ExchangeHistory';
 
 import { DividendEditModal } from './components/DividendEditModal';
 import { InvestmentQuote } from './components/InvestmentQuote';
@@ -71,7 +72,7 @@ const App: React.FC = () => {
       setCurrentView('SETTINGS');
       return;
     }
-    await syncPrices();
+    await syncPrices({ createSnapshot: true });
   };
 
   // 초기 로드 시 한 번 자동 가격 동기화 시도
@@ -80,7 +81,7 @@ const App: React.FC = () => {
     if (!settings.serverUrl || !hasTickers || !settings.apiToken) {
       return;
     }
-    void handleSyncPrices();
+    void syncPrices({ createSnapshot: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -123,9 +124,9 @@ const App: React.FC = () => {
   );
 
   // 배경 스타일 계산
-  const bgStyle: React.CSSProperties = settings.bgEnabled && settings.bgImageUrl
+  const bgStyle: React.CSSProperties = settings.bgEnabled && settings.bgImageData
     ? {
-      backgroundImage: `url(${settings.bgImageUrl})`,
+      backgroundImage: `url(${settings.bgImageData})`,
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       backgroundAttachment: 'fixed',
@@ -216,6 +217,7 @@ const App: React.FC = () => {
           <NavItem view="DASHBOARD" icon={LayoutDashboard} label="대시보드" />
           <NavItem view="LIST" icon={List} label="자산 목록" />
           <NavItem view="TRADES" icon={ScrollText} label="거래 내역" />
+          <NavItem view="EXCHANGE" icon={ArrowLeftRight} label="환전 내역" />
           <NavItem view="ADD" icon={PlusCircle} label="자산 추가" />
         </nav>
 
@@ -242,8 +244,10 @@ const App: React.FC = () => {
                 ? '대시보드'
                 : currentView === 'LIST'
                   ? '보유 자산'
-                  : currentView === 'TRADES'
-                    ? '거래 내역'
+                : currentView === 'TRADES'
+                  ? '거래 내역'
+                  : currentView === 'EXCHANGE'
+                    ? '환전 내역'
                     : currentView === 'ADD'
                       ? '자산 추가'
                       : '서버 설정'}
@@ -253,8 +257,10 @@ const App: React.FC = () => {
                 ? '자산 현황 한눈에 보기'
                 : currentView === 'LIST'
                   ? '자산 관리 및 거래'
-                  : currentView === 'TRADES'
-                    ? '전체 거래 기록 조회'
+                : currentView === 'TRADES'
+                  ? '전체 거래 기록 조회'
+                  : currentView === 'EXCHANGE'
+                    ? '환전 기록 조회 및 수정'
                     : currentView === 'ADD'
                       ? '새로운 자산 등록'
                       : '연결 및 환경 설정'}
@@ -412,6 +418,13 @@ const App: React.FC = () => {
             assets={assets}
             serverUrl={settings.serverUrl}
             apiToken={settings.apiToken}
+          />
+        )}
+        {currentView === 'EXCHANGE' && (
+          <ExchangeHistory
+            serverUrl={settings.serverUrl}
+            apiToken={settings.apiToken}
+            onFxBaseUpdated={(value) => setSettings((prev) => ({ ...prev, usdFxBase: value }))}
           />
         )}
         {currentView === 'ADD' && (

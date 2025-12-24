@@ -20,9 +20,21 @@ fi
 
 mkdir -p "$LOCAL_BACKUP_DIR"
 
-timestamp="$(date +'%Y%m%d_%H%M%S')"
-# 압축 파일명 (예: portfolio_20241223_090000.db.gz)
-backup_file_base="portfolio_${timestamp}.db"
+timestamp="$(date +'%Y-%m-%d')"
+backup_time="$(date +'%Y-%m-%d %H:%M:%S')"
+base_name="portfolio_${timestamp}"
+# 확장자
+ext=".db"
+
+# 순차적 파일명 생성 (예: portfolio_2025-12-23.db -> portfolio_2025-12-23(1).db)
+backup_file_base="${base_name}${ext}"
+count=1
+
+while [[ -f "$LOCAL_BACKUP_DIR/$backup_file_base" || -f "$LOCAL_BACKUP_DIR/${backup_file_base}.gz" ]]; do
+  backup_file_base="${base_name}(${count})${ext}"
+  ((count++))
+done
+
 backup_path="$LOCAL_BACKUP_DIR/$backup_file_base"
 compressed_path="${backup_path}.gz"
 
@@ -41,7 +53,7 @@ fi
 
 # 압축 (gzip)
 echo "INFO: 파일 압축 중..."
-gzip -f "$backup_path"
+gzip -f -n "$backup_path"
 echo "백업 및 압축 완료: $compressed_path"
 
 # --- 2. 텔레그램 전송 (분할 전송 포함) ---
@@ -65,7 +77,8 @@ if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
     echo "INFO: 용량 적합 ($file_size bytes). 단일 파일 전송."
     curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
          -F chat_id="${TELEGRAM_CHAT_ID}" \
-         -F document=@"${compressed_path}" > /dev/null
+         -F document=@"${compressed_path}" \
+         -F caption="📦 DB 백업 완료 (${backup_time})" > /dev/null
     echo "INFO: 전송 완료."
   else
     # 50MB 초과: 분할 전송
@@ -93,6 +106,7 @@ else
 fi
 
 # --- 3. 드롭박스 전송 (옵션) ---
+dropbox_upload_ok="false"
 if [[ -n "${DROPBOX_APP_KEY:-}" ]] && [[ -n "${DROPBOX_APP_SECRET:-}" ]] && [[ -n "${DROPBOX_REFRESH_TOKEN:-}" ]]; then
   echo "INFO: 드롭박스 전송 준비..."
 
@@ -112,7 +126,7 @@ if [[ -n "${DROPBOX_APP_KEY:-}" ]] && [[ -n "${DROPBOX_APP_SECRET:-}" ]] && [[ -
     dropbox_path="/marin-db-backup/${backup_file_base}.gz"
     
     # 50MB 이상 분할된 경우 폴더째로 올릴 수는 없으니, 여기선 단순화를 위해 원본 압축파일 하나만 올림
-    # (드롭박스는 150MB까지 단일 API로 가능, 그 이상은 session upload 필요하지만 DB가 그정도 크기는 아닐거라 가정)
+    # 요청당 150MB 미만 권장/제한. 그 이상은 upload session으로 분할 업로드(파일 전체는 훨씬 큰 용량까지 가능
     
     echo "  - 업로드 중: $dropbox_path ..."
     # Dropbox-API-Arg 헤더는 JSON 형태여야 함.
@@ -126,6 +140,7 @@ if [[ -n "${DROPBOX_APP_KEY:-}" ]] && [[ -n "${DROPBOX_APP_SECRET:-}" ]] && [[ -
       
     if [[ "$http_code" == "200" ]]; then
       echo "INFO: 드롭박스 업로드 성공"
+      dropbox_upload_ok="true"
     else
       echo "ERROR: 드롭박스 업로드 실패 (HTTP $http_code)"
     fi
@@ -147,5 +162,7 @@ else
   echo "WARN: 외장하드 경로($EXTERNAL_BACKUP_DIR)에 접근할 수 없어 복사를 건너뜁니다."
 fi
 
-# (선택) 로컬 백업 정리: 30일 지난 파일 삭제
-find "$LOCAL_BACKUP_DIR" -name "portfolio_*.db.gz" -mtime +30 -delete
+# (선택) 로컬 백업 정리: 드롭박스 업로드 성공 시 2일 초과 파일 삭제
+if [[ "$dropbox_upload_ok" == "true" ]]; then
+  find "$LOCAL_BACKUP_DIR" -name "portfolio_*.db.gz" -mmin +2880 -delete
+fi

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Optional
 
 from sqlalchemy import (
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -37,6 +38,9 @@ class User(Base):
     )
     trades: Mapped[List["Trade"]] = relationship(
         "Trade", back_populates="user", cascade="all, delete-orphan"
+    )
+    fx_transactions: Mapped[List["FxTransaction"]] = relationship(
+        "FxTransaction", back_populates="user", cascade="all, delete-orphan"
     )
     settings: Mapped[List["Setting"]] = relationship(
         "Setting", back_populates="user", cascade="all, delete-orphan"
@@ -112,6 +116,34 @@ class Trade(Base):
     asset: Mapped[Asset] = relationship("Asset", back_populates="trades")
 
 
+class FxTransaction(Base):
+    __tablename__ = "fx_transactions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False)
+    type: Mapped[str] = mapped_column(String(20), nullable=False)  # 'BUY' | 'SELL' | 'SETTLEMENT'
+    currency: Mapped[str] = mapped_column(String(10), nullable=False)  # 'KRW' | 'USD'
+    fx_amount: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    krw_amount: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    user: Mapped[User] = relationship("User", back_populates="fx_transactions")
+
+
 class Setting(Base):
     __tablename__ = "settings"
 
@@ -123,6 +155,8 @@ class Setting(Base):
     dividend_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     dividend_total: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     dividends: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    usd_fx_base: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    usd_fx_now: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
