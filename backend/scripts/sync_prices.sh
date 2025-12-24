@@ -10,6 +10,16 @@ set -euo pipefail
 #   API_TOKEN (필수) - 백엔드 인증 토큰
 #   BACKEND_URL (선택, 기본값: http://127.0.0.1:8000)
 
+# --- Load .env ---
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENV_FILE="$SCRIPT_DIR/../.env"
+
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  source "$ENV_FILE"
+  set +a
+fi
+
 BACKEND_URL="${BACKEND_URL:-http://127.0.0.1:8000}"
 API_TOKEN="${API_TOKEN:-}"
 
@@ -68,3 +78,12 @@ curl -fsS -X POST \
   }
 
 echo "$(date -Is) close sync + snapshot OK"
+sync_time="$(date +'%Y-%m-%d %H:%M:%S')"
+
+# --- Telegram Notification ---
+if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
+  MSG="$(printf "💰 시세 업데이트 완료!\n- 총 %s개 종목\n- %s 기준" "$ticker_count" "$sync_time")"
+  curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+       -d chat_id="${TELEGRAM_CHAT_ID}" \
+       -d text="${MSG}" > /dev/null
+fi

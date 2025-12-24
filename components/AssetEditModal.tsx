@@ -209,11 +209,11 @@ export const AssetEditModal: React.FC<AssetEditModalProps> = ({
     return (
         <div
             className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center px-4 animate-fade-in"
-            onClick={onClose}
+            onMouseDown={onClose}
         >
             <div
                 className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all"
-                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
             >
                 {/* Header */}
                 <div className="relative bg-gradient-to-br from-indigo-500 via-indigo-600 to-violet-600 p-6 text-white overflow-hidden">

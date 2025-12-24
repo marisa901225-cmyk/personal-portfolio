@@ -28,6 +28,8 @@ export interface Asset {
 
 export type TradeType = 'BUY' | 'SELL';
 
+export type FxTransactionType = 'BUY' | 'SELL' | 'SETTLEMENT';
+
 export interface TradeRecord {
   id: string;
   assetId: string;
@@ -38,6 +40,18 @@ export interface TradeRecord {
   price: number;
   timestamp: string;
   realizedDelta?: number;
+}
+
+export interface FxTransactionRecord {
+  id: string;
+  tradeDate: string;
+  type: FxTransactionType;
+  currency: 'KRW' | 'USD';
+  fxAmount?: number;
+  krwAmount?: number;
+  rate?: number;
+  description?: string;
+  note?: string;
 }
 
 export interface TargetIndexAllocation {
@@ -56,7 +70,7 @@ export interface PortfolioSummary {
   historyData: { date: string; value: number }[];
 }
 
-export type ViewState = 'DASHBOARD' | 'LIST' | 'TRADES' | 'ADD' | 'SETTINGS';
+export type ViewState = 'DASHBOARD' | 'LIST' | 'TRADES' | 'EXCHANGE' | 'ADD' | 'SETTINGS';
 
 export interface DividendEntry {
   year: number;
@@ -80,8 +94,8 @@ export interface AppSettings {
   // 외관 설정
   /** 배경 이미지 사용 여부 */
   bgEnabled?: boolean;
-  /** 배경 이미지 URL */
-  bgImageUrl?: string;
+  /** 배경 이미지 데이터 (로컬스토리지에 Base64로 저장) */
+  bgImageData?: string;
   /** 카드 불투명도 (0~100, 기본 85) */
   cardOpacity?: number;
   /** 배경 흐림 강도 (0~20, 기본 8) */

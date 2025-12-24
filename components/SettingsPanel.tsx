@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Server, Palette, Sliders } from 'lucide-react';
 import { AppSettings, TargetIndexAllocation } from '../types';
-import { ApiClient } from '../backendClient';
+import { ApiClient, BackendFxTransaction } from '../backendClient';
 import { alertError } from '../errors';
 
 type SettingsTab = 'server' | 'portfolio';
@@ -25,11 +25,10 @@ const TabButton: React.FC<TabButtonProps> = ({ tab, icon: Icon, label, isActive,
     type="button"
     onClick={onClick}
     data-tab={tab}
-    className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium rounded-xl transition-all ${
-      isActive
+    className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium rounded-xl transition-all ${isActive
         ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200'
         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-    }`}
+      }`}
   >
     <Icon size={18} />
     <span>{label}</span>
@@ -97,6 +96,7 @@ interface PortfolioTabProps {
   settings: AppSettings;
   onSettingsChange: (next: AppSettings) => void;
   onFetchFxRate: () => void;
+  onApplyFxBaseFromHistory: () => void;
   onAllocationChange: (
     index: number,
     field: 'indexGroup' | 'targetWeight',
@@ -110,6 +110,7 @@ const PortfolioTab: React.FC<PortfolioTabProps> = ({
   settings,
   onSettingsChange,
   onFetchFxRate,
+  onApplyFxBaseFromHistory,
   onAllocationChange,
   onAddAllocationRow,
   onRemoveAllocationRow,
@@ -163,13 +164,22 @@ const PortfolioTab: React.FC<PortfolioTabProps> = ({
             }
           />
         </div>
-        <button
-          type="button"
-          onClick={onFetchFxRate}
-          className="px-3 py-2 rounded-lg border border-slate-200 text-[11px] text-slate-600 hover:border-indigo-400 hover:text-indigo-600 whitespace-nowrap"
-        >
-          증권사에서 불러오기
-        </button>
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            onClick={onFetchFxRate}
+            className="px-3 py-2 rounded-lg border border-slate-200 text-[11px] text-slate-600 hover:border-indigo-400 hover:text-indigo-600 whitespace-nowrap"
+          >
+            증권사에서 불러오기
+          </button>
+          <button
+            type="button"
+            onClick={onApplyFxBaseFromHistory}
+            className="px-3 py-2 rounded-lg border border-slate-200 text-[11px] text-slate-600 hover:border-indigo-400 hover:text-indigo-600 whitespace-nowrap"
+          >
+            환전 평균 적용
+          </button>
+        </div>
       </div>
     </div>
 
@@ -242,37 +252,83 @@ const PortfolioTab: React.FC<PortfolioTabProps> = ({
               bgEnabled: !settings.bgEnabled,
             })
           }
-          className={`relative w-12 h-6 rounded-full transition-colors ${
-            settings.bgEnabled ? 'bg-indigo-600' : 'bg-slate-300'
-          }`}
+          className={`relative w-12 h-6 rounded-full transition-colors ${settings.bgEnabled ? 'bg-indigo-600' : 'bg-slate-300'
+            }`}
         >
           <span
-            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-              settings.bgEnabled ? 'translate-x-6' : 'translate-x-0'
-            }`}
+            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${settings.bgEnabled ? 'translate-x-6' : 'translate-x-0'
+              }`}
           />
         </button>
       </div>
 
       {settings.bgEnabled && (
         <div className="space-y-4 pl-2 border-l-2 border-indigo-200 animate-fade-in">
-          {/* 배경 이미지 URL */}
+          {/* 배경 이미지 업로드 */}
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">
-              배경 이미지 URL
+              배경 이미지 업로드
             </label>
-            <input
-              type="text"
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 text-xs focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              placeholder="https://example.com/background.jpg"
-              value={settings.bgImageUrl ?? ''}
-              onChange={(e) =>
-                onSettingsChange({
-                  ...settings,
-                  bgImageUrl: e.target.value || undefined,
-                })
-              }
-            />
+            <div className="flex items-center gap-2">
+              <label className="flex-1 flex items-center justify-center px-4 py-3 rounded-lg border-2 border-dashed border-slate-300 hover:border-indigo-400 cursor-pointer transition-colors">
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      // 파일 크기 체크 (5MB 제한)
+                      if (file.size > 5 * 1024 * 1024) {
+                        alert('이미지 파일이 너무 큽니다. 5MB 이하의 파일을 선택해주세요.');
+                        return;
+                      }
+                      const reader = new FileReader();
+                      reader.onload = (event) => {
+                        const base64Data = event.target?.result as string;
+                        onSettingsChange({
+                          ...settings,
+                          bgImageData: base64Data,
+                        });
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                    // input 초기화 (같은 파일 다시 선택 가능하도록)
+                    e.target.value = '';
+                  }}
+                />
+                <span className="text-xs text-slate-500">
+                  {settings.bgImageData ? '다른 이미지 선택' : '이미지 파일 선택'}
+                </span>
+              </label>
+              {settings.bgImageData && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onSettingsChange({
+                      ...settings,
+                      bgImageData: undefined,
+                    })
+                  }
+                  className="px-3 py-2 text-xs text-red-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                >
+                  삭제
+                </button>
+              )}
+            </div>
+            {/* 이미지 미리보기 */}
+            {settings.bgImageData && (
+              <div className="mt-3 rounded-lg overflow-hidden border border-slate-200">
+                <img
+                  src={settings.bgImageData}
+                  alt="배경 이미지 미리보기"
+                  className="w-full h-24 object-cover"
+                />
+              </div>
+            )}
+            <p className="text-[10px] text-slate-400 mt-2">
+              * 이미지는 브라우저 로컬스토리지에 저장됩니다. (최대 5MB)
+            </p>
           </div>
 
           {/* 카드 불투명도 */}
@@ -429,6 +485,89 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   };
 
+  const handleApplyFxBaseFromHistory = async () => {
+    if (!settings.serverUrl || !settings.serverUrl.trim()) {
+      alert('먼저 홈서버 API URL을 입력해주세요.');
+      return;
+    }
+    if (!settings.apiToken) {
+      alert('먼저 API 비밀번호를 입력해주세요.');
+      return;
+    }
+
+    const fetchAll = async (client: ApiClient): Promise<BackendFxTransaction[]> => {
+      const records: BackendFxTransaction[] = [];
+      let beforeId: number | undefined;
+
+      while (true) {
+        const batch = await client.fetchFxTransactions({
+          limit: 500,
+          beforeId,
+          kind: 'BUY',
+        });
+        if (batch.length === 0) break;
+        records.push(...batch);
+        if (batch.length < 500) break;
+        beforeId = batch[batch.length - 1].id;
+      }
+
+      return records;
+    };
+
+    try {
+      const apiClient = new ApiClient(settings.serverUrl, settings.apiToken);
+      const records = await fetchAll(apiClient);
+
+      let weightedSum = 0;
+      let weightTotal = 0;
+      let fallbackSum = 0;
+      let fallbackCount = 0;
+
+      records.forEach((record) => {
+        const fxAmount = record.fx_amount ?? null;
+        let rate = record.rate ?? null;
+        if (rate == null && fxAmount != null && record.krw_amount != null && fxAmount !== 0) {
+          rate = record.krw_amount / fxAmount;
+        }
+        if (rate == null || !Number.isFinite(rate)) return;
+
+        if (fxAmount && Number.isFinite(fxAmount) && fxAmount > 0) {
+          weightedSum += rate * fxAmount;
+          weightTotal += fxAmount;
+        } else {
+          fallbackSum += rate;
+          fallbackCount += 1;
+        }
+      });
+
+      let avgRate: number | null = null;
+      if (weightTotal > 0) {
+        avgRate = weightedSum / weightTotal;
+      } else if (fallbackCount > 0) {
+        avgRate = fallbackSum / fallbackCount;
+      }
+
+      if (!avgRate || !Number.isFinite(avgRate)) {
+        alert('환전 평균 환율을 계산할 수 없습니다.');
+        return;
+      }
+
+      const rounded = Math.round(avgRate * 100) / 100;
+      onSettingsChange({
+        ...settings,
+        usdFxBase: rounded,
+      });
+      alert(`환전 평균 환율 ${rounded} 적용 완료 (매수 ${records.length}건 기준)`);
+    } catch (error) {
+      alertError('FX average apply error', error, {
+        default: '환전 평균 환율을 불러오지 못했습니다.\n잠시 후 다시 시도해주세요.',
+        unauthorized:
+          'API 비밀번호가 올바르지 않습니다.\n백엔드 서버의 API_TOKEN 값과 동일한 비밀번호를 입력했는지 확인해주세요.',
+        network: '서버와 통신할 수 없습니다.\n서버 연결을 확인해주세요.',
+      });
+    }
+  };
+
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-lg mx-auto animate-fade-in-up">
       {/* 탭 버튼 */}
@@ -463,6 +602,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             settings={settings}
             onSettingsChange={onSettingsChange}
             onFetchFxRate={handleFetchFxRate}
+            onApplyFxBaseFromHistory={handleApplyFxBaseFromHistory}
             onAllocationChange={handleAllocationChange}
             onAddAllocationRow={handleAddAllocationRow}
             onRemoveAllocationRow={handleRemoveAllocationRow}

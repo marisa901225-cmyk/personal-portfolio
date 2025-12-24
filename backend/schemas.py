@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Optional, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -86,6 +86,41 @@ class TradeRead(TradeBase):
     updated_at: datetime
 
 
+class FxTransactionBase(BaseModel):
+    trade_date: date
+    type: Literal["BUY", "SELL", "SETTLEMENT"]
+    currency: Literal["KRW", "USD"]
+    fx_amount: Optional[float] = None
+    krw_amount: Optional[float] = None
+    rate: Optional[float] = None
+    description: Optional[str] = None
+    note: Optional[str] = None
+
+
+class FxTransactionCreate(FxTransactionBase):
+    pass
+
+
+class FxTransactionUpdate(BaseModel):
+    trade_date: Optional[date] = None
+    type: Optional[Literal["BUY", "SELL", "SETTLEMENT"]] = None
+    currency: Optional[Literal["KRW", "USD"]] = None
+    fx_amount: Optional[float] = None
+    krw_amount: Optional[float] = None
+    rate: Optional[float] = None
+    description: Optional[str] = None
+    note: Optional[str] = None
+
+
+class FxTransactionRead(FxTransactionBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_id: int
+    created_at: datetime
+    updated_at: datetime
+
+
 class SettingsRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -94,6 +129,8 @@ class SettingsRead(BaseModel):
     dividend_year: Optional[int] = None
     dividend_total: Optional[float] = None
     dividends: Optional[List[DividendRecord]] = None
+    usd_fx_base: Optional[float] = None
+    usd_fx_now: Optional[float] = None
 
 
 class SettingsUpdate(BaseModel):
@@ -102,6 +139,8 @@ class SettingsUpdate(BaseModel):
     dividends: Optional[List[DividendRecord]] = None
     dividend_year: Optional[int] = None
     dividend_total: Optional[float] = None
+    usd_fx_base: Optional[float] = None
+    usd_fx_now: Optional[float] = None
 
 
 class DistributionItem(BaseModel):

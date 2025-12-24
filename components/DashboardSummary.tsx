@@ -109,19 +109,25 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
                 <div className="mt-4 text-sm text-slate-400">
                     총 투자 원금: {formatCurrency(summary.totalInvested)}
                 </div>
-                <div className="mt-1 text-xs text-slate-500">
-                    실현:{' '}
-                    <span className={summary.realizedProfitTotal >= 0 ? 'text-red-500' : 'text-blue-500'}>
-                        {formatCurrency(summary.realizedProfitTotal)}
-                    </span>{' '}
-                    / 평가:{' '}
-                    <span className={summary.unrealizedProfitTotal >= 0 ? 'text-red-500' : 'text-blue-500'}>
-                        {formatCurrency(summary.unrealizedProfitTotal)}
-                    </span>{' '}
-                    / 배당:{' '}
-                    <span className="text-emerald-600 font-semibold">
-                        +{formatCurrency(dividendInfo.totalAllTime)}
-                    </span>
+                <div className="mt-1 text-xs text-slate-500 space-y-0.5">
+                    <div>
+                        실현:{' '}
+                        <span className={summary.realizedProfitTotal >= 0 ? 'text-red-500' : 'text-blue-500'}>
+                            {formatCurrency(summary.realizedProfitTotal)}
+                        </span>
+                    </div>
+                    <div>
+                        평가:{' '}
+                        <span className={summary.unrealizedProfitTotal >= 0 ? 'text-red-500' : 'text-blue-500'}>
+                            {formatCurrency(summary.unrealizedProfitTotal)}
+                        </span>
+                    </div>
+                    <div>
+                        배당:{' '}
+                        <span className="text-emerald-600 font-semibold">
+                            +{formatCurrency(dividendInfo.totalAllTime)}
+                        </span>
+                    </div>
                 </div>
             </div>
 

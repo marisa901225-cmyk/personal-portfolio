@@ -37,7 +37,10 @@ export const DividendEditModal: React.FC<DividendEditModalProps> = ({
             return;
         }
 
-        const newEntry = { year, total: numAmount };
+        // 같은 연도가 있으면 금액을 누적
+        const existing = localDividends.find((d) => d.year === year);
+        const newTotal = existing ? existing.total + numAmount : numAmount;
+        const newEntry = { year, total: newTotal };
         const others = localDividends.filter((d) => d.year !== year);
         const updated = [...others, newEntry].sort((a, b) => b.year - a.year);
 
@@ -61,11 +64,11 @@ export const DividendEditModal: React.FC<DividendEditModalProps> = ({
     return (
         <div
             className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center px-4 animate-fade-in"
-            onClick={onClose}
+            onMouseDown={onClose}
         >
             <div
                 className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden transform transition-all"
-                onClick={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
             >
                 {/* Header with gradient */}
                 <div className="relative bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-600 p-6 text-white overflow-hidden">
@@ -136,7 +139,7 @@ export const DividendEditModal: React.FC<DividendEditModalProps> = ({
                         </div>
                         <p className="text-xs text-slate-400 flex items-center gap-1">
                             <span className="w-1 h-1 bg-slate-400 rounded-full"></span>
-                            이미 존재하는 연도를 입력하면 금액이 업데이트됩니다
+                            이미 존재하는 연도를 입력하면 금액이 누적됩니다
                         </p>
                     </div>
 
