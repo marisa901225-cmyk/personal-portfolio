@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from ..auth import verify_api_token
 from ..db import get_db
 from ..models import Asset, Trade
-from ..schemas import PortfolioResponse
+from ..schemas import PortfolioResponse, PortfolioRestoreRequest, PortfolioRestoreResponse
 from ..services.portfolio import calculate_summary, to_asset_read, to_trade_read
 from ..services.users import get_or_create_single_user
 
@@ -37,3 +39,43 @@ def get_portfolio(db: Session = Depends(get_db)) -> PortfolioResponse:
         summary=summary,
     )
 
+
+@router.post("/portfolio/restore", response_model=PortfolioRestoreResponse)
+def restore_portfolio(
+    payload: PortfolioRestoreRequest, db: Session = Depends(get_db)
+) -> PortfolioRestoreResponse:
+    user = get_or_create_single_user(db)
+    now = datetime.utcnow()
+
+    with db.begin():
+        existing_assets = (
+            db.query(Asset)
+            .filter(Asset.user_id == user.id, Asset.deleted_at.is_(None))
+            .all()
+        )
+        for asset in existing_assets:
+            asset.deleted_at = now
+            asset.updated_at = now
+
+        for item in payload.assets:
+            asset = Asset(
+                user_id=user.id,
+                name=item.name,
+                ticker=item.ticker,
+                category=item.category,
+                currency=item.currency,
+                amount=item.amount,
+                current_price=item.current_price,
+                purchase_price=item.purchase_price,
+                realized_profit=item.realized_profit,
+                index_group=item.index_group,
+                cma_config=item.cma_config.model_dump()
+                if item.cma_config is not None
+                else None,
+            )
+            db.add(asset)
+
+    return PortfolioRestoreResponse(
+        restored=len(payload.assets),
+        deleted=len(existing_assets),
+    )

@@ -117,6 +117,24 @@ export interface BackendPortfolioResponse {
   summary: BackendPortfolioSummary;
 }
 
+export interface BackendRestoreAsset {
+  name: string;
+  ticker?: string | null;
+  category: string;
+  currency: 'KRW' | 'USD';
+  amount: number;
+  current_price: number;
+  purchase_price?: number | null;
+  realized_profit: number;
+  index_group?: string | null;
+  cma_config?: BackendCmaConfig | null;
+}
+
+export interface BackendPortfolioRestoreResponse {
+  restored: number;
+  deleted: number;
+}
+
 export interface BackendSnapshot {
   id: number;
   snapshot_at: string;
@@ -271,6 +289,15 @@ export class ApiClient {
   async fetchPortfolio(): Promise<BackendPortfolioResponse> {
     return this.request<BackendPortfolioResponse>('/api/portfolio', {
       method: 'GET',
+    });
+  }
+
+  async restorePortfolio(
+    assets: BackendRestoreAsset[],
+  ): Promise<BackendPortfolioRestoreResponse> {
+    return this.request<BackendPortfolioRestoreResponse>('/api/portfolio/restore', {
+      method: 'POST',
+      body: JSON.stringify({ assets }),
     });
   }
 

@@ -28,7 +28,7 @@ interface UsePortfolioResult {
   addAsset: (newAsset: Asset) => Promise<void>;
   deleteAsset: (id: string) => Promise<void>;
   tradeAsset: (id: string, type: TradeType, quantity: number, price: number) => Promise<void>;
-  syncPrices: (options?: { createSnapshot?: boolean }) => Promise<void>;
+  syncPrices: (options?: { createSnapshot?: boolean; onSuccess?: () => void }) => Promise<void>;
   updateAsset: (
     id: string,
     updates: {
@@ -295,7 +295,7 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
     setTradeHistory((prev) => [record, ...prev].slice(0, 20));
   };
 
-  const syncPrices = async (options?: { createSnapshot?: boolean }): Promise<void> => {
+  const syncPrices = async (options?: { createSnapshot?: boolean; onSuccess?: () => void }): Promise<void> => {
     await syncPortfolioPrices({
       settings,
       assets,
@@ -304,6 +304,7 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
       setAssets,
       setIsSyncing,
       loadPortfolioFromServer,
+      onSuccess: options?.onSuccess,
     });
 
     if (!options?.createSnapshot) return;

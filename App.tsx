@@ -10,6 +10,7 @@ import { TradeHistoryAll } from './components/TradeHistoryAll';
 import { ExchangeHistory } from './components/ExchangeHistory';
 
 import { DividendEditModal } from './components/DividendEditModal';
+import { NotificationModal } from './components/NotificationModal';
 import { InvestmentQuote } from './components/InvestmentQuote';
 import { usePortfolio } from './hooks/usePortfolio';
 import { useSettings } from './hooks/useSettings';
@@ -22,6 +23,11 @@ const App: React.FC = () => {
   const [authInput, setAuthInput] = useState('');
   const [showAuthModal, setShowAuthModal] = useState(true);
   const [isDividendModalOpen, setIsDividendModalOpen] = useState(false);
+  const [syncNotification, setSyncNotification] = useState<{ isOpen: boolean; title: string; message: string }>({
+    isOpen: false,
+    title: '',
+    message: '',
+  });
 
   const {
     assets,
@@ -72,7 +78,16 @@ const App: React.FC = () => {
       setCurrentView('SETTINGS');
       return;
     }
-    await syncPrices({ createSnapshot: true });
+    await syncPrices({
+      createSnapshot: true,
+      onSuccess: () => {
+        setSyncNotification({
+          isOpen: true,
+          title: '동기화 완료',
+          message: '가격 동기화 및 서버 저장이 완료되었습니다.',
+        });
+      },
+    });
   };
 
   // 초기 로드 시 한 번 자동 가격 동기화 시도
@@ -244,26 +259,26 @@ const App: React.FC = () => {
                 ? '대시보드'
                 : currentView === 'LIST'
                   ? '보유 자산'
-                : currentView === 'TRADES'
-                  ? '거래 내역'
-                  : currentView === 'EXCHANGE'
-                    ? '환전 내역'
-                    : currentView === 'ADD'
-                      ? '자산 추가'
-                      : '서버 설정'}
+                  : currentView === 'TRADES'
+                    ? '거래 내역'
+                    : currentView === 'EXCHANGE'
+                      ? '환전 내역'
+                      : currentView === 'ADD'
+                        ? '자산 추가'
+                        : '서버 설정'}
             </h1>
             <p className="text-sm text-slate-500 mt-1">
               {currentView === 'DASHBOARD'
                 ? '자산 현황 한눈에 보기'
                 : currentView === 'LIST'
                   ? '자산 관리 및 거래'
-                : currentView === 'TRADES'
-                  ? '전체 거래 기록 조회'
-                  : currentView === 'EXCHANGE'
-                    ? '환전 기록 조회 및 수정'
-                    : currentView === 'ADD'
-                      ? '새로운 자산 등록'
-                      : '연결 및 환경 설정'}
+                  : currentView === 'TRADES'
+                    ? '전체 거래 기록 조회'
+                    : currentView === 'EXCHANGE'
+                      ? '환전 기록 조회 및 수정'
+                      : currentView === 'ADD'
+                        ? '새로운 자산 등록'
+                        : '연결 및 환경 설정'}
             </p>
           </div>
 
@@ -457,6 +472,13 @@ const App: React.FC = () => {
           setSettings((prev) => ({ ...prev, dividends: updated }));
           void saveSettingsToServer({ ...settings, dividends: updated });
         }}
+      />
+
+      <NotificationModal
+        isOpen={syncNotification.isOpen}
+        onClose={() => setSyncNotification((prev) => ({ ...prev, isOpen: false }))}
+        title={syncNotification.title}
+        message={syncNotification.message}
       />
     </div>
   );

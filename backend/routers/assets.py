@@ -18,7 +18,6 @@ router = APIRouter(prefix="/api", tags=["portfolio"], dependencies=[Depends(veri
 @router.post("/assets", response_model=AssetRead)
 def create_asset(payload: AssetCreate, db: Session = Depends(get_db)) -> AssetRead:
     user = get_or_create_single_user(db)
-
     asset = Asset(
         user_id=user.id,
         name=payload.name,
@@ -32,9 +31,11 @@ def create_asset(payload: AssetCreate, db: Session = Depends(get_db)) -> AssetRe
         index_group=payload.index_group,
         cma_config=payload.cma_config.model_dump() if payload.cma_config is not None else None,
     )
-    db.add(asset)
-    db.commit()
-    db.refresh(asset)
+    # Ensure create is performed inside a transaction for atomicity
+    with db.begin():
+        db.add(asset)
+        db.flush()
+        db.refresh(asset)
     return to_asset_read(asset)
 
 
@@ -54,8 +55,11 @@ def update_asset(asset_id: int, payload: AssetUpdate, db: Session = Depends(get_
         setattr(asset, field, value)
     asset.updated_at = datetime.utcnow()
 
-    db.commit()
-    db.refresh(asset)
+    # perform update inside transaction
+    with db.begin():
+        db.flush()
+        db.refresh(asset)
+
     return to_asset_read(asset)
 
 
@@ -70,9 +74,10 @@ def delete_asset(asset_id: int, db: Session = Depends(get_db)) -> dict:
     if not asset:
         raise HTTPException(status_code=404, detail="asset not found")
 
-    # 소프트 삭제
+    # 소프트 삭제 - perform inside transaction
     asset.deleted_at = datetime.utcnow()
-    db.commit()
+    with db.begin():
+        db.flush()
     return {"status": "ok"}
 
 
@@ -143,9 +148,12 @@ def create_trade_for_asset(
         realized_delta=realized_delta,
         note=payload.note,
     )
-    db.add(trade)
-    db.commit()
-    db.refresh(trade)
+
+    # Ensure asset update and trade creation are atomic
+    with db.begin():
+        db.add(trade)
+        db.flush()
+        db.refresh(trade)
 
     return to_trade_read(trade)
 
