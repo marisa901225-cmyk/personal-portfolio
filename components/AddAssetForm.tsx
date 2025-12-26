@@ -212,6 +212,7 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
               type="number"
               required
               min="0"
+              step="any"
               className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
               placeholder="0"
               value={formData.currentPrice || ''}
@@ -243,6 +244,7 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
                   type="number"
                   required
                   min="0"
+                  step="any"
                   className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
                   placeholder="0"
                   value={formData.currentPrice || ''}
@@ -256,6 +258,7 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
               <input
                 type="number"
                 min="0"
+                step="any"
                 className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
                 placeholder="입력 시 수익률이 계산됩니다."
                 value={formData.purchasePrice || ''}

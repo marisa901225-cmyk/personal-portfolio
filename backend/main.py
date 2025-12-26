@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, RootModel
 from sqlalchemy.orm import Session
+from starlette.requests import Request
 
 from . import kis_client
 from .auth import verify_api_token
@@ -25,6 +26,23 @@ from .services.users import get_or_create_single_user
 
 app = FastAPI(title="MyAsset Portfolio Backend")
 ensure_schema()
+
+
+@app.middleware("http")
+async def api_prefix_fallback(request: Request, call_next):
+    """
+    Reverse proxy(Tailscale Serve) 설정에 따라 /api prefix가 upstream에서 제거될 수 있다.
+    이 경우에도 프론트가 사용하는 /api/* 라우팅을 그대로 지원하기 위해,
+    /api 로 시작하지 않는 요청을 내부적으로 /api/* 로 매핑한다.
+    """
+    path = request.scope.get("path") or ""
+    if (
+        path
+        and path not in ("/", "/health", "/openapi.json")
+        and not path.startswith(("/api", "/docs", "/redoc"))
+    ):
+        request.scope["path"] = f"/api{path}"
+    return await call_next(request)
 
 
 class PricesRequest(BaseModel):
@@ -219,6 +237,11 @@ async def get_usdkrw_fx_rate() -> FxRateResponse:
 @app.get("/health")
 async def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/health")
+async def api_health() -> Dict[str, str]:
+    return await health()
 
 
 @app.get("/", response_class=HTMLResponse)

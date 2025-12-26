@@ -7,6 +7,12 @@ from backend import auth
 
 
 class AuthTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._prev_token = auth.API_TOKEN
+
+    def tearDown(self) -> None:
+        auth.API_TOKEN = self._prev_token
+
     def test_verify_api_token_allows_when_unset(self) -> None:
         auth.API_TOKEN = ""
         asyncio.run(auth.verify_api_token(None))
