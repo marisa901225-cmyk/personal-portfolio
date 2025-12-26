@@ -31,11 +31,13 @@ def create_asset(payload: AssetCreate, db: Session = Depends(get_db)) -> AssetRe
         index_group=payload.index_group,
         cma_config=payload.cma_config.model_dump() if payload.cma_config is not None else None,
     )
-    # Ensure create is performed inside a transaction for atomicity
-    with db.begin():
-        db.add(asset)
-        db.flush()
-        db.refresh(asset)
+    db.add(asset)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(asset)
     return to_asset_read(asset)
 
 
@@ -55,10 +57,12 @@ def update_asset(asset_id: int, payload: AssetUpdate, db: Session = Depends(get_
         setattr(asset, field, value)
     asset.updated_at = datetime.utcnow()
 
-    # perform update inside transaction
-    with db.begin():
-        db.flush()
-        db.refresh(asset)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(asset)
 
     return to_asset_read(asset)
 
@@ -76,8 +80,11 @@ def delete_asset(asset_id: int, db: Session = Depends(get_db)) -> dict:
 
     # 소프트 삭제 - perform inside transaction
     asset.deleted_at = datetime.utcnow()
-    with db.begin():
-        db.flush()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return {"status": "ok"}
 
 
@@ -149,11 +156,12 @@ def create_trade_for_asset(
         note=payload.note,
     )
 
-    # Ensure asset update and trade creation are atomic
-    with db.begin():
-        db.add(trade)
-        db.flush()
-        db.refresh(trade)
+    db.add(trade)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(trade)
 
     return to_trade_read(trade)
-

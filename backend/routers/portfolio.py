@@ -47,33 +47,38 @@ def restore_portfolio(
     user = get_or_create_single_user(db)
     now = datetime.utcnow()
 
-    with db.begin():
-        existing_assets = (
-            db.query(Asset)
-            .filter(Asset.user_id == user.id, Asset.deleted_at.is_(None))
-            .all()
-        )
-        for asset in existing_assets:
-            asset.deleted_at = now
-            asset.updated_at = now
+    existing_assets = (
+        db.query(Asset)
+        .filter(Asset.user_id == user.id, Asset.deleted_at.is_(None))
+        .all()
+    )
+    for asset in existing_assets:
+        asset.deleted_at = now
+        asset.updated_at = now
 
-        for item in payload.assets:
-            asset = Asset(
-                user_id=user.id,
-                name=item.name,
-                ticker=item.ticker,
-                category=item.category,
-                currency=item.currency,
-                amount=item.amount,
-                current_price=item.current_price,
-                purchase_price=item.purchase_price,
-                realized_profit=item.realized_profit,
-                index_group=item.index_group,
-                cma_config=item.cma_config.model_dump()
-                if item.cma_config is not None
-                else None,
-            )
-            db.add(asset)
+    for item in payload.assets:
+        asset = Asset(
+            user_id=user.id,
+            name=item.name,
+            ticker=item.ticker,
+            category=item.category,
+            currency=item.currency,
+            amount=item.amount,
+            current_price=item.current_price,
+            purchase_price=item.purchase_price,
+            realized_profit=item.realized_profit,
+            index_group=item.index_group,
+            cma_config=item.cma_config.model_dump()
+            if item.cma_config is not None
+            else None,
+        )
+        db.add(asset)
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
     return PortfolioRestoreResponse(
         restored=len(payload.assets),

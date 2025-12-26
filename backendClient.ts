@@ -235,7 +235,10 @@ export class ApiClient {
   private readonly baseUrl: string;
 
   constructor(baseUrl: string, private apiToken?: string) {
-    this.baseUrl = baseUrl.replace(/\/+$/, '');
+    const trimmed = baseUrl.replace(/\/+$/, '');
+    this.baseUrl = trimmed.endsWith('/api')
+      ? trimmed.slice(0, -4)
+      : trimmed;
   }
 
   private createHeaders(withJson = false): HeadersInit {
@@ -317,7 +320,7 @@ export class ApiClient {
   // --- Health ---
 
   async checkHealth(): Promise<BackendHealthResponse> {
-    return this.request<BackendHealthResponse>('/health', { method: 'GET' });
+    return this.request<BackendHealthResponse>('/api/health', { method: 'GET' });
   }
 
   // --- Settings ---
