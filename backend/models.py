@@ -51,6 +51,9 @@ class User(Base):
     yearly_cashflows: Mapped[List["YearlyCashflow"]] = relationship(
         "YearlyCashflow", back_populates="user", cascade="all, delete-orphan"
     )
+    external_cashflows: Mapped[List["ExternalCashflow"]] = relationship(
+        "ExternalCashflow", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Asset(Base):
@@ -160,6 +163,9 @@ class Setting(Base):
     dividends: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     usd_fx_base: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     usd_fx_now: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    benchmark_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    benchmark_return: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    benchmark_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
@@ -229,3 +235,26 @@ class YearlyCashflow(Base):
 
     user: Mapped[User] = relationship("User", back_populates="yearly_cashflows")
 
+class ExternalCashflow(Base):
+    """XIRR 계산을 위한 개별 입출금 내역 (순수 외부 유입/유출)"""
+    __tablename__ = "external_cashflows"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    amount: Mapped[float] = mapped_column(Float, nullable=False)  # 입금(+), 출금(-)
+    description: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    account_info: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    user: Mapped[User] = relationship("User", back_populates="external_cashflows")

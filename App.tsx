@@ -43,6 +43,8 @@ const App: React.FC = () => {
     updateCashBalance,
     restoreFromBackup,
     yearlyCashflows,
+    apiClient,
+    reload,
   } = usePortfolio(settings);
 
   const handleAddAsset = async (newAsset: Asset) => {
@@ -415,6 +417,10 @@ const App: React.FC = () => {
             dividends={settings.dividends}
             onUpdateDividends={() => setIsDividendModalOpen(true)}
             yearlyCashflows={yearlyCashflows}
+            benchmarkName={settings.benchmarkName}
+            benchmarkReturn={settings.benchmarkReturn}
+            apiClient={apiClient}
+            onReload={reload}
           />
         )}
         {currentView === 'LIST' && (

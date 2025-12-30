@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime, date
 from typing import List
 
-from ..models import Asset, FxTransaction, PortfolioSnapshot, Trade
+from ..models import Asset, FxTransaction, PortfolioSnapshot, Trade, ExternalCashflow
 from ..schemas import (
     AssetRead,
     DistributionItem,
@@ -10,7 +11,9 @@ from ..schemas import (
     PortfolioSnapshotRead,
     PortfolioSummary,
     TradeRead,
+    ExternalCashflowRead,
 )
+from .performance import xirr
 
 
 def to_asset_read(asset: Asset) -> AssetRead:
@@ -32,7 +35,7 @@ def to_snapshot_read(snapshot: PortfolioSnapshot) -> PortfolioSnapshotRead:
     return PortfolioSnapshotRead.model_validate(snapshot)
 
 
-def calculate_summary(assets: List[Asset]) -> PortfolioSummary:
+def calculate_summary(assets: List[Asset], external_cashflows: List[ExternalCashflow] = None) -> PortfolioSummary:
     total_value = 0.0
     total_invested = 0.0
     realized_profit_total = 0.0
@@ -59,6 +62,31 @@ def calculate_summary(assets: List[Asset]) -> PortfolioSummary:
 
     unrealized_profit_total = total_value - total_invested
 
+    # --- XIRR Calculation ---
+    xirr_rate = None
+    if external_cashflows and len(external_cashflows) > 0:
+        # XIRR expects:
+        # - Deposits into portfolio: Negative (outflow from user perspective)
+        # - Withdrawals from portfolio: Positive (inflow to user perspective)
+        # - Current Value: Positive (treated as a withdrawal if sold today)
+        
+        investable_total_value = sum(
+            a.amount * a.current_price
+            for a in assets if a.category != "부동산"
+        )
+        
+        txs = [(cf.date, cf.amount) for cf in external_cashflows]
+        # Add Terminal Value (Investable Only)
+        txs.append((date.today(), investable_total_value))
+        
+        # Sort by date
+        txs.sort(key=lambda x: x[0])
+        
+        try:
+            xirr_rate = xirr(txs)
+        except Exception:
+            xirr_rate = None
+
     category_distribution = [
         DistributionItem(name=name, value=value) for name, value in category_map.items()
     ]
@@ -73,5 +101,6 @@ def calculate_summary(assets: List[Asset]) -> PortfolioSummary:
         unrealized_profit_total=unrealized_profit_total,
         category_distribution=category_distribution,
         index_distribution=index_distribution,
+        xirr_rate=xirr_rate,
     )
 

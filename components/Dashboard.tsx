@@ -1,9 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Asset, AssetCategory, PortfolioSummary, TargetIndexAllocation, DividendEntry } from '../types';
-import { COLORS } from '../constants';
+import { COLORS, REAL_ESTATE_SHARE_RATIO } from '../constants';
 import { DashboardSummary } from './DashboardSummary';
 import { DashboardCharts } from './DashboardCharts';
-import type { BackendPortfolioSummary } from '../backendClient';
+import { BrokerageSync } from './BrokerageSync';
+import { ApiClient, type BackendPortfolioSummary } from '../backendClient';
 import type { YearlyCashflowData } from '../hooks/usePortfolio';
 
 const normalizeIndexKey = (name: string): string =>
@@ -13,7 +14,7 @@ interface DashboardProps {
   assets: Asset[];
   backendSummary?: BackendPortfolioSummary;
   targetIndexAllocations?: TargetIndexAllocation[];
-  historyData?: { date: string; value: number }[];
+  historyData?: { date: string; value: number; stockValue?: number; realEstateValue?: number }[];
   dividendTotalYear?: number;
   dividendYear?: number;
   dividends?: DividendEntry[];
@@ -21,6 +22,10 @@ interface DashboardProps {
   usdFxBase?: number;
   usdFxNow?: number;
   yearlyCashflows?: YearlyCashflowData[];
+  benchmarkName?: string;
+  benchmarkReturn?: number;
+  apiClient: ApiClient;
+  onReload: () => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -35,7 +40,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
   usdFxBase,
   usdFxNow,
   yearlyCashflows,
+  benchmarkName,
+  benchmarkReturn,
+  apiClient,
+  onReload,
 }) => {
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+
   const { summary, investableSummary, realEstate } = useMemo(() => {
     const history = historyData || [];
 
@@ -98,6 +109,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
       color: COLORS[index % COLORS.length]
     })).sort((a, b) => b.value - a.value);
 
+    const realEstateShareValue = reValue * REAL_ESTATE_SHARE_RATIO;
+    const historySeries = history.map((point) => ({
+      ...point,
+      stockValue: Math.max(0, point.value - reValue),
+      realEstateValue: realEstateShareValue,
+    }));
+
     const investableSummary: PortfolioSummary = {
       totalValue: invTotalValue,
       totalInvested: invTotalInvested,
@@ -105,13 +123,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
       unrealizedProfitTotal: invUnrealizedProfitTotal,
       categoryDistribution: invCategoryDistribution,
       indexDistribution: invIndexDistribution,
-      historyData: history,
+      historyData: historySeries,
+      xirr_rate: backendSummary?.xirr_rate ?? undefined,
     };
 
     const realEstate = {
-      totalValue: reValue,
-      totalInvested: reInvested,
-      realizedProfitTotal: reRealized,
+      totalValue: realEstateShareValue,
+      totalInvested: reInvested * REAL_ESTATE_SHARE_RATIO,
+      realizedProfitTotal: reRealized * REAL_ESTATE_SHARE_RATIO,
     };
 
     let summary: PortfolioSummary;
@@ -144,14 +163,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
         }))
         .sort((a, b) => b.value - a.value);
 
+      const realEstateFullUnrealized = reValue - reInvested;
+      const realEstateShareUnrealized = realEstate.totalValue - realEstate.totalInvested;
+
       summary = {
-        totalValue: backendSummary.total_value,
-        totalInvested: backendSummary.total_invested,
-        realizedProfitTotal: backendSummary.realized_profit_total,
-        unrealizedProfitTotal: backendSummary.unrealized_profit_total,
+        totalValue: backendSummary.total_value - reValue + realEstate.totalValue,
+        totalInvested: backendSummary.total_invested - reInvested + realEstate.totalInvested,
+        realizedProfitTotal: backendSummary.realized_profit_total - reRealized + realEstate.realizedProfitTotal,
+        unrealizedProfitTotal: backendSummary.unrealized_profit_total - realEstateFullUnrealized + realEstateShareUnrealized,
         categoryDistribution,
         indexDistribution,
-        historyData: history,
+        historyData: historySeries,
+        xirr_rate: backendSummary.xirr_rate ?? undefined,
       };
     } else {
       // 서버 summary가 없을 때는 기존과 동일하게 프론트에서 전체 요약을 계산
@@ -198,14 +221,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
         color: COLORS[index % COLORS.length],
       })).sort((a, b) => b.value - a.value);
 
+      const realEstateFullUnrealized = reValue - reInvested;
+      const realEstateShareUnrealized = realEstate.totalValue - realEstate.totalInvested;
+
       summary = {
-        totalValue,
-        totalInvested,
-        realizedProfitTotal,
-        unrealizedProfitTotal,
+        totalValue: totalValue - reValue + realEstate.totalValue,
+        totalInvested: totalInvested - reInvested + realEstate.totalInvested,
+        realizedProfitTotal: realizedProfitTotal - reRealized + realEstate.realizedProfitTotal,
+        unrealizedProfitTotal: unrealizedProfitTotal - realEstateFullUnrealized + realEstateShareUnrealized,
         categoryDistribution,
         indexDistribution,
-        historyData: history,
+        historyData: historySeries,
       };
     }
 
@@ -241,10 +267,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
     };
   }, [dividends, dividendTotalYear, dividendYear]);
 
+  // 실제 입금 원금 (연도별 순입금 합계)
+  const actualInvested = useMemo(() => {
+    if (!yearlyCashflows || yearlyCashflows.length === 0) return summary.totalInvested;
+    return yearlyCashflows.reduce((sum, cf) => sum + cf.net, 0);
+  }, [yearlyCashflows, summary.totalInvested]);
+
   // 총 손익 계산 (실현 + 평가 + 배당금)
   // 배당금은 재투자되어 원금(totalInvested)에 포함되므로, 수익으로 더해주지 않으면 수익률이 낮게 나옴.
   const totalProfit = summary.realizedProfitTotal + summary.unrealizedProfitTotal + dividendInfo.totalAllTime;
-  const profitRate = summary.totalInvested > 0 ? (totalProfit / summary.totalInvested) * 100 : 0;
+  const profitRate = actualInvested > 0 ? (totalProfit / actualInvested) * 100 : 0;
   const isPositive = totalProfit >= 0;
 
   const fxInfo = useMemo(() => {
@@ -339,13 +371,31 @@ export const Dashboard: React.FC<DashboardProps> = ({
         dividendInfo={dividendInfo}
         fxInfo={fxInfo}
         onUpdateDividends={onUpdateDividends}
+        onSyncClick={() => setIsSyncModalOpen(true)}
         realEstateSummary={realEstate}
+        actualInvested={actualInvested}
       />
       <DashboardCharts
         summary={investableSummary}
         rebalanceNotices={rebalanceNotices}
         yearlyStats={yearlyCashflows}
+        benchmarkName={benchmarkName}
+        benchmarkReturn={benchmarkReturn}
+        actualInvested={actualInvested}
       />
+
+      {/* Sync Modal */}
+      {isSyncModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-md animate-in zoom-in-95 duration-200">
+            <BrokerageSync
+              apiClient={apiClient}
+              onSyncComplete={onReload}
+              onClose={() => setIsSyncModalOpen(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
