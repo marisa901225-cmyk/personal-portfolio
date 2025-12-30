@@ -32,6 +32,26 @@ def create_asset(payload: AssetCreate, db: Session = Depends(get_db)) -> AssetRe
         cma_config=payload.cma_config.model_dump() if payload.cma_config is not None else None,
     )
     db.add(asset)
+    db.flush()  # Ensure asset.id is assigned
+
+    if payload.amount > 0:
+        # Create a matching BUY trade for initial balance
+        trade_price = (
+            payload.purchase_price
+            if payload.purchase_price is not None
+            else payload.current_price
+        )
+        trade = Trade(
+            user_id=user.id,
+            asset_id=asset.id,
+            type="BUY",
+            quantity=payload.amount,
+            price=trade_price,
+            timestamp=datetime.utcnow(),
+            note="초기 자산 등록",
+        )
+        db.add(trade)
+
     try:
         db.commit()
     except Exception:

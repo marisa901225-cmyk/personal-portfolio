@@ -33,4 +33,4 @@ backend/__pycache__/
 # Private Backup Files
 backend/crontab.bak
 backend/backups/
-**/kis_devlp.yaml
+

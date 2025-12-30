@@ -22,6 +22,7 @@ from .routers.portfolio import router as portfolio_router
 from .routers.settings import router as settings_router
 from .routers.snapshots import router as snapshots_router
 from .routers.trades import router as trades_router
+from .routers.cashflows import router as cashflows_router
 from .services.users import get_or_create_single_user
 
 app = FastAPI(title="MyAsset Portfolio Backend")
@@ -90,6 +91,7 @@ app.include_router(trades_router)
 app.include_router(exchanges_router)
 app.include_router(settings_router)
 app.include_router(snapshots_router)
+app.include_router(cashflows_router)
 
 
 @app.post(

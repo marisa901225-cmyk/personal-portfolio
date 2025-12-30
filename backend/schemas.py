@@ -188,3 +188,33 @@ class TransactionResult(BaseModel):
     success: bool = True
     applied: int = 0
     message: Optional[str] = None
+
+
+# ========== YearlyCashflow (연도별 입출금) ==========
+
+class YearlyCashflowBase(BaseModel):
+    year: int
+    deposit: float = 0.0
+    withdrawal: float = 0.0
+    note: Optional[str] = None
+
+
+class YearlyCashflowCreate(YearlyCashflowBase):
+    pass
+
+
+class YearlyCashflowUpdate(BaseModel):
+    year: Optional[int] = None
+    deposit: Optional[float] = None
+    withdrawal: Optional[float] = None
+    note: Optional[str] = None
+
+
+class YearlyCashflowRead(YearlyCashflowBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    net: float = 0.0  # deposit - withdrawal (계산된 값)
+    created_at: datetime
+    updated_at: datetime
+

@@ -7,6 +7,7 @@ import {
   mapBackendAssetToFrontend,
   mapBackendTradesToFrontend,
   BackendPortfolioSummary,
+  BackendYearlyCashflow,
 } from '../backendClient';
 import { CmaConfig } from '../cmaConfig';
 import type { ImportedAssetSnapshot } from './portfolioTypes';
@@ -17,6 +18,14 @@ import { alertError } from '../errors';
 interface HistoryPoint {
   date: string;
   value: number;
+}
+
+export interface YearlyCashflowData {
+  year: string;
+  deposit: number;
+  withdrawal: number;
+  net: number;
+  note?: string;
 }
 
 interface UsePortfolioResult {
@@ -42,6 +51,7 @@ interface UsePortfolioResult {
   ) => Promise<void>;
   updateCashBalance: (id: string, newBalance: number, cmaConfig?: CmaConfig | null) => Promise<void>;
   restoreFromBackup: (snapshot: ImportedAssetSnapshot[]) => Promise<void>;
+  yearlyCashflows: YearlyCashflowData[];
 }
 
 export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
@@ -50,6 +60,7 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
   const [historyData, setHistoryData] = useState<HistoryPoint[]>([]);
   const [summaryFromServer, setSummaryFromServer] = useState<BackendPortfolioSummary | undefined>(undefined);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [yearlyCashflows, setYearlyCashflows] = useState<YearlyCashflowData[]>([]);
 
   const isRemoteEnabled = Boolean(settings.serverUrl && settings.apiToken);
 
@@ -100,6 +111,27 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
     }
   };
 
+  const loadCashflowsFromServer = async (): Promise<void> => {
+    if (!isRemoteEnabled) {
+      setYearlyCashflows([]);
+      return;
+    }
+
+    try {
+      const data = await apiClient.fetchCashflows();
+      const mapped = data.map((cf) => ({
+        year: cf.year.toString(),
+        deposit: cf.deposit,
+        withdrawal: cf.withdrawal,
+        net: cf.net,
+        note: cf.note ?? undefined,
+      }));
+      setYearlyCashflows(mapped);
+    } catch (error) {
+      console.warn('Failed to load yearly cashflows', error);
+    }
+  };
+
   useEffect(() => {
     if (!isRemoteEnabled) {
       setHistoryData([]);
@@ -109,6 +141,7 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
 
     void loadPortfolioFromServer();
     void loadHistoryFromServer();
+    void loadCashflowsFromServer();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRemoteEnabled, apiClient]); // apiClient changes when settings change
 
@@ -484,5 +517,6 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
     updateAsset,
     updateCashBalance,
     restoreFromBackup,
+    yearlyCashflows,
   };
 };

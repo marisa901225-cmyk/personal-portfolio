@@ -153,7 +153,7 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
 
                 {dividendInfo.hasData ? (
                     <div className="mt-4 h-[60px] w-full">
-                        <ResponsiveContainer width="100%" height="100%">
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={60}>
                             <BarChart data={dividendInfo.list}>
                                 <Tooltip
                                     cursor={{ fill: 'transparent' }}

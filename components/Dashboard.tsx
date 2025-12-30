@@ -4,6 +4,7 @@ import { COLORS } from '../constants';
 import { DashboardSummary } from './DashboardSummary';
 import { DashboardCharts } from './DashboardCharts';
 import type { BackendPortfolioSummary } from '../backendClient';
+import type { YearlyCashflowData } from '../hooks/usePortfolio';
 
 const normalizeIndexKey = (name: string): string =>
   name.replace(/\s+/g, '').toUpperCase();
@@ -19,6 +20,7 @@ interface DashboardProps {
   onUpdateDividends?: () => void;
   usdFxBase?: number;
   usdFxNow?: number;
+  yearlyCashflows?: YearlyCashflowData[];
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -32,6 +34,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onUpdateDividends,
   usdFxBase,
   usdFxNow,
+  yearlyCashflows,
 }) => {
   const { summary, investableSummary, realEstate } = useMemo(() => {
     const history = historyData || [];
@@ -341,6 +344,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       <DashboardCharts
         summary={investableSummary}
         rebalanceNotices={rebalanceNotices}
+        yearlyStats={yearlyCashflows}
       />
     </div>
   );
