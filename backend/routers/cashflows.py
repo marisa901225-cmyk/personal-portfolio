@@ -1,124 +1,75 @@
-from __future__ import annotations
-
-from datetime import datetime
-from typing import List
-
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
+from typing import List
+import os
+import shutil
+import tempfile
 
-from ..auth import verify_api_token
 from ..db import get_db
-from ..models import YearlyCashflow
-from ..schemas import YearlyCashflowCreate, YearlyCashflowRead, YearlyCashflowUpdate
-from ..services.users import get_or_create_single_user
+from ..models import ExternalCashflow
+from ..schemas import ExternalCashflowRead, ExternalCashflowCreate
+from ..services.brokerage_parser import get_parser
 
-router = APIRouter(prefix="/api/cashflows", tags=["cashflows"], dependencies=[Depends(verify_api_token)])
+router = APIRouter(prefix="/api/cashflows", tags=["cashflows"])
 
+@router.get("/", response_model=List[ExternalCashflowRead])
+def get_cashflows(db: Session = Depends(get_db), user_id: int = 1):
+    return db.query(ExternalCashflow).filter(ExternalCashflow.user_id == user_id).order_by(ExternalCashflow.date.desc()).all()
 
-def to_cashflow_read(record: YearlyCashflow) -> YearlyCashflowRead:
-    """YearlyCashflow 모델을 Read 스키마로 변환 (net 계산 포함)"""
-    return YearlyCashflowRead(
-        id=record.id,
-        year=record.year,
-        deposit=record.deposit,
-        withdrawal=record.withdrawal,
-        net=record.deposit - record.withdrawal,
-        note=record.note,
-        created_at=record.created_at,
-        updated_at=record.updated_at,
-    )
-
-
-@router.get("", response_model=List[YearlyCashflowRead])
-def list_cashflows(db: Session = Depends(get_db)) -> List[YearlyCashflowRead]:
-    """연도별 입출금 내역 전체 조회 (연도 오름차순)"""
-    user = get_or_create_single_user(db)
-    records = (
-        db.query(YearlyCashflow)
-        .filter(YearlyCashflow.user_id == user.id)
-        .order_by(YearlyCashflow.year.asc())
-        .all()
-    )
-    return [to_cashflow_read(r) for r in records]
-
-
-@router.post("", response_model=YearlyCashflowRead)
-def create_cashflow(payload: YearlyCashflowCreate, db: Session = Depends(get_db)) -> YearlyCashflowRead:
-    """새 연도별 입출금 내역 생성"""
-    user = get_or_create_single_user(db)
+@router.post("/upload")
+async def upload_statement(
+    file: UploadFile = File(...), 
+    db: Session = Depends(get_db), 
+    user_id: int = 1
+):
+    parser = get_parser(file.filename)
+    if not parser:
+        raise HTTPException(status_code=400, detail="Unsupported brokerage or file format. Currently supporting '삼성' in filename.")
     
-    # 같은 연도가 이미 있는지 확인
-    existing = (
-        db.query(YearlyCashflow)
-        .filter(YearlyCashflow.user_id == user.id, YearlyCashflow.year == payload.year)
-        .first()
-    )
-    if existing:
-        raise HTTPException(status_code=400, detail=f"Year {payload.year} already exists. Use PATCH to update.")
-    
-    record = YearlyCashflow(
-        user_id=user.id,
-        year=payload.year,
-        deposit=payload.deposit,
-        withdrawal=payload.withdrawal,
-        note=payload.note,
-    )
-    db.add(record)
+    # Save to temp file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename)[1]) as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        tmp_path = tmp.name
+        
     try:
+        new_items = parser.parse(tmp_path, user_id)
+        
+        added_count = 0
+        skipped_count = 0
+        
+        for item in new_items:
+            # Simple deduplication: Check if same date, amount and description exists
+            exists = db.query(ExternalCashflow).filter(
+                ExternalCashflow.user_id == user_id,
+                ExternalCashflow.date == item.date,
+                ExternalCashflow.amount == item.amount,
+                ExternalCashflow.description == item.description
+            ).first()
+            
+            if not exists:
+                db_item = ExternalCashflow(
+                    user_id=user_id,
+                    date=item.date,
+                    amount=item.amount,
+                    description=item.description,
+                    account_info=item.account_info
+                )
+                db.add(db_item)
+                added_count += 1
+            else:
+                skipped_count += 1
+        
         db.commit()
-    except Exception:
+        return {
+            "message": "Upload successful",
+            "added": added_count,
+            "skipped": skipped_count,
+            "total_parsed": len(new_items)
+        }
+        
+    except Exception as e:
         db.rollback()
-        raise
-    db.refresh(record)
-    return to_cashflow_read(record)
-
-
-@router.patch("/{cashflow_id}", response_model=YearlyCashflowRead)
-def update_cashflow(
-    cashflow_id: int,
-    payload: YearlyCashflowUpdate,
-    db: Session = Depends(get_db),
-) -> YearlyCashflowRead:
-    """연도별 입출금 내역 수정"""
-    user = get_or_create_single_user(db)
-    record = (
-        db.query(YearlyCashflow)
-        .filter(YearlyCashflow.id == cashflow_id, YearlyCashflow.user_id == user.id)
-        .first()
-    )
-    if not record:
-        raise HTTPException(status_code=404, detail="Cashflow record not found")
-    
-    data = payload.model_dump(exclude_unset=True)
-    for field, value in data.items():
-        setattr(record, field, value)
-    record.updated_at = datetime.utcnow()
-    
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    db.refresh(record)
-    return to_cashflow_read(record)
-
-
-@router.delete("/{cashflow_id}")
-def delete_cashflow(cashflow_id: int, db: Session = Depends(get_db)) -> dict:
-    """연도별 입출금 내역 삭제"""
-    user = get_or_create_single_user(db)
-    record = (
-        db.query(YearlyCashflow)
-        .filter(YearlyCashflow.id == cashflow_id, YearlyCashflow.user_id == user.id)
-        .first()
-    )
-    if not record:
-        raise HTTPException(status_code=404, detail="Cashflow record not found")
-    
-    db.delete(record)
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    return {"status": "ok"}
+        raise HTTPException(status_code=500, detail=f"Parsing failed: {str(e)}")
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)

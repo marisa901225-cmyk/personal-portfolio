@@ -67,7 +67,8 @@ export interface PortfolioSummary {
   unrealizedProfitTotal: number;
   categoryDistribution: { name: string; value: number; color: string }[];
   indexDistribution: { name: string; value: number; color: string }[];
-  historyData: { date: string; value: number }[];
+  xirr_rate?: number; // 연평균 수익률
+  historyData: { date: string; value: number; stockValue?: number; realEstateValue?: number }[];
 }
 
 export type ViewState = 'DASHBOARD' | 'LIST' | 'TRADES' | 'EXCHANGE' | 'ADD' | 'SETTINGS';
@@ -91,6 +92,10 @@ export interface AppSettings {
   dividendYear?: number;
   /** 연도별 배당 합계 리스트 (서버/로컬에 함께 저장) */
   dividends?: DividendEntry[];
+  /** 시장지수/벤치마크 이름 (예: SPY TR) */
+  benchmarkName?: string;
+  /** 시장지수 수익률 (%) */
+  benchmarkReturn?: number;
   // 외관 설정
   /** 배경 이미지 사용 여부 */
   bgEnabled?: boolean;

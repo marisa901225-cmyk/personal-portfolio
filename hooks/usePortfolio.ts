@@ -18,6 +18,8 @@ import { alertError } from '../errors';
 interface HistoryPoint {
   date: string;
   value: number;
+  stockValue?: number;
+  realEstateValue?: number;
 }
 
 export interface YearlyCashflowData {
@@ -27,6 +29,8 @@ export interface YearlyCashflowData {
   net: number;
   note?: string;
 }
+
+const HISTORY_DAYS = 365;
 
 interface UsePortfolioResult {
   assets: Asset[];
@@ -52,6 +56,8 @@ interface UsePortfolioResult {
   updateCashBalance: (id: string, newBalance: number, cmaConfig?: CmaConfig | null) => Promise<void>;
   restoreFromBackup: (snapshot: ImportedAssetSnapshot[]) => Promise<void>;
   yearlyCashflows: YearlyCashflowData[];
+  apiClient: ApiClient;
+  reload: () => Promise<void>;
 }
 
 export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
@@ -93,7 +99,7 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
     }
 
     try {
-      const data = await apiClient.fetchSnapshots(180);
+      const data = await apiClient.fetchSnapshots(HISTORY_DAYS);
       const mapped = data.map((snap) => {
         const d = new Date(snap.snapshot_at);
         const label = d.toLocaleDateString('ko-KR', {
@@ -518,5 +524,11 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
     updateCashBalance,
     restoreFromBackup,
     yearlyCashflows,
+    apiClient,
+    reload: async () => {
+      await loadPortfolioFromServer();
+      await loadCashflowsFromServer();
+      await loadHistoryFromServer();
+    },
   };
 };

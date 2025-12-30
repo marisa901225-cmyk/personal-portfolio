@@ -15,6 +15,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   dividendTotalYear: undefined,
   dividendYear: undefined,
   dividends: [],
+  benchmarkName: undefined,
+  benchmarkReturn: undefined,
 };
 
 export const useSettings = () => {
@@ -41,6 +43,8 @@ export const useSettings = () => {
       })),
       usd_fx_base: current.usdFxBase ?? null,
       usd_fx_now: current.usdFxNow ?? null,
+      benchmark_name: current.benchmarkName ?? null,
+      benchmark_return: current.benchmarkReturn ?? null,
     };
 
     try {
@@ -81,6 +85,14 @@ export const useSettings = () => {
           ...prev,
           usdFxBase: data.usd_fx_base ?? undefined,
           usdFxNow: data.usd_fx_now ?? undefined,
+        }));
+      }
+
+      if (data.benchmark_name !== undefined || data.benchmark_return !== undefined) {
+        setSettings((prev) => ({
+          ...prev,
+          benchmarkName: data.benchmark_name ?? undefined,
+          benchmarkReturn: data.benchmark_return ?? undefined,
         }));
       }
     } catch (error) {
@@ -136,6 +148,14 @@ export const useSettings = () => {
             ...prev,
             usdFxBase: data.usd_fx_base ?? undefined,
             usdFxNow: data.usd_fx_now ?? undefined,
+          }));
+        }
+
+        if (data.benchmark_name !== undefined || data.benchmark_return !== undefined) {
+          setSettings((prev) => ({
+            ...prev,
+            benchmarkName: data.benchmark_name ?? undefined,
+            benchmarkReturn: data.benchmark_return ?? undefined,
           }));
         }
       } catch (error) {

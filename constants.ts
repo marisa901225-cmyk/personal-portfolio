@@ -11,6 +11,10 @@ export const formatCurrency = (value: number) => {
   }).format(value);
 };
 
+export const REAL_ESTATE_TOTAL_PURCHASE = 145000000;
+export const REAL_ESTATE_MY_SHARE = 53750000;
+export const REAL_ESTATE_SHARE_RATIO = REAL_ESTATE_MY_SHARE / REAL_ESTATE_TOTAL_PURCHASE;
+
 export const formatCompactNumber = (number: number) => {
   const formatter = Intl.NumberFormat("ko-KR", { notation: "compact" });
   return formatter.format(number);

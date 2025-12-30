@@ -48,6 +48,8 @@ export interface BackendSettings {
   dividends?: BackendDividend[] | null;
   usd_fx_base?: number | null;
   usd_fx_now?: number | null;
+  benchmark_name?: string | null;
+  benchmark_return?: number | null;
 }
 
 export interface BackendAsset {
@@ -109,6 +111,7 @@ export interface BackendPortfolioSummary {
   unrealized_profit_total: number;
   category_distribution: BackendDistributionItem[];
   index_distribution: BackendDistributionItem[];
+  xirr_rate?: number | null;
 }
 
 export interface BackendPortfolioResponse {
@@ -267,9 +270,10 @@ export class ApiClient {
     options: RequestInit = {},
   ): Promise<T> {
     const url = `${this.baseUrl}${endpoint}`;
+    const isFormData = options.body instanceof FormData;
     const headers = {
       ...this.createHeaders(
-        options.method !== 'GET' && options.method !== 'DELETE',
+        options.method !== 'GET' && options.method !== 'DELETE' && !isFormData,
       ),
       ...(options.headers || {}),
     };
@@ -515,5 +519,26 @@ export class ApiClient {
       method: 'DELETE',
     });
   }
-}
 
+  async uploadStatement(file: File): Promise<{
+    message: string;
+    added: number;
+    skipped: number;
+    total_parsed: number;
+  }> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    return this.request<{
+      message: string;
+      added: number;
+      skipped: number;
+      total_parsed: number;
+    }>('/api/cashflows/upload', {
+      method: 'POST',
+      body: formData,
+      // FormData 자동으로 Content-Type: multipart/form-data 설정됨
+      headers: {},
+    });
+  }
+}

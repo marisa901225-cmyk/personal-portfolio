@@ -131,6 +131,8 @@ class SettingsRead(BaseModel):
     dividends: Optional[List[DividendRecord]] = None
     usd_fx_base: Optional[float] = None
     usd_fx_now: Optional[float] = None
+    benchmark_name: Optional[str] = None
+    benchmark_return: Optional[float] = None
 
 
 class SettingsUpdate(BaseModel):
@@ -141,6 +143,8 @@ class SettingsUpdate(BaseModel):
     dividend_total: Optional[float] = None
     usd_fx_base: Optional[float] = None
     usd_fx_now: Optional[float] = None
+    benchmark_name: Optional[str] = None
+    benchmark_return: Optional[float] = None
 
 
 class DistributionItem(BaseModel):
@@ -155,6 +159,7 @@ class PortfolioSummary(BaseModel):
     unrealized_profit_total: float
     category_distribution: List[DistributionItem] = []
     index_distribution: List[DistributionItem] = []
+    xirr_rate: Optional[float] = None  # 연평균 수익률 (XIRR)
 
 
 class PortfolioResponse(BaseModel):
@@ -218,3 +223,24 @@ class YearlyCashflowRead(YearlyCashflowBase):
     created_at: datetime
     updated_at: datetime
 
+
+# ========== ExternalCashflow (개별 입출금) ==========
+
+class ExternalCashflowBase(BaseModel):
+    date: date
+    amount: float
+    description: Optional[str] = None
+    account_info: Optional[str] = None
+
+
+class ExternalCashflowCreate(ExternalCashflowBase):
+    pass
+
+
+class ExternalCashflowRead(ExternalCashflowBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_id: int
+    created_at: datetime
+    updated_at: datetime

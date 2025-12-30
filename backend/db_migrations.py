@@ -35,6 +35,12 @@ def _migrate_settings_table() -> None:
         statements.append("ALTER TABLE settings ADD COLUMN usd_fx_base FLOAT")
     if "usd_fx_now" not in columns:
         statements.append("ALTER TABLE settings ADD COLUMN usd_fx_now FLOAT")
+    if "benchmark_name" not in columns:
+        statements.append("ALTER TABLE settings ADD COLUMN benchmark_name VARCHAR(100)")
+    if "benchmark_return" not in columns:
+        statements.append("ALTER TABLE settings ADD COLUMN benchmark_return FLOAT")
+    if "benchmark_updated_at" not in columns:
+        statements.append("ALTER TABLE settings ADD COLUMN benchmark_updated_at DATETIME")
 
     if not statements:
         return
@@ -64,4 +70,3 @@ def _migrate_assets_table() -> None:
     with engine.begin() as conn:
         for stmt in statements:
             conn.execute(text(stmt))
-

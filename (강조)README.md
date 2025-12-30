@@ -189,3 +189,9 @@ curl -sS -H "X-API-Token: $API_TOKEN" http://127.0.0.1:8000/api/settings
 ```bash
 sqlite3 backend/portfolio.db "SELECT COUNT(*) FROM assets;"
 ```
+## 브랜치 정보
+
+| 브랜치 | 설명 |
+|--------|------|
+| `main` | 메인 브랜치 |
+| `feature/yearly-cashflow` | 연도별 입출금 관리 기능 (검토 중) |

@@ -1,8 +1,8 @@
 import React from 'react';
 import { PortfolioSummary, DividendEntry } from '../types';
-import { formatCurrency } from '../constants';
+import { formatCurrency, REAL_ESTATE_MY_SHARE } from '../constants';
 import { Tooltip, BarChart, Bar, ResponsiveContainer } from 'recharts';
-import { Wallet, TrendingUp, ArrowUpRight, ArrowDownRight, Edit2, Building } from 'lucide-react';
+import { Wallet, TrendingUp, ArrowUpRight, ArrowDownRight, Edit2, Building, RefreshCw } from 'lucide-react';
 
 interface DashboardSummaryProps {
     summary: PortfolioSummary;
@@ -29,6 +29,8 @@ interface DashboardSummaryProps {
         usdFxNow: number;
     };
     onUpdateDividends?: () => void;
+    onSyncClick?: () => void;
+    actualInvested?: number;  // 연도별 입출금 합계 (실제 원금)
 }
 
 export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
@@ -39,7 +41,9 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
     dividendInfo,
     fxInfo,
     onUpdateDividends,
+    onSyncClick,
     realEstateSummary,
+    actualInvested,
 }) => {
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -58,6 +62,26 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
                     </span>
                     <span className="text-slate-400 ml-2">수익률 (배당포함)</span>
                 </div>
+                {summary.xirr_rate !== undefined && summary.xirr_rate !== null && (
+                    <div className="mt-2 text-sm flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600 border border-indigo-100">XIRR</span>
+                            <span className={`font-bold ${summary.xirr_rate >= 0 ? 'text-red-500' : 'text-blue-500'}`}>
+                                {summary.xirr_rate >= 0 ? '+' : ''}{(summary.xirr_rate * 100).toFixed(2)}%
+                            </span>
+                            <span className="text-slate-400 text-xs">연평균 수익률</span>
+                        </div>
+                        {onSyncClick && (
+                            <button
+                                onClick={onSyncClick}
+                                className="p-1.5 hover:bg-indigo-50 rounded-lg text-slate-400 hover:text-indigo-600 transition-colors group"
+                                title="증권사 내역 동기화"
+                            >
+                                <RefreshCw size={14} className="group-hover:rotate-180 transition-transform duration-500" />
+                            </button>
+                        )}
+                    </div>
+                )}
                 {fxInfo.enabled && (
                     <div className="mt-2 text-xs text-slate-500">
                         추정 환차{fxInfo.fxPnl >= 0 ? '익' : '손'} (USD 자산 기준){' '}
@@ -87,8 +111,11 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
                     <div className="mt-4 text-sm text-slate-400">
                         투자 원금: {formatCurrency(realEstateSummary.totalInvested)}
                     </div>
+                    <div className="mt-0.5 text-xs text-slate-500">
+                        내 지분(매입): {formatCurrency(REAL_ESTATE_MY_SHARE)}
+                    </div>
                     <div className="mt-1 text-xs text-slate-500">
-                        평가손익: {' '}
+                        평가손익:{' '}
                         <span className={(realEstateSummary.totalValue - realEstateSummary.totalInvested) >= 0 ? 'text-red-500' : 'text-blue-500'}>
                             {formatCurrency(realEstateSummary.totalValue - realEstateSummary.totalInvested)}
                         </span>
@@ -107,7 +134,7 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
                     </div>
                 </div>
                 <div className="mt-4 text-sm text-slate-400">
-                    총 투자 원금: {formatCurrency(summary.totalInvested)}
+                    순입금 원금: {formatCurrency(actualInvested ?? summary.totalInvested)}
                 </div>
                 <div className="mt-1 text-xs text-slate-500 space-y-0.5">
                     <div>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
+import logging
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -15,8 +16,45 @@ from ..schemas import (
     TargetIndexAllocation,
 )
 from ..services.users import get_or_create_single_user
+from ..services.benchmark import compute_calendar_year_total_return, DEFAULT_BENCHMARK_NAME
 
 router = APIRouter(prefix="/api", tags=["portfolio"], dependencies=[Depends(verify_api_token)])
+logger = logging.getLogger(__name__)
+
+def _normalize_benchmark_name(name: str) -> str:
+    return name.replace(" ", "").upper()
+
+
+def _is_default_benchmark_name(name: str) -> bool:
+    normalized = _normalize_benchmark_name(name)
+    base = _normalize_benchmark_name(DEFAULT_BENCHMARK_NAME)
+    return normalized.startswith(base)
+
+
+def _should_refresh_benchmark(setting: Setting) -> bool:
+    if setting.benchmark_name and not _is_default_benchmark_name(setting.benchmark_name):
+        return False
+    if setting.benchmark_return is None:
+        return True
+    if setting.benchmark_updated_at is None:
+        return True
+    return setting.benchmark_updated_at.date() != datetime.utcnow().date()
+
+
+def _refresh_benchmark_if_needed(setting: Setting, db: Session) -> None:
+    if not _should_refresh_benchmark(setting):
+        return
+    try:
+        label, benchmark_return, _ = compute_calendar_year_total_return()
+    except Exception as exc:
+        logger.warning("Benchmark update failed: %s", exc)
+        return
+
+    setting.benchmark_name = label
+    setting.benchmark_return = benchmark_return
+    setting.benchmark_updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(setting)
 
 
 def _to_settings_read(setting: Setting) -> SettingsRead:
@@ -40,6 +78,8 @@ def _to_settings_read(setting: Setting) -> SettingsRead:
         dividends=dividends,
         usd_fx_base=setting.usd_fx_base,
         usd_fx_now=setting.usd_fx_now,
+        benchmark_name=setting.benchmark_name,
+        benchmark_return=setting.benchmark_return,
     )
 
 
@@ -68,6 +108,7 @@ def get_settings(db: Session = Depends(get_db)) -> SettingsRead:
         db.commit()
         db.refresh(setting)
 
+    _refresh_benchmark_if_needed(setting, db)
     return _to_settings_read(setting)
 
 
@@ -103,10 +144,18 @@ def update_settings(
         setting.usd_fx_base = payload.usd_fx_base
     if "usd_fx_now" in payload.model_fields_set:
         setting.usd_fx_now = payload.usd_fx_now
+    if "benchmark_name" in payload.model_fields_set:
+        setting.benchmark_name = payload.benchmark_name
+    if "benchmark_return" in payload.model_fields_set:
+        setting.benchmark_return = payload.benchmark_return
+    if (
+        "benchmark_name" in payload.model_fields_set
+        or "benchmark_return" in payload.model_fields_set
+    ):
+        setting.benchmark_updated_at = datetime.utcnow()
 
     setting.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(setting)
 
     return _to_settings_read(setting)
-

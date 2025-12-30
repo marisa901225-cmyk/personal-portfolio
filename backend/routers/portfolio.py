@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import verify_api_token
 from ..db import get_db
-from ..models import Asset, Trade
+from ..models import Asset, Trade, ExternalCashflow
 from ..schemas import PortfolioResponse, PortfolioRestoreRequest, PortfolioRestoreResponse
 from ..services.portfolio import calculate_summary, to_asset_read, to_trade_read
 from ..services.users import get_or_create_single_user
@@ -32,7 +32,13 @@ def get_portfolio(db: Session = Depends(get_db)) -> PortfolioResponse:
         .all()
     )
 
-    summary = calculate_summary(assets)
+    external_cashflows = (
+        db.query(ExternalCashflow)
+        .filter(ExternalCashflow.user_id == user.id)
+        .all()
+    )
+
+    summary = calculate_summary(assets, external_cashflows)
     return PortfolioResponse(
         assets=[to_asset_read(a) for a in assets],
         trades=[to_trade_read(t) for t in trades],
