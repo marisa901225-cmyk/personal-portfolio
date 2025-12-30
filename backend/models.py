@@ -48,6 +48,9 @@ class User(Base):
     snapshots: Mapped[List["PortfolioSnapshot"]] = relationship(
         "PortfolioSnapshot", back_populates="user", cascade="all, delete-orphan"
     )
+    yearly_cashflows: Mapped[List["YearlyCashflow"]] = relationship(
+        "YearlyCashflow", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Asset(Base):
@@ -200,3 +203,29 @@ class PortfolioSnapshot(Base):
     )
 
     user: Mapped[User] = relationship("User", back_populates="snapshots")
+
+
+class YearlyCashflow(Base):
+    """연도별 입출금 내역 (원금 흐름 추적용)"""
+    __tablename__ = "yearly_cashflows"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    deposit: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    withdrawal: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    user: Mapped[User] = relationship("User", back_populates="yearly_cashflows")
+

@@ -154,6 +154,17 @@ export interface BackendFxRateResponse {
   rate: number;
 }
 
+export interface BackendYearlyCashflow {
+  id: number;
+  year: number;
+  deposit: number;
+  withdrawal: number;
+  net: number;
+  note?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface BackendTickerInfo {
   symbol: string;
   name: string;
@@ -465,4 +476,44 @@ export class ApiClient {
       method: 'DELETE',
     });
   }
+
+  // --- Yearly Cashflows (연도별 입출금) ---
+
+  async fetchCashflows(): Promise<BackendYearlyCashflow[]> {
+    return this.request<BackendYearlyCashflow[]>('/api/cashflows', { method: 'GET' });
+  }
+
+  async createCashflow(payload: {
+    year: number;
+    deposit: number;
+    withdrawal: number;
+    note?: string | null;
+  }): Promise<BackendYearlyCashflow> {
+    return this.request<BackendYearlyCashflow>('/api/cashflows', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateCashflow(
+    cashflowId: number,
+    payload: {
+      year?: number;
+      deposit?: number;
+      withdrawal?: number;
+      note?: string | null;
+    },
+  ): Promise<BackendYearlyCashflow> {
+    return this.request<BackendYearlyCashflow>(`/api/cashflows/${cashflowId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteCashflow(cashflowId: number): Promise<void> {
+    return this.request<void>(`/api/cashflows/${cashflowId}`, {
+      method: 'DELETE',
+    });
+  }
 }
+
