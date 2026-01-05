@@ -34,3 +34,6 @@ backend/__pycache__/
 backend/crontab.bak
 backend/backups/
 
+*.db-shm
+*.db-wal
+삼성*.xlsx

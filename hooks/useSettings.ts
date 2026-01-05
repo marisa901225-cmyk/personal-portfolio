@@ -12,9 +12,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   ],
   usdFxBase: undefined,
   usdFxNow: undefined,
-  dividendTotalYear: undefined,
-  dividendYear: undefined,
-  dividends: [],
   benchmarkName: undefined,
   benchmarkReturn: undefined,
 };
@@ -35,12 +32,6 @@ export const useSettings = () => {
           target_weight: a.targetWeight,
         })),
       server_url: current.serverUrl,
-      dividend_year: current.dividendYear ?? null,
-      dividend_total: current.dividendTotalYear ?? null,
-      dividends: (current.dividends || []).map((d) => ({
-        year: d.year,
-        total: d.total,
-      })),
       usd_fx_base: current.usdFxBase ?? null,
       usd_fx_now: current.usdFxNow ?? null,
       benchmark_name: current.benchmarkName ?? null,
@@ -58,25 +49,6 @@ export const useSettings = () => {
         setSettings((prev) => ({
           ...prev,
           targetIndexAllocations: mapped,
-        }));
-      }
-
-      if (typeof data.dividend_year === 'number' || typeof data.dividend_total === 'number') {
-        setSettings((prev) => ({
-          ...prev,
-          dividendYear: data.dividend_year ?? prev.dividendYear,
-          dividendTotalYear: data.dividend_total ?? prev.dividendTotalYear,
-        }));
-      }
-
-      if (Array.isArray(data.dividends)) {
-        const mappedDividends: DividendEntry[] = data.dividends.map((d) => ({
-          year: d.year,
-          total: d.total,
-        }));
-        setSettings((prev) => ({
-          ...prev,
-          dividends: mappedDividends,
         }));
       }
 
@@ -121,25 +93,6 @@ export const useSettings = () => {
           setSettings((prev) => ({
             ...prev,
             targetIndexAllocations: mapped,
-          }));
-        }
-
-        if (typeof data.dividend_year === 'number' || typeof data.dividend_total === 'number') {
-          setSettings((prev) => ({
-            ...prev,
-            dividendYear: data.dividend_year ?? prev.dividendYear,
-            dividendTotalYear: data.dividend_total ?? prev.dividendTotalYear,
-          }));
-        }
-
-        if (Array.isArray(data.dividends)) {
-          const mappedDividends: DividendEntry[] = data.dividends.map((d) => ({
-            year: d.year,
-            total: d.total,
-          }));
-          setSettings((prev) => ({
-            ...prev,
-            dividends: mappedDividends,
           }));
         }
 

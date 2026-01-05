@@ -92,46 +92,20 @@ def refine_portfolio_for_ai(
     # Determine if we're analyzing a historical period
     is_historical = month is not None or quarter is not None or half is not None or year != date.today().year
 
-    # ========== Portfolio Summary (Historical vs Current) ==========
-    if is_historical:
-        # For historical periods, get the latest snapshot within that period
-        portfolio_summary = con.execute(f"""
-            SELECT
-                0 as total_assets, -- assets count from snapshots not easily available
-                total_value,
-                total_invested,
-                realized_profit_total as total_realized_profit,
-                unrealized_profit_total as total_unrealized_profit
-            FROM sqlite_db.portfolio_snapshots
-            WHERE snapshot_at < '{end_date}'
-            ORDER BY snapshot_at DESC
-            LIMIT 1
-        """).fetchone()
-        
-        # If no snapshot found for that period, fall back to current (though it won't be accurate)
-        if not portfolio_summary:
-            portfolio_summary = con.execute("""
-                SELECT
-                    COUNT(*) as total_assets,
-                    COALESCE(SUM(amount * current_price), 0) as total_value,
-                    COALESCE(SUM(amount * COALESCE(purchase_price, current_price)), 0) as total_invested,
-                    COALESCE(SUM(realized_profit), 0) as total_realized_profit,
-                    COALESCE(SUM(amount * current_price) - SUM(amount * COALESCE(purchase_price, current_price)), 0) as total_unrealized_profit
-                FROM sqlite_db.assets
-                WHERE deleted_at IS NULL
-            """).fetchone()
-    else:
-        # For current state (no filters), use assets table
-        portfolio_summary = con.execute("""
-            SELECT
-                COUNT(*) as total_assets,
-                COALESCE(SUM(amount * current_price), 0) as total_value,
-                COALESCE(SUM(amount * COALESCE(purchase_price, current_price)), 0) as total_invested,
-                COALESCE(SUM(realized_profit), 0) as total_realized_profit,
-                COALESCE(SUM(amount * current_price) - SUM(amount * COALESCE(purchase_price, current_price)), 0) as total_unrealized_profit
-            FROM sqlite_db.assets
-            WHERE deleted_at IS NULL
-        """).fetchone()
+    asset_filter = "deleted_at IS NULL AND (category IS NULL OR category != '부동산')"
+
+    # ========== Portfolio Summary (Operational Assets Only) ==========
+    # Exclude real estate from operational portfolio to avoid report pollution.
+    portfolio_summary = con.execute(f"""
+        SELECT
+            COUNT(*) as total_assets,
+            COALESCE(SUM(amount * current_price), 0) as total_value,
+            COALESCE(SUM(amount * COALESCE(purchase_price, current_price)), 0) as total_invested,
+            COALESCE(SUM(realized_profit), 0) as total_realized_profit,
+            COALESCE(SUM(amount * current_price) - SUM(amount * COALESCE(purchase_price, current_price)), 0) as total_unrealized_profit
+        FROM sqlite_db.assets
+        WHERE {asset_filter}
+    """).fetchone()
 
     # ========== Asset Analytics (CURRENT STATE, Top 20 by value) ==========
     # ⚠️ NOTE: Shows CURRENT portfolio holdings, NOT holdings during the specified period
@@ -157,7 +131,7 @@ def refine_portfolio_for_ai(
             realized_profit,
             index_group
         FROM sqlite_db.assets
-        WHERE deleted_at IS NULL
+        WHERE deleted_at IS NULL AND (category IS NULL OR category != '부동산')
         ORDER BY current_value DESC
         LIMIT 20
     """).fetchall()
@@ -177,7 +151,7 @@ def refine_portfolio_for_ai(
             SUM(amount * COALESCE(purchase_price, current_price)) as total_invested,
             SUM(amount * current_price) - SUM(amount * COALESCE(purchase_price, current_price)) as unrealized_pnl
         FROM sqlite_db.assets
-        WHERE deleted_at IS NULL
+        WHERE deleted_at IS NULL AND (category IS NULL OR category != '부동산')
         GROUP BY category
         ORDER BY total_value DESC
     """).fetchall()
@@ -191,7 +165,7 @@ def refine_portfolio_for_ai(
             COUNT(*) as asset_count,
             SUM(amount * current_price) as total_value
         FROM sqlite_db.assets
-        WHERE deleted_at IS NULL
+        WHERE deleted_at IS NULL AND (category IS NULL OR category != '부동산')
         GROUP BY index_group
         ORDER BY total_value DESC
     """).fetchall()
@@ -339,7 +313,7 @@ def refine_portfolio_for_ai(
             COUNT(*) as asset_count,
             SUM(amount * current_price) as total_value
         FROM sqlite_db.assets
-        WHERE deleted_at IS NULL
+        WHERE deleted_at IS NULL AND (category IS NULL OR category != '부동산')
         GROUP BY currency
     """).fetchall()
 
@@ -431,7 +405,7 @@ def refine_portfolio_for_ai(
             "is_historical_period": is_historical,
         },
         "portfolio_summary": {
-            "_note": "Current portfolio state (as of today), not the period being analyzed" if is_historical else None,
+            "_note": "현재 운용 포트폴리오 상태(부동산 제외)이며, 요청 기간과는 무관합니다." if is_historical else "운용 포트폴리오 기준(부동산 제외)입니다.",
             "total_assets": portfolio_summary[0] if portfolio_summary else 0,
             "total_value": portfolio_summary[1] if portfolio_summary else 0,
             "total_invested": portfolio_summary[2] if portfolio_summary else 0,

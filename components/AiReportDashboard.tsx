@@ -1,12 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Loader2, Sparkles, Trash2 } from 'lucide-react';
-import { ApiClient, BackendAiReportTextResponse, BackendSavedAiReport } from '../lib/api';
+import {
+  ApiClient,
+  BackendAiReportTextResponse,
+  BackendReportResponse,
+  BackendSavedAiReport,
+} from '../lib/api';
 import { getUserErrorMessage } from '../lib/utils/errors';
 
 interface AiReportDashboardProps {
   serverUrl: string;
   apiToken?: string;
 }
+
+type GeneralPeriod = {
+  year: number;
+  month?: number | null;
+  quarter?: number | null;
+  half?: number | null;
+};
 
 const MAX_TOKENS_LIMIT = 10000;
 const MIN_TOKENS = 512;
@@ -16,7 +28,7 @@ const formatPeriodLabel = (report: {
   period_month?: number | null;
   period_quarter?: number | null;
   period_half?: number | null;
-  period?: BackendAiReportTextResponse['period'];
+  period?: GeneralPeriod;
 }) => {
   const year = report.period_year ?? report.period?.year;
   const month = report.period_month ?? report.period?.month;
@@ -39,8 +51,15 @@ export const AiReportDashboard: React.FC<AiReportDashboardProps> = ({ serverUrl,
   const [query, setQuery] = useState('2025년 6월 리포트');
   const [maxTokens, setMaxTokens] = useState(8000);
   const [currentResult, setCurrentResult] = useState<BackendAiReportTextResponse | null>(null);
+  const [streamedReport, setStreamedReport] = useState('');
+  const [streamMeta, setStreamMeta] = useState<Omit<BackendAiReportTextResponse, 'report'> | null>(null);
+  const [generalReport, setGeneralReport] = useState<BackendReportResponse | null>(null);
+  const [generalPeriod, setGeneralPeriod] = useState<GeneralPeriod | null>(null);
+  const [generalNote, setGeneralNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [generalError, setGeneralError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isGeneralLoading, setIsGeneralLoading] = useState(false);
 
   // 저장된 리포트 관련 상태
   const [savedReports, setSavedReports] = useState<BackendSavedAiReport[]>([]);
@@ -91,13 +110,58 @@ export const AiReportDashboard: React.FC<AiReportDashboardProps> = ({ serverUrl,
     setIsLoading(true);
     setError(null);
     setCurrentResult(null);
+    setStreamedReport('');
+    setStreamMeta(null);
+    setGeneralReport(null);
+    setGeneralPeriod(null);
+    setGeneralNote(null);
+    setGeneralError(null);
 
     try {
-      const data = await apiClient.fetchAiReportText({
-        query,
-        maxTokens,
-      });
+      let fullText = '';
+      let meta: BackendAiReportTextResponse | null = null;
+
+      await apiClient.fetchAiReportTextStream(
+        {
+          query,
+          maxTokens,
+        },
+        {
+          onMeta: (data) => {
+            meta = {
+              generated_at: data.generated_at,
+              period: data.period,
+              model: data.model,
+              report: '',
+            };
+            setStreamMeta(data);
+            void loadGeneralReport({
+              year: data.period.year,
+              month: data.period.month ?? null,
+              quarter: data.period.quarter ?? null,
+              half: data.period.half ?? null,
+            });
+          },
+          onChunk: (chunk) => {
+            fullText += chunk;
+            setStreamedReport(fullText);
+          },
+        },
+      );
+
+      if (!meta) {
+        throw new Error('AI 리포트 메타데이터를 받지 못했습니다.');
+      }
+
+      const data: BackendAiReportTextResponse = {
+        generated_at: meta.generated_at,
+        period: meta.period,
+        model: meta.model,
+        report: fullText,
+      };
       setCurrentResult(data);
+      setStreamedReport('');
+      setStreamMeta(null);
 
       // 생성된 리포트 자동 저장
       try {
@@ -117,6 +181,8 @@ export const AiReportDashboard: React.FC<AiReportDashboardProps> = ({ serverUrl,
         console.error('[AiReportDashboard] Failed to save report:', saveErr);
       }
     } catch (err) {
+      setStreamedReport('');
+      setStreamMeta(null);
       setError(
         getUserErrorMessage(err, {
           default: 'AI 리포트를 생성하지 못했습니다.',
@@ -130,9 +196,19 @@ export const AiReportDashboard: React.FC<AiReportDashboardProps> = ({ serverUrl,
   };
 
   const handleSelectSaved = (id: number) => {
+    const report = savedReports.find((item) => item.id === id);
     setSelectedReportId(id);
     setCurrentResult(null); // 새로 생성한 결과 초기화
     setError(null);
+    setGeneralError(null);
+    if (report) {
+      void loadGeneralReport({
+        year: report.period_year,
+        month: report.period_month ?? null,
+        quarter: report.period_quarter ?? null,
+        half: report.period_half ?? null,
+      });
+    }
   };
 
   const handleDelete = async (id: number) => {
@@ -151,6 +227,37 @@ export const AiReportDashboard: React.FC<AiReportDashboardProps> = ({ serverUrl,
     }
   };
 
+  const loadGeneralReport = useCallback(async (period: GeneralPeriod) => {
+    if (!isRemoteEnabled) return;
+    setIsGeneralLoading(true);
+    setGeneralError(null);
+    setGeneralPeriod(period);
+    setGeneralNote(
+      period.half != null && period.month == null && period.quarter == null
+        ? '일반 리포트는 반기 미지원이라 연간 기준으로 표시합니다.'
+        : null,
+    );
+    try {
+      const data = await apiClient.fetchReport({
+        year: period.year,
+        month: period.month ?? undefined,
+        quarter: period.quarter ?? undefined,
+        half: period.half ?? undefined,
+      });
+      setGeneralReport(data);
+    } catch (err) {
+      setGeneralError(
+        getUserErrorMessage(err, {
+          default: '일반 리포트를 불러오지 못했습니다.',
+          unauthorized: '일반 리포트를 불러오지 못했습니다.\nAPI 비밀번호를 확인해주세요.',
+          network: '일반 리포트를 불러오지 못했습니다.\n서버 연결을 확인해주세요.',
+        }),
+      );
+    } finally {
+      setIsGeneralLoading(false);
+    }
+  }, [apiClient, isRemoteEnabled]);
+
   // 표시할 리포트 결정
   const displayReport = currentResult
     ? {
@@ -160,15 +267,27 @@ export const AiReportDashboard: React.FC<AiReportDashboardProps> = ({ serverUrl,
       model: currentResult.model,
       isNew: true,
     }
-    : selectedReport
+    : isLoading && (streamedReport || streamMeta)
       ? {
-        report: selectedReport.report,
-        periodLabel: formatPeriodLabel(selectedReport),
-        generatedAt: selectedReport.generated_at,
-        model: selectedReport.model,
-        isNew: false,
+        report: streamedReport,
+        periodLabel: streamMeta
+          ? formatPeriodLabel({ period: streamMeta.period })
+          : '생성 중',
+        generatedAt: streamMeta?.generated_at,
+        model: streamMeta?.model,
+        isNew: true,
       }
-      : null;
+      : selectedReport
+        ? {
+          report: selectedReport.report,
+          periodLabel: formatPeriodLabel(selectedReport),
+          generatedAt: selectedReport.generated_at,
+          model: selectedReport.model,
+          isNew: false,
+        }
+        : null;
+
+  const generalSummary = generalReport?.portfolio.summary ?? null;
 
   return (
     <section className="space-y-6">
@@ -342,30 +461,116 @@ export const AiReportDashboard: React.FC<AiReportDashboardProps> = ({ serverUrl,
           {displayReport && (
             <div className="text-xs text-slate-400 text-right">
               <div>기간: {displayReport.periodLabel}</div>
-              <div>생성: {new Date(displayReport.generatedAt).toLocaleString('ko-KR')}</div>
+              {displayReport.generatedAt && (
+                <div>생성: {new Date(displayReport.generatedAt).toLocaleString('ko-KR')}</div>
+              )}
               {displayReport.model && <div>모델: {displayReport.model}</div>}
             </div>
           )}
         </div>
-
-        {!displayReport && !isLoading && (
-          <div className="mt-6 text-sm text-slate-400 text-center">
-            리포트를 선택하거나 새로 생성해주세요.
+        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-slate-800">AI 리포트</h3>
+              {isLoading && (
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <Loader2 size={14} className="animate-spin" />
+                  생성 중
+                </div>
+              )}
+            </div>
+            {!displayReport && !isLoading && (
+              <div className="text-sm text-slate-400 text-center py-8">
+                리포트를 선택하거나 새로 생성해주세요.
+              </div>
+            )}
+            {displayReport?.report && (
+              <div className="whitespace-pre-wrap text-sm text-slate-700 leading-relaxed">
+                {displayReport.report}
+              </div>
+            )}
           </div>
-        )}
-
-        {isLoading && (
-          <div className="mt-6 flex items-center justify-center gap-2 text-sm text-slate-500">
-            <Loader2 size={16} className="animate-spin" />
-            AI 리포트를 생성 중입니다...
+          <div className="border-t border-slate-100 pt-6 lg:border-t-0 lg:border-l lg:pl-6 lg:pt-0">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-800">일반 리포트</h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  요약 수치와 건수 기준으로 비교합니다.
+                </p>
+              </div>
+              {isGeneralLoading && (
+                <Loader2 size={14} className="animate-spin text-slate-400" />
+              )}
+            </div>
+            {generalNote && (
+              <div className="mb-3 text-xs text-amber-600 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                {generalNote}
+              </div>
+            )}
+            {generalError && (
+              <div className="mb-3 text-xs text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2">
+                {generalError}
+              </div>
+            )}
+            {!generalReport && !generalError && !isGeneralLoading && (
+              <div className="text-sm text-slate-400 text-center py-8">
+                비교할 일반 리포트를 불러오지 않았습니다.
+              </div>
+            )}
+            {generalReport && generalSummary && (
+              <div className="space-y-4 text-sm text-slate-700">
+                {generalPeriod && (
+                  <div className="text-xs text-slate-400">
+                    기간: {formatPeriodLabel({ period: generalPeriod })}
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                    <div className="text-slate-400">총 평가액</div>
+                    <div className="text-sm font-semibold text-slate-800">
+                      {generalSummary.total_value.toLocaleString('ko-KR')}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                    <div className="text-slate-400">총 매입액</div>
+                    <div className="text-sm font-semibold text-slate-800">
+                      {generalSummary.total_invested.toLocaleString('ko-KR')}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                    <div className="text-slate-400">실현 손익</div>
+                    <div className="text-sm font-semibold text-slate-800">
+                      {generalSummary.realized_profit_total.toLocaleString('ko-KR')}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                    <div className="text-slate-400">평가 손익</div>
+                    <div className="text-sm font-semibold text-slate-800">
+                      {generalSummary.unrealized_profit_total.toLocaleString('ko-KR')}
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="rounded-lg border border-slate-100 bg-white p-3">
+                    <div className="text-slate-400">자산/거래</div>
+                    <div className="text-sm font-semibold text-slate-800">
+                      {generalReport.portfolio.assets.length} / {generalReport.portfolio.trades.length}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-slate-100 bg-white p-3">
+                    <div className="text-slate-400">스냅샷/입출금</div>
+                    <div className="text-sm font-semibold text-slate-800">
+                      {generalReport.snapshots.length} / {generalReport.external_cashflows.length}
+                    </div>
+                  </div>
+                </div>
+                <div className="text-xs text-slate-400">
+                  생성: {new Date(generalReport.generated_at).toLocaleString('ko-KR')}
+                </div>
+              </div>
+            )}
           </div>
-        )}
-
-        {displayReport && !isLoading && (
-          <div className="mt-6 whitespace-pre-wrap text-sm text-slate-700 leading-relaxed">
-            {displayReport.report}
-          </div>
-        )}
+        </div>
       </div>
     </section>
   );

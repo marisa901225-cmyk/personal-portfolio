@@ -4,6 +4,22 @@ from typing import List, Dict, Any, Optional
 from abc import ABC, abstractmethod
 from ..schemas import ExternalCashflowCreate
 
+
+def _parse_number(value: Any) -> Optional[float]:
+    if value is None or pd.isna(value):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    text = text.replace(",", "")
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    if pd.isna(number):
+        return None
+    return number
+
 class BrokerageParser(ABC):
     @abstractmethod
     def parse(self, file_path: str, user_id: int) -> List[ExternalCashflowCreate]:
@@ -37,7 +53,7 @@ class SamsungParser(BrokerageParser):
         
         results = []
         for _, row in df.iterrows():
-            trade_name = str(row.get('거래명', ''))
+            trade_name = str(row.get('거래명', '')).strip()
             date_val = row.get('거래일자')
             
             # Handle date format
@@ -58,21 +74,27 @@ class SamsungParser(BrokerageParser):
             if trade_name in inflow_types:
                 # KRW amount is usually in '거래금액' or '정산금액'
                 # For deposits, it's positive in the sheet, but we need it NEGATIVE for XIRR inflow
-                krw = float(row.get('정산금액', 0) or row.get('거래금액', 0))
-                if krw != 0:
+                krw = _parse_number(row.get('정산금액'))
+                if not krw:
+                    krw = _parse_number(row.get('거래금액'))
+                if krw:
                     amount = -abs(krw)
                     is_valid = True
                 else:
                     # Check foreign currency (USD etc.)
-                    fx_amt = float(row.get('외화정산금액', 0) or row.get('외화거래금액', 0))
-                    if fx_amt != 0:
-                        rate = float(row.get('환율', 0) or 1350) # Fallback to 1350 if rate missing
+                    fx_amt = _parse_number(row.get('외화정산금액'))
+                    if not fx_amt:
+                        fx_amt = _parse_number(row.get('외화거래금액'))
+                    if fx_amt:
+                        rate = _parse_number(row.get('환율')) or 1350 # Fallback to 1350 if rate missing
                         amount = -abs(fx_amt * rate)
                         is_valid = True
 
             elif trade_name in outflow_types:
-                krw = float(row.get('정산금액', 0) or row.get('거래금액', 0))
-                if krw != 0:
+                krw = _parse_number(row.get('정산금액'))
+                if not krw:
+                    krw = _parse_number(row.get('거래금액'))
+                if krw:
                     amount = abs(krw)
                     is_valid = True
             
@@ -88,6 +110,10 @@ class SamsungParser(BrokerageParser):
 
 def get_parser(filename: str) -> Optional[BrokerageParser]:
     # Simple dispatcher
-    if "삼성" in filename:
+    name = filename or ""
+    lower = name.lower()
+    if "삼성" in name or "samsung" in lower:
+        return SamsungParser()
+    if lower.endswith((".xlsx", ".xls")):
         return SamsungParser()
     return None

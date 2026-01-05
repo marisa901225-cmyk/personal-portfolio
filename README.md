@@ -277,8 +277,39 @@ pip install duckdb>=1.0.0
 - 백엔드는 FastAPI + SQLite 기반으로 안정적으로 운영 가능하며, DuckDB 분석 레이어가 연동되어 AI 보고서에 필요한 집계가 빠르게 생성됩니다.
 - Tailscale 기반의 사설 네트워크 접근과 스케줄링(가격 동기화/스냅샷/백업) 운영을 전제로 구성되어 있습니다.
 
-## 🔭 차후 개선사항
-- 프론트엔드 상태 표시/에러 처리 UX 개선 및 주요 흐름에 대한 UI 테스트 보강.
-- 데이터 임포트(엑셀/CSV) 유효성 검사와 예외 처리 강화.
-- 리포트 지표 확장(벤치마크 대비, 카테고리/지수별 변동 원인 분석 등).
-- 배포/운영 자동화(CI에서 `typecheck`/`test`/`build` 실행, 릴리즈 노트 정리).
+
+## 🛠️ Backend Refactoring Roadmap
+
+현재 라우터(Controller) 중심의 비즈니스 로직을 서비스 계층(Service Layer)으로 분리하고, 데이터 무결성 및 보안 취약점을 개선하기 위한 리팩토링 계획입니다.
+
+### 🚨 1. 데이터 무결성 및 트레이딩 로직 개선 (Critical)
+- **증권사 이관 데이터와 신규 거래 로직 분리 (Hybrid Mode)**
+  - [ ] `POST /api/trades` 엔드포인트에 `sync_asset: bool` 파라미터 추가 (Default: `True`).
+  - [ ] `sync_asset=False`: 과거 엑셀 데이터 업로드용. `Trade` 기록만 남기고 `Asset` 잔고/평단가는 건드리지 않음.
+  - [ ] `sync_asset=True`: 신규 거래용. `Trade` 생성 시 `Asset`의 수량 및 평단가(이동평균법) 자동 재계산 로직 적용.
+- **잔고 강제 보정(Calibration) 기능 추가**
+  - [ ] `PATCH /api/assets/{id}/balance` 구현.
+  - [ ] 거래 내역과 무관하게 실제 증권사 앱 조회 결과에 맞춰 수량/평단가를 덮어쓸 수 있는 비상 탈출구(Escape Hatch) 마련.
+
+### 🔐 2. 보안 및 인증 표준화 (Security)
+- **User Identity 하드코딩 제거**
+  - [ ] 모든 라우터(특히 `cashflows.py`, `assets.py`)에 존재하는 `user_id: int = 1` 기본값 제거.
+  - [ ] `Depends(verify_api_token)` 또는 `current_user` 의존성 주입으로 사용자 식별 방식 통일.
+- **안전하지 않은 모듈 로딩 수정**
+  - [ ] `expenses.py`, `expense_upload.py` 내의 `sys.path.insert(...)` 코드 제거.
+  - [ ] 스크립트 폴더(`scripts/`)를 정식 패키지화하거나 서비스 모듈로 이동하여 정적 임포트(`import ...`)로 전환.
+
+### 🏗️ 3. 아키텍처 개선 (Service Layer Extraction)
+- **비즈니스 로직 분리**
+  - [ ] 라우터에 비대하게 작성된 로직을 `services/` 패키지로 이관.
+    - `assets.py` → `services/asset_service.py` (평단가 계산, 매도 시 실현손익 계산)
+    - `report_ai.py` → `services/report_service.py` (자연어 쿼리 파싱, 리포트 데이터 취합)
+- **재사용성 확보**
+  - [ ] 리포트 생성, 자산 업데이트 등 핵심 로직을 API 뿐만 아니라 백그라운드 작업(Cron)에서도 호출 가능하도록 구조화.
+
+### ⚡ 4. 성능 및 안정성 최적화 (Optimization)
+- **대량 데이터 처리 효율화**
+  - [ ] `cashflows.py`의 엑셀 업로드 시 N+1 쿼리(루프 돌며 중복 체크) 제거.
+  - [ ] 데이터 해시(Hash) 비교 또는 `Bulk Insert` / `Upsert` 방식으로 변경.
+- **스냅샷 중복 방지**
+  - [ ] `snapshots.py` 실행 시 당일 중복 스냅샷 생성 방지 로직(Upsert) 추가.

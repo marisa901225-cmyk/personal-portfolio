@@ -85,12 +85,6 @@ export interface AppSettings {
     usdFxBase?: number;
     /** 현재 USD/KRW 환율 (직접 입력) */
     usdFxNow?: number;
-    /** 올해 받은 배당금 총액 (세후, 수동 입력) */
-    dividendTotalYear?: number;
-    /** 배당금 합계가 어느 연도 기준인지 (예: 2025) */
-    dividendYear?: number;
-    /** 연도별 배당 합계 리스트 (서버/로컬에 함께 저장) */
-    dividends?: DividendEntry[];
     /** 시장지수/벤치마크 이름 (예: SPY TR) */
     benchmarkName?: string;
     /** 시장지수 수익률 (%) */
