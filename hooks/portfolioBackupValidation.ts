@@ -1,4 +1,4 @@
-import { AssetCategory } from '../types';
+import { AssetCategory } from '../lib/types';
 import type { ImportedAssetSnapshot } from './portfolioTypes';
 
 export type SnapshotValidationResult = {

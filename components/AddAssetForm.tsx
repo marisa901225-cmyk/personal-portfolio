@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { Asset, AssetCategory } from '../types';
+import { Asset, AssetCategory } from '../lib/types';
 import { X } from 'lucide-react';
-import { ApiClient } from '../backendClient';
-import { alertError } from '../errors';
-import { inferCategoryFromTicker } from '../tickerUtils';
+import { ApiClient } from '../lib/api';
+import { alertError } from '../lib/utils/errors';
+import { inferCategoryFromTicker } from '../lib/utils/tickerUtils';
 
 interface AddAssetFormProps {
   onSave: (asset: Asset) => void;
@@ -130,8 +130,8 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
                 type="button"
                 onClick={() => handleChange('category', cat)}
                 className={`py-2 px-3 rounded-lg text-sm border transition-all ${formData.category === cat
-                    ? 'border-indigo-600 bg-indigo-50 text-indigo-700 font-medium'
-                    : 'border-slate-200 text-slate-600 hover:border-indigo-300'
+                  ? 'border-indigo-600 bg-indigo-50 text-indigo-700 font-medium'
+                  : 'border-slate-200 text-slate-600 hover:border-indigo-300'
                   }`}
               >
                 {cat}

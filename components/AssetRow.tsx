@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Asset, AssetCategory, TradeType } from '../types';
-import { formatCurrency } from '../constants';
+import { Asset, AssetCategory, TradeType } from '../lib/types';
+import { formatCurrency } from '../lib/utils/constants';
 import { Trash2, Edit3 } from 'lucide-react';
 
 interface AssetRowProps {
@@ -115,10 +115,20 @@ export const AssetRow: React.FC<AssetRowProps> = ({
                     {asset.amount.toLocaleString()}
                 </td>
                 <td className="p-4 text-right text-slate-500">
-                    {formatCurrency(asset.purchasePrice || 0)}
+                    <div>{formatCurrency(asset.purchasePrice || 0)}</div>
+                    {asset.category === AssetCategory.STOCK_US && asset.purchasePrice && (
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                            ${(asset.purchasePrice / getDefaultFxRate()).toFixed(2)}
+                        </div>
+                    )}
                 </td>
                 <td className="p-4 text-right">
                     <div className="text-slate-800 font-medium">{formatCurrency(asset.currentPrice)}</div>
+                    {asset.category === AssetCategory.STOCK_US && (
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                            ${(asset.currentPrice / getDefaultFxRate()).toFixed(2)}
+                        </div>
+                    )}
                     {asset.purchasePrice && asset.purchasePrice > 0 && (
                         <div className={`text-xs ${isProfitable ? 'text-red-500' : isLoss ? 'text-blue-500' : 'text-slate-400'}`}>
                             {isProfitable ? '+' : ''}{profitRate.toFixed(2)}%

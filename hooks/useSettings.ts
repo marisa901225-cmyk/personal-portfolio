@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { AppSettings, DividendEntry } from '../types';
-import { alertError } from '../errors';
-import { ApiClient, BackendSettings } from '../backendClient';
+import { AppSettings, DividendEntry } from '../lib/types';
+import { alertError } from '../lib/utils/errors';
+import { ApiClient, BackendSettings } from '../lib/api';
 
 const DEFAULT_SETTINGS: AppSettings = {
   serverUrl: 'https://dlckdgn-nucboxg3-plus.tail5c2348.ts.net',

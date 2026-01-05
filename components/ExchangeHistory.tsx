@@ -1,22 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Pencil, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react';
-import { ApiClient, BackendFxTransaction, mapBackendFxToFrontend } from '../backendClient';
-import { formatCurrency } from '../constants';
-import { getUserErrorMessage } from '../errors';
-import type { FxTransactionRecord, FxTransactionType } from '../types';
+import { Plus, RefreshCw } from 'lucide-react';
+import { ApiClient, BackendFxTransaction, mapBackendFxToFrontend } from '../lib/api';
+import { getUserErrorMessage } from '../lib/utils/errors';
+import type { FxTransactionRecord, FxTransactionType } from '../lib/types';
+import { FxTransactionForm, FxTransactionRow, type FxDraft } from './exchange';
 
 type FxFilter = 'ALL' | FxTransactionType;
-
-type FxDraft = {
-  tradeDate: string;
-  type: FxTransactionType;
-  currency: 'KRW' | 'USD';
-  fxAmount: string;
-  krwAmount: string;
-  rate: string;
-  description: string;
-  note: string;
-};
 
 interface ExchangeHistoryProps {
   serverUrl: string;
@@ -25,12 +14,6 @@ interface ExchangeHistoryProps {
 }
 
 const PAGE_SIZE = 200;
-
-const TYPE_LABEL: Record<FxTransactionType, string> = {
-  BUY: '매수',
-  SELL: '매도',
-  SETTLEMENT: '정산',
-};
 
 const typeToCurrency = (type: FxTransactionType): 'KRW' | 'USD' => (
   type === 'BUY' ? 'USD' : 'KRW'
@@ -57,17 +40,6 @@ const parseNumber = (value: string): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
-const formatFxAmount = (value?: number) => {
-  if (value == null) return '-';
-  const formatted = new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 }).format(value);
-  return `$${formatted}`;
-};
-
-const formatRate = (value?: number) => {
-  if (value == null) return '-';
-  return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(value);
-};
-
 export const ExchangeHistory: React.FC<ExchangeHistoryProps> = ({
   serverUrl,
   apiToken,
@@ -80,6 +52,7 @@ export const ExchangeHistory: React.FC<ExchangeHistoryProps> = ({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FxFilter>('ALL');
   const [yearFilter, setYearFilter] = useState<number | 'ALL'>('ALL');
+  const [monthFilter, setMonthFilter] = useState<number | 'ALL'>('ALL');
   const [searchTerm, setSearchTerm] = useState('');
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -91,19 +64,13 @@ export const ExchangeHistory: React.FC<ExchangeHistoryProps> = ({
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
 
   const isRemoteEnabled = Boolean(serverUrl && apiToken);
-
   const apiClient = useMemo(() => new ApiClient(serverUrl, apiToken), [serverUrl, apiToken]);
 
   const loadRecords = async ({ reset }: { reset: boolean }) => {
-    if (!isRemoteEnabled) return;
-    if (isLoading) return;
-    if (!hasMore && !reset) return;
-
+    if (!isRemoteEnabled || isLoading || (!hasMore && !reset)) return;
     const beforeId = reset ? undefined : cursorBeforeId ?? undefined;
-
     setIsLoading(true);
     setLoadError(null);
-
     try {
       const backendRecords = await apiClient.fetchFxTransactions({
         limit: PAGE_SIZE,
@@ -116,13 +83,7 @@ export const ExchangeHistory: React.FC<ExchangeHistoryProps> = ({
       setCursorBeforeId(last ? last.id : null);
       setHasMore(backendRecords.length === PAGE_SIZE);
     } catch (error) {
-      setLoadError(
-        getUserErrorMessage(error, {
-          default: '환전 내역을 불러오지 못했습니다.',
-          unauthorized: '환전 내역을 불러오지 못했습니다.\nAPI 비밀번호가 올바른지 확인해주세요.',
-          network: '환전 내역을 불러오지 못했습니다.\n서버 연결을 확인해주세요.',
-        }),
-      );
+      setLoadError(getUserErrorMessage(error, { default: '환전 내역을 불러오지 못했습니다.' }));
     } finally {
       setIsLoading(false);
     }
@@ -136,6 +97,8 @@ export const ExchangeHistory: React.FC<ExchangeHistoryProps> = ({
     setDraft(null);
     setShowNew(false);
     setFormError(null);
+    setYearFilter('ALL');
+    setMonthFilter('ALL');
     await loadRecords({ reset: true });
   };
 
@@ -158,41 +121,25 @@ export const ExchangeHistory: React.FC<ExchangeHistoryProps> = ({
 
   const availableYears = useMemo(() => {
     const years = new Set<number>();
-    records.forEach((record) => {
-      const year = new Date(record.tradeDate).getFullYear();
-      years.add(year);
-    });
+    records.forEach((r) => years.add(new Date(r.tradeDate).getFullYear()));
     return Array.from(years).sort((a, b) => b - a);
   }, [records]);
 
   const filteredRecords = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
-    return records.filter((record) => {
-      // 년도 필터
-      if (yearFilter !== 'ALL') {
-        const recordYear = new Date(record.tradeDate).getFullYear();
-        if (recordYear !== yearFilter) return false;
-      }
-      // 검색어 필터
+    return records.filter((r) => {
+      if (yearFilter !== 'ALL' && new Date(r.tradeDate).getFullYear() !== yearFilter) return false;
+      if (monthFilter !== 'ALL' && new Date(r.tradeDate).getMonth() + 1 !== monthFilter) return false;
       if (!query) return true;
-      const description = (record.description || '').toLowerCase();
-      const note = (record.note || '').toLowerCase();
-      return description.includes(query) || note.includes(query);
+      return (r.description || '').toLowerCase().includes(query) || (r.note || '').toLowerCase().includes(query);
     });
-  }, [records, searchTerm, yearFilter]);
+  }, [records, searchTerm, yearFilter, monthFilter]);
 
-  const updateDraftField = (
-    setter: React.Dispatch<React.SetStateAction<FxDraft | null>>,
-    field: keyof FxDraft,
-    value: string,
-  ) => {
-    setter((prev) => {
+  const updateDraftField = (field: keyof FxDraft, value: string) => {
+    setDraft((prev) => {
       if (!prev) return prev;
       const next = { ...prev, [field]: value };
-      if (field === 'type') {
-        const nextType = value as FxTransactionType;
-        next.currency = typeToCurrency(nextType);
-      }
+      if (field === 'type') next.currency = typeToCurrency(value as FxTransactionType);
       return next;
     });
   };
@@ -200,10 +147,7 @@ export const ExchangeHistory: React.FC<ExchangeHistoryProps> = ({
   const updateNewDraftField = (field: keyof FxDraft, value: string) => {
     setNewDraft((prev) => {
       const next = { ...prev, [field]: value };
-      if (field === 'type') {
-        const nextType = value as FxTransactionType;
-        next.currency = typeToCurrency(nextType);
-      }
+      if (field === 'type') next.currency = typeToCurrency(value as FxTransactionType);
       return next;
     });
   };
@@ -220,18 +164,6 @@ export const ExchangeHistory: React.FC<ExchangeHistoryProps> = ({
     setFormError(null);
   };
 
-  const startCreate = () => {
-    setShowNew(true);
-    setNewDraft(makeDraft());
-    setFormError(null);
-  };
-
-  const cancelCreate = () => {
-    setShowNew(false);
-    setNewDraft(makeDraft());
-    setFormError(null);
-  };
-
   const toPayload = (input: FxDraft) => ({
     trade_date: input.tradeDate,
     type: input.type,
@@ -243,61 +175,67 @@ export const ExchangeHistory: React.FC<ExchangeHistoryProps> = ({
     note: input.note.trim() || null,
   });
 
+  const applyFxBaseFromHistory = async () => {
+    if (!isRemoteEnabled) return;
+    let weightedSum = 0, weightTotal = 0, fallbackSum = 0, fallbackCount = 0;
+    let beforeId: number | undefined;
+    while (true) {
+      const batch: BackendFxTransaction[] = await apiClient.fetchFxTransactions({ limit: 500, beforeId, kind: 'BUY' });
+      if (batch.length === 0) break;
+      batch.forEach((rec) => {
+        const fxAmount = rec.fx_amount ?? null;
+        let rate = rec.rate ?? null;
+        if (rate == null && fxAmount != null && rec.krw_amount != null && fxAmount !== 0) {
+          rate = rec.krw_amount / fxAmount;
+        }
+        if (rate == null || !Number.isFinite(rate)) return;
+        if (fxAmount != null && Number.isFinite(fxAmount) && fxAmount > 0) {
+          weightedSum += rate * fxAmount;
+          weightTotal += fxAmount;
+        } else {
+          fallbackSum += rate;
+          fallbackCount += 1;
+        }
+      });
+      if (batch.length < 500) break;
+      beforeId = batch[batch.length - 1].id;
+    }
+    const avgRate = weightTotal > 0 ? weightedSum / weightTotal : fallbackCount > 0 ? fallbackSum / fallbackCount : null;
+    if (!avgRate || !Number.isFinite(avgRate)) throw new Error('no fx average');
+    const rounded = Math.round(avgRate * 100) / 100;
+    await apiClient.updateSettings({ usd_fx_base: rounded });
+    onFxBaseUpdated?.(rounded);
+  };
+
   const saveEdit = async () => {
     if (!draft || !editingId) return;
-    if (!draft.tradeDate) {
-      setFormError('거래일자를 입력해주세요.');
-      return;
-    }
+    if (!draft.tradeDate) { setFormError('거래일자를 입력해주세요.'); return; }
     setIsSaving(true);
     setFormError(null);
     try {
       await apiClient.updateFxTransaction(Number(editingId), toPayload(draft));
       await handleRefresh();
-      try {
-        await applyFxBaseFromHistory();
-      } catch (error) {
-        setFormError('기준 환율 자동 갱신에 실패했습니다.');
-      }
+      try { await applyFxBaseFromHistory(); } catch { setFormError('기준 환율 자동 갱신에 실패했습니다.'); }
       cancelEdit();
     } catch (error) {
-      setFormError(
-        getUserErrorMessage(error, {
-          default: '수정에 실패했습니다.',
-          unauthorized: '수정에 실패했습니다.\nAPI 비밀번호가 올바른지 확인해주세요.',
-          network: '수정에 실패했습니다.\n서버 연결을 확인해주세요.',
-        }),
-      );
+      setFormError(getUserErrorMessage(error, { default: '수정에 실패했습니다.' }));
     } finally {
       setIsSaving(false);
     }
   };
 
   const saveCreate = async () => {
-    if (!newDraft.tradeDate) {
-      setFormError('거래일자를 입력해주세요.');
-      return;
-    }
+    if (!newDraft.tradeDate) { setFormError('거래일자를 입력해주세요.'); return; }
     setIsSaving(true);
     setFormError(null);
     try {
       await apiClient.createFxTransaction(toPayload(newDraft));
       await handleRefresh();
-      try {
-        await applyFxBaseFromHistory();
-      } catch (error) {
-        setFormError('기준 환율 자동 갱신에 실패했습니다.');
-      }
+      try { await applyFxBaseFromHistory(); } catch { setFormError('기준 환율 자동 갱신에 실패했습니다.'); }
       setShowNew(false);
       setNewDraft(makeDraft());
     } catch (error) {
-      setFormError(
-        getUserErrorMessage(error, {
-          default: '등록에 실패했습니다.',
-          unauthorized: '등록에 실패했습니다.\nAPI 비밀번호가 올바른지 확인해주세요.',
-          network: '등록에 실패했습니다.\n서버 연결을 확인해주세요.',
-        }),
-      );
+      setFormError(getUserErrorMessage(error, { default: '등록에 실패했습니다.' }));
     } finally {
       setIsSaving(false);
     }
@@ -310,75 +248,12 @@ export const ExchangeHistory: React.FC<ExchangeHistoryProps> = ({
     try {
       await apiClient.deleteFxTransaction(Number(recordId));
       await handleRefresh();
-      try {
-        await applyFxBaseFromHistory();
-      } catch (error) {
-        setFormError('기준 환율 자동 갱신에 실패했습니다.');
-      }
+      try { await applyFxBaseFromHistory(); } catch { setFormError('기준 환율 자동 갱신에 실패했습니다.'); }
     } catch (error) {
-      setFormError(
-        getUserErrorMessage(error, {
-          default: '삭제에 실패했습니다.',
-          unauthorized: '삭제에 실패했습니다.\nAPI 비밀번호가 올바른지 확인해주세요.',
-          network: '삭제에 실패했습니다.\n서버 연결을 확인해주세요.',
-        }),
-      );
+      setFormError(getUserErrorMessage(error, { default: '삭제에 실패했습니다.' }));
     } finally {
       setIsDeletingId(null);
     }
-  };
-
-  const applyFxBaseFromHistory = async () => {
-    if (!isRemoteEnabled) return;
-
-    let weightedSum = 0;
-    let weightTotal = 0;
-    let fallbackSum = 0;
-    let fallbackCount = 0;
-    let beforeId: number | undefined;
-
-    while (true) {
-      const batch: BackendFxTransaction[] = await apiClient.fetchFxTransactions({
-        limit: 500,
-        beforeId,
-        kind: 'BUY',
-      });
-      if (batch.length === 0) break;
-
-      batch.forEach((record) => {
-        const fxAmount = record.fx_amount ?? null;
-        let rate = record.rate ?? null;
-        if (rate == null && fxAmount != null && record.krw_amount != null && fxAmount !== 0) {
-          rate = record.krw_amount / fxAmount;
-        }
-        if (rate == null || !Number.isFinite(rate)) return;
-
-        if (fxAmount != null && Number.isFinite(fxAmount) && fxAmount > 0) {
-          weightedSum += rate * fxAmount;
-          weightTotal += fxAmount;
-        } else {
-          fallbackSum += rate;
-          fallbackCount += 1;
-        }
-      });
-
-      if (batch.length < 500) break;
-      beforeId = batch[batch.length - 1].id;
-    }
-
-    const avgRate = weightTotal > 0
-      ? weightedSum / weightTotal
-      : fallbackCount > 0
-        ? fallbackSum / fallbackCount
-        : null;
-
-    if (!avgRate || !Number.isFinite(avgRate)) {
-      throw new Error('no fx average');
-    }
-
-    const rounded = Math.round(avgRate * 100) / 100;
-    await apiClient.updateSettings({ usd_fx_base: rounded });
-    onFxBaseUpdated?.(rounded);
   };
 
   const filterOptions: { key: FxFilter; label: string }[] = [
@@ -398,367 +273,84 @@ export const ExchangeHistory: React.FC<ExchangeHistoryProps> = ({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void handleRefresh()}
-            disabled={isLoading}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-medium hover:bg-slate-200 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-          >
-            <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
-            새로고침
+          <button type="button" onClick={() => void handleRefresh()} disabled={isLoading} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-medium hover:bg-slate-200 disabled:opacity-60 disabled:cursor-not-allowed transition-colors">
+            <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} /> 새로고침
           </button>
-          <button
-            type="button"
-            onClick={startCreate}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-colors"
-          >
-            <Plus size={14} />
-            환전 추가
+          <button type="button" onClick={() => { setShowNew(true); setNewDraft(makeDraft()); setFormError(null); }} className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 transition-colors">
+            <Plus size={14} /> 환전 추가
           </button>
         </div>
       </div>
 
       {!isRemoteEnabled ? (
-        <div className="mt-4 text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-xl p-3">
-          환전 내역은 백엔드 서버 연결 시에만 조회/수정할 수 있어요.
-        </div>
+        <div className="mt-4 text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-xl p-3">환전 내역은 백엔드 서버 연결 시에만 조회/수정할 수 있어요.</div>
       ) : (
         <div className="mt-4 space-y-3">
+          {/* Filters */}
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
-            <div className="relative flex-1 max-w-md">
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="적요/비고 검색..."
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-              />
-            </div>
+            <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="적요/비고 검색..." className="flex-1 max-w-md px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm" />
             <div className="flex flex-wrap items-center gap-2">
-              {/* 년도 필터 */}
-              <select
-                value={yearFilter}
-                onChange={(e) => setYearFilter(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
-                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
+              <select value={yearFilter} onChange={(e) => setYearFilter(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium">
                 <option value="ALL">전체 년도</option>
-                {availableYears.map((year) => (
-                  <option key={year} value={year}>{year}년</option>
-                ))}
+                {availableYears.map((y) => <option key={y} value={y}>{y}년</option>)}
               </select>
-              {/* 거래 유형 필터 */}
+              <select value={monthFilter} onChange={(e) => setMonthFilter(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))} className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium">
+                <option value="ALL">전체 월</option>
+                {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => <option key={m} value={m}>{m}월</option>)}
+              </select>
               {filterOptions.map(({ key, label }) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setFilter(key)}
-                  className={`px-3 py-2 rounded-xl text-xs font-medium transition-colors ${filter === key
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                >
-                  {label}
-                </button>
+                <button key={key} type="button" onClick={() => setFilter(key)} className={`px-3 py-2 rounded-xl text-xs font-medium transition-colors ${filter === key ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>{label}</button>
               ))}
             </div>
           </div>
 
-          {formError && (
-            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">
-              {formError}
-            </div>
-          )}
-
-          {loadError && (
-            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">
-              {loadError}
-            </div>
-          )}
+          {formError && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">{formError}</div>}
+          {loadError && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">{loadError}</div>}
 
           {showNew && (
-            <div className="border border-indigo-100 rounded-2xl p-3 bg-indigo-50/40">
-              <div className="text-xs font-semibold text-indigo-600 mb-2">새 환전 내역</div>
-              <div className="grid grid-cols-1 md:grid-cols-8 gap-2 text-xs">
-                <div>
-                  <label className="block text-[11px] text-slate-500 mb-1">날짜</label>
-                  <input
-                    type="date"
-                    value={newDraft.tradeDate}
-                    onChange={(e) => updateNewDraftField('tradeDate', e.target.value)}
-                    className="w-full px-2 py-2 border border-slate-200 rounded-lg bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] text-slate-500 mb-1">구분</label>
-                  <select
-                    value={newDraft.type}
-                    onChange={(e) => updateNewDraftField('type', e.target.value)}
-                    className="w-full px-2 py-2 border border-slate-200 rounded-lg bg-white"
-                  >
-                    <option value="BUY">매수</option>
-                    <option value="SELL">매도</option>
-                    <option value="SETTLEMENT">정산</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[11px] text-slate-500 mb-1">통화</label>
-                  <div className="px-2 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-600">
-                    {newDraft.currency}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-[11px] text-slate-500 mb-1">외화금액</label>
-                  <input
-                    type="number"
-                    step="0.0001"
-                    value={newDraft.fxAmount}
-                    onChange={(e) => updateNewDraftField('fxAmount', e.target.value)}
-                    className="w-full px-2 py-2 border border-slate-200 rounded-lg bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] text-slate-500 mb-1">원화금액</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={newDraft.krwAmount}
-                    onChange={(e) => updateNewDraftField('krwAmount', e.target.value)}
-                    className="w-full px-2 py-2 border border-slate-200 rounded-lg bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] text-slate-500 mb-1">환율</label>
-                  <input
-                    type="number"
-                    step="0.0001"
-                    value={newDraft.rate}
-                    onChange={(e) => updateNewDraftField('rate', e.target.value)}
-                    className="w-full px-2 py-2 border border-slate-200 rounded-lg bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] text-slate-500 mb-1">적요</label>
-                  <input
-                    type="text"
-                    value={newDraft.description}
-                    onChange={(e) => updateNewDraftField('description', e.target.value)}
-                    className="w-full px-2 py-2 border border-slate-200 rounded-lg bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] text-slate-500 mb-1">비고</label>
-                  <input
-                    type="text"
-                    value={newDraft.note}
-                    onChange={(e) => updateNewDraftField('note', e.target.value)}
-                    className="w-full px-2 py-2 border border-slate-200 rounded-lg bg-white"
-                  />
-                </div>
-              </div>
-              <div className="mt-3 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void saveCreate()}
-                  disabled={isSaving}
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-60"
-                >
-                  <Save size={14} />
-                  저장
-                </button>
-                <button
-                  type="button"
-                  onClick={cancelCreate}
-                  className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-medium hover:bg-slate-200"
-                >
-                  <X size={14} />
-                  취소
-                </button>
-                <span className="text-[11px] text-slate-400">통화는 구분에 따라 자동 설정됩니다.</span>
-              </div>
-            </div>
+            <FxTransactionForm
+              draft={newDraft}
+              onDraftChange={updateNewDraftField}
+              onSave={() => void saveCreate()}
+              onCancel={() => { setShowNew(false); setNewDraft(makeDraft()); setFormError(null); }}
+              isSaving={isSaving}
+              isNew
+            />
           )}
 
           {filteredRecords.length === 0 ? (
-            <div className="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-xl p-3">
-              {records.length === 0 ? '환전 내역이 없습니다.' : '조건에 맞는 내역이 없습니다.'}
-            </div>
+            <div className="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-xl p-3">{records.length === 0 ? '환전 내역이 없습니다.' : '조건에 맞는 내역이 없습니다.'}</div>
           ) : (
             <div className="space-y-2">
               {filteredRecords.map((record) => {
-                const isEditing = editingId === record.id;
-                const badgeClass = record.type === 'BUY'
-                  ? 'bg-red-50 text-red-600'
-                  : record.type === 'SELL'
-                    ? 'bg-blue-50 text-blue-600'
-                    : 'bg-slate-100 text-slate-600';
-
-                if (isEditing && draft) {
+                if (editingId === record.id && draft) {
                   return (
-                    <div key={record.id} className="border border-indigo-100 rounded-2xl p-3 bg-white">
-                      <div className="grid grid-cols-1 md:grid-cols-8 gap-2 text-xs">
-                        <div>
-                          <label className="block text-[11px] text-slate-500 mb-1">날짜</label>
-                          <input
-                            type="date"
-                            value={draft.tradeDate}
-                            onChange={(e) => updateDraftField(setDraft, 'tradeDate', e.target.value)}
-                            className="w-full px-2 py-2 border border-slate-200 rounded-lg bg-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] text-slate-500 mb-1">구분</label>
-                          <select
-                            value={draft.type}
-                            onChange={(e) => updateDraftField(setDraft, 'type', e.target.value)}
-                            className="w-full px-2 py-2 border border-slate-200 rounded-lg bg-white"
-                          >
-                            <option value="BUY">매수</option>
-                            <option value="SELL">매도</option>
-                            <option value="SETTLEMENT">정산</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-[11px] text-slate-500 mb-1">통화</label>
-                          <div className="px-2 py-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-600">
-                            {draft.currency}
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-[11px] text-slate-500 mb-1">외화금액</label>
-                          <input
-                            type="number"
-                            step="0.0001"
-                            value={draft.fxAmount}
-                            onChange={(e) => updateDraftField(setDraft, 'fxAmount', e.target.value)}
-                            className="w-full px-2 py-2 border border-slate-200 rounded-lg bg-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] text-slate-500 mb-1">원화금액</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={draft.krwAmount}
-                            onChange={(e) => updateDraftField(setDraft, 'krwAmount', e.target.value)}
-                            className="w-full px-2 py-2 border border-slate-200 rounded-lg bg-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] text-slate-500 mb-1">환율</label>
-                          <input
-                            type="number"
-                            step="0.0001"
-                            value={draft.rate}
-                            onChange={(e) => updateDraftField(setDraft, 'rate', e.target.value)}
-                            className="w-full px-2 py-2 border border-slate-200 rounded-lg bg-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] text-slate-500 mb-1">적요</label>
-                          <input
-                            type="text"
-                            value={draft.description}
-                            onChange={(e) => updateDraftField(setDraft, 'description', e.target.value)}
-                            className="w-full px-2 py-2 border border-slate-200 rounded-lg bg-white"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] text-slate-500 mb-1">비고</label>
-                          <input
-                            type="text"
-                            value={draft.note}
-                            onChange={(e) => updateDraftField(setDraft, 'note', e.target.value)}
-                            className="w-full px-2 py-2 border border-slate-200 rounded-lg bg-white"
-                          />
-                        </div>
-                      </div>
-                      <div className="mt-3 flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void saveEdit()}
-                          disabled={isSaving}
-                          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-60"
-                        >
-                          <Save size={14} />
-                          저장
-                        </button>
-                        <button
-                          type="button"
-                          onClick={cancelEdit}
-                          className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-medium hover:bg-slate-200"
-                        >
-                          <X size={14} />
-                          취소
-                        </button>
-                        <span className="text-[11px] text-slate-400">통화는 구분에 따라 자동 설정됩니다.</span>
-                      </div>
-                    </div>
+                    <FxTransactionForm
+                      key={record.id}
+                      draft={draft}
+                      onDraftChange={updateDraftField}
+                      onSave={() => void saveEdit()}
+                      onCancel={cancelEdit}
+                      isSaving={isSaving}
+                    />
                   );
                 }
-
                 return (
-                  <div key={record.id} className="border border-slate-100 rounded-2xl p-3 bg-white">
-                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${badgeClass}`}>
-                            {TYPE_LABEL[record.type]}
-                          </span>
-                          <span className="text-[11px] text-slate-500">{record.tradeDate}</span>
-                          <span className="px-1.5 py-0.5 rounded bg-slate-100 text-[10px] text-slate-500 font-medium">
-                            {record.currency}
-                          </span>
-                        </div>
-                        <div className="mt-1 flex flex-wrap gap-3 text-[11px] text-slate-600">
-                          <span>외화 <span className="font-medium">{formatFxAmount(record.fxAmount)}</span></span>
-                          <span>원화 <span className="font-medium">{record.krwAmount != null ? formatCurrency(record.krwAmount) : '-'}</span></span>
-                          <span>환율 <span className="font-medium">{formatRate(record.rate)}</span></span>
-                        </div>
-                        {record.description && (
-                          <div className="mt-1 text-[11px] text-slate-500">
-                            {record.description}
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => startEdit(record)}
-                          className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-medium hover:bg-slate-200 transition-colors"
-                        >
-                          <Pencil size={14} />
-                          수정
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void deleteRecord(record.id)}
-                          disabled={isDeletingId === record.id}
-                          className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-rose-50 text-rose-600 text-xs font-medium hover:bg-rose-100 disabled:opacity-60"
-                        >
-                          <Trash2 size={14} />
-                          삭제
-                        </button>
-                      </div>
-                    </div>
-                  </div>
+                  <FxTransactionRow
+                    key={record.id}
+                    record={record}
+                    onEdit={startEdit}
+                    onDelete={(id) => void deleteRecord(id)}
+                    isDeleting={isDeletingId === record.id}
+                  />
                 );
               })}
             </div>
           )}
 
           <div className="flex items-center justify-between text-xs text-slate-400">
-            <span>
-              불러온 내역 {records.length.toLocaleString()}건
-              {filteredRecords.length !== records.length && (
-                <span className="ml-1">(표시 {filteredRecords.length.toLocaleString()}건)</span>
-              )}
-            </span>
-            <button
-              type="button"
-              onClick={() => void loadRecords({ reset: false })}
-              disabled={isLoading || !hasMore}
-              className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-            >
+            <span>불러온 내역 {records.length.toLocaleString()}건{filteredRecords.length !== records.length && <span className="ml-1">(표시 {filteredRecords.length.toLocaleString()}건)</span>}</span>
+            <button type="button" onClick={() => void loadRecords({ reset: false })} disabled={isLoading || !hasMore} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors">
               {isLoading ? '불러오는 중...' : hasMore ? '더 불러오기' : '끝'}
             </button>
           </div>

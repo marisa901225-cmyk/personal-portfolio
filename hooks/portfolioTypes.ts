@@ -1,4 +1,4 @@
-import { AssetCategory } from '../types';
+import { AssetCategory } from '../lib/types';
 
 export interface ImportedAssetSnapshot {
   name: string;

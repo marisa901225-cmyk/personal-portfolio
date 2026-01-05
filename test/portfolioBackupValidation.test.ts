@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AssetCategory } from '../types';
+import { AssetCategory } from '../lib/types';
 import { validateImportedAssetSnapshotList } from '../hooks/portfolioBackupValidation';
 
 describe('validateImportedAssetSnapshotList', () => {

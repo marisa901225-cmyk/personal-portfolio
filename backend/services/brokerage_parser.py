@@ -63,13 +63,12 @@ class SamsungParser(BrokerageParser):
                     amount = -abs(krw)
                     is_valid = True
                 else:
-                    # Check foreign currency
-                    fx = float(row.get('외화정산금액', 0) or row.get('외화거래금액', 0))
-                    if fx != 0:
-                        # We might need a rate, but for now, if it's the main account, 
-                        # maybe we use the KRW equivalent if available
-                        # Samsung sheet often has '거래금액' as KRW even for FX trades
-                        pass
+                    # Check foreign currency (USD etc.)
+                    fx_amt = float(row.get('외화정산금액', 0) or row.get('외화거래금액', 0))
+                    if fx_amt != 0:
+                        rate = float(row.get('환율', 0) or 1350) # Fallback to 1350 if rate missing
+                        amount = -abs(fx_amt * rate)
+                        is_valid = True
 
             elif trade_name in outflow_types:
                 krw = float(row.get('정산금액', 0) or row.get('거래금액', 0))

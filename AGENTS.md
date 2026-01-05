@@ -88,3 +88,8 @@ This repository contains a Vite + React TypeScript frontend with a FastAPI backe
 
 - **파일 삭제 시 휴지통으로 이동시키세요.** 영구 삭제(`rm` 등)는 금지합니다.
 - 휴지통 사용 명령어 예시: `trash-put <파일>` 또는 `gio trash <파일>`
+## Reporting & Documentation Guidelines
+
+- **모든 문서와 아티팩트(implementation_plan.md, walkthrough.md, task.md 등)는 한국어로 작성하세요.**
+- 사용자용 보고서, 진행 상황 요약, 검증 결과 등 모든 형태의 보고는 한국어를 사용해야 합니다.
+- 기술적인 용어는 필요한 경우 영문을 병기하거나 관용적인 한글 표기를 사용하세요.

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Server } from 'lucide-react';
-import { AppSettings } from '../../types';
+import { AppSettings } from '../../lib/types';
 
 interface ServerTabProps {
     settings: AppSettings;

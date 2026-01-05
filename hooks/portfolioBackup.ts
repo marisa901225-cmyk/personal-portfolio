@@ -1,7 +1,7 @@
 import type { Dispatch, SetStateAction } from 'react';
-import { Asset, TradeRecord } from '../types';
-import { ApiClient } from '../backendClient';
-import { alertError } from '../errors';
+import { Asset, TradeRecord } from '../lib/types';
+import { ApiClient } from '../lib/api';
+import { alertError } from '../lib/utils/errors';
 import type { ImportedAssetSnapshot } from './portfolioTypes';
 import { validateImportedAssetSnapshotList } from './portfolioBackupValidation';
 

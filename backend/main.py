@@ -19,10 +19,13 @@ from .models import Asset
 from .routers.assets import router as assets_router
 from .routers.exchanges import router as exchanges_router
 from .routers.portfolio import router as portfolio_router
+from .routers.report import router as report_router
 from .routers.settings import router as settings_router
 from .routers.snapshots import router as snapshots_router
 from .routers.trades import router as trades_router
 from .routers.cashflows import router as cashflows_router
+from .routers.expenses import router as expenses_router
+from .routers.expense_upload import router as expense_upload_router
 from .services.users import get_or_create_single_user
 
 app = FastAPI(title="MyAsset Portfolio Backend")
@@ -86,12 +89,15 @@ app.add_middleware(
 )
 
 app.include_router(portfolio_router)
+app.include_router(report_router)
 app.include_router(assets_router)
 app.include_router(trades_router)
 app.include_router(exchanges_router)
 app.include_router(settings_router)
 app.include_router(snapshots_router)
 app.include_router(cashflows_router)
+app.include_router(expenses_router)
+app.include_router(expense_upload_router)
 
 
 @app.post(

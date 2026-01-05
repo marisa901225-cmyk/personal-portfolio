@@ -1,6 +1,6 @@
 import React from 'react';
-import { PortfolioSummary, DividendEntry } from '../types';
-import { formatCurrency, REAL_ESTATE_MY_SHARE } from '../constants';
+import { PortfolioSummary, DividendEntry } from '../lib/types';
+import { formatCurrency, REAL_ESTATE_MY_SHARE } from '../lib/utils/constants';
 import { Tooltip, BarChart, Bar, ResponsiveContainer } from 'recharts';
 import { Wallet, TrendingUp, ArrowUpRight, ArrowDownRight, Edit2, Building, RefreshCw } from 'lucide-react';
 
@@ -19,6 +19,7 @@ interface DashboardSummaryProps {
         totalAllTime: number;
         currentYearTotal: number;
         hasData: boolean;
+        isFromBackend?: boolean;
     };
     fxInfo: {
         enabled: boolean;
@@ -162,7 +163,9 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 relative">
                 <div className="flex justify-between items-start">
                     <div>
-                        <p className="text-xs font-semibold text-slate-500 mb-1">💵 배당금 (수동 입력)</p>
+                        <p className="text-xs font-semibold text-slate-500 mb-1">
+                            💵 배당금 ({dividendInfo.isFromBackend ? '증권사 동기화' : '수동 입력'})
+                        </p>
                         <h2 className="text-xl md:text-2xl font-bold text-slate-900 tracking-tight whitespace-nowrap">
                             {dividendInfo.hasData ? `+${formatCurrency(dividendInfo.totalAllTime)}` : '-'}
                         </h2>

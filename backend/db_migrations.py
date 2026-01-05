@@ -10,6 +10,7 @@ def ensure_schema() -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_settings_table()
     _migrate_assets_table()
+    _migrate_expenses_table()
 
 
 def _migrate_settings_table() -> None:
@@ -63,6 +64,28 @@ def _migrate_assets_table() -> None:
     statements: list[str] = []
     if "cma_config" not in columns:
         statements.append("ALTER TABLE assets ADD COLUMN cma_config JSON")
+
+    if not statements:
+        return
+
+    with engine.begin() as conn:
+        for stmt in statements:
+            conn.execute(text(stmt))
+
+
+def _migrate_expenses_table() -> None:
+    """
+    기존 SQLite expenses 테이블에 누락된 컬럼(deleted_at)이 있으면 추가한다.
+    """
+    inspector = inspect(engine)
+    try:
+        columns = {col["name"] for col in inspector.get_columns("expenses")}
+    except Exception:
+        return
+
+    statements: list[str] = []
+    if "deleted_at" not in columns:
+        statements.append("ALTER TABLE expenses ADD COLUMN deleted_at DATETIME")
 
     if not statements:
         return

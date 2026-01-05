@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Upload, CheckCircle2, AlertCircle, Loader2, X } from 'lucide-react';
-import { ApiClient } from '../backendClient';
+import { ApiClient } from '../lib/api';
 
 interface BrokerageSyncProps {
     apiClient: ApiClient;
@@ -120,8 +120,8 @@ export const BrokerageSync: React.FC<BrokerageSyncProps> = ({ apiClient, onSyncC
                         onClick={handleUpload}
                         disabled={!file || loading}
                         className={`w-full py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-all ${!file || loading
-                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                                : 'bg-blue-600 text-white hover:bg-blue-700 shadow-md hover:shadow-lg active:scale-[0.98]'
+                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                            : 'bg-blue-600 text-white hover:bg-blue-700 shadow-md hover:shadow-lg active:scale-[0.98]'
                             }`}
                     >
                         {loading ? (
