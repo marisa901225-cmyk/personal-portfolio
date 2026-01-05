@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, List, PlusCircle, Bell, Settings, RefreshCw, Lock, KeyRound, ScrollText, ArrowLeftRight } from 'lucide-react';
-import { Asset, ViewState, TradeType, TradeRecord, AssetCategory } from './types';
-import { formatCurrency } from './constants';
+import { LayoutDashboard, List, PlusCircle, Bell, Settings, RefreshCw, Lock, KeyRound, ScrollText, ArrowLeftRight, Wallet, Sparkles, AlertCircle, X } from 'lucide-react';
+import { Asset, ViewState, TradeType, TradeRecord, AssetCategory } from './lib/types';
+import { formatCurrency } from './lib/utils/constants';
+import { APP_ERROR_EVENT } from './lib/utils/errors';
 import { Dashboard } from './components/Dashboard';
 import { AssetList } from './components/AssetList';
 import { AddAssetForm } from './components/AddAssetForm';
 import { SettingsPanel } from './components/SettingsPanel';
 import { TradeHistoryAll } from './components/TradeHistoryAll';
 import { ExchangeHistory } from './components/ExchangeHistory';
+import { ExpensesDashboard } from './components/ExpensesDashboard';
+import { AiReportDashboard } from './components/AiReportDashboard';
 
 import { DividendEditModal } from './components/DividendEditModal';
 import { NotificationModal } from './components/NotificationModal';
@@ -23,11 +26,13 @@ const App: React.FC = () => {
   const [authInput, setAuthInput] = useState('');
   const [showAuthModal, setShowAuthModal] = useState(true);
   const [isDividendModalOpen, setIsDividendModalOpen] = useState(false);
+  const [appError, setAppError] = useState<string | null>(null);
   const [syncNotification, setSyncNotification] = useState<{ isOpen: boolean; title: string; message: string }>({
     isOpen: false,
     title: '',
     message: '',
   });
+  const errorTimerRef = useRef<number | null>(null);
 
   const {
     assets,
@@ -123,6 +128,38 @@ const App: React.FC = () => {
     setShowAuthModal(false);
     setAuthInput('');
   };
+
+  const dismissAppError = () => {
+    setAppError(null);
+    if (errorTimerRef.current !== null) {
+      window.clearTimeout(errorTimerRef.current);
+      errorTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    const handleAppError = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+      if (!detail) return;
+      setAppError(detail);
+      if (errorTimerRef.current !== null) {
+        window.clearTimeout(errorTimerRef.current);
+      }
+      errorTimerRef.current = window.setTimeout(() => {
+        setAppError(null);
+        errorTimerRef.current = null;
+      }, 8000);
+    };
+
+    window.addEventListener(APP_ERROR_EVENT, handleAppError as EventListener);
+    return () => {
+      window.removeEventListener(APP_ERROR_EVENT, handleAppError as EventListener);
+      if (errorTimerRef.current !== null) {
+        window.clearTimeout(errorTimerRef.current);
+        errorTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // settings persistence & backend sync are handled by useSettings
 
@@ -236,6 +273,8 @@ const App: React.FC = () => {
           <NavItem view="LIST" icon={List} label="자산 목록" />
           <NavItem view="TRADES" icon={ScrollText} label="거래 내역" />
           <NavItem view="EXCHANGE" icon={ArrowLeftRight} label="환전 내역" />
+          <NavItem view="EXPENSES" icon={Wallet} label="가계부" />
+          <NavItem view="AI_REPORT" icon={Sparkles} label="AI 리포트" />
           <NavItem view="ADD" icon={PlusCircle} label="자산 추가" />
         </nav>
 
@@ -255,6 +294,25 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-1 p-4 md:p-8 max-w-6xl mx-auto w-full">
+        {appError && (
+          <div
+            role="alert"
+            className="mb-4 flex items-start justify-between gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 shadow-sm"
+          >
+            <div className="flex items-start gap-2">
+              <AlertCircle size={18} className="mt-0.5 shrink-0 text-red-500" />
+              <p className="whitespace-pre-line">{appError}</p>
+            </div>
+            <button
+              type="button"
+              onClick={dismissAppError}
+              className="rounded-lg p-1 text-red-400 transition-colors hover:bg-red-100 hover:text-red-600"
+              aria-label="오류 알림 닫기"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
         <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-slate-900">
@@ -266,9 +324,13 @@ const App: React.FC = () => {
                     ? '거래 내역'
                     : currentView === 'EXCHANGE'
                       ? '환전 내역'
-                      : currentView === 'ADD'
-                        ? '자산 추가'
-                        : '서버 설정'}
+                      : currentView === 'EXPENSES'
+                        ? '가계부'
+                        : currentView === 'AI_REPORT'
+                          ? 'AI 리포트'
+                          : currentView === 'ADD'
+                            ? '자산 추가'
+                            : '서버 설정'}
             </h1>
             <p className="text-sm text-slate-500 mt-1">
               {currentView === 'DASHBOARD'
@@ -279,9 +341,13 @@ const App: React.FC = () => {
                     ? '전체 거래 기록 조회'
                     : currentView === 'EXCHANGE'
                       ? '환전 기록 조회 및 수정'
-                      : currentView === 'ADD'
-                        ? '새로운 자산 등록'
-                        : '연결 및 환경 설정'}
+                      : currentView === 'EXPENSES'
+                        ? '월별 지출/수입 분석'
+                        : currentView === 'AI_REPORT'
+                          ? '가계부 + 투자 리포트 생성'
+                          : currentView === 'ADD'
+                            ? '새로운 자산 등록'
+                            : '연결 및 환경 설정'}
             </p>
           </div>
 
@@ -448,6 +514,18 @@ const App: React.FC = () => {
             serverUrl={settings.serverUrl}
             apiToken={settings.apiToken}
             onFxBaseUpdated={(value) => setSettings((prev) => ({ ...prev, usdFxBase: value }))}
+          />
+        )}
+        {currentView === 'EXPENSES' && (
+          <ExpensesDashboard
+            serverUrl={settings.serverUrl}
+            apiToken={settings.apiToken}
+          />
+        )}
+        {currentView === 'AI_REPORT' && (
+          <AiReportDashboard
+            serverUrl={settings.serverUrl}
+            apiToken={settings.apiToken}
           />
         )}
         {currentView === 'ADD' && (

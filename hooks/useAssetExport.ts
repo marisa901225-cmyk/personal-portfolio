@@ -1,8 +1,8 @@
 import { useRef, useState, useCallback } from 'react';
-import { Asset, AssetCategory } from '../types';
+import { Asset, AssetCategory } from '../lib/types';
 import type { ImportedAssetSnapshot } from './portfolioTypes';
 import { validateImportedAssetSnapshotList } from './portfolioBackupValidation';
-import { alertError } from '../errors';
+import { alertError } from '../lib/utils/errors';
 
 interface UseAssetExportOptions {
     onRestoreFromBackup?: (snapshot: ImportedAssetSnapshot[]) => Promise<void>;

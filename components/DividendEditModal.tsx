@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, TrendingUp, Sparkles } from 'lucide-react';
-import { DividendEntry } from '../types';
-import { formatCurrency } from '../constants';
+import { DividendEntry } from '../lib/types';
+import { formatCurrency } from '../lib/utils/constants';
 
 interface DividendEditModalProps {
     isOpen: boolean;

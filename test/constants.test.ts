@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatCompactNumber, formatCurrency } from '../constants';
+import { formatCompactNumber, formatCurrency } from '../lib/utils/constants';
 
 describe('constants formatters', () => {
   it('formatCurrency formats KRW without decimals', () => {

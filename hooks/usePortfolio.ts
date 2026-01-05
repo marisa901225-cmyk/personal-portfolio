@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Asset, AppSettings, AssetCategory, TradeRecord, TradeType } from '../types';
+import { Asset, AppSettings, AssetCategory, TradeRecord, TradeType } from '../lib/types';
 import {
   ApiClient,
   BackendPortfolioResponse,
@@ -8,12 +8,12 @@ import {
   mapBackendTradesToFrontend,
   BackendPortfolioSummary,
   BackendYearlyCashflow,
-} from '../backendClient';
-import { CmaConfig } from '../cmaConfig';
+} from '../lib/api';
+import { CmaConfig } from '../lib/utils/cmaConfig';
 import type { ImportedAssetSnapshot } from './portfolioTypes';
 import { syncPortfolioPrices } from './portfolioSync';
 import { restorePortfolioFromBackup } from './portfolioBackup';
-import { alertError } from '../errors';
+import { alertError } from '../lib/utils/errors';
 
 interface HistoryPoint {
   date: string;

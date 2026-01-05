@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { Asset, AssetCategory, PortfolioSummary, TargetIndexAllocation, DividendEntry } from '../types';
-import { COLORS, REAL_ESTATE_SHARE_RATIO } from '../constants';
+import { Asset, AssetCategory, PortfolioSummary, TargetIndexAllocation, DividendEntry } from '../lib/types';
+import { COLORS, REAL_ESTATE_SHARE_RATIO } from '../lib/utils/constants';
 import { DashboardSummary } from './DashboardSummary';
 import { DashboardCharts } from './DashboardCharts';
 import { BrokerageSync } from './BrokerageSync';
-import { ApiClient, type BackendPortfolioSummary } from '../backendClient';
+import { ApiClient, type BackendPortfolioSummary } from '../lib/api';
 import type { YearlyCashflowData } from '../hooks/usePortfolio';
 
 const normalizeIndexKey = (name: string): string =>
@@ -242,7 +242,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     };
   }, [assets, backendSummary, historyData]);
 
-  // 배당금 정보 계산
   const dividendInfo = useMemo(() => {
     const list: DividendEntry[] = (dividends || []).filter(
       (d) => typeof d.year === 'number' && typeof d.total === 'number' && d.total > 0,
@@ -255,7 +254,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
 
     const sorted = [...list].sort((a, b) => a.year - b.year); // 차트용 오름차순
-    const totalAllTime = sorted.reduce((sum, d) => sum + d.total, 0);
+    const manualTotal = sorted.reduce((sum, d) => sum + d.total, 0);
+
+    // 백엔드 집계 배당금이 있으면 우선 사용
+    const backendDivTotal = backendSummary?.total_dividends ?? 0;
+    const totalAllTime = backendDivTotal > 0 ? backendDivTotal : manualTotal;
+
     const currentYear = new Date().getFullYear();
     const currentYearTotal = sorted.find(d => d.year === currentYear)?.total || 0;
 
@@ -263,9 +267,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       list: sorted,
       totalAllTime,
       currentYearTotal,
-      hasData: sorted.length > 0,
+      hasData: totalAllTime > 0,
+      isFromBackend: backendDivTotal > 0,
     };
-  }, [dividends, dividendTotalYear, dividendYear]);
+  }, [dividends, dividendTotalYear, dividendYear, backendSummary]);
 
   // 실제 입금 원금 (연도별 순입금 합계)
   const actualInvested = useMemo(() => {
@@ -381,7 +386,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         yearlyStats={yearlyCashflows}
         benchmarkName={benchmarkName}
         benchmarkReturn={benchmarkReturn}
-        actualInvested={actualInvested}
+        actualInvested={actualInvested ? actualInvested - (realEstate?.totalInvested || 0) : undefined}
       />
 
       {/* Sync Modal */}

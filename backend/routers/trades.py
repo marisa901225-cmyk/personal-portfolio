@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 
 from ..auth import verify_api_token
 from ..db import get_db
-from ..models import Trade
-from ..schemas import TradeRead
+from ..models import Trade, Asset
+from ..schemas import TradeRead, TradeCreate, TradeUpdate
 from ..services.portfolio import to_trade_read
 from ..services.users import get_or_create_single_user
 
@@ -55,4 +55,53 @@ def get_recent_trades(
         .all()
     )
     return [to_trade_read(t) for t in trades]
+
+
+@router.post("/trades", response_model=TradeRead)
+def create_trade(item: TradeCreate, db: Session = Depends(get_db)):
+    user = get_or_create_single_user(db)
+    asset = db.query(Asset).filter(Asset.id == item.asset_id, Asset.user_id == user.id).first()
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    db_item = Trade(
+        user_id=user.id,
+        asset_id=item.asset_id,
+        type=item.type,
+        quantity=item.quantity,
+        price=item.price,
+        timestamp=item.timestamp or datetime.utcnow(),
+        note=item.note
+    )
+    db.add(db_item)
+    db.commit()
+    db.refresh(db_item)
+    return to_trade_read(db_item)
+
+
+@router.put("/trades/{trade_id}", response_model=TradeRead)
+def update_trade(trade_id: int, item: TradeUpdate, db: Session = Depends(get_db)):
+    user = get_or_create_single_user(db)
+    db_item = db.query(Trade).filter(Trade.id == trade_id, Trade.user_id == user.id).first()
+    if not db_item:
+        raise HTTPException(status_code=404, detail="Trade not found")
+
+    for key, value in item.model_dump(exclude_unset=True).items():
+        setattr(db_item, key, value)
+
+    db.commit()
+    db.refresh(db_item)
+    return to_trade_read(db_item)
+
+
+@router.delete("/trades/{trade_id}")
+def delete_trade(trade_id: int, db: Session = Depends(get_db)):
+    user = get_or_create_single_user(db)
+    db_item = db.query(Trade).filter(Trade.id == trade_id, Trade.user_id == user.id).first()
+    if not db_item:
+        raise HTTPException(status_code=404, detail="Trade not found")
+
+    db.delete(db_item)
+    db.commit()
+    return {"message": "Trade deleted"}
 

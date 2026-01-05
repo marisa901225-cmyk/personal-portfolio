@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { Asset, AssetCategory, TradeType } from '../types';
-import type { CmaConfig } from '../cmaConfig';
+import { Asset, AssetCategory, TradeType } from '../lib/types';
+import type { CmaConfig } from '../lib/utils/cmaConfig';
 import { Search, Filter, Download, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { AssetEditModal } from './AssetEditModal';
 import { AssetRow } from './AssetRow';

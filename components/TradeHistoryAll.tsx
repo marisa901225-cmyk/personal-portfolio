@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, ChevronUp, RefreshCw, Search } from 'lucide-react';
-import { ApiClient, BackendTrade, mapBackendTradesToFrontend } from '../backendClient';
-import { formatCurrency } from '../constants';
-import { getUserErrorMessage } from '../errors';
-import type { Asset, TradeRecord, TradeType } from '../types';
+import { ApiClient, BackendTrade, mapBackendTradesToFrontend } from '../lib/api';
+import { formatCurrency } from '../lib/utils/constants';
+import { getUserErrorMessage } from '../lib/utils/errors';
+import type { Asset, TradeRecord, TradeType } from '../lib/types';
 
 type TradeFilter = 'ALL' | TradeType;
 
@@ -33,6 +33,8 @@ export const TradeHistoryAll: React.FC<TradeHistoryAllProps> = ({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [tradeFilter, setTradeFilter] = useState<TradeFilter>('ALL');
+  const [yearFilter, setYearFilter] = useState<number | 'ALL'>('ALL');
+  const [monthFilter, setMonthFilter] = useState<number | 'ALL'>('ALL');
 
   const isRemoteEnabled = Boolean(serverUrl && apiToken);
 
@@ -54,6 +56,7 @@ export const TradeHistoryAll: React.FC<TradeHistoryAllProps> = ({
       const backendTrades = await apiClient.fetchTrades({ limit: PAGE_SIZE, beforeId });
       if (backendTrades.length === 0) {
         setHasMore(false);
+        if (reset) setTrades([]);
         return;
       }
 
@@ -80,6 +83,8 @@ export const TradeHistoryAll: React.FC<TradeHistoryAllProps> = ({
     setTrades([]);
     setCursorBeforeId(null);
     setHasMore(true);
+    setYearFilter('ALL');
+    setMonthFilter('ALL');
     await loadTrades({ reset: true });
   };
 
@@ -99,16 +104,30 @@ export const TradeHistoryAll: React.FC<TradeHistoryAllProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, isRemoteEnabled, isCollapsible]);
 
+  const availableYears = useMemo(() => {
+    const years = new Set<number>();
+    trades.forEach((trade) => {
+      const year = new Date(trade.timestamp).getFullYear();
+      years.add(year);
+    });
+    return Array.from(years).sort((a, b) => b - a);
+  }, [trades]);
+
   const filteredTrades = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
     return trades.filter((trade) => {
       if (tradeFilter !== 'ALL' && trade.type !== tradeFilter) return false;
+
+      const tradeDate = new Date(trade.timestamp);
+      if (yearFilter !== 'ALL' && tradeDate.getFullYear() !== yearFilter) return false;
+      if (monthFilter !== 'ALL' && (tradeDate.getMonth() + 1) !== monthFilter) return false;
+
       if (!query) return true;
       const name = trade.assetName.toLowerCase();
       const ticker = (trade.ticker || '').toLowerCase();
       return name.includes(query) || ticker.includes(query);
     });
-  }, [trades, tradeFilter, searchTerm]);
+  }, [trades, tradeFilter, searchTerm, yearFilter, monthFilter]);
 
   const tradeFilters: { key: TradeFilter; label: string }[] = [
     { key: 'ALL', label: '전체' },
@@ -145,16 +164,42 @@ export const TradeHistoryAll: React.FC<TradeHistoryAllProps> = ({
             </div>
           ) : (
             <>
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-                <div className="relative flex-1 max-w-md">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                  <input
-                    type="text"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="자산명/티커 검색..."
-                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-                  />
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+                <div className="flex flex-col md:flex-row md:items-center gap-2 flex-1">
+                  <div className="relative flex-1 max-w-sm">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                    <input
+                      type="text"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      placeholder="자산명/티커 검색..."
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={yearFilter}
+                      onChange={(e) => setYearFilter(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
+                      className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[11px] font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="ALL">전체 년도</option>
+                      {availableYears.map((year) => (
+                        <option key={year} value={year}>{year}년</option>
+                      ))}
+                    </select>
+
+                    <select
+                      value={monthFilter}
+                      onChange={(e) => setMonthFilter(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
+                      className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-[11px] font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="ALL">전체 월</option>
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
+                        <option key={month} value={month}>{month}월</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
@@ -187,7 +232,10 @@ export const TradeHistoryAll: React.FC<TradeHistoryAllProps> = ({
               </div>
 
               {loadError && (
-                <div className="mt-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3">
+                <div
+                  role="alert"
+                  className="mt-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3"
+                >
                   {loadError}
                 </div>
               )}

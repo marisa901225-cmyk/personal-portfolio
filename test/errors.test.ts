@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ApiError, NetworkError } from '../backendClient';
-import { getUserErrorMessage } from '../errors';
+import { ApiError, NetworkError } from '../lib/api';
+import { getUserErrorMessage } from '../lib/utils/errors';
 
 describe('getUserErrorMessage', () => {
   const messages = {

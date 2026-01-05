@@ -62,15 +62,23 @@ class AssetRead(AssetBase):
 
 
 class TradeBase(BaseModel):
-    type: Literal["BUY", "SELL"]
-    quantity: float
-    price: float
+    type: Literal["BUY", "SELL", "DIVIDEND"]
+    quantity: float = 0.0
+    price: float = 0.0
     timestamp: Optional[datetime] = None
     note: Optional[str] = None
 
 
 class TradeCreate(TradeBase):
-    pass
+    asset_id: int
+
+
+class TradeUpdate(BaseModel):
+    type: Optional[Literal["BUY", "SELL", "DIVIDEND"]] = None
+    quantity: Optional[float] = None
+    price: Optional[float] = None
+    timestamp: Optional[datetime] = None
+    note: Optional[str] = None
 
 
 class TradeRead(TradeBase):
@@ -157,6 +165,7 @@ class PortfolioSummary(BaseModel):
     total_invested: float
     realized_profit_total: float
     unrealized_profit_total: float
+    total_dividends: float = 0.0
     category_distribution: List[DistributionItem] = []
     index_distribution: List[DistributionItem] = []
     xirr_rate: Optional[float] = None  # 연평균 수익률 (XIRR)
@@ -237,6 +246,13 @@ class ExternalCashflowCreate(ExternalCashflowBase):
     pass
 
 
+class ExternalCashflowUpdate(BaseModel):
+    date: Optional[date] = None
+    amount: Optional[float] = None
+    description: Optional[str] = None
+    account_info: Optional[str] = None
+
+
 class ExternalCashflowRead(ExternalCashflowBase):
     model_config = ConfigDict(from_attributes=True)
 
@@ -244,3 +260,128 @@ class ExternalCashflowRead(ExternalCashflowBase):
     user_id: int
     created_at: datetime
     updated_at: datetime
+
+
+class ReportResponse(BaseModel):
+    generated_at: datetime
+    portfolio: PortfolioResponse
+    snapshots: List[PortfolioSnapshotRead]
+    fx_transactions: List[FxTransactionRead]
+    external_cashflows: List[ExternalCashflowRead]
+    settings: Optional[SettingsRead] = None
+
+
+class MonthlyReportSummary(BaseModel):
+    year: int
+    month: int
+    trade_count: int = 0
+    trade_buy_value: float = 0.0
+    trade_sell_value: float = 0.0
+    cashflow_count: int = 0
+    cashflow_total: float = 0.0
+    fx_transaction_count: int = 0
+    snapshot_count: int = 0
+
+
+class QuarterlyReportSummary(BaseModel):
+    year: int
+    quarter: int
+    trade_count: int = 0
+    trade_buy_value: float = 0.0
+    trade_sell_value: float = 0.0
+    cashflow_count: int = 0
+    cashflow_total: float = 0.0
+    fx_transaction_count: int = 0
+    snapshot_count: int = 0
+
+
+class ReportPeriod(BaseModel):
+    year: int
+    month: Optional[int] = None
+    quarter: Optional[int] = None
+    half: Optional[int] = None
+    start_date: date
+    end_date: date
+
+
+class ReportActivitySummary(BaseModel):
+    trade_count: int = 0
+    trade_buy_value: float = 0.0
+    trade_sell_value: float = 0.0
+    net_buy: float = 0.0
+    cashflow_count: int = 0
+    cashflow_total: float = 0.0
+    deposit_total: float = 0.0
+    withdrawal_total: float = 0.0
+    net_flow: float = 0.0
+    invested_principal: float = 0.0
+    fx_transaction_count: int = 0
+    snapshot_count: int = 0
+
+
+class TopAssetSummary(BaseModel):
+    id: int
+    name: str
+    ticker: Optional[str] = None
+    category: str
+    currency: str
+    amount: float
+    current_price: float
+    purchase_price: Optional[float] = None
+    value: float
+    invested: float
+    unrealized_profit: float
+    unrealized_profit_rate: Optional[float] = None
+
+
+class ReportAiResponse(BaseModel):
+    generated_at: datetime
+    period: ReportPeriod
+    summary: PortfolioSummary
+    activity: ReportActivitySummary
+    top_assets: List[TopAssetSummary]
+
+
+class ReportAiTextResponse(BaseModel):
+    generated_at: datetime
+    period: ReportPeriod
+    report: str
+    model: Optional[str] = None
+
+
+# ========== Expense (소비 데이터) ==========
+
+class ExpenseBase(BaseModel):
+    date: date
+    amount: float
+    category: str
+    merchant: Optional[str] = None
+    method: Optional[str] = None
+    is_fixed: bool = False
+    memo: Optional[str] = None
+
+
+class ExpenseCreate(ExpenseBase):
+    pass
+
+
+class ExpenseUpdate(BaseModel):
+    date: Optional[date] = None
+    amount: Optional[float] = None
+    category: Optional[str] = None
+    merchant: Optional[str] = None
+    method: Optional[str] = None
+    is_fixed: Optional[bool] = None
+    memo: Optional[str] = None
+
+
+class ExpenseRead(ExpenseBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    user_id: int
+    created_at: datetime
+    updated_at: datetime
+    deleted_at: Optional[datetime] = None
+    review_reason: Optional[str] = None
+    review_suggested_category: Optional[str] = None

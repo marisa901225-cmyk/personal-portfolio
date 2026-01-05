@@ -1,8 +1,8 @@
 import type { Dispatch, SetStateAction } from 'react';
-import { Asset, AppSettings, AssetCategory } from '../types';
-import { ApiClient } from '../backendClient';
-import { calculateCmaBalance } from '../cmaConfig';
-import { alertError } from '../errors';
+import { Asset, AppSettings, AssetCategory } from '../lib/types';
+import { ApiClient } from '../lib/api';
+import { calculateCmaBalance } from '../lib/utils/cmaConfig';
+import { alertError } from '../lib/utils/errors';
 
 interface SyncPortfolioPricesParams {
   settings: AppSettings;

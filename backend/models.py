@@ -54,6 +54,15 @@ class User(Base):
     external_cashflows: Mapped[List["ExternalCashflow"]] = relationship(
         "ExternalCashflow", back_populates="user", cascade="all, delete-orphan"
     )
+    expenses: Mapped[List["Expense"]] = relationship(
+        "Expense", back_populates="user", cascade="all, delete-orphan"
+    )
+    merchant_patterns: Mapped[List["MerchantPattern"]] = relationship(
+        "MerchantPattern", back_populates="user", cascade="all, delete-orphan"
+    )
+    ai_reports: Mapped[List["AiReport"]] = relationship(
+        "AiReport", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Asset(Base):
@@ -258,3 +267,84 @@ class ExternalCashflow(Base):
     )
 
     user: Mapped[User] = relationship("User", back_populates="external_cashflows")
+
+
+class Expense(Base):
+    """소비 데이터 추적 (소비 엔진용)"""
+    __tablename__ = "expenses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    date: Mapped[date] = mapped_column(Date, nullable=False)  # 결제일
+    amount: Mapped[float] = mapped_column(Float, nullable=False)  # 금액 (음수: 지출, 양수: 환불/수입)
+    category: Mapped[str] = mapped_column(String(50), nullable=False)  # 식비, 교통, 쇼핑, 고정지출 등
+    merchant: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)  # 가맹점명 (스타벅스 강남점, 쿠팡 등)
+    method: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # 결제수단 (현대카드, 토스뱅크 등)
+    is_fixed: Mapped[bool] = mapped_column(Integer, nullable=False, default=False)  # 고정지출 여부
+    memo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # AI가 남기는 비고
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped[User] = relationship("User", back_populates="expenses")
+
+
+class MerchantPattern(Base):
+    """학습된 가맹점 분류 패턴 (사용자 수동 수정 및 자동 학습 결과)"""
+    __tablename__ = "merchant_patterns"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    merchant: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    user: Mapped[User] = relationship("User", back_populates="merchant_patterns")
+
+
+class AiReport(Base):
+    """AI 생성 리포트 저장"""
+    __tablename__ = "ai_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    period_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    period_month: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    period_quarter: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    period_half: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    query: Mapped[str] = mapped_column(String(500), nullable=False)  # 요청 문장
+    report: Mapped[str] = mapped_column(Text, nullable=False)  # 생성된 리포트 텍스트
+    model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # 사용된 AI 모델
+    generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)  # AI 생성 시각
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    user: Mapped[User] = relationship("User", back_populates="ai_reports")

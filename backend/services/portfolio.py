@@ -60,6 +60,15 @@ def calculate_summary(assets: List[Asset], external_cashflows: List[ExternalCash
         if asset.index_group:
             index_map[asset.index_group] = index_map.get(asset.index_group, 0.0) + value
 
+    total_dividends = 0.0
+    if external_cashflows:
+        # Sum negative amounts (inflows) that have dividend-related descriptions
+        total_dividends = sum(
+            abs(cf.amount) 
+            for cf in external_cashflows 
+            if cf.amount < 0 and any(k in (cf.description or "") for k in ["배당", "DIV"])
+        )
+
     unrealized_profit_total = total_value - total_invested
 
     # --- XIRR Calculation ---
@@ -99,6 +108,7 @@ def calculate_summary(assets: List[Asset], external_cashflows: List[ExternalCash
         total_invested=total_invested,
         realized_profit_total=realized_profit_total,
         unrealized_profit_total=unrealized_profit_total,
+        total_dividends=total_dividends,
         category_distribution=category_distribution,
         index_distribution=index_distribution,
         xirr_rate=xirr_rate,

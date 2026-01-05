@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { X, Edit3, Wallet, Tag, Home } from 'lucide-react';
-import { Asset, AssetCategory } from '../types';
-import { formatCurrency } from '../constants';
-import { calculateCmaBalance, CmaConfig } from '../cmaConfig';
-import { inferCategoryFromTicker } from '../tickerUtils';
+import { Asset, AssetCategory } from '../lib/types';
+import { formatCurrency } from '../lib/utils/constants';
+import { calculateCmaBalance, CmaConfig } from '../lib/utils/cmaConfig';
+import { inferCategoryFromTicker } from '../lib/utils/tickerUtils';
 
 interface AssetEditModalProps {
     isOpen: boolean;

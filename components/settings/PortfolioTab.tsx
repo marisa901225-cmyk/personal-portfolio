@@ -1,6 +1,6 @@
 import React from 'react';
 import { Sliders } from 'lucide-react';
-import { AppSettings } from '../../types';
+import { AppSettings, TargetIndexAllocation } from '../../lib/types';
 import { AppearanceSettings } from './AppearanceSettings';
 
 interface PortfolioTabProps {
@@ -102,7 +102,7 @@ export const PortfolioTab: React.FC<PortfolioTabProps> = ({
                 자동으로 100% 기준으로 환산됩니다. (합계가 100이면 각 값을 %로 그대로 사용합니다.)
             </p>
             <div className="space-y-2">
-                {(settings.targetIndexAllocations || []).map((alloc, index) => (
+                {(settings.targetIndexAllocations || []).map((alloc: TargetIndexAllocation, index: number) => (
                     <div key={index} className="flex items-center gap-2">
                         <input
                             type="text"
