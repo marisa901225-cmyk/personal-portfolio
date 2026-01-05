@@ -53,6 +53,11 @@ class AssetUpdate(BaseModel):
     cma_config: Optional[CmaConfig] = None
 
 
+class AssetCalibration(BaseModel):
+    actual_amount: float
+    actual_avg_price: float
+
+
 class AssetRead(AssetBase):
     model_config = ConfigDict(from_attributes=True)
 
@@ -166,6 +171,7 @@ class PortfolioSummary(BaseModel):
     realized_profit_total: float
     unrealized_profit_total: float
     total_dividends: float = 0.0
+    dividend_yearly: List[DividendRecord] = []
     category_distribution: List[DistributionItem] = []
     index_distribution: List[DistributionItem] = []
     xirr_rate: Optional[float] = None  # 연평균 수익률 (XIRR)

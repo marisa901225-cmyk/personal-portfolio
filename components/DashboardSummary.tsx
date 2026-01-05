@@ -29,7 +29,6 @@ interface DashboardSummaryProps {
         usdFxBase: number;
         usdFxNow: number;
     };
-    onUpdateDividends?: () => void;
     onSyncClick?: () => void;
     actualInvested?: number;  // 연도별 입출금 합계 (실제 원금)
 }
@@ -41,7 +40,6 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
     totalProfit,
     dividendInfo,
     fxInfo,
-    onUpdateDividends,
     onSyncClick,
     realEstateSummary,
     actualInvested,
@@ -164,23 +162,13 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
                 <div className="flex justify-between items-start">
                     <div>
                         <p className="text-xs font-semibold text-slate-500 mb-1">
-                            💵 배당금 ({dividendInfo.isFromBackend ? '증권사 동기화' : '수동 입력'})
+                            💵 배당금 (증권사 동기화)
                         </p>
                         <h2 className="text-xl md:text-2xl font-bold text-slate-900 tracking-tight whitespace-nowrap">
                             {dividendInfo.hasData ? `+${formatCurrency(dividendInfo.totalAllTime)}` : '-'}
                         </h2>
                     </div>
-                    {onUpdateDividends && (
-                        <button
-                            onClick={onUpdateDividends}
-                            className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-indigo-600 transition-colors"
-                            title="배당금 수정"
-                        >
-                            <Edit2 size={18} />
-                        </button>
-                    )}
                 </div>
-
                 {dividendInfo.hasData ? (
                     <div className="mt-4 h-[60px] w-full">
                         <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={60}>

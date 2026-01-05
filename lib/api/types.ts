@@ -16,17 +16,9 @@ export interface BackendTargetIndexAllocation {
     target_weight: number;
 }
 
-export interface BackendDividend {
-    year: number;
-    total: number;
-}
-
 export interface BackendSettings {
     target_index_allocations?: BackendTargetIndexAllocation[];
     server_url?: string | null;
-    dividend_year?: number | null;
-    dividend_total?: number | null;
-    dividends?: BackendDividend[] | null;
     usd_fx_base?: number | null;
     usd_fx_now?: number | null;
     benchmark_name?: string | null;
@@ -114,6 +106,7 @@ export interface BackendPortfolioSummary {
     category_distribution: BackendDistributionItem[];
     index_distribution: BackendDistributionItem[];
     total_dividends?: number;
+    dividend_yearly?: { year: number; total: number }[];
     xirr_rate?: number | null;
 }
 
@@ -135,6 +128,26 @@ export interface BackendSnapshot {
     total_invested: number;
     realized_profit_total: number;
     unrealized_profit_total: number;
+}
+
+export interface BackendExternalCashflow {
+    id: number;
+    user_id: number;
+    date: string;
+    amount: number;
+    description?: string | null;
+    account_info?: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface BackendReportResponse {
+    generated_at: string;
+    portfolio: BackendPortfolioResponse;
+    snapshots: BackendSnapshot[];
+    fx_transactions: BackendFxTransaction[];
+    external_cashflows: BackendExternalCashflow[];
+    settings?: BackendSettings | null;
 }
 
 // --- Health & FX Rate ---

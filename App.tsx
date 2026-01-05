@@ -12,7 +12,6 @@ import { ExchangeHistory } from './components/ExchangeHistory';
 import { ExpensesDashboard } from './components/ExpensesDashboard';
 import { AiReportDashboard } from './components/AiReportDashboard';
 
-import { DividendEditModal } from './components/DividendEditModal';
 import { NotificationModal } from './components/NotificationModal';
 import { InvestmentQuote } from './components/InvestmentQuote';
 import { usePortfolio } from './hooks/usePortfolio';
@@ -25,7 +24,6 @@ const App: React.FC = () => {
   const { settings, setSettings, saveSettingsToServer } = useSettings();
   const [authInput, setAuthInput] = useState('');
   const [showAuthModal, setShowAuthModal] = useState(true);
-  const [isDividendModalOpen, setIsDividendModalOpen] = useState(false);
   const [appError, setAppError] = useState<string | null>(null);
   const [syncNotification, setSyncNotification] = useState<{ isOpen: boolean; title: string; message: string }>({
     isOpen: false,
@@ -478,10 +476,6 @@ const App: React.FC = () => {
             usdFxNow={settings.usdFxNow}
             targetIndexAllocations={settings.targetIndexAllocations}
             historyData={historyData}
-            dividendTotalYear={settings.dividendTotalYear}
-            dividendYear={settings.dividendYear}
-            dividends={settings.dividends}
-            onUpdateDividends={() => setIsDividendModalOpen(true)}
             yearlyCashflows={yearlyCashflows}
             benchmarkName={settings.benchmarkName}
             benchmarkReturn={settings.benchmarkReturn}
@@ -549,16 +543,6 @@ const App: React.FC = () => {
           />
         )}
       </main>
-
-      <DividendEditModal
-        isOpen={isDividendModalOpen}
-        onClose={() => setIsDividendModalOpen(false)}
-        dividends={settings.dividends || []}
-        onSave={(updated) => {
-          setSettings((prev) => ({ ...prev, dividends: updated }));
-          void saveSettingsToServer({ ...settings, dividends: updated });
-        }}
-      />
 
       <NotificationModal
         isOpen={syncNotification.isOpen}

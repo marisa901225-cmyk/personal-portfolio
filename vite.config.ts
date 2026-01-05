@@ -9,6 +9,20 @@ export default defineConfig(() => {
       host: '0.0.0.0',
     },
     plugins: [react()],
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            // React 관련
+            'vendor-react': ['react', 'react-dom'],
+            // 차트 라이브러리
+            'vendor-charts': ['recharts'],
+            // 아이콘
+            'vendor-icons': ['lucide-react'],
+          },
+        },
+      },
+    },
     test: {
       environment: 'jsdom',
       globals: true,

@@ -15,10 +15,6 @@ interface DashboardProps {
   backendSummary?: BackendPortfolioSummary;
   targetIndexAllocations?: TargetIndexAllocation[];
   historyData?: { date: string; value: number; stockValue?: number; realEstateValue?: number }[];
-  dividendTotalYear?: number;
-  dividendYear?: number;
-  dividends?: DividendEntry[];
-  onUpdateDividends?: () => void;
   usdFxBase?: number;
   usdFxNow?: number;
   yearlyCashflows?: YearlyCashflowData[];
@@ -33,10 +29,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   backendSummary,
   targetIndexAllocations,
   historyData,
-  dividendTotalYear,
-  dividendYear,
-  dividends,
-  onUpdateDividends,
   usdFxBase,
   usdFxNow,
   yearlyCashflows,
@@ -243,22 +235,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }, [assets, backendSummary, historyData]);
 
   const dividendInfo = useMemo(() => {
-    const list: DividendEntry[] = (dividends || []).filter(
-      (d) => typeof d.year === 'number' && typeof d.total === 'number' && d.total > 0,
-    );
+    const list: DividendEntry[] = (backendSummary?.dividend_yearly || [])
+      .filter((d) => typeof d.year === 'number' && typeof d.total === 'number' && d.total > 0)
+      .map((d) => ({ year: d.year, total: d.total }));
 
-    // 구버전 데이터 호환 (dividendTotalYear만 있는 경우)
-    if (list.length === 0 && typeof dividendTotalYear === 'number' && dividendTotalYear > 0) {
-      const year = dividendYear || new Date().getFullYear();
-      list.push({ year, total: dividendTotalYear });
-    }
-
-    const sorted = [...list].sort((a, b) => a.year - b.year); // 차트용 오름차순
-    const manualTotal = sorted.reduce((sum, d) => sum + d.total, 0);
-
-    // 백엔드 집계 배당금이 있으면 우선 사용
-    const backendDivTotal = backendSummary?.total_dividends ?? 0;
-    const totalAllTime = backendDivTotal > 0 ? backendDivTotal : manualTotal;
+    const sorted = [...list].sort((a, b) => a.year - b.year);
+    const totalAllTime = backendSummary?.total_dividends ?? 0;
 
     const currentYear = new Date().getFullYear();
     const currentYearTotal = sorted.find(d => d.year === currentYear)?.total || 0;
@@ -268,9 +250,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
       totalAllTime,
       currentYearTotal,
       hasData: totalAllTime > 0,
-      isFromBackend: backendDivTotal > 0,
+      isFromBackend: true,
     };
-  }, [dividends, dividendTotalYear, dividendYear, backendSummary]);
+  }, [backendSummary]);
 
   // 실제 입금 원금 (연도별 순입금 합계)
   const actualInvested = useMemo(() => {
@@ -375,7 +357,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
         totalProfit={totalProfit}
         dividendInfo={dividendInfo}
         fxInfo={fxInfo}
-        onUpdateDividends={onUpdateDividends}
         onSyncClick={() => setIsSyncModalOpen(true)}
         realEstateSummary={realEstate}
         actualInvested={actualInvested}
