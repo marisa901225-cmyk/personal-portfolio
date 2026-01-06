@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from ..models import Trade, Asset
 from ..schemas import TradeCreate
 
+
 def create_trade_with_sync(
     db: Session, 
     user_id: int, 
@@ -14,6 +15,8 @@ def create_trade_with_sync(
 ) -> Trade:
     """
     거래 내역을 생성하고, sync_asset=True일 경우 자산(Asset)의 상태(잔고/평단)를 동기화합니다.
+    
+    NOTE: This function does NOT commit. The caller (router) is responsible for commit/rollback.
     """
     if item.quantity <= 0 or item.price <= 0:
         raise HTTPException(status_code=400, detail="quantity and price must be positive")
@@ -23,7 +26,7 @@ def create_trade_with_sync(
     now = datetime.utcnow()
     timestamp = item.timestamp or now
 
-    # 1. 자산 조회
+    # 1. 자산 조회 with row lock
     asset = (
         db.query(Asset)
         .filter(
@@ -53,10 +56,10 @@ def create_trade_with_sync(
         note=item.note,
     )
     db.add(trade)
+    db.flush()  # Ensure trade.id is assigned, but don't commit
 
-    db.commit()
-    db.refresh(trade)
     return trade
+
 
 def _apply_trade_to_asset(asset: Asset, trade_type: str, quantity: float, price: float, now: datetime) -> float | None:
     """

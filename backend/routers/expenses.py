@@ -65,7 +65,8 @@ def _build_review_info(
     learned_patterns: dict[str, str],
     model: Any | None,
 ) -> tuple[str, str | None] | None:
-    if expense.amount <= 0:
+    # Skip income (positive amounts), only review expenses (negative amounts)
+    if expense.amount >= 0:
         return None
     if not expense.merchant:
         return None
@@ -298,15 +299,8 @@ def learn_patterns_from_history(db: Session = Depends(get_db)) -> dict:
     # AI 모델 학습 추가
     ai_success = False
     try:
-        import sys
-        from pathlib import Path
-        project_root = Path(__file__).parent.parent.parent
-        sys.path.insert(0, str(project_root))
-        from scripts.expenses.train_expense_ai import train_model
-        
-        db_path = Path(__file__).parent.parent / "portfolio.db"
-        model_path = Path(__file__).parent.parent / "expense_model.joblib"
-        ai_success = train_model(str(db_path), str(model_path))
+        from ..services.expense_trainer import train_model
+        ai_success = train_model()
     except Exception as e:
         print(f"⚠️ AI 모델 학습 중 오류 발생: {e}")
 

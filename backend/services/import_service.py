@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import tempfile
 from sqlalchemy.orm import Session
@@ -7,6 +8,15 @@ from fastapi import UploadFile, HTTPException
 from .brokerage_parser import get_parser
 from ..models import ExternalCashflow
 
+
+def _normalize_description(description: str | None) -> str:
+    """Normalize description for consistent deduplication."""
+    if not description:
+        return ""
+    # Trim and collapse consecutive whitespace
+    return re.sub(r'\s+', ' ', description.strip())
+
+
 def process_brokerage_upload(
     db: Session, 
     user_id: int, 
@@ -14,6 +24,8 @@ def process_brokerage_upload(
 ) -> dict:
     """
     증권사 엑셀 파일을 받아서 ExternalCashflow 데이터를 생성합니다.
+    
+    NOTE: This function does NOT commit. The caller (router) is responsible for commit/rollback.
     """
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename is required")
@@ -37,21 +49,26 @@ def process_brokerage_upload(
         added_count = 0
         skipped_count = 0
         
-        # 중복 방지 로직 (Batch Insert 개선 가능하지만 일단 기존 로직 유지)
+        # 중복 방지 로직 with normalized comparison
         for item in new_items:
+            # Normalize amount to 2 decimal places for consistent comparison
+            normalized_amount = round(item.amount, 2)
+            # Normalize description (trim, collapse whitespace)
+            normalized_description = _normalize_description(item.description)
+            
             exists = db.query(ExternalCashflow).filter(
                 ExternalCashflow.user_id == user_id,
                 ExternalCashflow.date == item.date,
-                ExternalCashflow.amount == item.amount,
-                ExternalCashflow.description == item.description
+                ExternalCashflow.amount == normalized_amount,
+                ExternalCashflow.description == normalized_description
             ).first()
             
             if not exists:
                 db_item = ExternalCashflow(
                     user_id=user_id,
                     date=item.date,
-                    amount=item.amount,
-                    description=item.description,
+                    amount=normalized_amount,
+                    description=normalized_description,
                     account_info=item.account_info
                 )
                 db.add(db_item)
@@ -59,7 +76,7 @@ def process_brokerage_upload(
             else:
                 skipped_count += 1
         
-        db.commit()
+        db.flush()  # Apply changes without committing
         return {
             "message": "Upload successful",
             "added": added_count,
@@ -68,10 +85,8 @@ def process_brokerage_upload(
         }
         
     except ValueError as e:
-        db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        db.rollback()
         raise HTTPException(status_code=500, detail=f"Parsing failed: {str(e)}")
     finally:
         if os.path.exists(tmp_path):

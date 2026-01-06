@@ -29,24 +29,73 @@ def _parse_number(value: str | float | int | None) -> float | None:
         return None
 
 
-def _load_kis_config() -> dict:
-    cfg_path = Path.home() / "KIS" / "config" / "kis_user.yaml"
-    if not cfg_path.exists():
-        raise RuntimeError("kis_user.yaml not found in ~/KIS/config")
-    return yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+def _parse_datetime(value) -> datetime | None:
+    """Safely parse datetime from various types (string, date, datetime)."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day)
+    if isinstance(value, str):
+        try:
+            # Try ISO format first
+            return datetime.fromisoformat(value.replace('Z', '+00:00'))
+        except ValueError:
+            pass
+        try:
+            # Try common format
+            return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            pass
+        try:
+            # Try date only
+            return datetime.strptime(value, "%Y-%m-%d")
+        except ValueError:
+            pass
+    return None
 
 
-def _load_kis_token() -> str:
-    config_dir = Path.home() / "KIS" / "config"
-    candidates = sorted(config_dir.glob("KIS20*"), reverse=True)
-    now = datetime.now()
-    for path in candidates:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        token = data.get("token")
-        valid = data.get("valid-date")
-        if token and valid and valid > now:
-            return token
-    raise RuntimeError("No valid KIS token file found")
+def _load_kis_config() -> dict | None:
+    """Load KIS config, returning None on failure instead of raising."""
+    try:
+        cfg_path = Path.home() / "KIS" / "config" / "kis_user.yaml"
+        if not cfg_path.exists():
+            logger.warning("kis_user.yaml not found in ~/KIS/config")
+            return None
+        return yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning(f"Failed to load KIS config: {e}")
+        return None
+
+
+def _load_kis_token() -> str | None:
+    """Load KIS token, returning None on failure instead of raising."""
+    try:
+        config_dir = Path.home() / "KIS" / "config"
+        if not config_dir.exists():
+            logger.warning("KIS config directory not found")
+            return None
+        candidates = sorted(config_dir.glob("KIS20*"), reverse=True)
+        now = datetime.now()
+        for path in candidates:
+            try:
+                data = yaml.safe_load(path.read_text(encoding="utf-8"))
+                token = data.get("token")
+                valid = data.get("valid-date")
+                
+                # Safely parse valid-date
+                valid_dt = _parse_datetime(valid)
+                if token and valid_dt and valid_dt > now:
+                    return token
+            except Exception as e:
+                logger.warning(f"Failed to parse token file {path}: {e}")
+                continue
+        logger.warning("No valid KIS token file found")
+        return None
+    except Exception as e:
+        logger.warning(f"Failed to load KIS token: {e}")
+        return None
 
 
 def _kis_get(cfg: dict, token: str, api_url: str, tr_id: str, params: dict) -> dict:
@@ -188,55 +237,75 @@ def _price_on_or_before(prices: dict[date, float], target: date) -> float | None
 def compute_total_return(
     start_date: date,
     end_date: date,
-) -> float:
+) -> float | None:
+    """
+    Compute benchmark total return. Returns None on failure instead of raising.
+    """
     cfg = _load_kis_config()
+    if cfg is None:
+        logger.warning("Cannot compute benchmark: KIS config not available")
+        return None
+        
     token = _load_kis_token()
+    if token is None:
+        logger.warning("Cannot compute benchmark: KIS token not available")
+        return None
 
-    prices = _fetch_overseas_prices(
-        cfg,
-        token,
-        DEFAULT_BENCHMARK_EXCHANGE,
-        DEFAULT_BENCHMARK_SYMBOL,
-        start_date,
-        end_date,
-    )
-    if not prices:
-        raise RuntimeError("No benchmark prices fetched")
+    try:
+        prices = _fetch_overseas_prices(
+            cfg,
+            token,
+            DEFAULT_BENCHMARK_EXCHANGE,
+            DEFAULT_BENCHMARK_SYMBOL,
+            start_date,
+            end_date,
+        )
+        if not prices:
+            logger.warning("No benchmark prices fetched")
+            return None
 
-    start_price = _price_on_or_before(prices, start_date)
-    end_price = _price_on_or_before(prices, end_date)
-    if start_price is None or end_price is None:
-        raise RuntimeError("Missing benchmark price for start/end date")
+        start_price = _price_on_or_before(prices, start_date)
+        end_price = _price_on_or_before(prices, end_date)
+        if start_price is None or end_price is None:
+            logger.warning("Missing benchmark price for start/end date")
+            return None
 
-    dividends = _fetch_overseas_dividends(
-        cfg,
-        token,
-        DEFAULT_BENCHMARK_SYMBOL,
-        start_date,
-        end_date,
-    )
+        dividends = _fetch_overseas_dividends(
+            cfg,
+            token,
+            DEFAULT_BENCHMARK_SYMBOL,
+            start_date,
+            end_date,
+        )
 
-    units = 1.0
-    for d, div in dividends:
-        price = _price_on_or_before(prices, d)
-        if price is None:
-            continue
-        units += units * div / price
+        units = 1.0
+        for d, div in dividends:
+            price = _price_on_or_before(prices, d)
+            if price is None:
+                continue
+            units += units * div / price
 
-    end_value = units * end_price
-    total_return = (end_value / start_price - 1) * 100
-    logger.info(
-        "Benchmark TR computed: start=%s end=%s return=%.4f%%",
-        start_date,
-        end_date,
-        total_return,
-    )
-    return total_return
+        end_value = units * end_price
+        total_return = (end_value / start_price - 1) * 100
+        logger.info(
+            "Benchmark TR computed: start=%s end=%s return=%.4f%%",
+            start_date,
+            end_date,
+            total_return,
+        )
+        return total_return
+    except Exception as e:
+        logger.warning(f"Failed to compute benchmark total return: {e}")
+        return None
 
 
 def compute_calendar_year_total_return(
     today: date | None = None,
-) -> tuple[str, float, bool]:
+) -> tuple[str, float | None, bool]:
+    """
+    Compute calendar year total return.
+    Returns (label, return_pct, is_partial). return_pct may be None on failure.
+    """
     today = today or date.today()
     start_date = date(today.year, 1, 1)
     year_end = date(today.year, 12, 31)

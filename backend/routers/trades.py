@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import List
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..auth import verify_api_token
@@ -74,7 +75,11 @@ def create_trade(item: TradeCreate, db: Session = Depends(get_db)):
         note=item.note
     )
     db.add(db_item)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(db_item)
     return to_trade_read(db_item)
 
@@ -89,7 +94,11 @@ def update_trade(trade_id: int, item: TradeUpdate, db: Session = Depends(get_db)
     for key, value in item.model_dump(exclude_unset=True).items():
         setattr(db_item, key, value)
 
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(db_item)
     return to_trade_read(db_item)
 
@@ -102,6 +111,9 @@ def delete_trade(trade_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Trade not found")
 
     db.delete(db_item)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return {"message": "Trade deleted"}
-

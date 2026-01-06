@@ -20,6 +20,14 @@ router = APIRouter(prefix="/api", tags=["portfolio"], dependencies=[Depends(veri
 @router.post("/assets", response_model=AssetRead)
 def create_asset(payload: AssetCreate, db: Session = Depends(get_db)) -> AssetRead:
     user = get_or_create_single_user(db)
+    
+    # Validate: if amount > 0, at least one price must be provided
+    if payload.amount > 0 and payload.purchase_price is None and payload.current_price is None:
+        raise HTTPException(
+            status_code=400, 
+            detail="purchase_price or current_price required when amount > 0"
+        )
+    
     asset = Asset(
         user_id=user.id,
         name=payload.name,
@@ -103,6 +111,12 @@ def calibrate_asset(
         payload.actual_amount,
         payload.actual_avg_price,
     )
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(asset)
     return to_asset_read(asset)
 
 
@@ -136,4 +150,10 @@ def create_trade_for_asset(
     user = get_or_create_single_user(db)
     item = payload.model_copy(update={"asset_id": asset_id})
     trade = create_trade_with_sync(db, user.id, item, sync_asset=True)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(trade)
     return to_trade_read(trade)

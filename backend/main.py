@@ -1,21 +1,25 @@
+"""
+MyAsset Portfolio Backend - Main Application Entry Point
+
+이 파일의 책임:
+- FastAPI 앱 생성
+- 미들웨어 설정
+- 라우터 등록
+- 헬스체크 및 루트 페이지
+
+비즈니스 로직은 services/에, API 엔드포인트는 routers/에 위치한다.
+"""
+
 from __future__ import annotations
 
-from typing import Dict, List
-import asyncio
-from datetime import datetime
+from typing import Dict
 
-from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, RootModel
-from sqlalchemy.orm import Session
 from starlette.requests import Request
 
-from . import kis_client
-from .auth import verify_api_token
 from .db_migrations import ensure_schema
-from .db import get_db
-from .models import Asset
 from .routers.assets import router as assets_router
 from .routers.exchanges import router as exchanges_router
 from .routers.portfolio import router as portfolio_router
@@ -26,11 +30,15 @@ from .routers.trades import router as trades_router
 from .routers.cashflows import router as cashflows_router
 from .routers.expenses import router as expenses_router
 from .routers.expense_upload import router as expense_upload_router
-from .services.users import get_or_create_single_user
+from .routers.market_data import router as market_data_router
 
 app = FastAPI(title="MyAsset Portfolio Backend")
 ensure_schema()
 
+
+# ============================================
+# Middleware
+# ============================================
 
 @app.middleware("http")
 async def api_prefix_fallback(request: Request, call_next):
@@ -49,34 +57,6 @@ async def api_prefix_fallback(request: Request, call_next):
     return await call_next(request)
 
 
-class PricesRequest(BaseModel):
-    tickers: List[str]
-
-
-class PricesResponse(RootModel[Dict[str, float]]):
-    """단순 티커 → 가격 매핑을 감싸는 루트 모델 (Pydantic v2 스타일)."""
-    pass
-
-
-class TickerInfo(BaseModel):
-    symbol: str
-    name: str
-    exchange: str | None = None
-    currency: str | None = None
-    type: str | None = None
-
-
-class TickerSearchResponse(BaseModel):
-    query: str
-    results: List[TickerInfo]
-
-
-class FxRateResponse(BaseModel):
-    base: str
-    quote: str
-    rate: float
-
-
 app.add_middleware(
     CORSMiddleware,
     # Backend는 Tailscale 등 사설 망 뒤에 두는 것을 전제로 하고,
@@ -88,6 +68,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# ============================================
+# Router Registration
+# ============================================
+
 app.include_router(portfolio_router)
 app.include_router(report_router)
 app.include_router(assets_router)
@@ -98,149 +83,12 @@ app.include_router(snapshots_router)
 app.include_router(cashflows_router)
 app.include_router(expenses_router)
 app.include_router(expense_upload_router)
+app.include_router(market_data_router)
 
 
-@app.post(
-    "/api/kis/prices",
-    response_model=PricesResponse,
-    dependencies=[Depends(verify_api_token)],
-)
-async def get_kis_prices(
-    req: PricesRequest,
-    db: Session = Depends(get_db),
-) -> PricesResponse:
-    """
-    한국투자증권 Open API 기준으로 국내/해외 시세를 조회한다.
-
-    - 국내: 6자리 숫자 종목코드 (예: 005930)
-    - 해외: EXCD:SYMB 형식 (예: NAS:AAPL, NYS:VOO)
-      * EXCD: KIS 거래소 코드 (NAS, NYS, AMS, HKS, TSE 등)
-    - 응답값은 모두 KRW 기준 가격으로 반환된다.
-    """
-    raw_tickers = [t.strip() for t in req.tickers if t and t.strip()]
-    if not raw_tickers:
-        raise HTTPException(status_code=400, detail="tickers list is empty")
-
-    try:
-        prices = await asyncio.to_thread(kis_client.fetch_kis_prices_krw, raw_tickers)
-    except RuntimeError as exc:
-        # KIS 인증/환경 설정 문제 등
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"KIS price fetch failed: {exc}",
-        ) from exc
-
-    if not prices:
-        raise HTTPException(
-            status_code=502,
-            detail="no prices found for given tickers via KIS",
-        )
-
-    # --- 가격을 포트폴리오 자산에도 반영 ---
-    try:
-        user = get_or_create_single_user(db)
-        tickers = list(prices.keys())
-        if tickers:
-            assets = (
-                db.query(Asset)
-                .filter(
-                    Asset.user_id == user.id,
-                    Asset.deleted_at.is_(None),
-                    Asset.ticker.in_(tickers),
-                )
-                .all()
-            )
-
-            now = datetime.utcnow()
-            for asset in assets:
-                if asset.ticker and asset.ticker in prices:
-                    asset.current_price = prices[asset.ticker]
-                    asset.updated_at = now
-
-            if assets:
-                db.commit()
-    except Exception as exc:  # 저장 실패해도 시세 조회 응답은 유지
-        # 로그만 남기고 조용히 무시
-        # (개인용 프로젝트이므로 간단히 처리)
-        print(f"[WARN] failed to persist synced prices: {exc}")
-
-    return PricesResponse(root=prices)
-
-
-@app.get("/api/search_ticker", response_model=TickerSearchResponse, dependencies=[Depends(verify_api_token)])
-async def search_ticker(q: str = Query(..., min_length=1)) -> TickerSearchResponse:
-    """
-    종목명으로 검색 후,
-    포트폴리오에서 사용할 KIS 호환 티커 포맷을 반환한다.
-
-    - 국내: 6자리 숫자 코드 (예: 005930)
-    - 미국: EXCD:SYMB 형식 (예: NAS:AAPL, NYS:VOO)
-    - 데이터 출처: KIS 종목 마스터 엑셀 파일
-    """
-    try:
-        raw_items = await asyncio.to_thread(kis_client.search_tickers_by_name, q)
-    except RuntimeError as exc:
-        # 마스터 파일이 없는 경우 등
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"KIS ticker search failed: {exc}",
-        ) from exc
-
-    results: List[TickerInfo] = []
-    for item in raw_items:
-        symbol = item.get("symbol") or ""
-        name = item.get("name") or symbol
-        exchange_label = item.get("exchange")
-        currency = item.get("currency")
-        quote_type = item.get("type")
-
-        results.append(
-            TickerInfo(
-                symbol=symbol,
-                name=name,
-                exchange=exchange_label,
-                currency=currency,
-                type=quote_type,
-            )
-        )
-
-    return TickerSearchResponse(query=q, results=results)
-
-
-@app.get(
-    "/api/kis/fx/usdkrw",
-    response_model=FxRateResponse,
-    dependencies=[Depends(verify_api_token)],
-)
-async def get_usdkrw_fx_rate() -> FxRateResponse:
-    """
-    한국투자증권 해외 현재가 상세 API를 사용해 USD/KRW 당일 환율을 조회한다.
-
-    - 구현 단순화를 위해 미국 나스닥 상장 AAPL의 t_rate(당일환율)을 사용.
-    - 참고용 환율이며, 실제 환전/과세 기준 환율과는 다를 수 있다.
-    """
-    try:
-        rate = await asyncio.to_thread(kis_client.fetch_usdkrw_rate)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"KIS FX fetch failed: {exc}",
-        ) from exc
-
-    if rate is None:
-        raise HTTPException(
-            status_code=502,
-            detail="no FX rate found from KIS",
-        )
-
-    return FxRateResponse(base="USD", quote="KRW", rate=rate)
-
+# ============================================
+# Health & Root
+# ============================================
 
 @app.get("/health")
 async def health() -> Dict[str, str]:

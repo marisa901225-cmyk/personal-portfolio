@@ -153,10 +153,12 @@ export const AiReportDashboard: React.FC<AiReportDashboardProps> = ({ serverUrl,
         throw new Error('AI 리포트 메타데이터를 받지 못했습니다.');
       }
 
+      // Type assertion needed because TypeScript doesn't track callback mutations
+      const metaData = meta as BackendAiReportTextResponse;
       const data: BackendAiReportTextResponse = {
-        generated_at: meta.generated_at,
-        period: meta.period,
-        model: meta.model,
+        generated_at: metaData.generated_at,
+        period: metaData.period,
+        model: metaData.model,
         report: fullText,
       };
       setCurrentResult(data);
