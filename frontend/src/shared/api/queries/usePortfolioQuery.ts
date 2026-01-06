@@ -33,17 +33,20 @@ export function usePortfolioQuery(
  */
 export function useAssetsQuery(
     apiClient: ApiClient | null,
-    options?: Omit<UseQueryOptions<Asset[], Error>, 'queryKey' | 'queryFn'>
+    options?: Omit<
+        UseQueryOptions<BackendPortfolioResponse, Error, Asset[]>,
+        'queryKey' | 'queryFn' | 'select'
+    >
 ) {
     return useQuery({
         queryKey: queryKeys.portfolio,
-        queryFn: async (): Promise<Asset[]> => {
+        queryFn: async (): Promise<BackendPortfolioResponse> => {
             if (!apiClient) throw new Error('API client not configured');
-            const data = await apiClient.fetchPortfolio();
-            return data.assets.map(mapBackendAssetToFrontend);
+            return apiClient.fetchPortfolio();
         },
         enabled: !!apiClient,
         staleTime: 1000 * 60 * 2,
+        select: (data) => data.assets.map(mapBackendAssetToFrontend),
         ...options,
     });
 }
