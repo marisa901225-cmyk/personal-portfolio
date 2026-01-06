@@ -67,7 +67,11 @@ def create_fx_transaction(
         note=payload.note,
     )
     db.add(record)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(record)
     return to_fx_transaction_read(record)
 
@@ -92,7 +96,11 @@ def update_fx_transaction(
         setattr(record, field, value)
     record.updated_at = datetime.utcnow()
 
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(record)
     return to_fx_transaction_read(record)
 
@@ -112,6 +120,9 @@ def delete_fx_transaction(
         raise HTTPException(status_code=404, detail="fx transaction not found")
 
     db.delete(record)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return {"status": "ok"}
-

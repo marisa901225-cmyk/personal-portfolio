@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import verify_api_token
 from ..db import get_db
-from ..models import Asset, PortfolioSnapshot
+from ..models import Asset, ExternalCashflow, PortfolioSnapshot
 from ..schemas import PortfolioSnapshotRead
 from ..services.portfolio import calculate_summary, to_snapshot_read
 from ..services.users import get_or_create_single_user
@@ -29,7 +29,12 @@ def create_portfolio_snapshot(db: Session = Depends(get_db)) -> PortfolioSnapsho
         .filter(Asset.user_id == user.id, Asset.deleted_at.is_(None))
         .all()
     )
-    summary = calculate_summary(assets)
+    external_cashflows = (
+        db.query(ExternalCashflow)
+        .filter(ExternalCashflow.user_id == user.id)
+        .all()
+    )
+    summary = calculate_summary(assets, external_cashflows)
     now = datetime.utcnow()
 
     snapshot = PortfolioSnapshot(
@@ -41,7 +46,11 @@ def create_portfolio_snapshot(db: Session = Depends(get_db)) -> PortfolioSnapsho
         unrealized_profit_total=summary.unrealized_profit_total,
     )
     db.add(snapshot)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(snapshot)
 
     return to_snapshot_read(snapshot)
@@ -72,4 +81,3 @@ def get_portfolio_snapshots(
     )
 
     return [to_snapshot_read(s) for s in snapshots]
-

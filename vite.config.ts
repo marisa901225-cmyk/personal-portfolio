@@ -30,7 +30,11 @@ export default defineConfig(() => {
     },
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(__dirname, 'src'),
+        // 기존 컴포넌트 경로 호환성 유지
+        '@components': path.resolve(__dirname, 'components'),
+        '@hooks': path.resolve(__dirname, 'hooks'),
+        '@lib': path.resolve(__dirname, 'lib'),
       },
     },
   };

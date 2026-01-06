@@ -16,6 +16,12 @@ from ..schemas import (
 )
 from .performance import xirr
 
+# Keywords for XIRR classification
+# Income: dividends, interest, refunds - should be POSITIVE in XIRR (inflow to user)
+_INCOME_KEYWORDS = ["배당", "분배금", "DIV", "이자", "이용료", "환급"]
+# Costs: tax, fees - should be NEGATIVE in XIRR (outflow from user's return)
+_COST_KEYWORDS = ["세금", "TAX", "WITHHOLD", "원천징수", "수수료", "FEE"]
+
 
 def to_asset_read(asset: Asset) -> AssetRead:
     return AssetRead.model_validate(asset)
@@ -95,20 +101,24 @@ def calculate_summary(assets: List[Asset], external_cashflows: List[ExternalCash
         
         txs = []
         for cf in external_cashflows:
-            # Dividends, interests, and tax refunds are "Internal Returns"
-            # In DB, inflows to brokerage are stored as < 0.
-            # For XIRR:
-            # - If it's a dividend/interest: Treat as a POSITIVE cashflow (withdrawal/profit)
-            #   since the 'total_value' below only includes stock assets, not the cash account.
-            # - If it's a transfer in: Stay NEGATIVE (investment cost)
-            
             desc = (cf.description or "").upper()
-            is_internal_return = any(k in desc for k in ["배당", "분배금", "DIV", "이자", "이용료", "환급"])
             
-            if is_internal_return:
-                txs.append((cf.date, abs(cf.amount))) # To Positive (Profit)
+            # Check for cost keywords first (tax, fees) - they should reduce returns
+            is_internal_cost = any(k.upper() in desc for k in _COST_KEYWORDS)
+            # Check for income keywords (dividends, interest)
+            is_internal_return = any(k.upper() in desc for k in _INCOME_KEYWORDS)
+            
+            if is_internal_cost:
+                # Costs should be negative (outflow from portfolio returns)
+                # Even if stored as negative in DB, ensure it's negative in XIRR
+                txs.append((cf.date, -abs(cf.amount)))
+            elif is_internal_return:
+                # Income should be positive (inflow to user)
+                txs.append((cf.date, abs(cf.amount)))
             else:
-                txs.append((cf.date, cf.amount))      # Stay as is (Investment/Withdrawal)
+                # Regular deposits/withdrawals: keep original sign
+                # In DB, deposits are stored as negative (outflow from bank to portfolio)
+                txs.append((cf.date, cf.amount))
 
         # Add Terminal Value (Investable Only)
         txs.append((date.today(), investable_total_value))

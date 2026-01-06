@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException
 from ..models import Asset
 
+
 def calibrate_asset_balance(
     db: Session, 
     user_id: int, 
@@ -12,6 +13,8 @@ def calibrate_asset_balance(
 ) -> Asset:
     """
     [비상 탈출구] 거래 내역과 무관하게, 실제 증권사 앱의 잔고/평단가로 데이터를 덮어씁니다.
+    
+    NOTE: This function does NOT commit. The caller (router) is responsible for commit/rollback.
     """
     if actual_amount < 0:
         raise HTTPException(status_code=400, detail="actual_amount must be non-negative")
@@ -25,6 +28,7 @@ def calibrate_asset_balance(
             Asset.user_id == user_id,
             Asset.deleted_at.is_(None),
         )
+        .with_for_update()  # Row lock for concurrent access protection
         .first()
     )
     if not asset:
@@ -38,6 +42,5 @@ def calibrate_asset_balance(
     if actual_amount == 0:
         asset.purchase_price = 0.0
 
-    db.commit()
-    db.refresh(asset)
+    db.flush()  # Apply changes without committing
     return asset

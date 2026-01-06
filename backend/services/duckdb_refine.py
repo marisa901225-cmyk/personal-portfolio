@@ -86,8 +86,10 @@ def refine_portfolio_for_ai(
         period_label = str(year)
 
     # Connect to DuckDB (in-memory) and attach SQLite
+    # Escape single quotes in path to prevent SQL syntax errors
     con = duckdb.connect(":memory:")
-    con.execute(f"ATTACH '{db_path}' AS sqlite_db (TYPE SQLITE, READ_ONLY)")
+    escaped_path = db_path.replace("'", "''")
+    con.execute(f"ATTACH '{escaped_path}' AS sqlite_db (TYPE SQLITE, READ_ONLY)")
 
     # Determine if we're analyzing a historical period
     is_historical = month is not None or quarter is not None or half is not None or year != date.today().year
