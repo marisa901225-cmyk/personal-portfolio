@@ -13,6 +13,8 @@ MyAsset Portfolio Backend - Main Application Entry Point
 from __future__ import annotations
 
 from typing import Dict
+import logging
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +22,7 @@ from fastapi.responses import HTMLResponse
 from starlette.requests import Request
 
 from .core.db_migrations import ensure_schema
+from .core import auth, db
 from .routers.assets import router as assets_router
 from .routers.exchanges import router as exchanges_router
 from .routers.portfolio import router as portfolio_router
@@ -34,6 +37,7 @@ from .routers.market_data import router as market_data_router
 
 app = FastAPI(title="MyAsset Portfolio Backend")
 ensure_schema()
+logger = logging.getLogger("myasset.startup")
 
 
 # ============================================
@@ -67,6 +71,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ============================================
+# Startup Log
+# ============================================
+
+@app.on_event("startup")
+def log_startup_info() -> None:
+    logger.info("MyAsset Backend 시작")
+    logger.info("DB 확인: %s", db.DATABASE_URL)
+    logger.info("인증 모드: %s", "활성화" if auth.API_TOKEN else "비활성화")
+    logger.info("Working Dir: %s", os.getcwd())
 
 
 # ============================================

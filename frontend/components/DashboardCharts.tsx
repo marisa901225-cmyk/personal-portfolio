@@ -104,7 +104,7 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
                                     ))}
                                 </Pie>
                                 <Tooltip
-                                    formatter={(value: number) => formatCurrency(value)}
+                                    formatter={(value: number | undefined) => (value !== undefined ? formatCurrency(value) : '')}
                                     contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                                 />
                             </PieChart>
@@ -180,7 +180,7 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
                                         domain={['dataMin', 'dataMax']}
                                     />
                                     <Tooltip
-                                        formatter={(value: number) => formatCurrency(value)}
+                                        formatter={(value: number | undefined) => (value !== undefined ? formatCurrency(value) : '')}
                                         labelStyle={{ color: '#64748b' }}
                                         contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                                     />

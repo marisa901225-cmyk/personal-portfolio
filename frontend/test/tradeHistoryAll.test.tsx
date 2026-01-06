@@ -11,16 +11,27 @@ vi.mock('../lib/api', async () => {
   };
 });
 
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { TradeHistoryAll } from '../components/TradeHistoryAll';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+    },
+  },
+});
 
 describe('TradeHistoryAll', () => {
   it('shows an error banner when loading fails', async () => {
     render(
-      <TradeHistoryAll
-        assets={[]}
-        serverUrl="http://localhost"
-        apiToken="token"
-      />,
+      <QueryClientProvider client={queryClient}>
+        <TradeHistoryAll
+          assets={[]}
+          serverUrl="http://localhost"
+          apiToken="token"
+        />
+      </QueryClientProvider>,
     );
 
     const alert = await screen.findByRole('alert');

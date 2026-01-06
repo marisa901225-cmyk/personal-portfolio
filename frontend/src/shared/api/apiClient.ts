@@ -19,7 +19,7 @@ export interface ApiConfig {
  */
 export function useApiClient(config: ApiConfig): ApiClient | null {
     return useMemo(() => {
-        if (!config.serverUrl) return null;
+        if (!config.serverUrl || !config.apiToken) return null;
         return new ApiClient(config.serverUrl, config.apiToken);
     }, [config.serverUrl, config.apiToken]);
 }
