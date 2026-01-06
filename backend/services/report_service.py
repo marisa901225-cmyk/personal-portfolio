@@ -11,14 +11,16 @@ Report Service - Business logic for report generation.
 """
 from __future__ import annotations
 
-from datetime import date, datetime
-import json
+import httpx
 import logging
 import os
+import json
 import re
-from typing import TYPE_CHECKING, List, Optional
+from datetime import date, datetime
+from typing import TYPE_CHECKING, List, Optional, Any, AsyncGenerator
 
 from sqlalchemy.orm import Session
+from sqlalchemy import extract
 
 from ..models import (
     AiReport,
@@ -38,6 +40,9 @@ from ..schemas import (
     ReportActivitySummary,
     ReportPeriod,
     ReportResponse,
+    ReportAiResponse,
+    ReportAiTextResponse,
+    TopAssetSummary,
 )
 from ..services.portfolio import (
     calculate_summary,
@@ -47,6 +52,7 @@ from ..services.portfolio import (
     to_trade_read,
 )
 from ..services.settings_service import to_settings_read
+from ..services.duckdb_refine import refine_portfolio_for_ai
 
 if TYPE_CHECKING:
     pass
@@ -90,106 +96,65 @@ def get_user(db: Session) -> Optional[User]:
     return db.query(User).order_by(User.id.asc()).first()
 
 
-def build_report(
+def get_report_data(
     db: Session,
-    start_date: date | None,
-    end_date: date | None,
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    quarter: Optional[int] = None,
 ) -> ReportResponse:
     """
-    기간에 해당하는 리포트 데이터를 조립한다.
-    
-    Args:
-        db: 데이터베이스 세션
-        start_date: 시작일 (포함)
-        end_date: 종료일 (미포함)
-        
-    Returns:
-        ReportResponse 객체
+    년/월/분기 파라미터를 받아 기간을 계산하고 리포트 데이터를 조회한다.
+    (라우터에 있던 기간 계산 로직을 서비스로 이동)
     """
+    start_date = None
+    end_date = None
+    if year is not None:
+        if month is not None:
+            # 월간
+            start_date = date(year, month, 1)
+            if month == 12:
+                end_date = date(year + 1, 1, 1)
+            else:
+                end_date = date(year, month + 1, 1)
+        elif quarter is not None:
+            # 분기
+            start_month = (quarter - 1) * 3 + 1
+            start_date = date(year, start_month, 1)
+            if quarter == 4:
+                end_date = date(year + 1, 1, 1)
+            else:
+                end_date = date(year, start_month + 3, 1)
+        else:
+            # 연간
+            start_date = date(year, 1, 1)
+            end_date = date(year + 1, 1, 1)
+
+    return build_report(db, start_date, end_date)
+
+
+def get_quarterly_summaries(db: Session, year: int) -> List[QuarterlyReportSummary]:
+    """특정 연도의 분기별 요약을 집계한다. (라우터 로직 이동)"""
     user = get_user(db)
-    if not user:
-        summary = calculate_summary([], [])
-        return ReportResponse(
-            generated_at=datetime.utcnow(),
-            portfolio=PortfolioResponse(assets=[], trades=[], summary=summary),
-            snapshots=[],
-            fx_transactions=[],
-            external_cashflows=[],
-            settings=None,
+    monthly = build_monthly_summaries(db, user, year)
+    summaries = []
+    for quarter in range(1, 5):
+        start_month = (quarter - 1) * 3 + 1
+        months = [start_month, start_month + 1, start_month + 2]
+        activity = aggregate_activity(monthly, months)
+        summaries.append(
+            QuarterlyReportSummary(
+                year=year,
+                quarter=quarter,
+                trade_count=activity.trade_count,
+                trade_buy_value=activity.trade_buy_value,
+                trade_sell_value=activity.trade_sell_value,
+                cashflow_count=activity.cashflow_count,
+                cashflow_total=activity.cashflow_total,
+                fx_transaction_count=activity.fx_transaction_count,
+                snapshot_count=activity.snapshot_count,
+            )
         )
-
-    start_dt = None
-    end_dt = None
-    if start_date and end_date:
-        start_dt = datetime(start_date.year, start_date.month, start_date.day)
-        end_dt = datetime(end_date.year, end_date.month, end_date.day)
-
-    assets = (
-        db.query(Asset)
-        .filter(Asset.user_id == user.id, Asset.deleted_at.is_(None))
-        .order_by(Asset.id.asc())
-        .all()
-    )
-    
-    trades_query = db.query(Trade).filter(Trade.user_id == user.id)
-    if start_dt and end_dt:
-        trades_query = trades_query.filter(
-            Trade.timestamp >= start_dt,
-            Trade.timestamp < end_dt,
-        )
-    trades = trades_query.order_by(Trade.timestamp.asc()).all()
-
-    snapshots_query = db.query(PortfolioSnapshot).filter(PortfolioSnapshot.user_id == user.id)
-    if start_dt and end_dt:
-        snapshots_query = snapshots_query.filter(
-            PortfolioSnapshot.snapshot_at >= start_dt,
-            PortfolioSnapshot.snapshot_at < end_dt,
-        )
-    snapshots = snapshots_query.order_by(PortfolioSnapshot.snapshot_at.asc()).all()
-
-    fx_query = db.query(FxTransaction).filter(FxTransaction.user_id == user.id)
-    if start_date and end_date:
-        fx_query = fx_query.filter(
-            FxTransaction.trade_date >= start_date,
-            FxTransaction.trade_date < end_date,
-        )
-    fx_transactions = fx_query.order_by(
-        FxTransaction.trade_date.asc(),
-        FxTransaction.id.asc(),
-    ).all()
-
-    cashflows_query = db.query(ExternalCashflow).filter(ExternalCashflow.user_id == user.id)
-    if start_date and end_date:
-        cashflows_query = cashflows_query.filter(
-            ExternalCashflow.date >= start_date,
-            ExternalCashflow.date < end_date,
-        )
-    external_cashflows = cashflows_query.order_by(
-        ExternalCashflow.date.asc(),
-        ExternalCashflow.id.asc(),
-    ).all()
-    
-    setting = (
-        db.query(Setting)
-        .filter(Setting.user_id == user.id)
-        .order_by(Setting.id.asc())
-        .first()
-    )
-
-    summary = calculate_summary(assets, external_cashflows)
-
-    return ReportResponse(
-        generated_at=datetime.utcnow(),
-        portfolio=PortfolioResponse(
-            assets=[to_asset_read(a) for a in assets],
-            trades=[to_trade_read(t) for t in trades],
-            summary=summary,
-        ),
-        snapshots=[to_snapshot_read(s) for s in snapshots],
-        fx_transactions=[to_fx_transaction_read(r) for r in fx_transactions],
-        external_cashflows=[ExternalCashflowRead.model_validate(c) for c in external_cashflows],
-        settings=to_settings_read(setting) if setting else None,
-    )
+    return summaries
 
 
 def build_monthly_summaries(
@@ -601,6 +566,281 @@ def build_report_prompt(period: ReportPeriod, refined_data: dict, expense_summar
 
 
 # ============================================
+# AI Report Logic (Core Integration)
+# ============================================
+
+def resolve_ai_report_prompt(
+    db: Session,
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    quarter: Optional[int] = None,
+    query: Optional[str] = None,
+) -> tuple[ReportPeriod, str]:
+    """
+    AI 리포트 생성을 위한 입력을 해석하고 최종 프롬프트를 생성한다.
+    (라우터의 복잡한 로직을 모두 서비스로 이동)
+    """
+    from ..services.expense_service import get_expense_summary
+    
+    today = date.today()
+    resolved_year = year
+    resolved_month = month
+    resolved_quarter = quarter
+    resolved_half = None
+
+    if query:
+        parsed_year, parsed_month, parsed_quarter, parsed_half, parse_error = parse_report_query(query, today)
+        if parse_error:
+            raise ValueError(parse_error)
+        resolved_year = parsed_year or resolved_year or today.year
+        resolved_month = parsed_month
+        resolved_quarter = parsed_quarter
+        resolved_half = parsed_half
+
+    if resolved_year is None:
+        raise ValueError("연도 정보가 필요해. 예: 2025년 6월 리포트")
+
+    period = resolve_period(resolved_year, resolved_month, resolved_quarter, resolved_half)
+
+    # DuckDB 정제 로직 호출
+    refined = refine_portfolio_for_ai(
+        year=period.year,
+        month=period.month,
+        quarter=period.quarter,
+        half=period.half,
+    )
+    
+    # 지출 요약 합산 로직
+    if period.quarter is not None:
+        start_month = (period.quarter - 1) * 3 + 1
+        months = [start_month, start_month + 1, start_month + 2]
+        summaries = [get_expense_summary(db, year=period.year, month=m) for m in months]
+        expense_summary = merge_expense_summaries(summaries, period.year, period.quarter, None)
+    elif period.half is not None:
+        months = list(range(1, 7)) if period.half == 1 else list(range(7, 13))
+        summaries = [get_expense_summary(db, year=period.year, month=m) for m in months]
+        expense_summary = merge_expense_summaries(summaries, period.year, None, period.half)
+    else:
+        expense_summary = get_expense_summary(db, year=period.year, month=period.month)
+
+    prompt = build_report_prompt(period, refined, expense_summary)
+    return period, prompt
+
+
+async def generate_ai_report_text(
+    period: ReportPeriod,
+    prompt: str,
+    model: Optional[str] = None,
+    max_tokens: Optional[int] = None,
+) -> ReportAiTextResponse:
+    """AI API 호출 (Non-streaming)."""
+    base_url, api_key, selected_model, selected_tokens, temperature = get_ai_config(period, model, max_tokens)
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"{base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": selected_model,
+                "messages": [
+                    {"role": "system", "content": AI_REPORT_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": temperature,
+                "max_completion_tokens": selected_tokens,
+            },
+            timeout=60.0,
+        )
+    
+    if response.status_code >= 400:
+        raise RuntimeError(f"AI API request failed: {response.text}")
+
+    data = response.json()
+    report_text = data["choices"][0]["message"]["content"].strip()
+    
+    return ReportAiTextResponse(
+        generated_at=datetime.utcnow(),
+        period=period,
+        report=report_text,
+        model=selected_model,
+    )
+
+
+async def generate_ai_report_stream(
+    period: ReportPeriod,
+    prompt: str,
+    model: Optional[str] = None,
+    max_tokens: Optional[int] = None,
+) -> AsyncGenerator[str, None]:
+    """AI API 호출 (Streaming)."""
+    base_url, api_key, selected_model, selected_tokens, temperature = get_ai_config(period, model, max_tokens)
+    generated_at = datetime.utcnow()
+
+    # Meta 정보 먼저 전달
+    meta_payload = json.dumps(
+        {
+            "generated_at": generated_at.isoformat(),
+            "period": period.model_dump(mode="json"),
+            "model": selected_model,
+        },
+        ensure_ascii=False,
+    )
+    yield format_sse("meta", meta_payload)
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            async with client.stream(
+                "POST",
+                f"{base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": selected_model,
+                    "messages": [
+                        {"role": "system", "content": AI_REPORT_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "temperature": temperature,
+                    "max_completion_tokens": selected_tokens,
+                    "stream": True,
+                },
+                timeout=120.0,
+            ) as response:
+                if response.status_code >= 400:
+                    yield format_sse("error", f"AI report request failed: {await response.aread()}")
+                    return
+
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data_str = line[5:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        payload = json.loads(data_str)
+                    except json.JSONDecodeError:
+                        continue
+                    
+                    choice = (payload.get("choices") or [{}])[0]
+                    delta = ""
+                    if "delta" in choice:
+                        delta = choice["delta"].get("content") or ""
+                    elif "message" in choice:
+                        delta = choice["message"].get("content") or ""
+                    
+                    if delta:
+                        yield format_sse("chunk", delta)
+        except Exception as exc:
+            yield format_sse("error", f"AI request failed: {str(exc)}")
+            return
+
+    yield format_sse("done", "[DONE]")
+
+
+def get_ai_report_metrics(
+    db: Session,
+    year: int,
+    month: Optional[int] = None,
+    quarter: Optional[int] = None,
+    top_n: int = 10,
+) -> ReportAiResponse:
+    """AI 리포트 화면용 통계 데이터 및 Top 자산 집계."""
+    period = resolve_period(year, month, quarter, None)
+    user = get_user(db)
+    monthly = build_monthly_summaries(db, user, year)
+    
+    if month is not None:
+        activity = aggregate_activity(monthly, [month])
+    elif quarter is not None:
+        start_month = (quarter - 1) * 3 + 1
+        activity = aggregate_activity(monthly, [start_month, start_month + 1, start_month + 2])
+    else:
+        activity = aggregate_activity(monthly, list(range(1, 13)))
+
+    if not user:
+        summary = calculate_summary([], [])
+        return ReportAiResponse(
+            generated_at=datetime.utcnow(),
+            period=period,
+            summary=summary,
+            activity=activity,
+            top_assets=[],
+        )
+
+    assets = (
+        db.query(Asset)
+        .filter(Asset.user_id == user.id, Asset.deleted_at.is_(None))
+        .order_by(Asset.id.asc())
+        .all()
+    )
+    cashflows = (
+        db.query(ExternalCashflow)
+        .filter(
+            ExternalCashflow.user_id == user.id,
+            ExternalCashflow.date >= period.start_date,
+            ExternalCashflow.date < period.end_date,
+        )
+        .all()
+    )
+    
+    # Cashflow metrics
+    deposit_total = 0.0
+    withdrawal_total = 0.0
+    for cashflow in cashflows:
+        if cashflow.amount < 0:
+            deposit_total += abs(cashflow.amount)
+        else:
+            withdrawal_total += cashflow.amount
+
+    activity.cashflow_total = sum(c.amount for c in cashflows)
+    activity.deposit_total = deposit_total
+    activity.withdrawal_total = withdrawal_total
+    activity.net_flow = deposit_total - withdrawal_total
+    activity.invested_principal = activity.net_flow
+    activity.net_buy = activity.trade_buy_value - activity.trade_sell_value
+    
+    summary = calculate_summary(assets, cashflows)
+
+    # Top assets
+    top_assets = []
+    for asset in assets:
+        value = asset.amount * asset.current_price
+        invested = asset.amount * (asset.purchase_price or asset.current_price)
+        unrealized_profit = value - invested
+        unrealized_profit_rate = (unrealized_profit / invested * 100) if invested > 0 else None
+        top_assets.append(
+            TopAssetSummary(
+                id=asset.id,
+                name=asset.name,
+                ticker=asset.ticker,
+                category=asset.category,
+                currency=asset.currency,
+                amount=asset.amount,
+                current_price=asset.current_price,
+                purchase_price=asset.purchase_price,
+                value=value,
+                invested=invested,
+                unrealized_profit=unrealized_profit,
+                unrealized_profit_rate=unrealized_profit_rate,
+            )
+        )
+    top_assets.sort(key=lambda item: item.value, reverse=True)
+
+    return ReportAiResponse(
+        generated_at=datetime.utcnow(),
+        period=period,
+        summary=summary,
+        activity=activity,
+        top_assets=top_assets[:top_n],
+    )
+
+
+# ============================================
 # Saved Report CRUD (from report_saved.py)
 # ============================================
 
@@ -706,3 +946,229 @@ def delete_saved_report(db: Session, report_id: int) -> dict:
     db.commit()
 
     return {"message": "삭제되었습니다.", "id": report_id}
+
+
+# ============================================
+# Private Helpers
+# ============================================
+
+def build_report(
+    db: Session,
+    start_date: Optional[date],
+    end_date: Optional[date],
+) -> ReportResponse:
+    """기간에 해당하는 데이터를 조립한다."""
+    user = get_user(db)
+    if not user:
+        summary = calculate_summary([], [])
+        return ReportResponse(
+            generated_at=datetime.utcnow(),
+            portfolio=PortfolioResponse(assets=[], trades=[], summary=summary),
+            snapshots=[],
+            fx_transactions=[],
+            external_cashflows=[],
+            settings=None,
+        )
+
+    start_dt = None
+    end_dt = None
+    if start_date and end_date:
+        start_dt = datetime(start_date.year, start_date.month, start_date.day)
+        end_dt = datetime(end_date.year, end_date.month, end_date.day)
+
+    assets = (
+        db.query(Asset)
+        .filter(Asset.user_id == user.id, Asset.deleted_at.is_(None))
+        .order_by(Asset.id.asc())
+        .all()
+    )
+    
+    trades_query = db.query(Trade).filter(Trade.user_id == user.id)
+    if start_dt and end_dt:
+        trades_query = trades_query.filter(
+            Trade.timestamp >= start_dt,
+            Trade.timestamp < end_dt,
+        )
+    trades = trades_query.order_by(Trade.timestamp.asc()).all()
+
+    snapshots_query = db.query(PortfolioSnapshot).filter(PortfolioSnapshot.user_id == user.id)
+    if start_dt and end_dt:
+        snapshots_query = snapshots_query.filter(
+            PortfolioSnapshot.snapshot_at >= start_dt,
+            PortfolioSnapshot.snapshot_at < end_dt,
+        )
+    snapshots = snapshots_query.order_by(PortfolioSnapshot.snapshot_at.asc()).all()
+
+    fx_query = db.query(FxTransaction).filter(FxTransaction.user_id == user.id)
+    if start_date and end_date:
+        fx_query = fx_query.filter(
+            FxTransaction.trade_date >= start_date,
+            FxTransaction.trade_date < end_date,
+        )
+    fx_transactions = fx_query.order_by(
+        FxTransaction.trade_date.asc(),
+        FxTransaction.id.asc(),
+    ).all()
+
+    cashflows_query = db.query(ExternalCashflow).filter(ExternalCashflow.user_id == user.id)
+    if start_date and end_date:
+        cashflows_query = cashflows_query.filter(
+            ExternalCashflow.date >= start_date,
+            ExternalCashflow.date < end_date,
+        )
+    external_cashflows = cashflows_query.order_by(
+        ExternalCashflow.date.asc(),
+        ExternalCashflow.id.asc(),
+    ).all()
+    
+    setting = (
+        db.query(Setting)
+        .filter(Setting.user_id == user.id)
+        .order_by(Setting.id.asc())
+        .first()
+    )
+
+    summary = calculate_summary(assets, external_cashflows)
+
+    return ReportResponse(
+        generated_at=datetime.utcnow(),
+        portfolio=PortfolioResponse(
+            assets=[to_asset_read(a) for a in assets],
+            trades=[to_trade_read(t) for t in trades],
+            summary=summary,
+        ),
+        snapshots=[to_snapshot_read(s) for s in snapshots],
+        fx_transactions=[to_fx_transaction_read(r) for r in fx_transactions],
+        external_cashflows=[ExternalCashflowRead.model_validate(c) for c in external_cashflows],
+        settings=to_settings_read(setting) if setting else None,
+    )
+
+
+    # Top assets
+    top_assets = []
+    for asset in assets:
+        value = asset.amount * asset.current_price
+        invested = asset.amount * (asset.purchase_price or asset.current_price)
+        unrealized_profit = value - invested
+        unrealized_profit_rate = (unrealized_profit / invested * 100) if invested > 0 else None
+        top_assets.append(
+            TopAssetSummary(
+                id=asset.id,
+                name=asset.name,
+                ticker=asset.ticker,
+                category=asset.category,
+                currency=asset.currency,
+                amount=asset.amount,
+                current_price=asset.current_price,
+                purchase_price=asset.purchase_price,
+                value=value,
+                invested=invested,
+                unrealized_profit=unrealized_profit,
+                unrealized_profit_rate=unrealized_profit_rate,
+            )
+        )
+    top_assets.sort(key=lambda item: item.value, reverse=True)
+
+    return ReportAiResponse(
+        generated_at=datetime.utcnow(),
+        period=period,
+        summary=summary,
+        activity=activity,
+        top_assets=top_assets[:top_n],
+    )
+
+
+# ============================================
+# Private Helpers (Extracted from report_core)
+# ============================================
+
+def build_report(
+    db: Session,
+    start_date: Optional[date],
+    end_date: Optional[date],
+) -> ReportResponse:
+    """기간에 해당하는 데이터를 조립한다."""
+    user = get_user(db)
+    if not user:
+        summary = calculate_summary([], [])
+        return ReportResponse(
+            generated_at=datetime.utcnow(),
+            portfolio=PortfolioResponse(assets=[], trades=[], summary=summary),
+            snapshots=[],
+            fx_transactions=[],
+            external_cashflows=[],
+            settings=None,
+        )
+
+    start_dt = None
+    end_dt = None
+    if start_date and end_date:
+        start_dt = datetime(start_date.year, start_date.month, start_date.day)
+        end_dt = datetime(end_date.year, end_date.month, end_date.day)
+
+    assets = (
+        db.query(Asset)
+        .filter(Asset.user_id == user.id, Asset.deleted_at.is_(None))
+        .order_by(Asset.id.asc())
+        .all()
+    )
+    
+    trades_query = db.query(Trade).filter(Trade.user_id == user.id)
+    if start_dt and end_dt:
+        trades_query = trades_query.filter(
+            Trade.timestamp >= start_dt,
+            Trade.timestamp < end_dt,
+        )
+    trades = trades_query.order_by(Trade.timestamp.asc()).all()
+
+    snapshots_query = db.query(PortfolioSnapshot).filter(PortfolioSnapshot.user_id == user.id)
+    if start_dt and end_dt:
+        snapshots_query = snapshots_query.filter(
+            PortfolioSnapshot.snapshot_at >= start_dt,
+            PortfolioSnapshot.snapshot_at < end_dt,
+        )
+    snapshots = snapshots_query.order_by(PortfolioSnapshot.snapshot_at.asc()).all()
+
+    fx_query = db.query(FxTransaction).filter(FxTransaction.user_id == user.id)
+    if start_date and end_date:
+        fx_query = fx_query.filter(
+            FxTransaction.trade_date >= start_date,
+            FxTransaction.trade_date < end_date,
+        )
+    fx_transactions = fx_query.order_by(
+        FxTransaction.trade_date.asc(),
+        FxTransaction.id.asc(),
+    ).all()
+
+    cashflows_query = db.query(ExternalCashflow).filter(ExternalCashflow.user_id == user.id)
+    if start_date and end_date:
+        cashflows_query = cashflows_query.filter(
+            ExternalCashflow.date >= start_date,
+            ExternalCashflow.date < end_date,
+        )
+    external_cashflows = cashflows_query.order_by(
+        ExternalCashflow.date.asc(),
+        ExternalCashflow.id.asc(),
+    ).all()
+    
+    setting = (
+        db.query(Setting)
+        .filter(Setting.user_id == user.id)
+        .order_by(Setting.id.asc())
+        .first()
+    )
+
+    summary = calculate_summary(assets, external_cashflows)
+
+    return ReportResponse(
+        generated_at=datetime.utcnow(),
+        portfolio=PortfolioResponse(
+            assets=[to_asset_read(a) for a in assets],
+            trades=[to_trade_read(t) for t in trades],
+            summary=summary,
+        ),
+        snapshots=[to_snapshot_read(s) for s in snapshots],
+        fx_transactions=[to_fx_transaction_read(r) for r in fx_transactions],
+        external_cashflows=[ExternalCashflowRead.model_validate(c) for c in external_cashflows],
+        settings=to_settings_read(setting) if setting else None,
+    )

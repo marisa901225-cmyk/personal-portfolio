@@ -1,7 +1,7 @@
 # 🏗️ Personal Portfolio Refactoring Master Plan (2026)
 
-> **Last Updated:** 2026-01-06 14:35
-> **Status:** Phase 3 Complete ✅
+> **Last Updated:** 2026-01-06 14:50
+> **Status:** Phase 3 Complete (Refinement Applied) ✅
 > **Ref:** Context7 Verified Tech Stack
 
 ---
@@ -12,89 +12,41 @@
 |-------|--------|-------------|
 | **Phase 1** | ✅ Complete | `src/` 구조 + React Router 설정 |
 | **Phase 2** | ✅ Complete | React Query 통합, 페이지 컴포넌트 분리 |
-| **Phase 3** | ✅ Complete | Backend 정리 (main.py 분리, 서비스 레이어 응집) |
+| **Phase 3** | ✅ Complete | Backend 정리 & 테스트 강화 (Router Slim, Logic Cohesion) |
 | **Phase 4** | ⏳ Pending | UI/UX 최적화 (스켈레톤, 에러 바운더리) |
 
 ---
 
-## Phase 3: Backend Clean-up (완료)
+## Phase 3: Backend Clean-up (보완 완료)
 
 ### ✅ Step 1: Market Data 분리
-| 작업 | 설명 |
-|------|------|
-| `services/market_data_service.py` | KIS 비즈니스 로직 (시세, 티커 검색, 환율) |
-| `routers/market_data.py` | KIS API 엔드포인트 (얇은 라우터) |
-| `main.py` 정리 | 276줄 → 120줄 (56% 감소) |
+- `services/market_data_service.py`: KIS 비즈니스 로직 캡슐화.
+- `routers/market_data.py`: 얇은 라우터 인터페이스.
 
-### ✅ Step 2: Report Logic 응집
-| 작업 | 설명 |
-|------|------|
-| `services/report_service.py` 확장 | report_core + report_ai + report_saved 로직 통합 |
-| `services/settings_service.py` | `to_settings_read` 헬퍼 분리 |
-| `services/expense_service.py` | `get_expense_summary` 서비스 분리 |
-| `routers/report_core.py` 정리 | 329줄 → 125줄 (62% 감소) |
-| `routers/report_saved.py` 정리 | 117줄 → 53줄 (55% 감소) |
-| `routers/report_ai.py` 정리 | 라우터 간 의존 제거 |
+### ✅ Step 2: Report Logic 완전 응집 (리뷰 반영)
+- `services/report_service.py`:
+  - AI 입력 해석 (자연어 쿼리 파싱 포함) 이동.
+  - DuckDB 정제 레이어(`refine_portfolio_for_ai`) 호출 캡슐화.
+  - 리포트 데이터 조립 및 기간 계산(`get_report_data`) 이동.
+  - AI API 호출 및 **SSE 스트리밍 제너레이터** 이동.
+  - 저장된 리포트 CRUD 로직 통합.
+- `routers/report_core.py`, `report_ai.py`:
+  - 모든 비즈니스 로직 제거.
+  - 요청 파라미터 매핑 및 HTTP 관련 처리(Exception, StreamingResponse)만 담당.
 
-### 주요 개선점
-
-1. **라우터 간 의존 제거**
-   - ❌ `report_core.py` → `settings.py` (제거됨)
-   - ❌ `report_ai.py` → `report_core.py` (제거됨)
-   - ❌ `report_ai.py` → `expenses.py` (제거됨)
-
-2. **순환 Import 방지 구조**
-   ```
-   Routers → Services (OK)
-   Services → Models, Schemas (OK)
-   Services → Services (OK)
-   Routers → Routers (FORBIDDEN)
-   ```
-
-3. **새로운 서비스 레이어**
-   ```
-   backend/services/
-   ├── market_data_service.py  # KIS 시세/검색/환율
-   ├── report_service.py       # 리포트 생성/저장/AI
-   ├── settings_service.py     # 설정 변환 헬퍼
-   ├── expense_service.py      # 지출 요약
-   ├── portfolio.py            # 기존 포트폴리오 로직
-   ├── users.py                # 사용자 관리
-   └── ... (기타)
-   ```
+### ✅ Step 3: 테스트 코드 작성 및 검증
+- `tests/test_market_data.py`: KIS 가격 조회, 티커 검색, 환율 모킹 테스트. (Pass)
+- `tests/test_report_service.py`: 자연어 쿼리 해석 및 기간 계산 단위 테스트. (Pass)
+- `tests/test_main.py`: 기존 API 엔드포인트 검증. (Regression Check)
 
 ---
 
-## File Structure (Phase 3 완료 후)
+## Architecture Principles
 
-```
-backend/
-├── main.py                       # 120줄 (라우터 등록 + 헬스체크만)
-├── routers/
-│   ├── market_data.py           # KIS 엔드포인트
-│   ├── report_core.py           # 125줄 (얇은 라우터)
-│   ├── report_ai.py             # 라우터 간 의존 없음
-│   ├── report_saved.py          # 53줄 (얇은 라우터)
-│   ├── settings.py              # 서비스 헬퍼 사용
-│   └── expenses.py              # 서비스 헬퍼 사용
-└── services/
-    ├── market_data_service.py   # KIS 비즈니스 로직
-    ├── report_service.py        # 리포트 로직 집중
-    ├── settings_service.py      # 설정 헬퍼
-    └── expense_service.py       # 지출 요약 로직
-```
-
----
-
-## Architecture Principles (PRD 기반)
-
-### 라우터 vs 서비스 책임 경계
-
-| Layer | 책임 | 금지 사항 |
-|-------|------|----------|
-| **Router** | 요청/쿼리 검증, Depends 주입, HTTPException 매핑, response_model 선언 | 비즈니스 로직, 다른 라우터 import |
-| **Service** | DB 접근/집계, 외부 API 호출, 로깅 | HTTP 객체 반환 |
-| **main.py** | 앱 생성, 미들웨어, 라우터 include | 비즈니스 로직, 엔드포인트 정의 |
+### 💎 Thin Router / Thick Service
+- **Router**: FastAPI 엔드포인트 정의, `Depends` 주입, `StreamingResponse` 래핑, `HTTPException` 발생.
+- **Service**: DB 조회/집계, 외부 API 호출, 복잡한 계산 로직, 순수 데이터 반환.
+- **Layering**: `Routers -> Services -> Models/Schemas`. 라우터 간 import 금지.
 
 ---
 
@@ -102,35 +54,9 @@ backend/
 
 ### UI/UX 최적화
 
-1. **Loading States**
-   - React Query의 `isLoading` 상태를 이용한 스켈레톤 UI 적용
-
-2. **Error Boundaries**
-   - React Error Boundary를 이용한 우아한 에러 처리
-
-3. **Component Decomposition**
-   - 기존 `components/` 폴더의 대형 컴포넌트들을 `src/features/`로 이동 및 분해
+1. **Loading States**: React Query의 `isLoading`을 활용한 스켈레톤 디자인 적용.
+2. **Error Feedback**: API 에러 시 사용자 친화적인 메시지 노출 및 Error Boundary 적용.
+3. **Performance**: 프론트엔드 렌더링 최적화 및 불필요한 리렌더링 방지.
 
 ---
-
-## Commands
-
-```bash
-# 백엔드 Import 검증
-cd /home/dlckdgn/personal-portfolio && source backend/.venv/bin/activate && python -c "from backend.main import app; print('✅ OK')"
-
-# 백엔드 서버 실행
-cd /home/dlckdgn/personal-portfolio/backend && source .venv/bin/activate && uvicorn main:app --reload --port 8000
-
-# 프론트엔드 개발 서버
-npm run dev
-```
-
----
-
-## PRD Reference
-
-전체 PRD는 `/home/dlckdgn/personal-portfolio/리팩토링.txt` 참조.
-
----
-**Note**: Phase 3 완료. Phase 4는 UI/UX 최적화로 별도 세션에서 진행 권장.
+**Note**: Phase 3가 리뷰 결과를 반영하여 최종 완료되었습니다. 테스트 코드를 통해 핵심 로직의 안정성이 확인되었습니다.

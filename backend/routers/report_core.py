@@ -6,7 +6,6 @@ Report Core Router
 """
 from __future__ import annotations
 
-from datetime import date
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -20,9 +19,9 @@ from ..schemas import (
     ReportResponse,
 )
 from ..services.report_service import (
-    build_report,
+    get_report_data,
     build_monthly_summaries,
-    aggregate_activity,
+    get_quarterly_summaries,
     get_user,
 )
 
@@ -35,23 +34,10 @@ def get_report(
     month: int | None = Query(None, ge=1, le=12),
     db: Session = Depends(get_db),
 ) -> ReportResponse:
+    """통합 리포트 데이터 조회 (연/월간 자동 처리)."""
     if month is not None and year is None:
         raise HTTPException(status_code=400, detail="year is required when month is set")
-
-    start_date = None
-    end_date = None
-    if year is not None:
-        if month is None:
-            start_date = date(year, 1, 1)
-            end_date = date(year + 1, 1, 1)
-        else:
-            start_date = date(year, month, 1)
-            if month == 12:
-                end_date = date(year + 1, 1, 1)
-            else:
-                end_date = date(year, month + 1, 1)
-
-    return build_report(db, start_date, end_date)
+    return get_report_data(db, year=year, month=month)
 
 
 @router.get("/report/yearly", response_model=ReportResponse)
@@ -59,9 +45,7 @@ def get_report_yearly(
     year: int = Query(..., ge=1970),
     db: Session = Depends(get_db),
 ) -> ReportResponse:
-    start_date = date(year, 1, 1)
-    end_date = date(year + 1, 1, 1)
-    return build_report(db, start_date, end_date)
+    return get_report_data(db, year=year)
 
 
 @router.get("/report/monthly", response_model=ReportResponse)
@@ -70,12 +54,7 @@ def get_report_monthly(
     month: int = Query(..., ge=1, le=12),
     db: Session = Depends(get_db),
 ) -> ReportResponse:
-    start_date = date(year, month, 1)
-    if month == 12:
-        end_date = date(year + 1, 1, 1)
-    else:
-        end_date = date(year, month + 1, 1)
-    return build_report(db, start_date, end_date)
+    return get_report_data(db, year=year, month=month)
 
 
 @router.get("/report/quarterly", response_model=ReportResponse)
@@ -84,13 +63,7 @@ def get_report_quarterly(
     quarter: int = Query(..., ge=1, le=4),
     db: Session = Depends(get_db),
 ) -> ReportResponse:
-    start_month = (quarter - 1) * 3 + 1
-    start_date = date(year, start_month, 1)
-    if quarter == 4:
-        end_date = date(year + 1, 1, 1)
-    else:
-        end_date = date(year, start_month + 3, 1)
-    return build_report(db, start_date, end_date)
+    return get_report_data(db, year=year, quarter=quarter)
 
 
 @router.get("/report/monthly/summary", response_model=List[MonthlyReportSummary])
@@ -108,25 +81,5 @@ def get_quarterly_report_summary(
     year: int = Query(..., ge=1970),
     db: Session = Depends(get_db),
 ) -> List[QuarterlyReportSummary]:
-    user = get_user(db)
-    monthly = build_monthly_summaries(db, user, year)
-    summaries = []
-    for quarter in range(1, 5):
-        start_month = (quarter - 1) * 3 + 1
-        months = [start_month, start_month + 1, start_month + 2]
-        activity = aggregate_activity(monthly, months)
-        summaries.append(
-            QuarterlyReportSummary(
-                year=year,
-                quarter=quarter,
-                trade_count=activity.trade_count,
-                trade_buy_value=activity.trade_buy_value,
-                trade_sell_value=activity.trade_sell_value,
-                cashflow_count=activity.cashflow_count,
-                cashflow_total=activity.cashflow_total,
-                fx_transaction_count=activity.fx_transaction_count,
-                snapshot_count=activity.snapshot_count,
-            )
-        )
-
-    return summaries
+    """분기 요약 집계 (집계 로직은 서비스에서 처리)."""
+    return get_quarterly_summaries(db, year)
