@@ -57,30 +57,7 @@ def _refresh_benchmark_if_needed(setting: Setting, db: Session) -> None:
     db.refresh(setting)
 
 
-def _to_settings_read(setting: Setting) -> SettingsRead:
-    # target_index_allocations 는 JSON(dict/list) 형태이므로 Pydantic 모델로 감싸줌
-    allocations_raw = setting.target_index_allocations or []
-    allocations = [
-        TargetIndexAllocation(**item) for item in allocations_raw  # type: ignore[arg-type]
-    ]
-
-    dividends_raw = setting.dividends or []
-    if not dividends_raw and setting.dividend_year is not None and setting.dividend_total is not None:
-        dividends_raw = [{"year": setting.dividend_year, "total": setting.dividend_total}]
-    dividends = [
-        DividendRecord(**item) for item in dividends_raw  # type: ignore[arg-type]
-    ]
-    return SettingsRead(
-        target_index_allocations=allocations,
-        server_url=setting.server_url,
-        dividend_year=setting.dividend_year,
-        dividend_total=setting.dividend_total,
-        dividends=dividends,
-        usd_fx_base=setting.usd_fx_base,
-        usd_fx_now=setting.usd_fx_now,
-        benchmark_name=setting.benchmark_name,
-        benchmark_return=setting.benchmark_return,
-    )
+from ..services.settings_service import to_settings_read as _to_settings_read
 
 
 @router.get("/settings", response_model=SettingsRead)

@@ -1,7 +1,7 @@
 # 🏗️ Personal Portfolio Refactoring Master Plan (2026)
 
-> **Last Updated:** 2026-01-06 14:25
-> **Status:** Phase 3 In Progress 🔄
+> **Last Updated:** 2026-01-06 14:35
+> **Status:** Phase 3 Complete ✅
 > **Ref:** Context7 Verified Tech Stack
 
 ---
@@ -12,68 +12,76 @@
 |-------|--------|-------------|
 | **Phase 1** | ✅ Complete | `src/` 구조 + React Router 설정 |
 | **Phase 2** | ✅ Complete | React Query 통합, 페이지 컴포넌트 분리 |
-| **Phase 3** | 🔄 In Progress | Backend 정리 (main.py 분리) |
+| **Phase 3** | ✅ Complete | Backend 정리 (main.py 분리, 서비스 레이어 응집) |
 | **Phase 4** | ⏳ Pending | UI/UX 최적화 (스켈레톤, 에러 바운더리) |
 
 ---
 
-## Phase 3: Backend Clean-up (현재 진행 중)
+## Phase 3: Backend Clean-up (완료)
 
-### ✅ 완료된 작업
+### ✅ Step 1: Market Data 분리
+| 작업 | 설명 |
+|------|------|
+| `services/market_data_service.py` | KIS 비즈니스 로직 (시세, 티커 검색, 환율) |
+| `routers/market_data.py` | KIS API 엔드포인트 (얇은 라우터) |
+| `main.py` 정리 | 276줄 → 120줄 (56% 감소) |
 
-#### Step 1: Market Data 분리
-| 작업 | 상태 | 설명 |
-|------|------|------|
-| `backend/services/market_data_service.py` 생성 | ✅ | KIS 비즈니스 로직 서비스 레이어 |
-| `backend/routers/market_data.py` 생성 | ✅ | KIS API 엔드포인트 라우터 |
-| `backend/main.py` 정리 | ✅ | KIS 로직 제거, 라우터 include 추가 |
-| Import 검증 | ✅ | `from backend.main import app` 성공 |
+### ✅ Step 2: Report Logic 응집
+| 작업 | 설명 |
+|------|------|
+| `services/report_service.py` 확장 | report_core + report_ai + report_saved 로직 통합 |
+| `services/settings_service.py` | `to_settings_read` 헬퍼 분리 |
+| `services/expense_service.py` | `get_expense_summary` 서비스 분리 |
+| `routers/report_core.py` 정리 | 329줄 → 125줄 (62% 감소) |
+| `routers/report_saved.py` 정리 | 117줄 → 53줄 (55% 감소) |
+| `routers/report_ai.py` 정리 | 라우터 간 의존 제거 |
 
-**새로 생성된 파일:**
-- `backend/services/market_data_service.py` - 3개의 서비스 함수 + 3개의 예외 클래스
-- `backend/routers/market_data.py` - 3개의 엔드포인트 + Pydantic 모델
+### 주요 개선점
 
-**main.py 변경 사항:**
-- 276줄 → 120줄로 축소 (56% 감소)
-- KIS 관련 코드 완전 제거
-- 라우터 등록과 미들웨어/헬스체크만 유지
+1. **라우터 간 의존 제거**
+   - ❌ `report_core.py` → `settings.py` (제거됨)
+   - ❌ `report_ai.py` → `report_core.py` (제거됨)
+   - ❌ `report_ai.py` → `expenses.py` (제거됨)
 
-### ⏳ 다음 작업
+2. **순환 Import 방지 구조**
+   ```
+   Routers → Services (OK)
+   Services → Models, Schemas (OK)
+   Services → Services (OK)
+   Routers → Routers (FORBIDDEN)
+   ```
 
-#### Step 2: Report Logic 응집 (추후 진행)
-PRD에 따르면:
-- `routers/report_core.py`의 `_build_report`, `_build_monthly_summaries` → `services/report_service.py`
-- `routers/report_ai.py`의 AI 호출 로직 → `services/report_service.py`
-- `routers/report_saved.py`의 CRUD → `services/report_service.py`
+3. **새로운 서비스 레이어**
+   ```
+   backend/services/
+   ├── market_data_service.py  # KIS 시세/검색/환율
+   ├── report_service.py       # 리포트 생성/저장/AI
+   ├── settings_service.py     # 설정 변환 헬퍼
+   ├── expense_service.py      # 지출 요약
+   ├── portfolio.py            # 기존 포트폴리오 로직
+   ├── users.py                # 사용자 관리
+   └── ... (기타)
+   ```
 
 ---
 
-## File Structure Changes
+## File Structure (Phase 3 완료 후)
 
-### Before (Phase 3 전)
-```
-backend/
-├── main.py               # 276줄 (KIS 로직 포함)
-├── routers/
-│   ├── report_core.py    # 329줄
-│   ├── report_ai.py      # (분석 필요)
-│   └── report_saved.py   # (분석 필요)
-└── services/
-    └── report_service.py # AI 유틸만 보유
-```
-
-### After (Phase 3 완료 시)
 ```
 backend/
 ├── main.py                       # 120줄 (라우터 등록 + 헬스체크만)
 ├── routers/
-│   ├── market_data.py           # ✅ 신설 (KIS 엔드포인트)
-│   ├── report_core.py           # 얇은 라우터 (서비스 호출)
-│   ├── report_ai.py             # 얇은 라우터 (서비스 호출)
-│   └── report_saved.py          # 얇은 라우터 (서비스 호출)
+│   ├── market_data.py           # KIS 엔드포인트
+│   ├── report_core.py           # 125줄 (얇은 라우터)
+│   ├── report_ai.py             # 라우터 간 의존 없음
+│   ├── report_saved.py          # 53줄 (얇은 라우터)
+│   ├── settings.py              # 서비스 헬퍼 사용
+│   └── expenses.py              # 서비스 헬퍼 사용
 └── services/
-    ├── market_data_service.py   # ✅ 신설 (KIS 비즈니스 로직)
-    └── report_service.py        # 확장 예정 (report 로직 집중)
+    ├── market_data_service.py   # KIS 비즈니스 로직
+    ├── report_service.py        # 리포트 로직 집중
+    ├── settings_service.py      # 설정 헬퍼
+    └── expense_service.py       # 지출 요약 로직
 ```
 
 ---
@@ -84,14 +92,24 @@ backend/
 
 | Layer | 책임 | 금지 사항 |
 |-------|------|----------|
-| **Router** | 요청/쿼리 검증, Depends 주입, HTTPException 매핑, response_model 선언 | 비즈니스 로직 (집계/DB 조작/복잡 분기) |
-| **Service** | DB 접근/집계, 외부 API 호출, 로깅 | HTTP 객체 반환 (순수 데이터/도메인 예외 중심) |
-| **main.py** | 앱 생성, 미들웨어, 라우터 include | 비즈니스 로직 |
+| **Router** | 요청/쿼리 검증, Depends 주입, HTTPException 매핑, response_model 선언 | 비즈니스 로직, 다른 라우터 import |
+| **Service** | DB 접근/집계, 외부 API 호출, 로깅 | HTTP 객체 반환 |
+| **main.py** | 앱 생성, 미들웨어, 라우터 include | 비즈니스 로직, 엔드포인트 정의 |
 
-### 순환 Import 회피
-- Router는 Service만 import
-- Service는 Router import 금지
-- 공용 변환 로직은 `services/` 또는 `schemas.py`로 이동
+---
+
+## 다음 단계: Phase 4
+
+### UI/UX 최적화
+
+1. **Loading States**
+   - React Query의 `isLoading` 상태를 이용한 스켈레톤 UI 적용
+
+2. **Error Boundaries**
+   - React Error Boundary를 이용한 우아한 에러 처리
+
+3. **Component Decomposition**
+   - 기존 `components/` 폴더의 대형 컴포넌트들을 `src/features/`로 이동 및 분해
 
 ---
 
@@ -115,4 +133,4 @@ npm run dev
 전체 PRD는 `/home/dlckdgn/personal-portfolio/리팩토링.txt` 참조.
 
 ---
-**Note**: Phase 3 Step 2 (Report Logic 응집)는 별도 세션에서 진행 권장. 현재 Market Data 분리는 완료됨.
+**Note**: Phase 3 완료. Phase 4는 UI/UX 최적화로 별도 세션에서 진행 권장.
