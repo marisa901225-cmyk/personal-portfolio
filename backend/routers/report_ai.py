@@ -1,3 +1,9 @@
+"""
+Report AI Router
+
+AI 리포트 생성 엔드포인트.
+비즈니스 로직은 report_service에서 처리하고, 라우터는 요청/응답 매핑만 담당한다.
+"""
 from __future__ import annotations
 
 from datetime import date, datetime
@@ -10,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import verify_api_token
 from ..db import get_db
-from ..models import Asset, ExternalCashflow, User
+from ..models import Asset, ExternalCashflow
 from ..schemas import ReportAiResponse, ReportAiTextResponse, ReportPeriod, TopAssetSummary
 from ..services.portfolio import calculate_summary
 from ..services.report_service import (
@@ -21,8 +27,11 @@ from ..services.report_service import (
     get_ai_config,
     format_sse,
     build_report_prompt,
+    build_monthly_summaries,
+    aggregate_activity,
+    get_user,
 )
-from .report_core import _aggregate_activity, _build_monthly_summaries
+from ..services.expense_service import get_expense_summary
 
 router = APIRouter(prefix="/api", tags=["report"], dependencies=[Depends(verify_api_token)])
 
@@ -34,7 +43,7 @@ def _resolve_ai_report_input(
     query: str | None,
     db: Session,
 ) -> tuple[ReportPeriod, str]:
-    """Resolve input parameters and build report prompt."""
+    """입력 파라미터를 검증하고 리포트 프롬프트를 생성한다."""
     today = date.today()
     resolved_year = year
     resolved_month = month
@@ -64,7 +73,6 @@ def _resolve_ai_report_input(
         raise HTTPException(status_code=400, detail=str(e))
 
     from ..services.duckdb_refine import refine_portfolio_for_ai
-    from ..routers.expenses import get_expense_summary
 
     refined = refine_portfolio_for_ai(
         year=period.year,
@@ -76,14 +84,14 @@ def _resolve_ai_report_input(
     if period.quarter is not None:
         start_month = (period.quarter - 1) * 3 + 1
         months = [start_month, start_month + 1, start_month + 2]
-        summaries = [get_expense_summary(year=period.year, month=m, db=db) for m in months]
+        summaries = [get_expense_summary(db, year=period.year, month=m) for m in months]
         expense_summary = merge_expense_summaries(summaries, period.year, period.quarter, None)
     elif period.half is not None:
         months = list(range(1, 7)) if period.half == 1 else list(range(7, 13))
-        summaries = [get_expense_summary(year=period.year, month=m, db=db) for m in months]
+        summaries = [get_expense_summary(db, year=period.year, month=m) for m in months]
         expense_summary = merge_expense_summaries(summaries, period.year, None, period.half)
     else:
-        expense_summary = get_expense_summary(year=period.year, month=period.month, db=db)
+        expense_summary = get_expense_summary(db, year=period.year, month=period.month)
 
     prompt = build_report_prompt(period, refined, expense_summary)
     return period, prompt
@@ -94,7 +102,7 @@ def _resolve_ai_report_config(
     model: str | None,
     max_tokens: int | None,
 ) -> tuple[str, str, str, int, float]:
-    """Get AI configuration, raising HTTPException on error."""
+    """AI 설정을 가져온다. 오류 시 HTTPException 발생."""
     try:
         return get_ai_config(period, model, max_tokens)
     except ValueError as e:
@@ -117,16 +125,16 @@ def get_report_ai(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    user = db.query(User).order_by(User.id.asc()).first()
-    monthly = _build_monthly_summaries(db, user, year)
+    user = get_user(db)
+    monthly = build_monthly_summaries(db, user, year)
     
     if month is not None:
-        activity = _aggregate_activity(monthly, [month])
+        activity = aggregate_activity(monthly, [month])
     elif quarter is not None:
         start_month = (quarter - 1) * 3 + 1
-        activity = _aggregate_activity(monthly, [start_month, start_month + 1, start_month + 2])
+        activity = aggregate_activity(monthly, [start_month, start_month + 1, start_month + 2])
     else:
-        activity = _aggregate_activity(monthly, list(range(1, 13)))
+        activity = aggregate_activity(monthly, list(range(1, 13)))
 
     if not user:
         summary = calculate_summary([], [])
@@ -358,9 +366,7 @@ def get_refined_report(
     month: int | None = Query(None, ge=1, le=12),
     quarter: int | None = Query(None, ge=1, le=4),
 ) -> dict:
-    """
-    DuckDB 기반 고성능 분석 레이어를 통해 정제된 포트폴리오 데이터를 반환합니다.
-    """
+    """DuckDB 기반 고성능 분석 레이어를 통해 정제된 포트폴리오 데이터를 반환합니다."""
     from ..services.duckdb_refine import refine_portfolio_for_ai
 
     if month is not None and quarter is not None:
