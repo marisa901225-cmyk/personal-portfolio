@@ -6,10 +6,10 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from ..auth import verify_api_token
-from ..db import get_db
-from ..models import Trade, Asset
-from ..schemas import TradeRead, TradeCreate, TradeUpdate
+from ..core.auth import verify_api_token
+from ..core.db import get_db
+from ..core.models import Trade, Asset
+from ..core.schemas import TradeRead, TradeCreate, TradeUpdate
 from ..services.portfolio import to_trade_read
 from ..services.users import get_or_create_single_user
 

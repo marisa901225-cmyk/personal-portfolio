@@ -6,10 +6,10 @@ import logging
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from ..auth import verify_api_token
-from ..db import get_db
-from ..models import Setting
-from ..schemas import (
+from ..core.auth import verify_api_token
+from ..core.db import get_db
+from ..core.models import Setting
+from ..core.schemas import (
     DividendRecord,
     SettingsRead,
     SettingsUpdate,

@@ -2,7 +2,7 @@ import pandas as pd
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from abc import ABC, abstractmethod
-from ..schemas import ExternalCashflowCreate
+from ..core.schemas import ExternalCashflowCreate
 
 
 def _parse_number(value: Any) -> Optional[float]:

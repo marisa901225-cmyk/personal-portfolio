@@ -155,8 +155,8 @@ def classify_with_learned_patterns(merchant: str) -> str | None:
 
 
 def main():
-    db_path = str(REPO_ROOT / "backend" / "portfolio.db")
-    output_path = str(REPO_ROOT / "backend" / "learned_merchant_rules.py")
+    db_path = str(REPO_ROOT / "backend" / "storage" / "db" / "portfolio.db")
+    output_path = str(REPO_ROOT / "backend" / "scripts" / "maintenance" / "learned_merchant_rules.py")
     
     print("🤖 DB 데이터 학습 시작...\n")
     

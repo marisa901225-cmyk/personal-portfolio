@@ -19,8 +19,8 @@ from typing import Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from .. import kis_client
-from ..models import Asset
+from ..integrations.kis import kis_client
+from ..core.models import Asset
 from ..services.users import get_or_create_single_user
 
 logger = logging.getLogger(__name__)

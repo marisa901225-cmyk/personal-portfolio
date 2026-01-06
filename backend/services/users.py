@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
-from ..models import User
+from ..core.models import User
 
 
 def get_or_create_single_user(db: Session) -> User:

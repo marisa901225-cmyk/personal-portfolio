@@ -8,11 +8,13 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
+DB_DIR = BASE_DIR / "storage" / "db"
+DB_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _build_default_sqlite_url() -> str:
-    db_path = BASE_DIR / "portfolio.db"
+    db_path = DB_DIR / "portfolio.db"
     return f"sqlite:///{db_path.as_posix()}"
 
 
@@ -61,4 +63,3 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
-

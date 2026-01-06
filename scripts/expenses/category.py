@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-KEYWORD_CONFIG_PATH = REPO_ROOT / "backend" / "expense_category_keywords.json"
+KEYWORD_CONFIG_PATH = REPO_ROOT / "backend" / "data" / "expense_category_keywords.json"
 
 
 def load_category_keywords() -> dict[str, list[str]]:
@@ -49,7 +49,7 @@ def classify_category(merchant: str, amount: float, learned_patterns: dict[str, 
 
     # 2. 학습된 패턴(파일 기반) 사용
     try:
-        from backend.learned_merchant_rules import classify_with_learned_patterns
+        from backend.scripts.maintenance.learned_merchant_rules import classify_with_learned_patterns
         learned_category = classify_with_learned_patterns(merchant)
         if learned_category:
             return learned_category

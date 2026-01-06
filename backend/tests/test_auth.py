@@ -3,7 +3,7 @@ import unittest
 
 from fastapi import HTTPException
 
-from backend import auth
+from backend.core import auth
 
 
 class AuthTests(unittest.TestCase):

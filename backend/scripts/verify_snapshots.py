@@ -75,7 +75,7 @@ def get_holdings_at_date(conn, target_date: str) -> dict:
 
 def main():
     # DB 연결
-    db_path = repo_root / "backend" / "portfolio.db"
+    db_path = repo_root / "backend" / "storage" / "db" / "portfolio.db"
     conn = sqlite3.connect(db_path)
     
     # 검증할 날짜: 11월 6일 (최고가 기록일)

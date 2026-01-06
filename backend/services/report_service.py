@@ -17,12 +17,11 @@ import os
 import json
 import re
 from datetime import date, datetime
-from typing import TYPE_CHECKING, List, Optional, Any, AsyncGenerator
+from typing import List, Optional, AsyncGenerator
 
 from sqlalchemy.orm import Session
-from sqlalchemy import extract
 
-from ..models import (
+from ..core.models import (
     AiReport,
     Asset,
     ExternalCashflow,
@@ -32,7 +31,7 @@ from ..models import (
     Trade,
     User,
 )
-from ..schemas import (
+from ..core.schemas import (
     ExternalCashflowRead,
     MonthlyReportSummary,
     PortfolioResponse,
@@ -53,9 +52,6 @@ from ..services.portfolio import (
 )
 from ..services.settings_service import to_settings_read
 from ..services.duckdb_refine import refine_portfolio_for_ai
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -627,6 +623,17 @@ def resolve_ai_report_prompt(
     return period, prompt
 
 
+def get_refined_report_data(
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    quarter: Optional[int] = None,
+) -> dict:
+    """DuckDB 정제 데이터를 반환한다."""
+    if month is not None and quarter is not None:
+        raise ValueError("use either month or quarter, not both")
+    return refine_portfolio_for_ai(year=year, month=month, quarter=quarter)
+
+
 async def generate_ai_report_text(
     period: ReportPeriod,
     prompt: str,
@@ -946,136 +953,6 @@ def delete_saved_report(db: Session, report_id: int) -> dict:
     db.commit()
 
     return {"message": "삭제되었습니다.", "id": report_id}
-
-
-# ============================================
-# Private Helpers
-# ============================================
-
-def build_report(
-    db: Session,
-    start_date: Optional[date],
-    end_date: Optional[date],
-) -> ReportResponse:
-    """기간에 해당하는 데이터를 조립한다."""
-    user = get_user(db)
-    if not user:
-        summary = calculate_summary([], [])
-        return ReportResponse(
-            generated_at=datetime.utcnow(),
-            portfolio=PortfolioResponse(assets=[], trades=[], summary=summary),
-            snapshots=[],
-            fx_transactions=[],
-            external_cashflows=[],
-            settings=None,
-        )
-
-    start_dt = None
-    end_dt = None
-    if start_date and end_date:
-        start_dt = datetime(start_date.year, start_date.month, start_date.day)
-        end_dt = datetime(end_date.year, end_date.month, end_date.day)
-
-    assets = (
-        db.query(Asset)
-        .filter(Asset.user_id == user.id, Asset.deleted_at.is_(None))
-        .order_by(Asset.id.asc())
-        .all()
-    )
-    
-    trades_query = db.query(Trade).filter(Trade.user_id == user.id)
-    if start_dt and end_dt:
-        trades_query = trades_query.filter(
-            Trade.timestamp >= start_dt,
-            Trade.timestamp < end_dt,
-        )
-    trades = trades_query.order_by(Trade.timestamp.asc()).all()
-
-    snapshots_query = db.query(PortfolioSnapshot).filter(PortfolioSnapshot.user_id == user.id)
-    if start_dt and end_dt:
-        snapshots_query = snapshots_query.filter(
-            PortfolioSnapshot.snapshot_at >= start_dt,
-            PortfolioSnapshot.snapshot_at < end_dt,
-        )
-    snapshots = snapshots_query.order_by(PortfolioSnapshot.snapshot_at.asc()).all()
-
-    fx_query = db.query(FxTransaction).filter(FxTransaction.user_id == user.id)
-    if start_date and end_date:
-        fx_query = fx_query.filter(
-            FxTransaction.trade_date >= start_date,
-            FxTransaction.trade_date < end_date,
-        )
-    fx_transactions = fx_query.order_by(
-        FxTransaction.trade_date.asc(),
-        FxTransaction.id.asc(),
-    ).all()
-
-    cashflows_query = db.query(ExternalCashflow).filter(ExternalCashflow.user_id == user.id)
-    if start_date and end_date:
-        cashflows_query = cashflows_query.filter(
-            ExternalCashflow.date >= start_date,
-            ExternalCashflow.date < end_date,
-        )
-    external_cashflows = cashflows_query.order_by(
-        ExternalCashflow.date.asc(),
-        ExternalCashflow.id.asc(),
-    ).all()
-    
-    setting = (
-        db.query(Setting)
-        .filter(Setting.user_id == user.id)
-        .order_by(Setting.id.asc())
-        .first()
-    )
-
-    summary = calculate_summary(assets, external_cashflows)
-
-    return ReportResponse(
-        generated_at=datetime.utcnow(),
-        portfolio=PortfolioResponse(
-            assets=[to_asset_read(a) for a in assets],
-            trades=[to_trade_read(t) for t in trades],
-            summary=summary,
-        ),
-        snapshots=[to_snapshot_read(s) for s in snapshots],
-        fx_transactions=[to_fx_transaction_read(r) for r in fx_transactions],
-        external_cashflows=[ExternalCashflowRead.model_validate(c) for c in external_cashflows],
-        settings=to_settings_read(setting) if setting else None,
-    )
-
-
-    # Top assets
-    top_assets = []
-    for asset in assets:
-        value = asset.amount * asset.current_price
-        invested = asset.amount * (asset.purchase_price or asset.current_price)
-        unrealized_profit = value - invested
-        unrealized_profit_rate = (unrealized_profit / invested * 100) if invested > 0 else None
-        top_assets.append(
-            TopAssetSummary(
-                id=asset.id,
-                name=asset.name,
-                ticker=asset.ticker,
-                category=asset.category,
-                currency=asset.currency,
-                amount=asset.amount,
-                current_price=asset.current_price,
-                purchase_price=asset.purchase_price,
-                value=value,
-                invested=invested,
-                unrealized_profit=unrealized_profit,
-                unrealized_profit_rate=unrealized_profit_rate,
-            )
-        )
-    top_assets.sort(key=lambda item: item.value, reverse=True)
-
-    return ReportAiResponse(
-        generated_at=datetime.utcnow(),
-        period=period,
-        summary=summary,
-        activity=activity,
-        top_assets=top_assets[:top_n],
-    )
 
 
 # ============================================

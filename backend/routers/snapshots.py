@@ -6,10 +6,10 @@ from typing import List
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from ..auth import verify_api_token
-from ..db import get_db
-from ..models import Asset, ExternalCashflow, PortfolioSnapshot
-from ..schemas import PortfolioSnapshotRead
+from ..core.auth import verify_api_token
+from ..core.db import get_db
+from ..core.models import Asset, ExternalCashflow, PortfolioSnapshot
+from ..core.schemas import PortfolioSnapshotRead
 from ..services.portfolio import calculate_summary, to_snapshot_read
 from ..services.users import get_or_create_single_user
 

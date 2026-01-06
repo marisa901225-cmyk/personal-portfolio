@@ -11,9 +11,9 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from ..auth import verify_api_token
-from ..db import get_db
-from ..schemas import (
+from ..core.auth import verify_api_token
+from ..core.db import get_db
+from ..core.schemas import (
     MonthlyReportSummary,
     QuarterlyReportSummary,
     ReportResponse,

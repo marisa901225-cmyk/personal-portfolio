@@ -19,8 +19,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, RootModel
 from sqlalchemy.orm import Session
 
-from ..auth import verify_api_token
-from ..db import get_db
+from ..core.auth import verify_api_token
+from ..core.db import get_db
 from ..services.market_data_service import (
     get_kis_prices_krw,
     search_tickers_by_name,

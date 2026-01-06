@@ -11,14 +11,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from ..auth import verify_api_token
-from ..db import get_db
-from ..schemas import ReportAiResponse, ReportAiTextResponse
+from ..core.auth import verify_api_token
+from ..core.db import get_db
+from ..core.schemas import ReportAiResponse, ReportAiTextResponse
 from ..services.report_service import (
     resolve_ai_report_prompt,
     generate_ai_report_text,
     generate_ai_report_stream,
     get_ai_report_metrics,
+    get_refined_report_data,
 )
 
 router = APIRouter(prefix="/api", tags=["report"], dependencies=[Depends(verify_api_token)])
@@ -92,9 +93,9 @@ def get_refined_report(
     quarter: int | None = Query(None, ge=1, le=4),
 ) -> dict:
     """DuckDB 기반의 정제된 데이터 반환 (호환성 유지용)."""
-    from ..services.duckdb_refine import refine_portfolio_for_ai
-    # 이 엔드포인트는 정제 데이터 자체만 반환하므로 직접 호출 유지 (또는 서비스 래퍼 사용)
     try:
-        return refine_portfolio_for_ai(year=year, month=month, quarter=quarter)
+        return get_refined_report_data(year=year, month=month, quarter=quarter)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"DuckDB refinement failed: {exc}") from exc

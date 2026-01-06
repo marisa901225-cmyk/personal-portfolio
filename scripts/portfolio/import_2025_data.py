@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Import 2025 transactions from combined_statements_valuation.xlsx into portfolio.db
+Import 2025 transactions from combined_statements_valuation.xlsx into storage/db/portfolio.db
 
 This script reads normalized transaction data from the Excel file and imports:
 1. Trades (buy/sell transactions)
@@ -19,7 +19,7 @@ from sqlalchemy.orm import sessionmaker
 
 # Database setup
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = REPO_ROOT / "backend" / "portfolio.db"
+DB_PATH = REPO_ROOT / "backend" / "storage" / "db" / "portfolio.db"
 EXCEL_PATH = REPO_ROOT / "combined_statements_valuation.xlsx"
 
 engine = create_engine(f"sqlite:///{DB_PATH}")

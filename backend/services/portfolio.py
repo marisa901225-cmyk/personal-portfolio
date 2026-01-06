@@ -3,8 +3,8 @@ from __future__ import annotations
 from datetime import datetime, date
 from typing import List
 
-from ..models import Asset, FxTransaction, PortfolioSnapshot, Trade, ExternalCashflow
-from ..schemas import (
+from ..core.models import Asset, FxTransaction, PortfolioSnapshot, Trade, ExternalCashflow
+from ..core.schemas import (
     AssetRead,
     DividendRecord,
     DistributionItem,

@@ -59,6 +59,6 @@ def train_model(db_path: str, model_path: str):
 
 if __name__ == "__main__":
     train_model(
-        str(REPO_ROOT / "backend" / "portfolio.db"),
-        str(REPO_ROOT / "backend" / "expense_model.joblib"),
+        str(REPO_ROOT / "backend" / "storage" / "db" / "portfolio.db"),
+        str(REPO_ROOT / "backend" / "data" / "expense_model.joblib"),
     )

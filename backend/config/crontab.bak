@@ -1,0 +1,9 @@
+# 부장님 메일 견적관리 DB링크 전송 및 메일보내기
+0 9 * * 1 cd /home/dlckdgn/switchgear-estimate-app/backend && /home/dlckdgn/.nvm/versions/node/v22.21.1/bin/node send-db-email.js --no-dropbox >> /home/dlckdgn/switchgear-estimate-app/backend/send-mail-weekly.log 2>&1
+# 견적관리툴 DB 드롭박스에 토스스
+5 9 * * 1,3,5 cd /home/dlckdgn/switchgear-estimate-app/backend && /usr/bin/flock -n /tmp/switchgear_dropbox_db.lock -c "/home/dlckdgn/.nvm/versions/node/v22.21.1/bin/node send-db-email.js --no-email --no-excel" >> /home/dlckdgn/switchgear-estimate-app/backend/send-db-dropbox.log 2>&1
+
+# 미국장 마감 후 시세 동기화 + 스냅샷 (화~토 06:30 KST)
+30 6 * * 2-6 API_TOKEN=26958f32afaf106b1d11ebc235a6df96a64bf6865999871dbc82d24c2f93db5f BACKEND_URL=http://127.0.0.1:8000 /home/dlckdgn/personal-portfolio/backend/scripts/sync_prices.sh >> /home/dlckdgn/personal-portfolio/backend/logs/sync.log 2>&1
+# 벡엔드 저장
+0 4 * * * /home/dlckdgn/personal-portfolio/backend/scripts/backup_db.sh >> /home/dlckdgn/personal-portfolio/backend/logs/backup_db.log 2>&1

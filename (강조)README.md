@@ -39,7 +39,7 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8000
 ### 백엔드 `.env`
 ```bash
 API_TOKEN=your_secret_token
-DATABASE_URL=sqlite:///backend/portfolio.db  # 선택
+DATABASE_URL=sqlite:///backend/storage/db/portfolio.db  # 선택
 KIS_ENABLED=auto  # auto/1/0
 BACKUP_ARCHIVE_PASSWORD=your_backup_password  # 설정 시 zip 암호화 압축
 ```
@@ -110,8 +110,8 @@ sudo systemctl restart myasset-backend.service
 ### 복원
 ```bash
 sudo systemctl stop myasset-backend.service
-cp /mnt/one-touch/.../portfolio_20250101_030000.db backend/portfolio.db
-sudo chown -R <user>:<user> backend/portfolio.db*
+cp /mnt/one-touch/.../portfolio_20250101_030000.db backend/storage/db/portfolio.db
+sudo chown -R <user>:<user> backend/storage/db/portfolio.db*
 sudo systemctl start myasset-backend.service
 ```
 
@@ -126,10 +126,10 @@ sudo systemctl start myasset-backend.service
 5 9 * * 1,3,5 cd /home/dlckdgn/switchgear-estimate-app/backend && /usr/bin/flock -n /tmp/switchgear_dropbox_db.lock -c "/home/dlckdgn/.nvm/versions/node/v22.21.1/bin/node send-db-email.js --no-email --no-excel" >> /home/dlckdgn/switchgear-estimate-app/backend/send-db-dropbox.log 2>&1
 
 # 💰 미국장 시세 동기화 (화~토 6:30)
-30 6 * * 2-6 API_TOKEN=RL=http://127.0.0.1:8000 /home/dlckdgn/personal-portfolio/backend/scripts/sync_prices.sh >> /home/dlckdgn/personal-portfolio/backend/sync.log 2>&1
+30 6 * * 2-6 API_TOKEN=RL=http://127.0.0.1:8000 /home/dlckdgn/personal-portfolio/backend/scripts/sync_prices.sh >> /home/dlckdgn/personal-portfolio/backend/logs/sync.log 2>&1
 
 # 💾 포트폴리오 DB 백업 (일 4시)
-0 4 * * 0 /home/dlckdgn/personal-portfolio/backend/scripts/backup_db.sh >> /home/dlckdgn/personal-portfolio/backend/backup_db.log 2>&1
+0 4 * * 0 /home/dlckdgn/personal-portfolio/backend/scripts/backup_db.sh >> /home/dlckdgn/personal-portfolio/backend/logs/backup_db.log 2>&1
 ```
 
 ### Cron 백업/복구
@@ -149,7 +149,7 @@ crontab backend/crontab.bak
 |------|------|
 | systemd 경고 | `sudo systemctl daemon-reload` |
 | 포트 충돌 | `sudo ss -ltnp \| rg ':8000'` |
-| DB 권한 오류 | `sudo chown <user>:<user> backend/portfolio.db*` |
+| DB 권한 오류 | `sudo chown <user>:<user> backend/storage/db/portfolio.db*` |
 | 401 토큰 에러 | 프론트 설정 토큰 ↔ 서버 `API_TOKEN` 확인 |
 | KIS 인증 실패 | `~/KIS/config/kis_user.yaml` 확인 |
 | 티커 검색 실패 | `open-trading-api/stocks_info/` 엑셀 파일 확인 |
@@ -219,7 +219,7 @@ curl -sS -H "X-API-Token: $API_TOKEN" http://127.0.0.1:8000/api/settings
 
 간단한 DB 확인 (SQLite 사용 시)
 ```bash
-sqlite3 backend/portfolio.db "SELECT COUNT(*) FROM assets;"
+sqlite3 backend/storage/db/portfolio.db "SELECT COUNT(*) FROM assets;"
 ```
 
 ---
@@ -280,8 +280,8 @@ source backend/.venv/bin/activate
 python3 scripts/expenses/learn_merchant_patterns.py
 
 # 생성 파일:
-#   - backend/learned_merchant_rules.py (분류 코드)
-#   - backend/learned_merchant_rules.json (JSON 데이터)
+#   - backend/scripts/maintenance/learned_merchant_rules.py (분류 코드)
+#   - backend/scripts/maintenance/learned_merchant_rules.json (JSON 데이터)
 ```
 
 #### 내장 규칙 (Fallback)

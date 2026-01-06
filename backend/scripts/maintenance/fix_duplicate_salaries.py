@@ -12,7 +12,7 @@ from pathlib import Path
 
 def main():
     # Database path
-    db_path = Path(__file__).parent / "portfolio.db"
+    db_path = Path(__file__).resolve().parents[2] / "storage" / "db" / "portfolio.db"
     
     if not db_path.exists():
         print(f"❌ Database not found: {db_path}")

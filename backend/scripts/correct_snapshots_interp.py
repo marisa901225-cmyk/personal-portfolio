@@ -2,8 +2,9 @@ import sqlite3
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from pathlib import Path
 
-DB_PATH = "portfolio.db"
+DB_PATH = str(Path(__file__).resolve().parents[1] / "storage" / "db" / "portfolio.db")
 REAL_ESTATE_VALUE = 150_000_000
 
 # Main Account Stock Values (End of Month)

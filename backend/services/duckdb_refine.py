@@ -15,7 +15,7 @@ from typing import Any
 import duckdb
 
 # Default path to the SQLite database
-_DEFAULT_DB_PATH = Path(__file__).parent.parent / "portfolio.db"
+_DEFAULT_DB_PATH = Path(__file__).resolve().parents[1] / "storage" / "db" / "portfolio.db"
 
 
 def get_db_path() -> str:

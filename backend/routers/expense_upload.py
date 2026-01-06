@@ -8,8 +8,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
-from ..auth import verify_api_token
-from ..db import get_db
+from ..core.auth import verify_api_token
+from ..core.db import get_db
 
 router = APIRouter(
     prefix="/api/expenses",
@@ -60,7 +60,7 @@ async def upload_expense_file(
         from scripts.expenses.import_expenses import import_expenses_from_file
         
         # DB 경로
-        db_path = Path(__file__).parent.parent / "portfolio.db"
+        db_path = Path(__file__).resolve().parents[1] / "storage" / "db" / "portfolio.db"
         
         # 임포트 실행
         total_rows, added, skipped = import_expenses_from_file(

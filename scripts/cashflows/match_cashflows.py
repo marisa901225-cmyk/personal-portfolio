@@ -15,7 +15,7 @@ from datetime import timedelta
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EXCEL_PATH = REPO_ROOT / "combined_statements_valuation.xlsx"
-DB_PATH = REPO_ROOT / "backend" / "portfolio.db"
+DB_PATH = REPO_ROOT / "backend" / "storage" / "db" / "portfolio.db"
 
 
 def load_securities_cashflows():

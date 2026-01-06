@@ -2,10 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List
 
-from ..auth import verify_api_token
-from ..db import get_db
-from ..models import ExternalCashflow
-from ..schemas import ExternalCashflowRead, ExternalCashflowCreate, ExternalCashflowUpdate
+from ..core.auth import verify_api_token
+from ..core.db import get_db
+from ..core.models import ExternalCashflow
+from ..core.schemas import ExternalCashflowRead, ExternalCashflowCreate, ExternalCashflowUpdate
 from ..services.import_service import process_brokerage_upload
 from ..services.users import get_or_create_single_user
 
