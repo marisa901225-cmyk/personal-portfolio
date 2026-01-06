@@ -5,10 +5,10 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from ..auth import verify_api_token
-from ..db import get_db
-from ..models import Asset, Trade
-from ..schemas import AssetCalibration, AssetCreate, AssetRead, AssetUpdate, TradeCreate, TradeRead
+from ..core.auth import verify_api_token
+from ..core.db import get_db
+from ..core.models import Asset, Trade
+from ..core.schemas import AssetCalibration, AssetCreate, AssetRead, AssetUpdate, TradeBase, TradeCreate, TradeRead
 from ..services.asset_service import calibrate_asset_balance
 from ..services.portfolio import to_asset_read, to_trade_read
 from ..services.trade_service import create_trade_with_sync
@@ -144,11 +144,11 @@ def delete_asset(asset_id: int, db: Session = Depends(get_db)) -> dict:
 @router.post("/assets/{asset_id}/trades", response_model=TradeRead)
 def create_trade_for_asset(
     asset_id: int,
-    payload: TradeCreate,
+    payload: TradeBase,
     db: Session = Depends(get_db),
 ) -> TradeRead:
     user = get_or_create_single_user(db)
-    item = payload.model_copy(update={"asset_id": asset_id})
+    item = TradeCreate(**payload.model_dump(), asset_id=asset_id)
     trade = create_trade_with_sync(db, user.id, item, sync_asset=True)
     try:
         db.commit()

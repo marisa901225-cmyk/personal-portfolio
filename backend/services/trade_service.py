@@ -3,8 +3,8 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
-from ..models import Trade, Asset
-from ..schemas import TradeCreate
+from ..core.models import Trade, Asset
+from ..core.schemas import TradeCreate
 
 
 def create_trade_with_sync(

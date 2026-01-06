@@ -4,7 +4,7 @@ from datetime import datetime
 import os
 
 EXCEL_PATH = "combined_statements_valuation.xlsx"
-DB_PATH = "backend/portfolio.db"
+DB_PATH = "backend/storage/db/portfolio.db"
 
 def import_cashflows():
     if not os.path.exists(EXCEL_PATH):
@@ -12,7 +12,7 @@ def import_cashflows():
         EXCEL_PATH_ALT = "../../combined_statements_valuation.xlsx"
         if os.path.exists(EXCEL_PATH_ALT):
             print(f"Using relative path: {EXCEL_PATH_ALT}")
-            import_cashflows_with_paths(EXCEL_PATH_ALT, "../portfolio.db")
+            import_cashflows_with_paths(EXCEL_PATH_ALT, "../storage/db/portfolio.db")
             return
         print(f"Error: {EXCEL_PATH} not found.")
         return

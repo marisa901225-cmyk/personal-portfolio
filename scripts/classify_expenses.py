@@ -25,7 +25,7 @@ except ImportError:
     sys.exit(1)
 
 # 설정
-DB_PATH = Path(__file__).parent.parent / "backend" / "portfolio.db"
+DB_PATH = Path(__file__).parent.parent / "backend" / "storage" / "db" / "portfolio.db"
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL = "qwen3:1.7b"
 

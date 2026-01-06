@@ -19,7 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from starlette.requests import Request
 
-from .db_migrations import ensure_schema
+from .core.db_migrations import ensure_schema
 from .routers.assets import router as assets_router
 from .routers.exchanges import router as exchanges_router
 from .routers.portfolio import router as portfolio_router

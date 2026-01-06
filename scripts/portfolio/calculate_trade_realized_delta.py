@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = REPO_ROOT / "backend" / "portfolio.db"
+DB_PATH = REPO_ROOT / "backend" / "storage" / "db" / "portfolio.db"
 
 
 def calculate_realized_deltas():

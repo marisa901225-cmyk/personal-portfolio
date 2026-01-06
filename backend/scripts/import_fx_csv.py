@@ -11,8 +11,8 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.append(str(ROOT_DIR))
 
-from backend.db import SessionLocal
-from backend.models import FxTransaction, User
+from backend.core.db import SessionLocal
+from backend.core.models import FxTransaction, User
 
 
 TYPE_MAP = {

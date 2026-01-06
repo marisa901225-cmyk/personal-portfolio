@@ -184,7 +184,7 @@ The script automatically classifies transactions into these categories:
 - **기타수입**: Cashback, points, interest
 - **기타**: Unclassified items
 
-> **Tip**: Keyword rules are managed in `backend/expense_category_keywords.json`. Update the file and re-run the import (or restart the backend) to apply changes.
+> **Tip**: Keyword rules are managed in `backend/data/expense_category_keywords.json`. Update the file and re-run the import (or restart the backend) to apply changes.
 
 #### Usage Examples
 

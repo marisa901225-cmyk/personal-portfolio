@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from fastapi import UploadFile, HTTPException
 
 from .brokerage_parser import get_parser
-from ..models import ExternalCashflow
+from ..core.models import ExternalCashflow
 
 
 def _normalize_description(description: str | None) -> str:

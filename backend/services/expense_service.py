@@ -9,7 +9,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 from sqlalchemy import extract
 
-from ..models import Expense
+from ..core.models import Expense
 from ..services.users import get_or_create_single_user
 
 

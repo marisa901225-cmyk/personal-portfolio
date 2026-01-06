@@ -6,10 +6,10 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from ..auth import verify_api_token
-from ..db import get_db
-from ..models import FxTransaction
-from ..schemas import FxTransactionCreate, FxTransactionRead, FxTransactionUpdate
+from ..core.auth import verify_api_token
+from ..core.db import get_db
+from ..core.models import FxTransaction
+from ..core.schemas import FxTransactionCreate, FxTransactionRead, FxTransactionUpdate
 from ..services.portfolio import to_fx_transaction_read
 from ..services.users import get_or_create_single_user
 

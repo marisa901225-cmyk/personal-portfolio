@@ -8,10 +8,10 @@ from typing import Any, List
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from ..auth import verify_api_token
-from ..db import get_db
-from ..models import Expense, MerchantPattern
-from ..schemas import ExpenseCreate, ExpenseRead, ExpenseUpdate
+from ..core.auth import verify_api_token
+from ..core.db import get_db
+from ..core.models import Expense, MerchantPattern
+from ..core.schemas import ExpenseCreate, ExpenseRead, ExpenseUpdate
 from ..services.users import get_or_create_single_user
 
 router = APIRouter(prefix="/api/expenses", tags=["expenses"], dependencies=[Depends(verify_api_token)])
@@ -27,7 +27,7 @@ _INCOME_MERCHANT_KEYWORDS = (
     "환급",
 )
 _REVIEW_CONFIDENCE_THRESHOLD = 0.65
-_EXPENSE_MODEL_PATH = Path(__file__).parent.parent / "expense_model.joblib"
+_EXPENSE_MODEL_PATH = Path(__file__).resolve().parents[1] / "data" / "expense_model.joblib"
 _EXPENSE_MODEL_CACHE: Any | None = None
 _EXPENSE_MODEL_MTIME: float | None = None
 
@@ -375,4 +375,3 @@ def get_expense_summary_endpoint(
     """소비 내역 요약 (카테고리별 합계, 고정지출 비율 등)."""
     from ..services.expense_service import get_expense_summary
     return get_expense_summary(db, year, month)
-

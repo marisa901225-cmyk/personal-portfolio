@@ -7,8 +7,8 @@ Settings Service
 
 from __future__ import annotations
 
-from ..models import Setting
-from ..schemas import (
+from ..core.models import Setting
+from ..core.schemas import (
     DividendRecord,
     SettingsRead,
     TargetIndexAllocation,

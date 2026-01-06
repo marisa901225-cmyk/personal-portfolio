@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 import sys
 sys.path.insert(0, str(REPO_ROOT))
 
-from backend.models import Expense, MerchantPattern
+from backend.core.models import Expense, MerchantPattern
 from backend.services.users import get_or_create_single_user
 
 from .parsers import (
@@ -126,7 +126,7 @@ def import_expenses_from_file(
         
         # AI 모델 로드
         model = None
-        model_path = REPO_ROOT / "backend" / "expense_model.joblib"
+        model_path = REPO_ROOT / "backend" / "data" / "expense_model.joblib"
         if model_path.exists():
             try:
                 model = joblib.load(model_path)

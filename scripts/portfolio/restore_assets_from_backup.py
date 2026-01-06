@@ -12,7 +12,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BACKUP_DB = REPO_ROOT / "data_backup_reference" / "portfolio_2025-12-31.db"
-CURRENT_DB = REPO_ROOT / "backend" / "portfolio.db"
+CURRENT_DB = REPO_ROOT / "backend" / "storage" / "db" / "portfolio.db"
 
 
 def restore_assets_from_backup():

@@ -55,7 +55,7 @@ def _setup_kis_path() -> None:
                 - domestic_stock/...
                 - overseas_stock/...
     """
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[3]
     kis_llm_dir = repo_root / "open-trading-api" / "examples_llm"
     if not kis_llm_dir.exists():
         raise RuntimeError(f"open-trading-api/examples_llm directory not found: {kis_llm_dir}")
@@ -94,7 +94,7 @@ def _ensure_kis_modules_loaded() -> None:
         return
 
     mode = _kis_enabled_mode()
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[3]
     has_open_trading_api = (repo_root / "open-trading-api").exists()
 
     if mode == "disabled" or (mode == "auto" and not has_open_trading_api):
@@ -162,7 +162,7 @@ def _stocks_info_dir() -> Path:
     """
     open-trading-api/stocks_info 디렉터리 경로를 반환한다.
     """
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[3]
     return repo_root / "open-trading-api" / "stocks_info"
 
 

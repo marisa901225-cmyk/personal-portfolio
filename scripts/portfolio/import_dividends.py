@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DB_PATH = REPO_ROOT / "backend" / "portfolio.db"
+DB_PATH = REPO_ROOT / "backend" / "storage" / "db" / "portfolio.db"
 EXCEL_PATH = REPO_ROOT / "combined_statements_valuation.xlsx"
 
 

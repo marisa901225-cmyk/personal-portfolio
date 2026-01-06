@@ -9,8 +9,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from ..auth import verify_api_token
-from ..db import get_db
+from ..core.auth import verify_api_token
+from ..core.db import get_db
 from ..services.report_service import (
     list_saved_reports,
     save_report,

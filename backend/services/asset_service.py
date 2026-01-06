@@ -1,7 +1,7 @@
 from __future__ import annotations
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
-from ..models import Asset
+from ..core.models import Asset
 
 
 def calibrate_asset_balance(

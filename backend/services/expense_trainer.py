@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING
 logger = logging.getLogger(__name__)
 
 # Default paths
-_DEFAULT_DB_PATH = Path(__file__).parent.parent / "portfolio.db"
-_DEFAULT_MODEL_PATH = Path(__file__).parent.parent / "expense_model.joblib"
+_DEFAULT_DB_PATH = Path(__file__).resolve().parents[1] / "storage" / "db" / "portfolio.db"
+_DEFAULT_MODEL_PATH = Path(__file__).resolve().parents[1] / "data" / "expense_model.joblib"
 
 
 def train_model(
@@ -26,8 +26,8 @@ def train_model(
     Train expense classification model from database.
     
     Args:
-        db_path: Path to SQLite database. Defaults to backend/portfolio.db
-        model_path: Path to save model. Defaults to backend/expense_model.joblib
+        db_path: Path to SQLite database. Defaults to backend/storage/db/portfolio.db
+        model_path: Path to save model. Defaults to backend/data/expense_model.joblib
         
     Returns:
         True if training succeeded, False otherwise

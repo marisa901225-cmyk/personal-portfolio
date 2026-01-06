@@ -47,8 +47,8 @@ def main():
     parser.add_argument('files', nargs='+', help='Excel, CSV 또는 TXT 파일 경로')
     parser.add_argument(
         '--db',
-        default=str(REPO_ROOT / "backend" / "portfolio.db"),
-        help='SQLite DB 경로 (기본: backend/portfolio.db)',
+        default=str(REPO_ROOT / "backend" / "storage" / "db" / "portfolio.db"),
+        help='SQLite DB 경로 (기본: backend/storage/db/portfolio.db)',
     )
     parser.add_argument('--dry-run', action='store_true', help='미리보기만 (실제 저장 안 함)')
     parser.add_argument('--no-auto-category', action='store_true', help='자동 카테고리 분류 비활성화')

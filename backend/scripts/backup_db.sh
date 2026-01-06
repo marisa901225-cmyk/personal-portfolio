@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # 백엔드 루트 (backend/)
 BASE_DIR="$SCRIPT_DIR/.."
-DB_PATH="${DB_PATH:-"$BASE_DIR/portfolio.db"}"
+DB_PATH="${DB_PATH:-"$BASE_DIR/storage/db/portfolio.db"}"
 
 # 환경변수 로드 (.env)
 ENV_FILE="$BASE_DIR/.env"
@@ -16,7 +16,7 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 # 로컬 백업 경로 (안정성 확보를 위해 우선 로컬에 저장)
-LOCAL_BACKUP_DIR="$BASE_DIR/backups"
+LOCAL_BACKUP_DIR="$BASE_DIR/storage/backups"
 # 외장하드 경로 (옵션)
 EXTERNAL_BACKUP_DIR="${BACKUP_DIR:-/mnt/one-touch/personal-portfolio-backend-backup}"
 

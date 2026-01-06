@@ -12,8 +12,8 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.append(str(ROOT_DIR))
 
-from backend.db import SessionLocal
-from backend.models import Asset, Trade
+from backend.core.db import SessionLocal
+from backend.core.models import Asset, Trade
 from backend.services.users import get_or_create_single_user
 
 DEFAULT_SHEET = "All_Normalized"

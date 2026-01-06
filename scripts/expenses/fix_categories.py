@@ -136,7 +136,7 @@ def main():
         """
     )
     
-    parser.add_argument('--db', default=str(REPO_ROOT / 'backend' / 'portfolio.db'), help='DB 경로')
+    parser.add_argument('--db', default=str(REPO_ROOT / 'backend' / 'storage' / 'db' / 'portfolio.db'), help='DB 경로')
     parser.add_argument('--find', action='store_true', help='의심 항목 찾기')
     parser.add_argument('--category', help='검사할 카테고리 (투자, 이체, 쇼핑)')
     parser.add_argument('--update', type=int, help='변경할 expense ID')

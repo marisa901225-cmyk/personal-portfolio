@@ -17,7 +17,7 @@ class MarketDataServiceTests(unittest.TestCase):
     def setUp(self):
         self.db = MagicMock(spec=Session)
 
-    @patch("backend.kis_client.fetch_kis_prices_krw")
+    @patch("backend.integrations.kis.kis_client.fetch_kis_prices_krw")
     def test_get_kis_prices_krw_success(self, mock_fetch):
         # Mocking
         mock_fetch.return_value = {"005930": 70000.0}
@@ -29,7 +29,7 @@ class MarketDataServiceTests(unittest.TestCase):
         self.assertEqual(result["005930"], 70000.0)
         mock_fetch.assert_called_once()
 
-    @patch("backend.kis_client.fetch_kis_prices_krw")
+    @patch("backend.integrations.kis.kis_client.fetch_kis_prices_krw")
     def test_get_kis_prices_configuration_error(self, mock_fetch):
         # Mocking RuntimeError (simulating KIS_ENABLED=disabled or missing keys)
         mock_fetch.side_effect = RuntimeError("KIS disabled")
@@ -37,7 +37,7 @@ class MarketDataServiceTests(unittest.TestCase):
         with self.assertRaises(KisConfigurationError):
             asyncio.run(get_kis_prices_krw(["005930"], self.db))
 
-    @patch("backend.kis_client.search_tickers_by_name")
+    @patch("backend.integrations.kis.kis_client.search_tickers_by_name")
     def test_search_tickers_by_name(self, mock_search):
         mock_search.return_value = [{"symbol": "005930", "name": "삼성전자"}]
         
@@ -46,7 +46,7 @@ class MarketDataServiceTests(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["symbol"], "005930")
 
-    @patch("backend.kis_client.fetch_usdkrw_rate")
+    @patch("backend.integrations.kis.kis_client.fetch_usdkrw_rate")
     def test_get_usdkrw_rate(self, mock_fetch):
         mock_fetch.return_value = 1300.0
         
