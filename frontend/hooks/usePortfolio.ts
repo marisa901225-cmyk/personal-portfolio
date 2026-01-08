@@ -1,5 +1,5 @@
 
-import { useMemo, useCallback } from 'react';
+import { useMemo, useCallback, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Asset, AppSettings, AssetCategory, TradeType, TradeRecord } from '../lib/types';
 import { ApiClient } from '../lib/api';
@@ -10,6 +10,7 @@ import { restorePortfolioFromBackup } from './portfolioBackup';
 import { usePortfolioQueries } from './usePortfolioQueries';
 import { useAssetMutations } from './useAssetMutations';
 import { useTradeMutation } from './useTradeMutation';
+import { queryKeys } from '../src/shared/api/queryKeys';
 
 export interface HistoryPoint {
   date: string;
@@ -32,6 +33,7 @@ export interface UsePortfolioResult {
   historyData: HistoryPoint[];
   summaryFromServer?: any;
   isSyncing: boolean;
+  isManualSyncing: boolean;
   addAsset: (newAsset: Asset) => Promise<void>;
   deleteAsset: (id: string) => Promise<void>;
   tradeAsset: (id: string, type: TradeType, quantity: number, price: number) => Promise<void>;
@@ -46,6 +48,7 @@ export interface UsePortfolioResult {
 
 export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
   const queryClient = useQueryClient();
+  const [syncing, setSyncing] = useState(false);
   const isRemoteEnabled = Boolean(settings.serverUrl && settings.apiToken);
   const apiClient = useMemo(() => new ApiClient(settings.serverUrl, settings.apiToken), [settings.serverUrl, settings.apiToken]);
 
@@ -60,9 +63,10 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
   const summaryFromServer = assetsQuery.data?.summary;
 
   const reload = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: ['portfolio'] });
-    await queryClient.invalidateQueries({ queryKey: ['portfolioSnapshots'] });
-    await queryClient.invalidateQueries({ queryKey: ['portfolioCashflows'] });
+    await queryClient.refetchQueries({ queryKey: queryKeys.legacyPortfolio });
+    await queryClient.refetchQueries({ queryKey: queryKeys.portfolio });
+    await queryClient.refetchQueries({ queryKey: queryKeys.snapshots(365) });
+    await queryClient.refetchQueries({ queryKey: queryKeys.cashflows });
   }, [queryClient]);
 
   const handleUpdateAsset = useCallback(async (id: string, updates: any) => {
@@ -101,20 +105,25 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
   }, [assets, assetMutations, isRemoteEnabled]);
 
   const handleSyncPrices = useCallback(async (options?: { createSnapshot?: boolean; onSuccess?: () => void }) => {
-    await syncPortfolioPrices({
-      settings,
-      assets,
-      apiClient,
-      isRemoteEnabled,
-      setAssets: () => { }, // Handled by invalidate
-      setIsSyncing: () => { }, // Simple wrapper if needed, but Query handles loading
-      loadPortfolioFromServer: reload,
-      onSuccess: options?.onSuccess,
-    });
+    setSyncing(true);
+    try {
+      await syncPortfolioPrices({
+        settings,
+        assets,
+        apiClient,
+        isRemoteEnabled,
+        setAssets: () => { }, // Handled by invalidate
+        setIsSyncing: () => { },
+        loadPortfolioFromServer: reload,
+        onSuccess: options?.onSuccess,
+      });
 
-    if (options?.createSnapshot && isRemoteEnabled) {
-      await apiClient.createSnapshot();
-      await queryClient.invalidateQueries({ queryKey: ['portfolioSnapshots'] });
+      if (options?.createSnapshot && isRemoteEnabled) {
+        await apiClient.createSnapshot();
+        await queryClient.refetchQueries({ queryKey: queryKeys.snapshots(365) });
+      }
+    } finally {
+      setSyncing(false);
     }
   }, [settings, assets, apiClient, isRemoteEnabled, reload, queryClient]);
 
@@ -123,7 +132,8 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
     tradeHistory,
     historyData,
     summaryFromServer,
-    isSyncing: assetsQuery.isLoading || snapshotsQuery.isLoading,
+    isSyncing: syncing || assetsQuery.isLoading || snapshotsQuery.isLoading,
+    isManualSyncing: syncing,
     addAsset: assetMutations.addAsset,
     deleteAsset: handleDeleteAsset,
     tradeAsset: handleTradeAsset,

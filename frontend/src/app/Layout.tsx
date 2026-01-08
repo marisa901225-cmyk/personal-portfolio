@@ -36,6 +36,7 @@ export const Layout: React.FC = () => {
         assets,
         tradeHistory,
         isSyncing,
+        isManualSyncing,
         syncPrices,
         reload,
         apiClient
@@ -71,8 +72,8 @@ export const Layout: React.FC = () => {
             onSuccess: () => {
                 setSyncNotification({
                     isOpen: true,
-                    title: '동기화 완료',
-                    message: '가격 동기화 및 서버 저장이 완료되었습니다.',
+                    title: '동기화 완료!',
+                    message: '자산 정보 최신화 끝! 이제 완벽해요. ✨',
                 });
             },
         });
@@ -267,6 +268,16 @@ export const Layout: React.FC = () => {
                 title={syncNotification.title}
                 message={syncNotification.message}
             />
+
+            {/* 로딩 팝업 (토스트) */}
+            {isManualSyncing && (
+                <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[60] animate-fade-in-up">
+                    <div className="bg-slate-900/90 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-white/10">
+                        <RefreshCw size={18} className="animate-spin text-indigo-400" />
+                        <span className="text-sm font-medium">잠시만요, 자산 정보 싹 긁어오는 중! 🚀</span>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
