@@ -95,7 +95,7 @@ export class ApiClient {
     // --- Portfolio ---
 
     async fetchPortfolio(): Promise<BackendPortfolioResponse> {
-        return this.request<BackendPortfolioResponse>('/api/portfolio', {
+        return this.request<BackendPortfolioResponse>('/api/portfolio/', {
             method: 'GET',
         });
     }
@@ -103,7 +103,7 @@ export class ApiClient {
     async restorePortfolio(
         assets: BackendRestoreAsset[],
     ): Promise<BackendPortfolioRestoreResponse> {
-        return this.request<BackendPortfolioRestoreResponse>('/api/portfolio/restore', {
+        return this.request<BackendPortfolioRestoreResponse>('/api/portfolio/restore/', {
             method: 'POST',
             body: JSON.stringify({ assets }),
         });
@@ -111,13 +111,13 @@ export class ApiClient {
 
     async fetchSnapshots(days = 180): Promise<BackendSnapshot[]> {
         return this.request<BackendSnapshot[]>(
-            `/api/portfolio/snapshots?days=${days}`,
+            `/api/portfolio/snapshots/?days=${days}`,
             { method: 'GET' },
         );
     }
 
     async createSnapshot(): Promise<BackendSnapshot> {
-        return this.request<BackendSnapshot>('/api/portfolio/snapshots', {
+        return this.request<BackendSnapshot>('/api/portfolio/snapshots/', {
             method: 'POST',
         });
     }
@@ -125,17 +125,17 @@ export class ApiClient {
     // --- Health ---
 
     async checkHealth(): Promise<BackendHealthResponse> {
-        return this.request<BackendHealthResponse>('/api/health', { method: 'GET' });
+        return this.request<BackendHealthResponse>('/api/health/', { method: 'GET' });
     }
 
     // --- Settings ---
 
     async fetchSettings(): Promise<BackendSettings> {
-        return this.request<BackendSettings>('/api/settings', { method: 'GET' });
+        return this.request<BackendSettings>('/api/settings/', { method: 'GET' });
     }
 
     async updateSettings(payload: BackendSettings): Promise<BackendSettings> {
-        return this.request<BackendSettings>('/api/settings', {
+        return this.request<BackendSettings>('/api/settings/', {
             method: 'PUT',
             body: JSON.stringify(payload),
         });
@@ -144,40 +144,40 @@ export class ApiClient {
     // --- Assets ---
 
     async createAsset(payload: any): Promise<BackendAsset> {
-        return this.request<BackendAsset>('/api/assets', {
+        return this.request<BackendAsset>('/api/assets/', {
             method: 'POST',
             body: JSON.stringify(payload),
         });
     }
 
     async deleteAsset(assetId: number): Promise<void> {
-        return this.request<void>(`/api/assets/${assetId}`, {
+        return this.request<void>(`/api/assets/${assetId}/`, {
             method: 'DELETE',
         });
     }
 
     async updateAsset(assetId: number, payload: any): Promise<BackendAsset> {
-        return this.request<BackendAsset>(`/api/assets/${assetId}`, {
+        return this.request<BackendAsset>(`/api/assets/${assetId}/`, {
             method: 'PATCH',
             body: JSON.stringify(payload),
         });
     }
 
     async fetchPrices(tickers: string[]): Promise<Record<string, number>> {
-        return this.request<Record<string, number>>('/api/kis/prices', {
+        return this.request<Record<string, number>>('/api/kis/prices/', {
             method: 'POST',
             body: JSON.stringify({ tickers }),
         });
     }
 
     async fetchUsdKrwFxRate(): Promise<BackendFxRateResponse> {
-        return this.request<BackendFxRateResponse>('/api/kis/fx/usdkrw', { method: 'GET' });
+        return this.request<BackendFxRateResponse>('/api/kis/fx/usdkrw/', { method: 'GET' });
     }
 
     async searchTicker(query: string): Promise<BackendTickerSearchResponse> {
         const q = query.trim();
         return this.request<BackendTickerSearchResponse>(
-            `/api/search_ticker?q=${encodeURIComponent(q)}`,
+            `/api/search_ticker/?q=${encodeURIComponent(q)}`,
             { method: 'GET' },
         );
     }
@@ -194,7 +194,7 @@ export class ApiClient {
         if (params?.beforeId != null) search.set('before_id', params.beforeId.toString());
         if (params?.assetId != null) search.set('asset_id', params.assetId.toString());
         const qs = search.toString();
-        return this.request<BackendTrade[]>(`/api/trades${qs ? `?${qs}` : ''}`, { method: 'GET' });
+        return this.request<BackendTrade[]>(`/api/trades/${qs ? `?${qs}` : ''}`, { method: 'GET' });
     }
 
     async createTrade(
@@ -203,7 +203,7 @@ export class ApiClient {
         quantity: number,
         price: number,
     ): Promise<BackendTrade> {
-        return this.request<BackendTrade>(`/api/assets/${assetId}/trades`, {
+        return this.request<BackendTrade>(`/api/assets/${assetId}/trades/`, {
             method: 'POST',
             body: JSON.stringify({
                 asset_id: assetId,
@@ -230,7 +230,7 @@ export class ApiClient {
         if (params?.startDate) search.set('start_date', params.startDate);
         if (params?.endDate) search.set('end_date', params.endDate);
         const qs = search.toString();
-        return this.request<BackendFxTransaction[]>(`/api/exchanges${qs ? `?${qs}` : ''}`, {
+        return this.request<BackendFxTransaction[]>(`/api/exchanges/${qs ? `?${qs}` : ''}`, {
             method: 'GET',
         });
     }
@@ -245,7 +245,7 @@ export class ApiClient {
         description?: string | null;
         note?: string | null;
     }): Promise<BackendFxTransaction> {
-        return this.request<BackendFxTransaction>('/api/exchanges', {
+        return this.request<BackendFxTransaction>('/api/exchanges/', {
             method: 'POST',
             body: JSON.stringify(payload),
         });
@@ -264,14 +264,14 @@ export class ApiClient {
             note?: string | null;
         },
     ): Promise<BackendFxTransaction> {
-        return this.request<BackendFxTransaction>(`/api/exchanges/${recordId}`, {
+        return this.request<BackendFxTransaction>(`/api/exchanges/${recordId}/`, {
             method: 'PATCH',
             body: JSON.stringify(payload),
         });
     }
 
     async deleteFxTransaction(recordId: number): Promise<void> {
-        return this.request<void>(`/api/exchanges/${recordId}`, {
+        return this.request<void>(`/api/exchanges/${recordId}/`, {
             method: 'DELETE',
         });
     }
@@ -279,7 +279,7 @@ export class ApiClient {
     // --- Yearly Cashflows (연도별 입출금) ---
 
     async fetchCashflows(): Promise<BackendYearlyCashflow[]> {
-        return this.request<BackendYearlyCashflow[]>('/api/cashflows', { method: 'GET' });
+        return this.request<BackendYearlyCashflow[]>('/api/cashflows/', { method: 'GET' });
     }
 
     async createCashflow(payload: {
@@ -288,7 +288,7 @@ export class ApiClient {
         withdrawal: number;
         note?: string | null;
     }): Promise<BackendYearlyCashflow> {
-        return this.request<BackendYearlyCashflow>('/api/cashflows', {
+        return this.request<BackendYearlyCashflow>('/api/cashflows/', {
             method: 'POST',
             body: JSON.stringify(payload),
         });
@@ -303,14 +303,14 @@ export class ApiClient {
             note?: string | null;
         },
     ): Promise<BackendYearlyCashflow> {
-        return this.request<BackendYearlyCashflow>(`/api/cashflows/${cashflowId}`, {
+        return this.request<BackendYearlyCashflow>(`/api/cashflows/${cashflowId}/`, {
             method: 'PATCH',
             body: JSON.stringify(payload),
         });
     }
 
     async deleteCashflow(cashflowId: number): Promise<void> {
-        return this.request<void>(`/api/cashflows/${cashflowId}`, {
+        return this.request<void>(`/api/cashflows/${cashflowId}/`, {
             method: 'DELETE',
         });
     }
@@ -329,7 +329,7 @@ export class ApiClient {
             added: number;
             skipped: number;
             total_parsed: number;
-        }>('/api/cashflows/upload', {
+        }>('/api/cashflows/upload/', {
             method: 'POST',
             body: formData,
             headers: {},
@@ -350,7 +350,7 @@ export class ApiClient {
         if (params.month != null) {
             search.set('month', params.month.toString());
             return this.request<BackendReportResponse>(
-                `/api/report/monthly?${search.toString()}`,
+                `/api/report/monthly/?${search.toString()}`,
                 { method: 'GET' },
             );
         }
@@ -358,13 +358,13 @@ export class ApiClient {
         if (params.quarter != null) {
             search.set('quarter', params.quarter.toString());
             return this.request<BackendReportResponse>(
-                `/api/report/quarterly?${search.toString()}`,
+                `/api/report/quarterly/?${search.toString()}`,
                 { method: 'GET' },
             );
         }
 
         return this.request<BackendReportResponse>(
-            `/api/report/yearly?${search.toString()}`,
+            `/api/report/yearly/?${search.toString()}`,
             { method: 'GET' },
         );
     }
@@ -385,7 +385,7 @@ export class ApiClient {
         if (params.maxTokens != null) search.set('max_tokens', params.maxTokens.toString());
         if (params.model) search.set('model', params.model);
         return this.request<BackendAiReportTextResponse>(
-            `/api/report/ai/text?${search.toString()}`,
+            `/api/report/ai/text/?${search.toString()}`,
             { method: 'GET' },
         );
     }
@@ -412,7 +412,7 @@ export class ApiClient {
         if (params.maxTokens != null) search.set('max_tokens', params.maxTokens.toString());
         if (params.model) search.set('model', params.model);
 
-        const url = `${this.baseUrl}/api/report/ai/text/stream?${search.toString()}`;
+        const url = `${this.baseUrl}/api/report/ai/text/stream/?${search.toString()}`;
         let response: Response;
         try {
             response = await fetch(url, {
