@@ -28,7 +28,14 @@ export class ApiClient {
     private readonly baseUrl: string;
 
     constructor(baseUrl: string, private apiToken?: string) {
-        const trimmed = baseUrl.replace(/\/+$/, '');
+        let trimmed = baseUrl.replace(/\/+$/, '');
+
+        // Vercel(HTTPS)에서 HTTP 호출 시 Mixed Content 에러 방지용 자동 업그레이드
+        if (typeof window !== 'undefined' && window.location.protocol === 'https:' && trimmed.startsWith('http://')) {
+            console.warn('Mixed Content detected: Upgrading serverUrl to HTTPS for secure connection');
+            trimmed = trimmed.replace(/^http:\/\//, 'https://');
+        }
+
         this.baseUrl = trimmed.endsWith('/api')
             ? trimmed.slice(0, -4)
             : trimmed;
