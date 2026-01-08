@@ -271,7 +271,7 @@ export const Layout: React.FC = () => {
 
             {/* 로딩 팝업 (토스트) */}
             {isManualSyncing && (
-                <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[60] animate-fade-in-up">
+                <div className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[60] animate-fade-in">
                     <div className="bg-slate-900/90 backdrop-blur-md text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 border border-white/10">
                         <RefreshCw size={18} className="animate-spin text-indigo-400" />
                         <span className="text-sm font-medium">잠시만요, 자산 정보 싹 긁어오는 중! 🚀</span>
