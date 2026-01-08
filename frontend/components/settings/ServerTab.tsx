@@ -25,7 +25,7 @@ export const ServerTab: React.FC<ServerTabProps> = ({ settings, onSettingsChange
             <input
                 type="text"
                 className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors font-mono text-sm"
-                placeholder="http://100.x.y.z:8000"
+                placeholder="https://your-server.ts.net"
                 value={settings.serverUrl}
                 onChange={(e) =>
                     onSettingsChange({
@@ -35,9 +35,9 @@ export const ServerTab: React.FC<ServerTabProps> = ({ settings, onSettingsChange
                 }
             />
             <p className="text-xs text-slate-500 mt-2">
-                * Tailscale Machine IP와 Port를 입력하세요.
+                * Vercel 배포 시 반드시 **https://** 주소를 사용해야 합니다.
                 <br />
-                * 예: http://100.101.102.103:8000
+                * Tailscale HTTPS 기능을 켜고 **.ts.net** 주소를 사용하는 것이 좋습니다.
             </p>
             <button
                 type="button"
