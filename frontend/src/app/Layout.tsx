@@ -67,18 +67,13 @@ export const Layout: React.FC = () => {
             alert('설정에서 홈서버 URL을 입력해주세요.');
             return;
         }
-        await syncPrices({
-            createSnapshot: true,
-            onSuccess: () => {
-                // 로딩 팝업이 사라지고 나서 성공 알림 표시 (겹침 방지)
-                setTimeout(() => {
-                    setSyncNotification({
-                        isOpen: true,
-                        title: '동기화 완료!',
-                        message: '자산 정보 최신화 끝! 이제 완벽해요. ✨',
-                    });
-                }, 300);
-            },
+        await syncPrices({ createSnapshot: true });
+
+        // 로딩 팝업이 사라지고 나서 성공 알림 표시
+        setSyncNotification({
+            isOpen: true,
+            title: '동기화 완료!',
+            message: '자산 정보 최신화 끝! 이제 완벽해요. ✨',
         });
     };
 
