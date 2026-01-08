@@ -139,7 +139,7 @@ export const Layout: React.FC = () => {
             </aside>
 
             {/* Main Content */}
-            <main className="flex-1 p-4 md:p-8 pb-24 md:pb-8 max-w-6xl mx-auto w-full">
+            <main className="flex-1 p-4 md:p-8 max-w-6xl mx-auto w-full">
                 <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
                     <div>
                         <h1 className="text-2xl md:text-3xl font-bold text-slate-900">
@@ -266,31 +266,6 @@ export const Layout: React.FC = () => {
                 title={syncNotification.title}
                 message={syncNotification.message}
             />
-
-            {/* Mobile Bottom Navigation */}
-            <nav className="md:hidden fixed bottom-6 left-6 right-6 h-16 bg-white/90 backdrop-blur-xl border border-slate-200 rounded-2xl shadow-2xl flex items-center justify-around px-2 z-50">
-                {navItems.slice(0, 4).map(({ to, icon: Icon, label }) => (
-                    <NavLink
-                        key={to}
-                        to={to}
-                        className={({ isActive }) =>
-                            `flex flex-col items-center gap-1 transition-colors ${isActive ? 'text-indigo-600' : 'text-slate-400'}`
-                        }
-                    >
-                        <Icon size={20} />
-                        <span className="text-[10px] font-medium">{label}</span>
-                    </NavLink>
-                ))}
-                <NavLink
-                    to="/settings"
-                    className={({ isActive }) =>
-                        `flex flex-col items-center gap-1 transition-colors ${isActive ? 'text-indigo-600' : 'text-slate-400'}`
-                    }
-                >
-                    <Settings size={20} />
-                    <span className="text-[10px] font-medium">설정</span>
-                </NavLink>
-            </nav>
 
             {/* 로딩 팝업 (토스트) */}
             {isManualSyncing && (
