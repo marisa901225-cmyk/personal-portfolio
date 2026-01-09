@@ -23,6 +23,7 @@ export const useAssetEditForm = ({
     const [assetName, setAssetName] = useState('');
     const [amountInput, setAmountInput] = useState('');
     const [purchasePriceInput, setPurchasePriceInput] = useState('');
+    const [currentPriceInput, setCurrentPriceInput] = useState('');
     const [category, setCategory] = useState<AssetCategory>(AssetCategory.STOCK_KR);
     const [isCmaEnabled, setIsCmaEnabled] = useState(false);
     const [annualRate, setAnnualRate] = useState('');
@@ -45,6 +46,7 @@ export const useAssetEditForm = ({
                 setInputValue(Math.round(currentTotal).toString());
                 setAmountInput('');
                 setPurchasePriceInput('');
+                setCurrentPriceInput('');
 
                 const cfg = asset.cmaConfig;
                 if (cfg) {
@@ -62,6 +64,7 @@ export const useAssetEditForm = ({
                 setInputValue(asset.ticker || '');
                 setAmountInput(asset.amount.toString());
                 setPurchasePriceInput(asset.purchasePrice != null ? asset.purchasePrice.toString() : '');
+                setCurrentPriceInput(asset.currentPrice > 0 ? asset.currentPrice.toString() : '');
                 setCategory(asset.category);
                 setIsCmaEnabled(false);
                 setAnnualRate('');
@@ -163,6 +166,22 @@ export const useAssetEditForm = ({
                 }
             }
 
+            if (category === AssetCategory.OTHER) {
+                const currentTrimmed = currentPriceInput.trim();
+                if (currentTrimmed === '') {
+                    alert('현재 단가를 입력해주세요.');
+                    return;
+                }
+                const currentValue = Number(currentTrimmed);
+                if (!Number.isFinite(currentValue) || currentValue < 0) {
+                    alert('현재 단가를 올바르게 입력해주세요.');
+                    return;
+                }
+                if (currentValue !== asset.currentPrice) {
+                    updates.currentPrice = currentValue;
+                }
+            }
+
             if (Object.keys(updates).length > 0) {
                 onUpdateAsset(asset.id, updates);
             }
@@ -177,6 +196,7 @@ export const useAssetEditForm = ({
             assetName,
             amountInput,
             purchasePriceInput,
+            currentPriceInput,
             category,
             isCmaEnabled,
             annualRate,
@@ -190,6 +210,7 @@ export const useAssetEditForm = ({
             setAssetName,
             setAmountInput,
             setPurchasePriceInput,
+            setCurrentPriceInput,
             setCategory,
             setIsCmaEnabled,
             setAnnualRate,

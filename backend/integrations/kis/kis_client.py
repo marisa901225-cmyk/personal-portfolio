@@ -24,7 +24,7 @@ def _kis_enabled_mode() -> str:
     """
     KIS 연동 활성화 모드.
 
-    - "auto"(기본): open-trading-api 폴더가 있으면 활성화, 없으면 비활성화
+    - "auto"(기본): backend 내 KIS 모듈이 있으면 활성화, 없으면 비활성화
     - truthy(1/true/yes/on): 강제 활성화 (없으면 요청 시 RuntimeError)
     - falsy(0/false/no/off): 강제 비활성화
     """
@@ -44,21 +44,16 @@ def _kis_enabled_mode() -> str:
 
 def _setup_kis_path() -> None:
     """
-    open-trading-api/examples_llm 경로를 sys.path에 추가한다.
+    backend 내부에 이관한 KIS 모듈 경로를 sys.path에 추가한다.
 
-    - 이 경로 안에 kis_auth.py 및 각 상품별 샘플 모듈이 존재한다.
-    - personal-portfolio/
-        - backend/
-        - open-trading-api/
-            - examples_llm/
-                - kis_auth.py
-                - domestic_stock/...
-                - overseas_stock/...
+    - backend/integrations/kis/open_trading
+        - kis_auth.py
+        - domestic_stock/...
+        - overseas_stock/...
     """
-    repo_root = Path(__file__).resolve().parents[3]
-    kis_llm_dir = repo_root / "open-trading-api" / "examples_llm"
+    kis_llm_dir = Path(__file__).resolve().parent / "open_trading"
     if not kis_llm_dir.exists():
-        raise RuntimeError(f"open-trading-api/examples_llm directory not found: {kis_llm_dir}")
+        raise RuntimeError(f"KIS open_trading directory not found: {kis_llm_dir}")
 
     if str(kis_llm_dir) not in sys.path:
         sys.path.append(str(kis_llm_dir))
@@ -71,15 +66,17 @@ _KIS_AVAILABLE = False
 ka = None  # type: ignore[assignment]
 _domestic_inquire_price = None  # type: ignore[assignment]
 _domestic_search_stock_info = None  # type: ignore[assignment]
+_domestic_watchlist_quote = None  # type: ignore[assignment]
 _overseas_price_detail = None  # type: ignore[assignment]
 _overseas_search_info = None  # type: ignore[assignment]
+_overseas_multi_quote = None  # type: ignore[assignment]
 
 
 def _ensure_kis_modules_loaded() -> None:
     """
-    open-trading-api 의 예제 모듈들은 환경마다 존재하지 않을 수 있으므로 import를 지연한다.
+    KIS 모듈들은 환경마다 존재하지 않을 수 있으므로 import를 지연한다.
 
-    - 백엔드 코드를 다른 서버로 옮겨서 테스트할 때, open-trading-api 폴더가 없어도
+    - 백엔드 코드를 다른 서버로 옮겨서 테스트할 때, KIS 모듈 폴더가 없어도
       앱 import 자체가 터지지 않게 하기 위함.
     """
     global _KIS_AVAILABLE
@@ -87,24 +84,26 @@ def _ensure_kis_modules_loaded() -> None:
     global ka
     global _domestic_inquire_price
     global _domestic_search_stock_info
+    global _domestic_watchlist_quote
     global _overseas_price_detail
     global _overseas_search_info
+    global _overseas_multi_quote
 
     if _KIS_MODULES_LOADED:
         return
 
     mode = _kis_enabled_mode()
-    repo_root = Path(__file__).resolve().parents[3]
-    has_open_trading_api = (repo_root / "open-trading-api").exists()
+    kis_llm_dir = Path(__file__).resolve().parent / "open_trading"
+    has_open_trading = kis_llm_dir.exists()
 
-    if mode == "disabled" or (mode == "auto" and not has_open_trading_api):
+    if mode == "disabled" or (mode == "auto" and not has_open_trading):
         _KIS_AVAILABLE = False
         _KIS_MODULES_LOADED = True
         logger.info(
-            "KIS integration disabled (mode=%s, open-trading-api exists=%s). "
+            "KIS integration disabled (mode=%s, open_trading exists=%s). "
             "Set %s=1 to force-enable.",
             mode,
-            has_open_trading_api,
+            has_open_trading,
             _KIS_ENABLED_ENV,
         )
         return
@@ -118,17 +117,23 @@ def _ensure_kis_modules_loaded() -> None:
         from domestic_stock.search_stock_info.search_stock_info import (  # type: ignore
             search_stock_info as __domestic_search_stock_info,
         )
+        from domestic_stock.watchlist_quote.watchlist_quote import (  # type: ignore
+            watchlist_quote as __domestic_watchlist_quote,
+        )
         from overseas_stock.price_detail.price_detail import (  # type: ignore
             price_detail as __overseas_price_detail,
         )
         from overseas_stock.search_info.search_info import (  # type: ignore
             search_info as __overseas_search_info,
         )
+        from overseas_stock.multi_quote.multi_quote import (  # type: ignore
+            multi_quote as __overseas_multi_quote,
+        )
     except Exception as exc:
         _KIS_AVAILABLE = False
         _KIS_MODULES_LOADED = True
         logger.warning(
-            "KIS integration unavailable (failed to import open-trading-api modules): %s. "
+            "KIS integration unavailable (failed to import KIS modules): %s. "
             "If you don't need KIS during tests, set %s=0.",
             exc,
             _KIS_ENABLED_ENV,
@@ -138,8 +143,10 @@ def _ensure_kis_modules_loaded() -> None:
     ka = _ka
     _domestic_inquire_price = __domestic_inquire_price
     _domestic_search_stock_info = __domestic_search_stock_info
+    _domestic_watchlist_quote = __domestic_watchlist_quote
     _overseas_price_detail = __overseas_price_detail
     _overseas_search_info = __overseas_search_info
+    _overseas_multi_quote = __overseas_multi_quote
 
     _KIS_AVAILABLE = True
     _KIS_MODULES_LOADED = True
@@ -160,10 +167,9 @@ _DOMESTIC_TICKER_RE = re.compile(r"^\d{6}$")
 
 def _stocks_info_dir() -> Path:
     """
-    open-trading-api/stocks_info 디렉터리 경로를 반환한다.
+    backend/integrations/kis/stocks_info 디렉터리 경로를 반환한다.
     """
-    repo_root = Path(__file__).resolve().parents[3]
-    return repo_root / "open-trading-api" / "stocks_info"
+    return Path(__file__).resolve().parent / "stocks_info"
 
 
 def _ensure_auth() -> None:

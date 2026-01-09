@@ -58,9 +58,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
     let reRealized = 0;
 
     assets.forEach(asset => {
-      const val = asset.amount * asset.currentPrice;
-      const invested = asset.amount * (asset.purchasePrice || asset.currentPrice);
-      const realized = asset.realizedProfit || 0;
+      const amount = asset.amount || 0;
+      const currentPrice = asset.currentPrice || 0;
+      const purchasePrice = asset.purchasePrice || currentPrice;
+      const realizedProfit = asset.realizedProfit || 0;
+
+      const val = amount * currentPrice;
+      const invested = amount * purchasePrice;
+      const realized = realizedProfit;
 
       // --- Investable vs Real Estate ---
       if (asset.category === AssetCategory.REAL_ESTATE) {
@@ -177,9 +182,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const indexAgg = new Map<string, { name: string; value: number }>();
 
       assets.forEach(asset => {
-        const val = asset.amount * asset.currentPrice;
-        const invested = asset.amount * (asset.purchasePrice || asset.currentPrice);
-        const realized = asset.realizedProfit || 0;
+        const amount = asset.amount || 0;
+        const currentPrice = asset.currentPrice || 0;
+        const purchasePrice = asset.purchasePrice || currentPrice;
+        const realizedProfit = asset.realizedProfit || 0;
+
+        const val = amount * currentPrice;
+        const invested = amount * purchasePrice;
+        const realized = realizedProfit;
 
         totalValue += val;
         totalInvested += invested;

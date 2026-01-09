@@ -73,6 +73,7 @@ const App: React.FC = () => {
       category?: AssetCategory;
       amount?: number;
       purchasePrice?: number;
+      currentPrice?: number;
     },
   ) => {
     void updateAsset(id, updates);

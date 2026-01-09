@@ -79,6 +79,8 @@ export const AssetEditModal: React.FC<AssetEditModalProps> = (props) => {
                                 setAmountInput={handlers.setAmountInput}
                                 purchasePriceInput={state.purchasePriceInput}
                                 setPurchasePriceInput={handlers.setPurchasePriceInput}
+                                currentPriceInput={state.currentPriceInput}
+                                setCurrentPriceInput={handlers.setCurrentPriceInput}
                                 category={state.category}
                                 setCategory={handlers.setCategory}
                                 indexGroup={state.indexGroup}

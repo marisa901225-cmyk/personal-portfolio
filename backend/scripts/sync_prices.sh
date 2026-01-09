@@ -28,6 +28,28 @@ if [[ -z "${API_TOKEN}" ]]; then
   exit 1
 fi
 
+# --- Telegram Notification function ---
+send_telegram() {
+  local message="$1"
+  if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
+    curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+         -d chat_id="${TELEGRAM_CHAT_ID}" \
+         -d text="${message}" > /dev/null
+  fi
+}
+
+# Error Trap
+on_error() {
+  local exit_code=$?
+  local line_no=$1
+  echo "ERROR: Script failed at line $line_no with exit code $exit_code" >&2
+  send_telegram "❌ 시세 동기화 실패!
+- 에러 발생 라인: $line_no
+- 종료 코드: $exit_code
+- 로그를 확인해 주세요."
+}
+trap 'on_error $LINENO' ERR
+
 # 1) 포트폴리오에서 보유 티커 목록 뽑기
 portfolio_json="$(curl -fsS -H "X-API-Token: ${API_TOKEN}" "${BACKEND_URL%/}/api/portfolio")" || {
   echo "ERROR: Failed to fetch portfolio" >&2
@@ -80,10 +102,9 @@ curl -fsS -X POST \
 echo "$(date -Is) close sync + snapshot OK"
 sync_time="$(date +'%Y-%m-%d %H:%M:%S')"
 
-# --- Telegram Notification ---
-if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
+# SUCCESS Notification
+echo "TICKER_COUNT=${ticker_count}"
+if [[ "${SKIP_TELEGRAM_NOTIFY:-}" != "true" ]]; then
   MSG="$(printf "💰 시세 업데이트 완료!\n- 총 %s개 종목\n- %s 기준" "$ticker_count" "$sync_time")"
-  curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-       -d chat_id="${TELEGRAM_CHAT_ID}" \
-       -d text="${MSG}" > /dev/null
+  send_telegram "${MSG}"
 fi

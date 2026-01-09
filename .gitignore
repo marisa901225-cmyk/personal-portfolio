@@ -36,4 +36,13 @@ backend/backups/
 
 *.db-shm
 *.db-wal
+*.db
 삼성*.xlsx
+
+# AI Models and Data
+backend/data/*.joblib
+backend/data/*.gguf
+backend/data/gemma*
+*.log
+alarm_collector.log
+alarm_process.log

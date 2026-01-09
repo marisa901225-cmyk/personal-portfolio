@@ -55,6 +55,7 @@ export const useAssetMutations = (apiClient: ApiClient, isRemoteEnabled: boolean
             if (updates.category !== undefined) payload.category = updates.category;
             if (updates.amount !== undefined) payload.amount = updates.amount;
             if (updates.purchasePrice !== undefined) payload.purchase_price = updates.purchasePrice;
+            if (updates.currentPrice !== undefined) payload.current_price = updates.currentPrice;
 
             return await apiClient.updateAsset(backendId, payload);
         },

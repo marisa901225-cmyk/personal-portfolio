@@ -10,6 +10,8 @@ interface StockEditFormProps {
     setAmountInput: (v: string) => void;
     purchasePriceInput: string;
     setPurchasePriceInput: (v: string) => void;
+    currentPriceInput: string;
+    setCurrentPriceInput: (v: string) => void;
     category: AssetCategory;
     setCategory: (v: AssetCategory) => void;
     indexGroup: string;
@@ -25,6 +27,8 @@ export const StockEditForm: React.FC<StockEditFormProps> = ({
     setAmountInput,
     purchasePriceInput,
     setPurchasePriceInput,
+    currentPriceInput,
+    setCurrentPriceInput,
     category,
     setCategory,
     indexGroup,
@@ -87,6 +91,26 @@ export const StockEditForm: React.FC<StockEditFormProps> = ({
                     />
                 </div>
             </div>
+
+            {category === AssetCategory.OTHER && (
+                <div className="mt-4">
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">
+                        현재 단가 (KRW)
+                    </label>
+                    <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        className="w-full px-4 py-3 rounded-xl border-2 border-slate-200 text-base focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all"
+                        placeholder="0"
+                        value={currentPriceInput}
+                        onChange={(e) => setCurrentPriceInput(e.target.value)}
+                    />
+                    <p className="text-xs text-slate-400 mt-1">
+                        기타 자산은 시세 동기화가 없으므로 직접 입력해주세요.
+                    </p>
+                </div>
+            )}
 
             <div className="mt-4">
                 <label className="block text-sm font-semibold text-slate-700 mb-2">
