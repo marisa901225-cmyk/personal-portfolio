@@ -73,6 +73,7 @@ export const AssetsPage: React.FC = () => {
             category?: AssetCategory;
             amount?: number;
             purchasePrice?: number;
+            currentPrice?: number;
         }
     ) => {
         const asset = assets.find(a => a.id === id);
@@ -86,6 +87,7 @@ export const AssetsPage: React.FC = () => {
                 category: updates.category,
                 amount: updates.amount,
                 purchase_price: updates.purchasePrice,
+                current_price: updates.currentPrice,
             },
         });
     };

@@ -25,13 +25,17 @@ export const AssetRow: React.FC<AssetRowProps> = ({
     const [tradeFxRate, setTradeFxRate] = useState<string>('');
     const [tradeUsdPrice, setTradeUsdPrice] = useState<string>('');
 
-    const totalValue = asset.amount * asset.currentPrice;
-    const profitRate = asset.purchasePrice
-        ? ((asset.currentPrice - asset.purchasePrice) / asset.purchasePrice) * 100
+    const amount = asset.amount || 0;
+    const currentPrice = asset.currentPrice || 0;
+    const purchasePrice = asset.purchasePrice || 0;
+    const realized = asset.realizedProfit || 0;
+
+    const totalValue = amount * currentPrice;
+    const profitRate = purchasePrice > 0
+        ? ((currentPrice - purchasePrice) / purchasePrice) * 100
         : 0;
     const isProfitable = profitRate > 0;
     const isLoss = profitRate < 0;
-    const realized = asset.realizedProfit || 0;
 
     const openTrade = (type: TradeType) => {
         setIsTradeOpen(true);

@@ -5,23 +5,28 @@
 import type { Asset, TradeRecord, FxTransactionRecord } from '../types';
 import type { BackendAsset, BackendTrade, BackendFxTransaction } from './types';
 
+const safeNum = (val: any) => {
+    const n = Number(val);
+    return Number.isFinite(n) ? n : 0;
+};
+
 export const mapBackendAssetToFrontend = (backend: BackendAsset): Asset => ({
     id: backend.id.toString(),
     backendId: backend.id,
     name: backend.name,
     ticker: backend.ticker ?? undefined,
     category: backend.category as Asset['category'],
-    amount: backend.amount,
-    currentPrice: backend.current_price,
+    amount: safeNum(backend.amount),
+    currentPrice: safeNum(backend.current_price),
     currency: backend.currency,
-    purchasePrice: backend.purchase_price ?? undefined,
-    realizedProfit: backend.realized_profit,
+    purchasePrice: backend.purchase_price != null ? safeNum(backend.purchase_price) : undefined,
+    realizedProfit: safeNum(backend.realized_profit),
     indexGroup: backend.index_group ?? undefined,
     cmaConfig: backend.cma_config
         ? {
-            principal: backend.cma_config.principal,
-            annualRate: backend.cma_config.annual_rate,
-            taxRate: backend.cma_config.tax_rate,
+            principal: safeNum(backend.cma_config.principal),
+            annualRate: safeNum(backend.cma_config.annual_rate),
+            taxRate: safeNum(backend.cma_config.tax_rate),
             startDate: backend.cma_config.start_date,
         }
         : undefined,

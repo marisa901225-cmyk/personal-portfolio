@@ -34,6 +34,8 @@ from .routers.cashflows import router as cashflows_router
 from .routers.expenses import router as expenses_router
 from .routers.expense_upload import router as expense_upload_router
 from .routers.market_data import router as market_data_router
+from .routers.spam_rules import router as spam_rules_router
+from .routers.telegram_webhook import router as telegram_webhook_router
 
 app = FastAPI(title="MyAsset Portfolio Backend")
 ensure_schema()
@@ -100,6 +102,8 @@ app.include_router(cashflows_router)
 app.include_router(expenses_router)
 app.include_router(expense_upload_router)
 app.include_router(market_data_router)
+app.include_router(spam_rules_router)
+app.include_router(telegram_webhook_router)
 
 
 # ============================================

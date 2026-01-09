@@ -22,14 +22,16 @@ npm ci && npm run dev
 # → http://localhost:5173
 ```
 
-### 백엔드 (홈서버)
+### 백엔드 (홈서버 - Docker)
 ```bash
-# systemd 쓰면
-sudo systemctl restart myasset-backend.service
+# Docker Compose 사용 (권장)
+docker-compose up -d
 
-# 수동 실행
-source backend/.venv/bin/activate
-uvicorn backend.main:app --host 0.0.0.0 --port 8000
+# 컨테이너 재시작
+docker-compose restart
+
+# 로그 확인
+docker-compose logs -f backend-api
 ```
 
 ---
@@ -89,11 +91,12 @@ npx vercel --prod
 # 또는 git push (GitHub 연동 시 자동 배포)
 ```
 
-### 백엔드 (홈서버)
+### 백엔드 (홈서버 - Docker)
 ```bash
 cd /path/to/personal-portfolio
 git pull
-sudo systemctl restart myasset-backend.service
+docker-compose down
+docker-compose up -d --build
 ```
 
 ---
@@ -102,17 +105,21 @@ sudo systemctl restart myasset-backend.service
 
 ### 백업
 ```bash
-./backend/backup_db.sh
-# → /mnt/one-touch/personal-portfolio-backend-backup/
+./backend/scripts/backup_db.sh
+# → backend/storage/backups/ (로컬)
+# → /mnt/one-touch/personal-portfolio-backend-backup/ (외장하드, 있으면)
+# → Telegram, Dropbox (설정되어있으면 자동 전송)
 # BACKUP_ARCHIVE_PASSWORD 설정 시 .db.zip 으로 저장됨
 ```
 
 ### 복원
 ```bash
-sudo systemctl stop myasset-backend.service
-cp /mnt/one-touch/.../portfolio_20250101_030000.db backend/storage/db/portfolio.db
+docker-compose down
+# .zip 파일이면 먼저 압축 해제
+unzip -P <password> portfolio_2026-01-08.db.zip
+cp portfolio_2026-01-08.db backend/storage/db/portfolio.db
 sudo chown -R <user>:<user> backend/storage/db/portfolio.db*
-sudo systemctl start myasset-backend.service
+docker-compose up -d
 ```
 
 ---
@@ -147,12 +154,14 @@ crontab backend/crontab.bak
 
 | 문제 | 해결 |
 |------|------|
-| systemd 경고 | `sudo systemctl daemon-reload` |
-| 포트 충돌 | `sudo ss -ltnp \| rg ':8000'` |
+| Docker 컨테이너 안 떠있음 | `docker-compose up -d` |
+| 컨테이너 에러 | `docker-compose logs backend-api` 확인 |
+| 포트 충돌 | `sudo ss -ltnp \| rg ':8000'` → 기존 프로세스 종료 |
 | DB 권한 오류 | `sudo chown <user>:<user> backend/storage/db/portfolio.db*` |
 | 401 토큰 에러 | 프론트 설정 토큰 ↔ 서버 `API_TOKEN` 확인 |
 | KIS 인증 실패 | `~/KIS/config/kis_user.yaml` 확인 |
 | 티커 검색 실패 | `open-trading-api/stocks_info/` 엑셀 파일 확인 |
+| 컨테이너 메타데이터 에러 | `docker-compose down && docker system prune -f` |
 
 ---
 
@@ -205,10 +214,13 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8000
 backend/.venv/bin/python -m unittest discover -s backend/tests -p "test_*.py"
 ```
 
-서비스/운영 상태 확인
+서비스/운영 상태 확인 (Docker)
 ```bash
-sudo systemctl restart myasset-backend.service
-sudo systemctl status myasset-backend.service --no-pager
+# 컨테이너 상태
+docker-compose ps
+
+# 로그 확인
+docker-compose logs -f backend-api
 
 # HTTP 헬스 체크
 curl -sS http://127.0.0.1:8000/health | jq .

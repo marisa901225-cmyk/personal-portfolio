@@ -18,6 +18,7 @@ interface AssetListProps {
     category?: AssetCategory;
     amount?: number;
     purchasePrice?: number;
+    currentPrice?: number;
   }) => void;
   onUpdateCash: (id: string, newBalance: number, cmaConfig?: CmaConfig | null) => void | Promise<void>;
   onRestoreFromBackup?: (snapshot: ImportedAssetSnapshot[]) => Promise<void>;

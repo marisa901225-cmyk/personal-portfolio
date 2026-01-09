@@ -54,6 +54,11 @@ export const syncPortfolioPrices = async ({
       for (const asset of assets) {
         if (asset.backendId && asset.category === AssetCategory.CASH && asset.cmaConfig) {
           const newBalance = calculateCmaBalance(asset.cmaConfig, now);
+          if (newBalance == null || !Number.isFinite(newBalance)) {
+            console.error(`Invalid balance calculated for asset ${asset.name}: ${newBalance}`);
+            continue;
+          }
+
           try {
             await apiClient.updateAsset(asset.backendId, {
               amount: 1,

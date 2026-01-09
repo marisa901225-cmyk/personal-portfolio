@@ -8,11 +8,11 @@ import sys
 import sqlite3
 from pathlib import Path
 
-# Add examples_llm path
+# Add KIS module path
 repo_root = Path(__file__).resolve().parents[2]
-examples_llm = repo_root / "open-trading-api" / "examples_llm"
-if str(examples_llm) not in sys.path:
-    sys.path.insert(0, str(examples_llm))
+kis_modules = repo_root / "backend" / "integrations" / "kis" / "open_trading"
+if str(kis_modules) not in sys.path:
+    sys.path.insert(0, str(kis_modules))
 
 import kis_auth as ka
 import pandas as pd

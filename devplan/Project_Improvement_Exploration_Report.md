@@ -29,17 +29,17 @@
 | 상태 | 개수 |
 |------|------|
 | 🔴 긴급 (P1) | 0 |
-| 🟡 중요 (P2) | 1 |
+| 🟡 중요 (P2) | 2 |
 | 🟢 개선 (P3) | 1 |
 
-총 미적용: 2건
-카테고리별 분포: 🧪 테스트 1, ✨ 시각화 1
+총 미적용: 3건
+카테고리별 분포: 🧪 테스트 1, 🔒 보안 1, ✨ 시각화 1
 우선순위별 한줄 요약:
 - P1: 긴급 이슈 없음.
-- P2: 핵심 통신 모듈인 `lib/api/client.ts`의 유닛 테스트가 부재하여 신뢰성 확보 필요.
-- P3: 지출 내역의 시각화(차트) 부재로 인한 분석 편의성 개선 권장.
+- P2: API Client 유닛 테스트 부재 및 스팸 규칙 API 인증 미적용.
+- P3: 지출 요약 차트 부재로 분석 가독성 개선 필요.
 
-> ✅ 이전 세션 대비 변경: 지출 관리 '삭제' 기능(P2-1)이 구현 완료되어 목록에서 제외됨. 리팩토링된 API 클라이언트의 안정성 확보를 위해 유닛 테스트 추가(P2-1) 신규 등록.
+> ✅ 이전 세션 대비 변경: 신규 P2 항목(스팸 규칙 API 인증) 추가. 기존 항목 2건 유지.
 <!-- AUTO-SUMMARY-END -->
 
 ---
@@ -49,17 +49,29 @@
 
 ### 🟡 중요 (P2)
 
-#### [P2-1] API Client 유닛 테스트 추가
+#### [P2-1] API Client 유닛 테스트 보강 (API Client Unit Tests)
 | 항목 | 내용 |
 |------|------|
-| **ID** | `api-client-test` |
+| **ID** | `api-client-tests` |
 | **카테고리** | 🧪 테스트 |
 | **복잡도** | Medium |
-| **대상 파일** | test/api.test.ts |
+| **대상 파일** | frontend/test/apiClient.test.ts |
 
-**현재 상태:** `lib/api/client.ts`로 API 클라이언트가 리팩토링되었으나, 이에 대한 유닛 테스트 파일이 부재함.  
-**개선 내용:** Vitest를 사용하여 주요 API 메소드(fetch, create, delete, update)에 대한 모킹 테스트 구현.  
-**기대 효과:** 백엔드 변경이나 클라이언트 로직 수정 시 안정성 보장.
+**현재 상태:** `frontend/lib/api/client.ts`가 다수의 API 호출을 담당하지만, fetch 기반 메서드 단위 테스트가 없음.  
+**개선 내용:** Vitest로 ApiClient의 주요 요청(health, portfolio, expenses, delete)과 쿼리 스트링 생성/오류 처리 테스트를 추가.  
+**기대 효과:** 백엔드 변경이나 클라이언트 로직 수정 시 회귀를 조기에 탐지.
+
+#### [P2-2] 스팸 규칙 API 인증 적용 (Secure Spam Rules API)
+| 항목 | 내용 |
+|------|------|
+| **ID** | `spam-rules-auth` |
+| **카테고리** | 🔒 보안 |
+| **복잡도** | Low |
+| **대상 파일** | backend/routers/spam_rules.py, backend/tests/test_spam_rules.py |
+
+**현재 상태:** `/api/spam-rules` 라우터가 인증 의존성을 사용하지 않아 토큰 없이 접근 가능.  
+**개선 내용:** `verify_api_token` 의존성을 라우터에 적용하고, 인증 유무 테스트를 추가.  
+**기대 효과:** 외부 노출 시 규칙 조작 위험 감소 및 보안 체계 일관성 확보.
 <!-- AUTO-IMPROVEMENT-LIST-END -->
 
 ---
@@ -69,23 +81,24 @@
 
 ### 🟢 개선 (P3)
 
-#### [P3-1] 지출 통계 시각화 (차트)
+#### [P3-1] 지출 요약 차트 추가 (Expense Summary Charts)
 | 항목 | 내용 |
 |------|------|
-| **ID** | `expense-charts` |
+| **ID** | `expense-summary-chart` |
 | **카테고리** | ✨ 시각화 |
-| **복잡도** | Low |
-| **대상 파일** | lib/api/client.ts, ExpensesDashboard.tsx |
+| **복잡도** | Medium |
+| **대상 파일** | frontend/components/ExpensesDashboard.tsx, frontend/lib/api/client.ts, frontend/lib/api/types.ts |
 
-**현재 상태:** 지출 내역이 리스트 형태로만 제공되어 카테고리별 비중이나 흐름 파악이 어려움.  
-**개선 내용:** 백엔드 `summary` API를 `ApiClient`에 추가하고, Recharts를 이용해 파이 차트 구현.  
-**기대 효과:** 직관적인 소비 패턴 분석 가능.
+**현재 상태:** 지출 요약 API가 존재하지만 프론트에서 사용하지 않아 리스트 중심의 화면 구성.  
+**개선 내용:** `fetchExpenseSummary` 메서드를 추가하고, 카테고리 파이 차트 및 요약 지표를 대시보드에 렌더링.  
+**기대 효과:** 소비 패턴과 고정지출 비중을 직관적으로 파악 가능.
 <!-- AUTO-FEATURE-LIST-END -->
 
 ---
 
 <!-- AUTO-SESSION-LOG-START -->
 ## 📜 분석 이력
+ - 2026-01-09 09:26 - 세션: 알림/스팸/뉴스 모듈 확인. 미적용 항목 3건(P2:2, P3:1) 정리, 신규 항목 1건(스팸 규칙 API 인증) 추가. 적용 완료 0건.
  - 2026-01-05 11:55 - 세션: `backendClient.ts`가 `lib/api/client.ts`로 리팩토링됨에 따라 관련 P2-1(삭제 기능) 완료 처리. P3-1(차트)는 대상 파일을 업데이트하여 유지. 신규 항목으로 [P2-1] API Client 테스트 추가를 제안함.
  - 2026-01-02 15:35 - 세션: 사용자의 "월 1회 엑셀 사용" 피드백 반영, P2-1(CRUD)에서 '수동 추가' 제외하고 '삭제' 기능만 남김. 프론트엔드의 업로드 기능 존재 재확인.
  - 2026-01-02 15:30 - 세션: 지출 관리 기능 코드 분석 결과, CRUD(Create/Delete) 및 시각화 기능 부재 확인. 사용자 요청에 따라 기존 미적용 항목(타임아웃, CSV수출)은 제거하고, 신규 발견된 Expense 항목 2건(P2, P3)을 등록함.

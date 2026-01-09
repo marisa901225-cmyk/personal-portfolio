@@ -7,7 +7,7 @@ export const usePortfolioQueries = (settings: AppSettings, apiClient: ApiClient)
     const isRemoteEnabled = Boolean(settings.serverUrl && settings.apiToken);
 
     const assetsQuery = useQuery({
-        queryKey: queryKeys.portfolio,
+        queryKey: queryKeys.legacyPortfolio,
         queryFn: async () => {
             const data = await apiClient.fetchPortfolio();
             const mappedAssets = data.assets.map(mapBackendAssetToFrontend);

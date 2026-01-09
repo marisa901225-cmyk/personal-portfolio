@@ -8,6 +8,7 @@
 export const queryKeys = {
     // Portfolio
     portfolio: ['portfolio'] as const,
+    legacyPortfolio: ['legacyPortfolio'] as const,
     assets: ['assets'] as const,
     asset: (id: number) => ['assets', id] as const,
 

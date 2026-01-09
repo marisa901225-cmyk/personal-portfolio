@@ -34,7 +34,7 @@ def _load_domestic_master() -> pd.DataFrame:
     """
     코스피/코스닥/코넥스 종목 마스터 엑셀을 로드한다.
 
-    - open-trading-api/stocks_info 디렉터리에서
+    - backend/integrations/kis/stocks_info 디렉터리에서
       kis_kospi_code_mst.py, kis_kosdaq_code_mst.py 등을 실행해
       kospi_code.xlsx, kosdaq_code.xlsx 등이 생성되어 있어야 한다.
     """
@@ -82,7 +82,7 @@ def _load_domestic_master() -> pd.DataFrame:
     if not frames:
         raise RuntimeError(
             "국내 종목 마스터 파일을 찾을 수 없습니다. "
-            "open-trading-api/stocks_info 디렉터리에 "
+            "backend/integrations/kis/stocks_info 디렉터리에 "
             "kospi/kosdaq/konex 마스터 엑셀 파일을 위치시켜 주세요."
         )
 
@@ -117,7 +117,7 @@ def _load_overseas_master() -> pd.DataFrame:
     """
     해외 종목 마스터 엑셀을 로드한다.
 
-    - open-trading-api/stocks_info/overseas_stock_code(all).xlsx 필요
+    - backend/integrations/kis/stocks_info/overseas_stock_code(all).xlsx 필요
       (overseas_stock_code.py 실행 시 생성)
     """
     _require_pandas()
@@ -126,7 +126,7 @@ def _load_overseas_master() -> pd.DataFrame:
     if not path.exists():
         raise RuntimeError(
             "해외 종목 마스터 파일을 찾을 수 없습니다. "
-            "open-trading-api/stocks_info 디렉터리에서 overseas_stock_code.py를 실행해 "
+            "backend/integrations/kis/stocks_info 디렉터리에서 overseas_stock_code.py를 실행해 "
             "overseas_stock_code(all).xlsx 파일을 생성해주세요."
         )
 
