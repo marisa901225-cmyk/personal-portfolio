@@ -15,6 +15,8 @@ load_dotenv("backend/.env")
 sys.path.append(os.getcwd())
 
 from backend.services.llm_service import LLMService
+from backend.services.alarm_service import AlarmService
+from backend.core.db import SessionLocal
 
 # Set up logging
 logging.basicConfig(
@@ -50,17 +52,16 @@ def generate_creative_msg(ticker_count: int):
         return f"💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 기준"
 
     prompt = f"""<start_of_turn>user
-당신은 사용자의 투자 포트폴리오 시세 동기화를 정기적으로 수행하는 유능하고 위트 있는 비서 AI입니다.
-방금 총 {ticker_count}개의 종목에 대한 시세 업데이트를 성공적으로 마쳤습니다.
+You are a witty and competent assistant synchronizing investment portfolio prices. You just finished updating {ticker_count} tickers.
+[Rules]
+1. Inform the user that the update is complete in Korean.
+2. You MUST include the exact ticker count ({ticker_count}). Do not hallucinate numbers.
+3. Use a polite and friendly tone in Korean, and be creative and varied in each response.
+4. Keep it concise (2-3 sentences).
+5. Use HTML tags (e.g., <b>, <i>) sparingly to style the Telegram message.
+6. Start directly without introductory phrases.
 
-[규칙]
-1. 업데이트가 완료되었다는 사실을 사용자에게 알려주세요.
-2. 종목 개수({ticker_count}개)는 반드시 정확하게 포함해야 합니다. (절대로 다른 숫자를 지어내지 마세요)
-3. 말투는 정중하면서도 친근하고, 매번 다르게 창의적으로 작성해 주세요. 
-4. 너무 길지 않게 2~3문장 내외로 작성해 주세요.
-5. HTML 태그(<b>, <i> 등)를 적절히 섞어서 텔레그램 메시지처럼 꾸며주세요.
-
-메시지:<end_of_turn>
+Message (in Korean):<end_of_turn>
 <start_of_turn>model
 """
     try:
@@ -122,6 +123,21 @@ def run_sync_script():
     finally:
         logger.info(f"--- Sync Job Finished at {datetime.now()} ---")
 
+async def run_alarm_processing():
+    """
+    Periodically processes pending alarms using the shared LLM model.
+    """
+    logger.info("--- Starting Alarm Processing Job ---")
+    db = SessionLocal()
+    try:
+        await AlarmService.process_pending_alarms(db)
+        logger.info("Alarm processing completed successfully.")
+    except Exception as e:
+        logger.error(f"Alarm processing job failed: {e}")
+    finally:
+        db.close()
+        logger.info("--- Alarm Processing Job Finished ---")
+
 async def main():
     logger.info(f"Current System Time: {datetime.now()}")
     # Initialize LLM early
@@ -148,6 +164,14 @@ async def main():
         CronTrigger(day_of_week='tue-sat', hour=6, minute=30),
         id="us_market_close",
         name="US Market Close Sync (06:30 KST)"
+    )
+    
+    # 3. Alarm Processing: Every 5 minutes (07:00 - 21:59 KST)
+    scheduler.add_job(
+        run_alarm_processing,
+        CronTrigger(hour='7-21', minute='*/5'),
+        id="alarm_processing",
+        name="Periodic Alarm Summary (Every 5 mins, 7am-10pm)"
     )
     
     logger.info("Starting Price Sync Scheduler...")

@@ -279,7 +279,7 @@ export class ApiClient {
     // --- Yearly Cashflows (연도별 입출금) ---
 
     async fetchCashflows(): Promise<BackendYearlyCashflow[]> {
-        return this.request<BackendYearlyCashflow[]>('/api/cashflows', { method: 'GET' });
+        return this.request<BackendYearlyCashflow[]>('/api/cashflows/', { method: 'GET' });
     }
 
     async createCashflow(payload: {
@@ -288,7 +288,7 @@ export class ApiClient {
         withdrawal: number;
         note?: string | null;
     }): Promise<BackendYearlyCashflow> {
-        return this.request<BackendYearlyCashflow>('/api/cashflows', {
+        return this.request<BackendYearlyCashflow>('/api/cashflows/', {
             method: 'POST',
             body: JSON.stringify(payload),
         });
@@ -509,7 +509,7 @@ export class ApiClient {
         if (params?.category) search.set('category', params.category);
         if (params?.includeDeleted) search.set('include_deleted', 'true');
         const qs = search.toString();
-        return this.request<BackendExpense[]>(`/api/expenses${qs ? `?${qs}` : ''}`, {
+        return this.request<BackendExpense[]>(`/api/expenses/${qs ? `?${qs}` : ''}`, {
             method: 'GET',
             signal: options.signal,
         });

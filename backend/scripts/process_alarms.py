@@ -1,3 +1,8 @@
+from dotenv import load_dotenv
+
+# .env 파일 로드
+load_dotenv()
+
 import asyncio
 import logging
 import os
@@ -9,10 +14,6 @@ sys.path.append(os.getcwd())
 
 from backend.core.db import SessionLocal
 from backend.services.alarm_service import AlarmService
-from dotenv import load_dotenv
-
-# .env 파일 로드
-load_dotenv()
 
 # 로깅 설정
 logging.basicConfig(

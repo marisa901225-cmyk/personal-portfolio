@@ -51,6 +51,7 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
   const [showDeleted, setShowDeleted] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const expensesAbortRef = useRef<AbortController | null>(null);
+  const hasMountedRef = useRef(false);
   const fallbackYearMonth = useMemo(() => ({ year: new Date().getFullYear(), month: new Date().getMonth() + 1 }), []);
 
   const isRemoteEnabled = Boolean(serverUrl && apiToken);
@@ -113,6 +114,11 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
   }, [isRemoteEnabled, loadExpenses, fetchGlobalCategories, selectedYearMonth]);
 
   useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+
     setExpenses([]);
     setGlobalCategories([]);
     setLoadError(null);
