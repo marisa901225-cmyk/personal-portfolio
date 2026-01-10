@@ -1,24 +1,5 @@
 /**
- * 백엔드 API 통신 시 발생하는 에러 클래스
+ * @deprecated lib/api/errors.ts로 import 하던 코드는
+ * @/shared/errors 또는 src/shared/errors 로 변경해주세요.
  */
-
-export class NetworkError extends Error {
-    constructor(public readonly url: string, cause?: unknown) {
-        super(`Network request failed: ${url}`, { cause });
-        this.name = 'NetworkError';
-    }
-}
-
-export class ApiError extends Error {
-    constructor(
-        public readonly status: number,
-        public readonly statusText: string,
-        public readonly url: string,
-        public readonly bodyText?: string,
-    ) {
-        super(
-            `API Request Failed: ${status} ${statusText}${bodyText ? ` - ${bodyText}` : ''}`,
-        );
-        this.name = 'ApiError';
-    }
-}
+export { ApiError, NetworkError } from '../../src/shared/errors';
