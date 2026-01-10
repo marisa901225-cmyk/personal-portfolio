@@ -16,11 +16,11 @@ import {
 } from 'lucide-react';
 import { usePortfolio } from '@hooks/usePortfolio';
 import { useSettings } from '@hooks/useSettings';
-import { formatCurrency } from '@lib/utils/constants';
+import { formatCurrency } from '@/shared/portfolio';
 import { NotificationModal } from '@components/NotificationModal';
 import { InvestmentQuote } from '@components/InvestmentQuote';
 import { TradeRecord } from '@lib/types';
-import { APP_ERROR_EVENT } from '@lib/utils/errors';
+import { APP_ERROR_EVENT } from '@/shared/errors';
 
 const navItems = [
     { to: '/dashboard', icon: LayoutDashboard, label: '대시보드' },

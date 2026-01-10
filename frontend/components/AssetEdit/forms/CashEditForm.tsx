@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Edit3 } from 'lucide-react';
-import { formatCurrency } from '../../../lib/utils/constants';
+import { formatCurrency } from '@/shared/portfolio';
 
 interface CashEditFormProps {
     inputValue: string;

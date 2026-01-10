@@ -34,7 +34,7 @@ const fetchExpensesMock = vi.fn().mockResolvedValue([
 
 const fetchCategoriesMock = vi.fn().mockResolvedValue([]);
 
-vi.mock('../lib/api', () => {
+vi.mock('@/shared/api/client', () => {
   return {
     ApiClient: class {
       fetchExpenses = fetchExpensesMock;

@@ -1,11 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { Asset, AssetCategory, TradeType } from '../lib/types';
-import type { CmaConfig } from '../lib/utils/cmaConfig';
+import type { CmaConfig } from '@/shared/portfolio';
 import { Search, Filter, Download, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { AssetEditModal } from './AssetEditModal';
 import { AssetRow } from './AssetRow';
 import { useAssetExport } from '../hooks/useAssetExport';
-import type { ImportedAssetSnapshot } from '../hooks/portfolioTypes';
+import type { ImportedAssetSnapshot } from '@/shared/portfolio';
 
 interface AssetListProps {
   assets: Asset[];

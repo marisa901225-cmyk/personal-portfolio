@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Asset, AssetCategory } from '../lib/types';
 import { X } from 'lucide-react';
-import { ApiClient } from '../lib/api';
-import { alertError } from '../lib/utils/errors';
-import { inferCategoryFromTicker } from '../lib/utils/tickerUtils';
+import { ApiClient } from '@/shared/api/client';
+import { alertError } from '@/shared/errors';
+import { inferCategoryFromTicker } from '@/shared/portfolio';
+import { cn, ui } from '@/shared/ui';
 
 interface AddAssetFormProps {
   onSave: (asset: Asset) => void;
@@ -112,7 +113,7 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-2xl mx-auto animate-fade-in-up">
+    <div className={cn(ui.card, 'p-6 max-w-2xl mx-auto animate-fade-in-up')}>
       <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
         <h2 className="text-xl font-bold text-slate-800">새 자산 추가</h2>
         <button onClick={onCancel} className="text-slate-400 hover:text-slate-600">
@@ -122,7 +123,7 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-2">자산 종류</label>
+          <label className={ui.label}>자산 종류</label>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             {Object.values(AssetCategory).map(cat => (
               <button
@@ -142,11 +143,11 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">자산명</label>
+            <label className={ui.label}>자산명</label>
             <input
               type="text"
               required
-              className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              className={ui.input}
               placeholder={isCashCategory ? '예: 카카오뱅크 통장' : '예: 삼성전자'}
               value={formData.name}
               onChange={(e) => handleChange('name', e.target.value)}
@@ -170,7 +171,7 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
               </div>
               <input
                 type="text"
-                className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors uppercase"
+                className={cn(ui.input, 'uppercase')}
                 placeholder="예: 005930, NAS:AAPL"
                 value={formData.ticker || ''}
                 onChange={(e) => handleChange('ticker', e.target.value)}
@@ -188,12 +189,12 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-700 mb-2">
+          <label className={ui.label}>
             지수 그룹 (선택)
           </label>
           <input
             type="text"
-            className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+            className={ui.input}
             placeholder="예: S&P500, NASDAQ100, KOSPI200"
             value={formData.indexGroup || ''}
             onChange={(e) => handleChange('indexGroup', e.target.value)}
@@ -205,7 +206,7 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
 
         {isCashCategory ? (
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">
+            <label className={ui.label}>
               보유 금액 (KRW)
             </label>
             <input
@@ -213,7 +214,7 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
               required
               min="0"
               step="any"
-              className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+              className={ui.input}
               placeholder="0"
               value={formData.currentPrice || ''}
               onChange={(e) => handleChange('currentPrice', e.target.value)}
@@ -226,26 +227,26 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">수량</label>
+                <label className={ui.label}>수량</label>
                 <input
                   type="number"
                   required
                   min="0"
                   step="any"
-                  className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                  className={ui.input}
                   placeholder="0"
                   value={formData.amount || ''}
                   onChange={(e) => handleChange('amount', e.target.value)}
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">현재 단가 (KRW)</label>
+                <label className={ui.label}>현재 단가 (KRW)</label>
                 <input
                   type="number"
                   required
                   min="0"
                   step="any"
-                  className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                  className={ui.input}
                   placeholder="0"
                   value={formData.currentPrice || ''}
                   onChange={(e) => handleChange('currentPrice', e.target.value)}
@@ -254,12 +255,12 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">매수 평균가 (선택)</label>
+              <label className={ui.label}>매수 평균가 (선택)</label>
               <input
                 type="number"
                 min="0"
                 step="any"
-                className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors"
+                className={ui.input}
                 placeholder="입력 시 수익률이 계산됩니다."
                 value={formData.purchasePrice || ''}
                 onChange={(e) => handleChange('purchasePrice', e.target.value)}

@@ -1,7 +1,7 @@
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
-import { ApiClient, BackendAiReportTextResponse, BackendSavedAiReport, BackendReportResponse } from '../lib/api';
-import { getUserErrorMessage } from '../lib/utils/errors';
+import { ApiClient, BackendAiReportTextResponse, BackendSavedAiReport, BackendReportResponse } from '@/shared/api/client';
+import { getUserErrorMessage } from '@/shared/errors';
 
 interface UseAiReportProps {
     serverUrl: string;

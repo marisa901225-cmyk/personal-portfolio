@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AssetCategory } from '../lib/types';
-import { validateImportedAssetSnapshotList } from '../hooks/portfolioBackupValidation';
+import { validateImportedAssetSnapshotList } from '@/features/portfolio';
 
 describe('validateImportedAssetSnapshotList', () => {
   it('rejects empty input', () => {
@@ -82,4 +82,3 @@ describe('validateImportedAssetSnapshotList', () => {
     expect(result.warnings.length).toBeGreaterThanOrEqual(2);
   });
 });
-

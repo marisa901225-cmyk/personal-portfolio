@@ -1,7 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiClient } from '../lib/api/client';
-import { ApiError } from '../lib/api/errors';
-import type { BackendHealthResponse, BackendPortfolioResponse } from '../lib/api/types';
+import { ApiClient, ApiError, type BackendHealthResponse, type BackendPortfolioResponse } from '@/shared/api/client';
 
 describe('ApiClient', () => {
   const baseUrl = 'http://localhost:8000';

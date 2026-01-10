@@ -24,6 +24,7 @@
 ## Testing Guidelines
 - Frontend: Vitest + Testing Library. Run with `npm run test --prefix frontend`.
 - Backend: `unittest` + FastAPI `TestClient`. Run with `python -m unittest discover backend/tests`.
+- Always run relevant tests after any code changes.
 - Add tests for new API endpoints and UI flows, especially those touching auth tokens or data transforms.
 
 ## Commit & Pull Request Guidelines

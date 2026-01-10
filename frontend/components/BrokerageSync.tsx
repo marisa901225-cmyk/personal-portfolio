@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Upload, CheckCircle2, AlertCircle, Loader2, X } from 'lucide-react';
-import { ApiClient } from '../lib/api';
+import { ApiClient } from '@/shared/api/client';
 
 interface BrokerageSyncProps {
     apiClient: ApiClient;

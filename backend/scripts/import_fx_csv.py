@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
-import re
 import sys
-from datetime import datetime
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -13,6 +11,7 @@ sys.path.append(str(ROOT_DIR))
 
 from backend.core.db import SessionLocal
 from backend.core.models import FxTransaction, User
+from backend.scripts.import_utils import parse_date, parse_number
 
 
 TYPE_MAP = {
@@ -21,31 +20,6 @@ TYPE_MAP = {
     "정산": "SETTLEMENT",
     "환전정산입금": "SETTLEMENT",
 }
-
-
-def parse_date(value: str) -> datetime.date | None:
-    value = (value or "").strip()
-    if not value:
-        return None
-    for fmt in ("%Y-%m-%d", "%Y.%m.%d", "%Y%m%d"):
-        try:
-            return datetime.strptime(value, fmt).date()
-        except ValueError:
-            continue
-    return None
-
-
-def parse_number(value: str) -> float | None:
-    value = (value or "").strip()
-    if not value:
-        return None
-    cleaned = re.sub(r"[^0-9.\-]", "", value)
-    if not cleaned:
-        return None
-    try:
-        return float(cleaned)
-    except ValueError:
-        return None
 
 
 def infer_type(kind: str, desc: str) -> str | None:

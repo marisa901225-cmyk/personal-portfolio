@@ -1,6 +1,6 @@
 import React, { useRef } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, Upload } from 'lucide-react';
-import type { BackendExpenseUploadResult } from '../../lib/api';
+import type { BackendExpenseUploadResult } from '@/shared/api/client';
 
 interface ExpenseUploadPanelProps {
     isRemoteEnabled: boolean;

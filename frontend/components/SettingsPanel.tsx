@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Server, Sliders } from 'lucide-react';
 import { AppSettings, TargetIndexAllocation } from '../lib/types';
-import { ApiClient, BackendFxTransaction } from '../lib/api';
-import { alertError } from '../lib/utils/errors';
+import { ApiClient, BackendFxTransaction } from '@/shared/api/client';
+import { alertError } from '@/shared/errors';
 import { ServerTab } from './settings/ServerTab';
 import { PortfolioTab } from './settings/PortfolioTab';
 

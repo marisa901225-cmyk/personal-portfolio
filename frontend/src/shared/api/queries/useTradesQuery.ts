@@ -5,7 +5,7 @@
  */
 
 import { useQuery, useInfiniteQuery, UseQueryOptions } from '@tanstack/react-query';
-import { ApiClient, BackendTrade, mapBackendTradesToFrontend } from '@lib/api';
+import { ApiClient, BackendTrade, mapBackendTradesToFrontend } from '@/shared/api/client';
 import { Asset, TradeRecord } from '@lib/types';
 import { queryKeys } from '../queryKeys';
 

@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { PortfolioSummary } from '../lib/types';
-import { formatCurrency } from '../lib/utils/constants';
+import { formatCurrency } from '@/shared/portfolio';
 import { PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Legend } from 'recharts';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 

@@ -5,7 +5,7 @@
  */
 
 import { useQuery, UseQueryOptions } from '@tanstack/react-query';
-import { ApiClient, BackendFxRateResponse } from '@lib/api';
+import { ApiClient, BackendFxRateResponse } from '@/shared/api/client';
 import { queryKeys } from '../queryKeys';
 
 /**
