@@ -7,12 +7,16 @@ from fastapi.testclient import TestClient
 
 _temp_dir = tempfile.TemporaryDirectory()
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{_temp_dir.name}/test.db")
-os.environ["API_TOKEN"] = ""
+os.environ["API_TOKEN"] = "test-token"
 
 from backend.main import api_health, app, health, root  # noqa: E402
 
 
 class MainHealthTests(unittest.TestCase):
+    def setUp(self) -> None:
+        os.environ["API_TOKEN"] = "test-token"
+        self.headers = {"X-API-Token": os.environ["API_TOKEN"]}
+
     def test_health_returns_ok(self) -> None:
         payload = asyncio.run(health())
         self.assertEqual(payload, {"status": "ok"})
@@ -27,7 +31,7 @@ class MainHealthTests(unittest.TestCase):
 
     def test_settings_path_works_without_api_prefix(self) -> None:
         client = TestClient(app)
-        response = client.get("/settings")
+        response = client.get("/settings", headers=self.headers)
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertIn("target_index_allocations", payload)
@@ -36,6 +40,7 @@ class MainHealthTests(unittest.TestCase):
         client = TestClient(app)
         asset_response = client.post(
             "/api/assets",
+            headers=self.headers,
             json={"name": "test-asset", "category": "TEST"},
         )
         self.assertEqual(asset_response.status_code, 200)
@@ -43,6 +48,7 @@ class MainHealthTests(unittest.TestCase):
 
         trade_response = client.post(
             f"/api/assets/{asset_id}/trades",
+            headers=self.headers,
             json={"type": "BUY", "quantity": 1, "price": 1000},
         )
         self.assertEqual(trade_response.status_code, 200)

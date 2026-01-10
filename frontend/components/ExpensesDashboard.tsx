@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, Loader2 } from 'lucide-react';
-import { ApiClient, BackendExpense, BackendExpenseUploadResult } from '../lib/api';
-import { formatCurrency } from '../lib/utils/constants';
-import { getUserErrorMessage } from '../lib/utils/errors';
+import { ApiClient, BackendExpense, BackendExpenseUploadResult } from '@/shared/api/client';
+import { formatCurrency } from '@/shared/portfolio';
+import { getUserErrorMessage } from '@/shared/errors';
 import { ExpenseRow, ExpenseUploadPanel } from './expenses';
 
 interface ExpensesDashboardProps {

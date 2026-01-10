@@ -6,7 +6,7 @@ import re
 import sys
 import zipfile
 import xml.etree.ElementTree as ET
-from datetime import date, datetime, time
+from datetime import datetime, time
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -14,6 +14,7 @@ sys.path.append(str(ROOT_DIR))
 
 from backend.core.db import SessionLocal
 from backend.core.models import Asset, Trade
+from backend.scripts.import_utils import normalize_name, parse_date, parse_number, parse_time
 from backend.services.users import get_or_create_single_user
 
 DEFAULT_SHEET = "All_Normalized"
@@ -41,47 +42,6 @@ CURRENCY_NAMES = {
 }
 NORMALIZED_CURRENCY_NAMES = {re.sub(r"\s+", "", name).upper() for name in CURRENCY_NAMES}
 FX_KEYWORDS = ("환전", "외화매수", "외화매도", "자동환전")
-
-
-def normalize_name(name: str) -> str:
-    return re.sub(r"\s+", "", name).upper()
-
-
-def parse_date(value: str) -> date | None:
-    value = (value or "").strip()
-    if not value:
-        return None
-    for fmt in ("%Y-%m-%d", "%Y.%m.%d", "%Y/%m/%d"):
-        try:
-            return datetime.strptime(value, fmt).date()
-        except ValueError:
-            continue
-    return None
-
-
-def parse_time(value: str) -> time | None:
-    value = (value or "").strip()
-    if not value:
-        return None
-    for fmt in ("%H:%M:%S", "%H:%M"):
-        try:
-            return datetime.strptime(value, fmt).time()
-        except ValueError:
-            continue
-    return None
-
-
-def parse_number(value: str | float | int | None) -> float | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
-    text = text.replace(",", "")
-    try:
-        return float(text)
-    except ValueError:
-        return None
 
 
 def get_cell(row: list[str], idx: int | None) -> str:

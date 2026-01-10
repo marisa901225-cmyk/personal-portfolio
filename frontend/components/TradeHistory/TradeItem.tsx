@@ -1,7 +1,7 @@
 
 import React from 'react';
 import type { TradeRecord } from '../../lib/types';
-import { formatCurrency } from '../../lib/utils/constants';
+import { formatCurrency } from '@/shared/portfolio';
 
 interface TradeItemProps {
     trade: TradeRecord;

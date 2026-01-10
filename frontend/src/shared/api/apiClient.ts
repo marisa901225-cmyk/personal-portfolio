@@ -6,7 +6,7 @@
  */
 
 import { useMemo } from 'react';
-import { ApiClient } from '@lib/api';
+import { ApiClient } from '@/shared/api/client';
 
 export interface ApiConfig {
     serverUrl: string;

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, RefreshCw } from 'lucide-react';
-import { ApiClient, BackendFxTransaction, mapBackendFxToFrontend } from '../lib/api';
-import { getUserErrorMessage } from '../lib/utils/errors';
+import { ApiClient, BackendFxTransaction, mapBackendFxToFrontend } from '@/shared/api/client';
+import { getUserErrorMessage } from '@/shared/errors';
 import type { FxTransactionRecord, FxTransactionType } from '../lib/types';
 import { FxTransactionForm, FxTransactionRow, type FxDraft } from './exchange';
 

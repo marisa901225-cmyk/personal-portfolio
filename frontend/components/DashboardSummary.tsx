@@ -1,6 +1,6 @@
 import React from 'react';
 import { PortfolioSummary, DividendEntry } from '../lib/types';
-import { formatCurrency, REAL_ESTATE_MY_SHARE } from '../lib/utils/constants';
+import { formatCurrency, REAL_ESTATE_MY_SHARE } from '@/shared/portfolio';
 import { Tooltip, BarChart, Bar, ResponsiveContainer } from 'recharts';
 import { Wallet, TrendingUp, ArrowUpRight, ArrowDownRight, Edit2, Building, RefreshCw } from 'lucide-react';
 

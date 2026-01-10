@@ -5,7 +5,7 @@
  */
 
 import { useQuery, UseQueryOptions } from '@tanstack/react-query';
-import { ApiClient, BackendYearlyCashflow } from '@lib/api';
+import { ApiClient, BackendYearlyCashflow } from '@/shared/api/client';
 import { queryKeys } from '../queryKeys';
 
 export interface YearlyCashflowData {

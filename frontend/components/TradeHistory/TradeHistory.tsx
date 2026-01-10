@@ -1,12 +1,12 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
-import { useInfiniteTradesQuery } from '../../src/shared/api/queries/useTradesQuery';
-import { useApiClient } from '../../src/shared/api/apiClient';
+import { useInfiniteTradesQuery } from '@/shared/api/queries';
+import { useApiClient } from '@/shared/api/apiClient';
 import { TradeFilters, type TradeFilter } from './TradeFilters';
 import { TradeList } from './TradeList';
 import type { Asset, TradeRecord } from '../../lib/types';
-import { getUserErrorMessage } from '../../lib/utils/errors';
+import { getUserErrorMessage } from '@/shared/errors';
 
 export type TradeHistoryVariant = 'page' | 'collapsible';
 

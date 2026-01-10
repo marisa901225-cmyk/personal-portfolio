@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Asset, AssetCategory, TradeType } from '../lib/types';
-import { formatCurrency } from '../lib/utils/constants';
+import { formatCurrency } from '@/shared/portfolio';
 import { Trash2, Edit3 } from 'lucide-react';
 
 interface AssetRowProps {

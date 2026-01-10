@@ -5,7 +5,7 @@
  */
 
 import { useQuery, UseQueryOptions } from '@tanstack/react-query';
-import { ApiClient, BackendSnapshot } from '@lib/api';
+import { ApiClient, BackendSnapshot } from '@/shared/api/client';
 import { queryKeys } from '../queryKeys';
 
 interface HistoryPoint {

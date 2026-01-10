@@ -83,7 +83,7 @@ app.add_middleware(
 def log_startup_info() -> None:
     logger.info("MyAsset Backend 시작")
     logger.info("DB 확인: %s", db.DATABASE_URL)
-    logger.info("인증 모드: %s", "활성화" if auth.API_TOKEN else "비활성화")
+    logger.info("인증 모드: %s", "활성화" if auth.resolve_api_token() else "비활성화")
     logger.info("Working Dir: %s", os.getcwd())
 
 

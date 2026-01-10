@@ -1,6 +1,7 @@
 import React from 'react';
 import { Server } from 'lucide-react';
 import { AppSettings } from '../../lib/types';
+import { cn, ui } from '@/shared/ui';
 
 interface ServerTabProps {
     settings: AppSettings;
@@ -21,10 +22,10 @@ export const ServerTab: React.FC<ServerTabProps> = ({ settings, onSettingsChange
         </div>
 
         <div>
-            <label className="block text-sm font-medium text-slate-700 mb-2">홈서버 API URL</label>
+            <label className={ui.label}>홈서버 API URL</label>
             <input
                 type="text"
-                className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors font-mono text-sm"
+                className={cn(ui.input, 'font-mono text-sm')}
                 placeholder="https://your-server.ts.net"
                 value={settings.serverUrl}
                 onChange={(e) =>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
-import { formatCurrency } from '../../lib/utils/constants';
+import { formatCurrency } from '@/shared/portfolio';
 import type { FxTransactionRecord, FxTransactionType } from '../../lib/types';
 
 const TYPE_LABEL: Record<FxTransactionType, string> = {

@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { Asset, AssetCategory, PortfolioSummary, TargetIndexAllocation, DividendEntry } from '../lib/types';
-import { COLORS, REAL_ESTATE_SHARE_RATIO } from '../lib/utils/constants';
+import { COLORS, REAL_ESTATE_SHARE_RATIO } from '@/shared/portfolio';
 import { DashboardSummary } from './DashboardSummary';
 import { DashboardCharts } from './DashboardCharts';
 import { BrokerageSync } from './BrokerageSync';
-import { ApiClient, type BackendPortfolioSummary } from '../lib/api';
+import { ApiClient, type BackendPortfolioSummary } from '@/shared/api/client';
 import type { YearlyCashflowData } from '../hooks/usePortfolio';
 
 const normalizeIndexKey = (name: string): string =>

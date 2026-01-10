@@ -2,12 +2,11 @@
 import { useMemo, useCallback, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Asset, AppSettings, AssetCategory, TradeType, TradeRecord } from '../lib/types';
-import { ApiClient, mapBackendAssetToFrontend, mapBackendTradesToFrontend } from '../lib/api';
-import { CmaConfig } from '../lib/utils/cmaConfig';
-import type { ImportedAssetSnapshot } from './portfolioTypes';
-import { syncPortfolioPrices } from './portfolioSync';
-import { restorePortfolioFromBackup } from './portfolioBackup';
-import { queryKeys } from '../src/shared/api/queryKeys';
+import { ApiClient, mapBackendAssetToFrontend, mapBackendTradesToFrontend, type BackendPortfolioResponse } from '@/shared/api/client';
+import { CmaConfig } from '@/shared/portfolio';
+import type { ImportedAssetSnapshot } from '@/shared/portfolio';
+import { syncPortfolioPrices, restorePortfolioFromBackup } from '@/features/portfolio';
+import { queryKeys } from '@/shared/api/queryKeys';
 
 export interface HistoryPoint {
   date: string;
@@ -53,15 +52,19 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
   );
 
   // === Queries (통합된 API 레이어 사용) ===
-  const assetsQuery = useQuery({
-    queryKey: queryKeys.legacyPortfolio,
-    queryFn: async () => {
-      const data = await apiClient.fetchPortfolio();
+  const assetsQuery = useQuery<BackendPortfolioResponse, Error, {
+    assets: Asset[];
+    tradeHistory: TradeRecord[];
+    summary: BackendPortfolioResponse['summary'];
+  }>({
+    queryKey: queryKeys.portfolio,
+    queryFn: async () => apiClient.fetchPortfolio(),
+    enabled: isRemoteEnabled,
+    select: (data) => {
       const mappedAssets = data.assets.map(mapBackendAssetToFrontend);
       const mappedTrades = mapBackendTradesToFrontend(data.trades, mappedAssets);
       return { assets: mappedAssets, tradeHistory: mappedTrades, summary: data.summary };
     },
-    enabled: isRemoteEnabled,
   });
 
   const snapshotsQuery = useQuery({
@@ -94,7 +97,6 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
   // === Mutations ===
   const invalidateAll = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: queryKeys.portfolio });
-    queryClient.invalidateQueries({ queryKey: queryKeys.legacyPortfolio });
     queryClient.invalidateQueries({ queryKey: ['snapshots'] });
     queryClient.invalidateQueries({ queryKey: queryKeys.cashflows });
   }, [queryClient]);
@@ -152,7 +154,6 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.portfolio });
-      queryClient.invalidateQueries({ queryKey: queryKeys.legacyPortfolio });
       queryClient.invalidateQueries({ queryKey: queryKeys.trades });
     },
   });
@@ -166,7 +167,6 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
 
   // === Handlers ===
   const reload = useCallback(async () => {
-    await queryClient.refetchQueries({ queryKey: queryKeys.legacyPortfolio });
     await queryClient.refetchQueries({ queryKey: queryKeys.portfolio });
     await queryClient.refetchQueries({ queryKey: queryKeys.snapshots(365) });
     await queryClient.refetchQueries({ queryKey: queryKeys.cashflows });

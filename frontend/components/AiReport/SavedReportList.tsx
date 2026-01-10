@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Loader2, Trash2 } from 'lucide-react';
-import { BackendSavedAiReport } from '../../lib/api';
+import { BackendSavedAiReport } from '@/shared/api/client';
 
 interface SavedReportListProps {
     savedReports: BackendSavedAiReport[];

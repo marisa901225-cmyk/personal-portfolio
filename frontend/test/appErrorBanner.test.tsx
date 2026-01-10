@@ -1,7 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { Layout } from '../src/app/Layout';
-import { APP_ERROR_EVENT } from '../lib/utils/errors';
+import { APP_ERROR_EVENT } from '@/shared/errors';
 
 import { SettingsProvider } from '../hooks/SettingsContext';
 import { QueryProvider } from '../src/app/providers/QueryProvider';

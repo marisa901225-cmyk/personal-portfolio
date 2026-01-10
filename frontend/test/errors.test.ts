@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ApiError, NetworkError } from '../lib/api';
-import { getUserErrorMessage } from '../lib/utils/errors';
+import { ApiError, NetworkError } from '@/shared/errors';
+import { getUserErrorMessage } from '@/shared/errors';
 
 describe('getUserErrorMessage', () => {
   const messages = {
@@ -21,4 +21,3 @@ describe('getUserErrorMessage', () => {
     expect(getUserErrorMessage(new TypeError('fetch failed'), messages)).toBe('NETWORK');
   });
 });
-

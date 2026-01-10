@@ -5,16 +5,22 @@
  */
 
 import React from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { AssetList } from '@components/AssetList';
+import { queryKeys } from '@/shared/api';
 import { useApiClient, isApiEnabled } from '@/shared/api/apiClient';
 import { useAssetsQuery } from '@/shared/api/queries';
 import { useDeleteAsset, useUpdateAsset, useCreateTrade } from '@/shared/api/mutations';
+import { restorePortfolioFromBackup } from '@/features/portfolio';
+import type { ImportedAssetSnapshot } from '@/shared/portfolio';
 import { useSettings } from '@hooks/useSettings';
-import { AssetCategory } from '@lib/types';
+import type { CmaConfig } from '@/shared/portfolio';
+import { Asset, AssetCategory, TradeRecord } from '@lib/types';
 import { Loader2 } from 'lucide-react';
 
 export const AssetsPage: React.FC = () => {
     const { settings } = useSettings();
+    const queryClient = useQueryClient();
     const apiClient = useApiClient({
         serverUrl: settings.serverUrl,
         apiToken: settings.apiToken,
@@ -92,14 +98,55 @@ export const AssetsPage: React.FC = () => {
         });
     };
 
-    const handleUpdateCash = async (id: string, newBalance: number) => {
+    const handleUpdateCash = (id: string, newBalance: number, cmaConfig?: CmaConfig | null) => {
         const asset = assets.find(a => a.id === id);
         if (!asset?.backendId) return;
+        const isCash = asset.category === AssetCategory.CASH;
+        const nextAmount = isCash ? 1 : asset.amount > 0 ? asset.amount : 1;
+        const nextCurrentPrice = isCash ? newBalance : newBalance / nextAmount;
+
+        const payload: {
+            current_price: number;
+            amount?: number;
+            purchase_price?: number;
+            cma_config?: {
+                principal: number;
+                annual_rate: number;
+                tax_rate: number;
+                start_date: string;
+            } | null;
+        } = { current_price: nextCurrentPrice };
+
+        if (isCash) {
+            payload.amount = 1;
+            payload.purchase_price = newBalance;
+            payload.cma_config = cmaConfig ? {
+                principal: cmaConfig.principal,
+                annual_rate: cmaConfig.annualRate,
+                tax_rate: cmaConfig.taxRate,
+                start_date: cmaConfig.startDate,
+            } : null;
+        }
+
         updateAssetMutation.mutate({
             assetId: asset.backendId,
-            payload: {
-                current_price: newBalance,
-                purchase_price: newBalance,
+            payload,
+        });
+    };
+
+    const handleRestoreFromBackup = async (snapshot: ImportedAssetSnapshot[]) => {
+        if (!apiClient) return;
+        await restorePortfolioFromBackup({
+            snapshot,
+            isRemoteEnabled: enabled,
+            apiClient,
+            setAssets: (_next: React.SetStateAction<Asset[]>) => { },
+            setTradeHistory: (_next: React.SetStateAction<TradeRecord[]>) => { },
+            loadPortfolioFromServer: async () => {
+                await queryClient.refetchQueries({ queryKey: queryKeys.portfolio });
+                await queryClient.refetchQueries({ queryKey: queryKeys.trades });
+                await queryClient.refetchQueries({ queryKey: queryKeys.snapshots(365) });
+                await queryClient.refetchQueries({ queryKey: queryKeys.cashflows });
             },
         });
     };
@@ -111,7 +158,7 @@ export const AssetsPage: React.FC = () => {
             onTrade={handleTrade}
             onUpdateAsset={handleUpdateAsset}
             onUpdateCash={handleUpdateCash}
-            onRestoreFromBackup={async () => { }}
+            onRestoreFromBackup={handleRestoreFromBackup}
             usdFxNow={settings.usdFxNow}
             indexGroupOptions={settings.targetIndexAllocations?.map(a => a.indexGroup) || []}
         />

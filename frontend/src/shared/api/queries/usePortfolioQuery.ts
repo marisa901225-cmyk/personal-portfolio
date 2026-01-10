@@ -5,7 +5,7 @@
  */
 
 import { useQuery, UseQueryOptions } from '@tanstack/react-query';
-import { ApiClient, BackendPortfolioResponse, mapBackendAssetToFrontend } from '@lib/api';
+import { ApiClient, BackendPortfolioResponse, mapBackendAssetToFrontend } from '@/shared/api/client';
 import { Asset } from '@lib/types';
 import { queryKeys } from '../queryKeys';
 

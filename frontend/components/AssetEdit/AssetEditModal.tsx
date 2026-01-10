@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Asset, AssetCategory } from '../../lib/types';
-import { CmaConfig } from '../../lib/utils/cmaConfig';
+import { CmaConfig } from '@/shared/portfolio';
 import { useAssetEditForm } from '../../hooks/useAssetEditForm';
 import { AssetEditHeader } from './AssetEditHeader';
 import { CashEditForm } from './forms/CashEditForm';

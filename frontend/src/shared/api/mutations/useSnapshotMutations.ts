@@ -5,7 +5,7 @@
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ApiClient } from '@lib/api';
+import { ApiClient } from '@/shared/api/client';
 import { queryKeys } from '../queryKeys';
 
 /**

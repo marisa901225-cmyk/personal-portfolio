@@ -5,7 +5,7 @@
  */
 
 import { useQuery, UseQueryOptions } from '@tanstack/react-query';
-import { ApiClient, BackendExpense } from '@lib/api';
+import { ApiClient, BackendExpense } from '@/shared/api/client';
 import { queryKeys } from '../queryKeys';
 
 interface ExpensesQueryParams {

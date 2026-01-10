@@ -1,7 +1,7 @@
 
 import { useState, useEffect } from 'react';
 import { Asset, AssetCategory } from '../lib/types';
-import { CmaConfig, calculateCmaBalance } from '../lib/utils/cmaConfig';
+import { CmaConfig, calculateCmaBalance } from '@/shared/portfolio';
 
 interface UseAssetEditFormProps {
     asset: Asset | null;

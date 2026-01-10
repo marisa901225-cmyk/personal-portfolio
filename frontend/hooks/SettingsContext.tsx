@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { AppSettings } from '../lib/types';
-import { alertError } from '../lib/utils/errors';
-import { ApiClient, BackendSettings } from '../lib/api';
+import { alertError } from '@/shared/errors';
+import { ApiClient, BackendSettings } from '@/shared/api/client';
 
 // 보안상의 이유로 apiToken은 메모리(state)에만 저장
 // localStorage 저장 제거됨 - 페이지 새로고침 시 토큰 초기화

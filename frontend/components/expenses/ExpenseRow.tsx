@@ -1,7 +1,7 @@
 import React from 'react';
 import { RotateCcw, Trash2 } from 'lucide-react';
-import { formatCurrency } from '../../lib/utils/constants';
-import type { BackendExpense } from '../../lib/api';
+import { formatCurrency } from '@/shared/portfolio';
+import type { BackendExpense } from '@/shared/api/client';
 
 interface ExpenseRowProps {
     expense: BackendExpense;
