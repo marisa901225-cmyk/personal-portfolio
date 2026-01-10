@@ -117,3 +117,26 @@ class LLMService:
 
     def is_loaded(self) -> bool:
         return self._model is not None
+
+    def reset_context(self):
+        """
+        LLM의 KV 캐시를 초기화하여 이전 대화 컨텍스트를 리셋한다.
+        특정 주제에 집착하는 문제를 해결하기 위해 주기적으로 호출.
+        """
+        if self._model is None:
+            logger.warning("LLM model is not loaded; nothing to reset.")
+            return
+
+        try:
+            reset_fn = getattr(self._model, "reset", None)
+            if callable(reset_fn):
+                reset_fn()
+                logger.info("LLM context (KV cache) has been reset.")
+                return
+            logger.warning("LLM reset() not available; reloading model to clear context.")
+        except Exception as e:
+            logger.warning(f"Failed to reset LLM context via reset(): {e}")
+
+        # Fallback: reload model to clear any cached state.
+        self._model = None
+        self._load_model()

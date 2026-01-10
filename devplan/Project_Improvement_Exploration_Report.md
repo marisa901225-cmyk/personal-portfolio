@@ -29,17 +29,17 @@
 | 상태 | 개수 |
 |------|------|
 | 🔴 긴급 (P1) | 0 |
-| 🟡 중요 (P2) | 2 |
+| 🟡 중요 (P2) | 1 |
 | 🟢 개선 (P3) | 1 |
 
-총 미적용: 3건
-카테고리별 분포: 🧪 테스트 1, 🔒 보안 1, ✨ 시각화 1
+총 미적용: 2건
+카테고리별 분포: 🐞 기능/RAG 1, ✨ 시각화 1
 우선순위별 한줄 요약:
 - P1: 긴급 이슈 없음.
-- P2: API Client 유닛 테스트 부재 및 스팸 규칙 API 인증 미적용.
+- P2: 게임 트렌드 질의에서 Steam 트렌드/랭킹 컨텍스트가 누락되어 응답 품질 저하.
 - P3: 지출 요약 차트 부재로 분석 가독성 개선 필요.
 
-> ✅ 이전 세션 대비 변경: 신규 P2 항목(스팸 규칙 API 인증) 추가. 기존 항목 2건 유지.
+> ✅ 이전 세션 대비 변경: 미적용 3건 → 2건. 신규 발견 1건, 적용 완료 2건(세션 로그 기록).
 <!-- AUTO-SUMMARY-END -->
 
 ---
@@ -49,29 +49,17 @@
 
 ### 🟡 중요 (P2)
 
-#### [P2-1] API Client 유닛 테스트 보강 (API Client Unit Tests)
+#### [P2-1] 게임 트렌드 질의에서 Steam 트렌드/랭킹 컨텍스트 누락 수정 (Include Steam Trends in Game Trend RAG)
 | 항목 | 내용 |
 |------|------|
-| **ID** | `api-client-tests` |
-| **카테고리** | 🧪 테스트 |
+| **ID** | `telegram-game-trend-context` |
+| **카테고리** | 🐞 기능/RAG |
 | **복잡도** | Medium |
-| **대상 파일** | frontend/test/apiClient.test.ts |
+| **대상 파일** | backend/services/news/refiner.py, backend/services/news/collector.py, backend/routers/telegram_webhook.py |
 
-**현재 상태:** `frontend/lib/api/client.ts`가 다수의 API 호출을 담당하지만, fetch 기반 메서드 단위 테스트가 없음.  
-**개선 내용:** Vitest로 ApiClient의 주요 요청(health, portfolio, expenses, delete)과 쿼리 스트링 생성/오류 처리 테스트를 추가.  
-**기대 효과:** 백엔드 변경이나 클라이언트 로직 수정 시 회귀를 조기에 탐지.
-
-#### [P2-2] 스팸 규칙 API 인증 적용 (Secure Spam Rules API)
-| 항목 | 내용 |
-|------|------|
-| **ID** | `spam-rules-auth` |
-| **카테고리** | 🔒 보안 |
-| **복잡도** | Low |
-| **대상 파일** | backend/routers/spam_rules.py, backend/tests/test_spam_rules.py |
-
-**현재 상태:** `/api/spam-rules` 라우터가 인증 의존성을 사용하지 않아 토큰 없이 접근 가능.  
-**개선 내용:** `verify_api_token` 의존성을 라우터에 적용하고, 인증 유무 테스트를 추가.  
-**기대 효과:** 외부 노출 시 규칙 조작 위험 감소 및 보안 체계 일관성 확보.
+**현재 상태:** 텔레그램 `game_trend` 분기에서 `refine_news_with_duckdb()`를 사용하지만, 해당 함수는 `source_type='news'` + e스포츠 태그 위주로 조회하여 SteamStore(`source_type='trend'`) 및 SteamSpy 랭킹이 컨텍스트에 포함되지 않음.  
+**개선 내용:** DuckDB 정제 단계에 Steam 트렌드/랭킹을 포함하는 전용 정제 함수(예: `refine_game_trends_with_duckdb`)를 추가하고, `NewsCollector` 및 텔레그램 라우터가 이를 사용하도록 연결.  
+**기대 효과:** 게임 신작/인기 트렌드 질의에 실제 Steam 데이터가 포함되어 답변 정확도와 일관성이 향상.
 <!-- AUTO-IMPROVEMENT-LIST-END -->
 
 ---
@@ -87,7 +75,7 @@
 | **ID** | `expense-summary-chart` |
 | **카테고리** | ✨ 시각화 |
 | **복잡도** | Medium |
-| **대상 파일** | frontend/components/ExpensesDashboard.tsx, frontend/lib/api/client.ts, frontend/lib/api/types.ts |
+| **대상 파일** | frontend/components/ExpensesDashboard.tsx, frontend/lib/api/client.ts, frontend/lib/api/types.ts, frontend/test/expensesDashboard.test.tsx |
 
 **현재 상태:** 지출 요약 API가 존재하지만 프론트에서 사용하지 않아 리스트 중심의 화면 구성.  
 **개선 내용:** `fetchExpenseSummary` 메서드를 추가하고, 카테고리 파이 차트 및 요약 지표를 대시보드에 렌더링.  
@@ -98,6 +86,7 @@
 
 <!-- AUTO-SESSION-LOG-START -->
 ## 📜 분석 이력
+ - 2026-01-09 16:21 - 세션: 이전 개선 과제 중 적용 완료 2건 확인. 신규 미적용 항목 1건(게임 트렌드 컨텍스트) 발굴, 기존 P3 1건 유지. 현재 미적용 2건(P2:1, P3:1). 적용 완료 2건.
  - 2026-01-09 09:26 - 세션: 알림/스팸/뉴스 모듈 확인. 미적용 항목 3건(P2:2, P3:1) 정리, 신규 항목 1건(스팸 규칙 API 인증) 추가. 적용 완료 0건.
  - 2026-01-05 11:55 - 세션: `backendClient.ts`가 `lib/api/client.ts`로 리팩토링됨에 따라 관련 P2-1(삭제 기능) 완료 처리. P3-1(차트)는 대상 파일을 업데이트하여 유지. 신규 항목으로 [P2-1] API Client 테스트 추가를 제안함.
  - 2026-01-02 15:35 - 세션: 사용자의 "월 1회 엑셀 사용" 피드백 반영, P2-1(CRUD)에서 '수동 추가' 제외하고 '삭제' 기능만 남김. 프론트엔드의 업로드 기능 존재 재확인.

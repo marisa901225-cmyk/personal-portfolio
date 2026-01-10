@@ -92,25 +92,31 @@ async def telegram_webhook(request: Request):
         finally:
             db.close()
     else:
-        # 일반 텍스트: e스포츠 일정 RAG 처리
+        # 일반 텍스트: 질문 유형 분류 후 처리
         if not text:
             return {"ok": True}
             
         logger.info(f"Natural language query received: {text}")
+        
+        # 질문 유형 분류
+        query_type = classify_query(text)
+        logger.info(f"Query classified as: {query_type}")
+        
         db = SessionLocal()
         try:
-            # 1. DuckDB를 이용한 관련 일정 검색 및 정제 (RAG - Retrieval & Refinement)
-            from ..services.news_collector import NewsCollector
-            context_text = NewsCollector.refine_schedules_with_duckdb(text)
-            
-            # 2. LLM에게 답변 생성 요청 (RAG - Generation)
             from ..services.llm_service import LLMService
             llm = LLMService.get_instance()
+            
             if not llm.is_remote_ready():
-                await send_telegram_message("LLM 원격 서버가 설정되지 않아 일정 답변을 생성할 수 없습니다.")
+                await send_telegram_message("LLM 원격 서버가 설정되지 않아 답변을 생성할 수 없습니다.")
                 return {"ok": True}
             
-            prompt = f"""<start_of_turn>user
+            # 1. E스포츠 일정 질의
+            if query_type == 'esports_schedule':
+                from ..services.news_collector import NewsCollector
+                context_text = NewsCollector.refine_schedules_with_duckdb(text)
+                
+                prompt = f"""<start_of_turn>user
 당신은 e스포츠 전문가이자 사용자의 개인 비서입니다. 
 사용자의 질문과 아래 제공된 경기 일정 데이터를 바탕으로 친절하고 명확하게 답변해 주세요.
 
@@ -129,18 +135,119 @@ async def telegram_webhook(request: Request):
 답변:<end_of_turn>
 <start_of_turn>model
 """
+            
+            # 2. 경제 뉴스 질의 (국내 + 해외)
+            elif query_type == 'economy_news':
+                from ..services.news_collector import NewsCollector
+                context_text = NewsCollector.refine_economy_news_with_duckdb(text)
+                
+                prompt = f"""<start_of_turn>user
+당신은 글로별 거시경제 전문가이자 사용자의 개인 비서입니다.
+아래 제공된 경제 뉴스 데이터를 바탕으로 사용자의 질문에 친절하고 명확하게 답변해 주세요.
+
+[제공된 경제 뉴스 데이터]
+{context_text}
+
+[사용자의 질문]
+{text}
+
+[답변 규칙]
+- 한국어로 답변하세요.
+- 영문 뉴스 제목이라면 핵심만 번역하여 설명하세요.
+- 데이터에 있는 내용을 기반으로 정확하게 안내하세요. 데이터에 없는 내용은 모른다고 말하세요.
+- 친절하고 위트 있는 말투를 사용하세요.
+
+답변:<end_of_turn>
+<start_of_turn>model
+"""
+            
+            # 3. 게임 트렌드 질의
+            elif query_type == 'game_trend':
+                from ..services.news_collector import NewsCollector
+                # Steam 트렌드 + E스포츠 뉴스 모두 포함
+                context_text = NewsCollector.refine_news_with_duckdb('esports', limit=10)
+                
+                prompt = f"""<start_of_turn>user
+당신은 게임 트렌드 전문가이자 사용자의 개인 비서입니다.
+아래 제공된 최신 게임 뉴스 및 트렌드 데이터를 바탕으로 사용자의 질문에 친절하게 답변해 주세요.
+
+[최신 게임 트렌드 데이터]
+{context_text}
+
+[사용자의 질문]
+{text}
+
+[답변 규칙]
+- 한국어로 답변하세요.
+- 데이터에 있는 내용을 기반으로 정확하게 안내하세요.
+- 게임 제목, 출시일, 장르 등을 명확히 제시하세요.
+- 친절하고 위트 있는 말투를 사용하세요.
+
+답변:<end_of_turn>
+<start_of_turn>model
+"""
+            
+            # 3. 일반 대화
+            else:
+                prompt = f"""<start_of_turn>user
+당신은 친절하고 유머러스한 개인 비서입니다.
+사용자의 메시지에 자연스럽고 위트 있게 답변해 주세요.
+
+[사용자 메시지]
+{text}
+
+답변:<end_of_turn>
+<start_of_turn>model
+"""
+            
+            # LLM 호출 (GPU 서버)
             response_text = llm.generate_remote(prompt, max_tokens=1024)
             if not response_text:
                 response_text = "죄송합니다. 답변을 생성하는 중에 문제가 발생했습니다. 😅"
             
             await send_telegram_message(response_text)
+            
         except Exception as e:
-            logger.error(f"RAG query failed: {e}")
-            await send_telegram_message("일정 검색 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.")
+            logger.error(f"Query processing failed: {e}")
+            await send_telegram_message("답변 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.")
         finally:
             db.close()
     
     return {"ok": True}
+
+
+def classify_query(text: str) -> str:
+    """
+    사용자 질문 유형 분류
+    - 'esports_schedule': E스포츠 경기 일정 관련
+    - 'game_trend': 게임 신작/트렌드 관련
+    - 'general_chat': 일반 대화
+    """
+    text_lower = text.lower()
+    
+    # E스포츠 키워드
+    esports_keywords = ['t1', 'skt', '티원', '젠지', 'geng', 'gen.g', 'lol', '롤', 
+                        'lck', '발로란트', 'valorant', 'vct', '경기', '일정', 
+                        '월즈', 'worlds', '챌린저스', '퍼시픽']
+    if any(kw in text_lower for kw in esports_keywords):
+        return 'esports_schedule'
+    
+    # 게임 트렌드 키워드
+    game_keywords = ['게임', '스팀', 'steam', '신작', '트렌드', '인기', '출시', 
+                     '추천', '플스', 'ps5', 'playstation', '닌텐도', 'switch']
+    if any(kw in text_lower for kw in game_keywords):
+        return 'game_trend'
+    
+    # 해외 + 국내 경제 키워드
+    economy_keywords = ['미국', '유럽', '환율', 'fomc', 'ecb', 's&p', '나스닥', '금리',
+                        'cpi', 'etf', '달러', '유로', '채권', '국채', 'treasury', '코스피',
+                        '코스닥', '주식', '경제', '인플레', '경기', '불황', '호황']
+    if any(kw in text_lower for kw in economy_keywords):
+        return 'economy_news'
+    
+    # 기타 일반 대화
+    return 'general_chat'
+
 
 
 async def handle_spam_command(cmd: str, arg: str, db: Session) -> str:

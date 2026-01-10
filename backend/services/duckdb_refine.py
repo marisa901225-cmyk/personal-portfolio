@@ -370,6 +370,20 @@ def refine_portfolio_for_ai(
         ORDER BY id ASC
         LIMIT 1
     """).fetchone()
+    
+    # ========== News Context (Economy/Finance) ==========
+    news_context = con.execute(f"""
+        SELECT 
+            strftime(published_at, '%m/%d %H:%M') as time,
+            game_tag,
+            title
+        FROM sqlite_db.game_news
+        WHERE published_at >= '{start_date}' AND published_at < '{end_date}'
+          AND game_tag IN ('Economy', 'Tech/Semiconductor', 'FX', 'Fed/Macro', 'LoL', 'Valorant')
+        ORDER BY published_at DESC
+        LIMIT 20
+    """).fetchall()
+    news_columns = ["time", "tag", "title"]
 
     con.close()
 
@@ -457,4 +471,5 @@ def refine_portfolio_for_ai(
             {**d, "weight_pct": round(d["total_value"] / total_value * 100, 2) if total_value > 0 else 0}
             for d in to_dict_list(currency_exposure, currency_columns)
         ],
+        "news_context": to_dict_list(news_context, news_columns),
     }

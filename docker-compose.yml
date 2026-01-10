@@ -6,7 +6,7 @@ services:
     container_name: myasset-backend-api
     restart: always
     ports:
-      - "8000:8000"
+      - "0.0.0.0:8000:8000"
     volumes:
       - ./backend/storage:/app/backend/storage
       - ./backend/data:/app/backend/data
@@ -15,6 +15,8 @@ services:
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
     environment:
       - PYTHONUNBUFFERED=1
+    env_file:
+      - ./backend/.env
 
   alarm-collector:
     build:
@@ -23,7 +25,7 @@ services:
     container_name: myasset-alarm-collector
     restart: always
     ports:
-      - "8001:8001"
+      - "0.0.0.0:8001:8001"
     volumes:
       - ./backend/storage:/app/backend/storage
       - ./backend/data:/app/backend/data

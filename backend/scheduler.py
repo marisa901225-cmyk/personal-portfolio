@@ -29,6 +29,12 @@ async def job_collect_news():
         
         # 3. PandaScore 일정 수집 (e스포츠)
         await NewsCollector.collect_pandascore_schedules(db)
+        
+        # 4. 네이버 뉴스 수집 (E스포츠 + 경제)
+        await NewsCollector.collect_all_naver_news(db)
+        
+        # 5. 구글 뉴스 수집 (해외 거시경제)
+        await NewsCollector.collect_all_google_news(db)
             
     except Exception as e:
         logger.error(f"News collection job failed: {e}")
@@ -36,23 +42,6 @@ async def job_collect_news():
         db.close()
         logger.info("News collection job finished.")
 
-async def job_steam_trends_summary():
-    """
-    매일 1회 스팀 신작 트렌드 AI 요약 리포트 생성 및 전송
-    """
-    logger.info("Starting daily Steam trends summary job...")
-    db: Session = SessionLocal()
-    try:
-        # 1. 먼저 최신 스팀 트렌드 수집하여 DB 저장 (DuckDB 정제용)
-        await NewsCollector.collect_steam_new_trends(db)
-        
-        # 2. DuckDB 정제 후 AI 요약 리포트 생성 및 전송
-        await NewsCollector.generate_steam_trend_summary(db)
-    except Exception as e:
-        logger.error(f"Steam trends summary job failed: {e}")
-    finally:
-        db.close()
-        logger.info("Steam trends summary job finished.")
 
 def start_scheduler():
     if not scheduler.running:
@@ -64,13 +53,7 @@ def start_scheduler():
             replace_existing=True
         )
         
-        # 2. 매일 오전 10시 스팀 신작 트렌드 요약 (KST)
-        scheduler.add_job(
-            job_steam_trends_summary,
-            CronTrigger(hour=10, minute=0),
-            id="steam_trends_summary",
-            replace_existing=True
-        )
+        # 스팀 트렌드 요약 (자동 발송 제거 -> 채팅 RAG로 위임)
         
         scheduler.start()
         logger.info("AsyncIOScheduler started.")
