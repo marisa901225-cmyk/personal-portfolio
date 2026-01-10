@@ -1,19 +1,21 @@
 import { act, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import App from '../App';
+import { Layout } from '../src/app/Layout';
 import { APP_ERROR_EVENT } from '../lib/utils/errors';
 
 import { SettingsProvider } from '../hooks/SettingsContext';
 import { QueryProvider } from '../src/app/providers/QueryProvider';
-import { BrowserRouter } from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 
-describe('App error banner', () => {
+describe('Layout error banner', () => {
   it('shows an error banner when app error event fires', async () => {
     render(
       <SettingsProvider>
         <QueryProvider>
           <BrowserRouter>
-            <App />
+            <Routes>
+              <Route path="*" element={<Layout />} />
+            </Routes>
           </BrowserRouter>
         </QueryProvider>
       </SettingsProvider>
