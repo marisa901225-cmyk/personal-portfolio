@@ -1,13 +1,5 @@
-import { AssetCategory } from '../lib/types';
-
-export interface ImportedAssetSnapshot {
-  name: string;
-  ticker?: string;
-  category: AssetCategory;
-  amount: number;
-  purchasePrice?: number;
-  currentPrice: number;
-  realizedProfit?: number;
-  currency: 'KRW' | 'USD';
-}
-
+/**
+ * @deprecated hooks/portfolioTypes.ts로 import 하던 코드는
+ * @/shared/portfolio 또는 src/shared/portfolio 로 변경해주세요.
+ */
+export type { ImportedAssetSnapshot } from '../src/shared/portfolio';
