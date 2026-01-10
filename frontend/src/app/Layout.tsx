@@ -11,6 +11,8 @@ import {
     Sparkles,
     Bell,
     RefreshCw,
+    AlertCircle,
+    X,
 } from 'lucide-react';
 import { usePortfolio } from '@hooks/usePortfolio';
 import { useSettings } from '@hooks/useSettings';
@@ -18,6 +20,7 @@ import { formatCurrency } from '@lib/utils/constants';
 import { NotificationModal } from '@components/NotificationModal';
 import { InvestmentQuote } from '@components/InvestmentQuote';
 import { TradeRecord } from '@lib/types';
+import { APP_ERROR_EVENT } from '@lib/utils/errors';
 
 const navItems = [
     { to: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
@@ -44,6 +47,8 @@ export const Layout: React.FC = () => {
 
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [hasUnreadHistory, setHasUnreadHistory] = useState(false);
+    const [appError, setAppError] = useState<string | null>(null);
+    const errorTimerRef = useRef<number | null>(null);
     const [syncNotification, setSyncNotification] = useState({
         isOpen: false,
         title: '',
@@ -61,6 +66,29 @@ export const Layout: React.FC = () => {
             setHasUnreadHistory(true);
         }
     }, [tradeHistory.length, isHistoryOpen]);
+
+    // 전역 에러 이벤트 핸들링
+    useEffect(() => {
+        const handleAppError = (event: Event) => {
+            const detail = (event as CustomEvent<string>).detail;
+            if (!detail) return;
+            setAppError(detail);
+            if (errorTimerRef.current !== null) {
+                window.clearTimeout(errorTimerRef.current);
+            }
+            errorTimerRef.current = window.setTimeout(() => {
+                setAppError(null);
+                errorTimerRef.current = null;
+            }, 8000);
+        };
+        window.addEventListener(APP_ERROR_EVENT, handleAppError as EventListener);
+        return () => {
+            window.removeEventListener(APP_ERROR_EVENT, handleAppError as EventListener);
+            if (errorTimerRef.current !== null) {
+                window.clearTimeout(errorTimerRef.current);
+            }
+        };
+    }, []);
 
     const handleSyncPrices = async () => {
         if (!settings.serverUrl) {
@@ -140,6 +168,26 @@ export const Layout: React.FC = () => {
 
             {/* Main Content */}
             <main className="flex-1 p-4 md:p-8 max-w-6xl mx-auto w-full">
+                {/* 전역 에러 배너 */}
+                {appError && (
+                    <div
+                        role="alert"
+                        className="mb-4 flex items-start justify-between gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 shadow-sm"
+                    >
+                        <div className="flex items-start gap-2">
+                            <AlertCircle size={18} className="mt-0.5 shrink-0 text-red-500" />
+                            <p className="whitespace-pre-line">{appError}</p>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setAppError(null)}
+                            className="rounded-lg p-1 text-red-400 transition-colors hover:bg-red-100 hover:text-red-600"
+                            aria-label="오류 알림 닫기"
+                        >
+                            <X size={16} />
+                        </button>
+                    </div>
+                )}
                 <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
                     <div>
                         <h1 className="text-2xl md:text-3xl font-bold text-slate-900">

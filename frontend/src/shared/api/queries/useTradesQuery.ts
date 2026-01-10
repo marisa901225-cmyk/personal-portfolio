@@ -4,7 +4,7 @@
  * 거래 내역을 가져오는 React Query 훅
  */
 
-import { useQuery, UseQueryOptions } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, UseQueryOptions } from '@tanstack/react-query';
 import { ApiClient, BackendTrade, mapBackendTradesToFrontend } from '@lib/api';
 import { Asset, TradeRecord } from '@lib/types';
 import { queryKeys } from '../queryKeys';
@@ -60,5 +60,36 @@ export function useTradesQuery(
         enabled: !!apiClient && assets.length > 0,
         staleTime: 1000 * 60 * 1,
         ...options,
+    });
+}
+
+const DEFAULT_PAGE_SIZE = 100;
+
+/**
+ * 거래 내역 무한 스크롤 조회
+ * 
+ * useTradeHistory.ts 기능 통합 - 페이지네이션 지원
+ */
+export function useInfiniteTradesQuery(
+    apiClient: ApiClient | null,
+    assets: Asset[],
+    pageSize = DEFAULT_PAGE_SIZE
+) {
+    return useInfiniteQuery({
+        queryKey: queryKeys.trades,
+        queryFn: async ({ pageParam }) => {
+            if (!apiClient) throw new Error('API client not configured');
+            return apiClient.fetchTrades({ limit: pageSize, beforeId: pageParam ?? undefined });
+        },
+        initialPageParam: null as number | null,
+        getNextPageParam: (lastPage) => {
+            if (!lastPage || lastPage.length < pageSize) return undefined;
+            return lastPage[lastPage.length - 1].id;
+        },
+        enabled: !!apiClient,
+        select: (data) => ({
+            ...data,
+            trades: mapBackendTradesToFrontend(data.pages.flat(), assets),
+        }),
     });
 }

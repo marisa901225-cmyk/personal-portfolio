@@ -1,10 +1,11 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
-import { useTradeHistory } from '../../hooks/useTradeHistory';
+import { useInfiniteTradesQuery } from '../../src/shared/api/queries/useTradesQuery';
+import { useApiClient } from '../../src/shared/api/apiClient';
 import { TradeFilters, type TradeFilter } from './TradeFilters';
 import { TradeList } from './TradeList';
-import type { Asset } from '../../lib/types';
+import type { Asset, TradeRecord } from '../../lib/types';
 import { getUserErrorMessage } from '../../lib/utils/errors';
 
 export type TradeHistoryVariant = 'page' | 'collapsible';
@@ -32,23 +33,23 @@ export const TradeHistory: React.FC<TradeHistoryProps> = ({
     const [monthFilter, setMonthFilter] = useState<number | 'ALL'>('ALL');
 
     const isRemoteEnabled = Boolean(serverUrl && apiToken);
+    const apiClient = useApiClient({ serverUrl, apiToken });
+    const shouldFetch = isRemoteEnabled && (isOpen || !isCollapsible);
 
-    // Use the new hook for data fetching
-    const {
-        trades,
-        isLoading,
-        isError,
-        error,
-        fetchNextPage,
-        hasNextPage,
-        isFetchingNextPage,
-        refetch,
-    } = useTradeHistory({
-        serverUrl,
-        apiToken,
-        assets,
-        enabled: isRemoteEnabled && (isOpen || !isCollapsible),
-    });
+    // Use the new unified API hook
+    const query = useInfiniteTradesQuery(
+        shouldFetch ? apiClient : null,
+        assets
+    );
+
+    const trades: TradeRecord[] = query.data?.trades ?? [];
+    const isLoading = query.isLoading;
+    const isError = query.isError;
+    const error = query.error;
+    const fetchNextPage = query.fetchNextPage;
+    const hasNextPage = query.hasNextPage ?? false;
+    const isFetchingNextPage = query.isFetchingNextPage;
+    const refetch = query.refetch;
 
     // Calculate available years from loaded trades
     const availableYears = useMemo(() => {
