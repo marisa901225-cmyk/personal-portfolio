@@ -43,4 +43,7 @@ export const queryKeys = {
     aiReport: (params: { year?: number; month?: number; quarter?: number; query?: string }) =>
         ['aiReport', params] as const,
     savedReports: ['savedReports'] as const,
+
+    // News
+    news: (query: string, ticker?: string | null) => ['news', { query, ticker }] as const,
 } as const;

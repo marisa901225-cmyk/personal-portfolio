@@ -106,6 +106,12 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
                 dropped_reasons.append(f"drop(hallucinated service): {line[:50]}...")
                 continue
 
+        # "왜냐하면/비커즈/because" 집착 방지 필터
+        annoying_phrases = ["왜냐하면", "비커즈", "because", "Because", "왜냐면"]
+        if any(phrase in line for phrase in annoying_phrases):
+            dropped_reasons.append(f"drop(annoying phrase): {line[:50]}...")
+            continue
+
         # URL 개별 제거
         line_cleaned = line
         line_output_urls = re.findall(url_pattern, line)

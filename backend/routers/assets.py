@@ -17,6 +17,14 @@ from ..services.users import get_or_create_single_user
 router = APIRouter(prefix="/api", tags=["portfolio"], dependencies=[Depends(verify_api_token)])
 
 
+@router.get("/assets", response_model=list[AssetRead])
+def get_assets(db: Session = Depends(get_db)) -> list[AssetRead]:
+    """자산 목록 조회"""
+    user = get_or_create_single_user(db)
+    assets = db.query(Asset).filter(Asset.user_id == user.id).all()
+    return [to_asset_read(asset) for asset in assets]
+
+
 @router.post("/assets", response_model=AssetRead)
 def create_asset(payload: AssetCreate, db: Session = Depends(get_db)) -> AssetRead:
     user = get_or_create_single_user(db)

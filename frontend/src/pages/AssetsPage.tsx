@@ -7,6 +7,7 @@
 import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { AssetList } from '@components/AssetList';
+import { NewsOverlay } from '@components/NewsOverlay';
 import { queryKeys } from '@/shared/api';
 import { useApiClient, isApiEnabled } from '@/shared/api/apiClient';
 import { useAssetsQuery } from '@/shared/api/queries';
@@ -32,6 +33,10 @@ export const AssetsPage: React.FC = () => {
     const deleteAssetMutation = useDeleteAsset(apiClient);
     const updateAssetMutation = useUpdateAsset(apiClient);
     const createTradeMutation = useCreateTrade(apiClient);
+
+    // Hook을 조건부 리턴 이전에 호출 (React Rules of Hooks)
+    const [selectedNewsQuery, setSelectedNewsQuery] = React.useState<string | null>(null);
+    const [selectedNewsTicker, setSelectedNewsTicker] = React.useState<string | null>(null);
 
     if (!enabled) {
         return (
@@ -152,16 +157,35 @@ export const AssetsPage: React.FC = () => {
     };
 
     return (
-        <AssetList
-            assets={assets}
-            onDelete={handleDelete}
-            onTrade={handleTrade}
-            onUpdateAsset={handleUpdateAsset}
-            onUpdateCash={handleUpdateCash}
-            onRestoreFromBackup={handleRestoreFromBackup}
-            usdFxNow={settings.usdFxNow}
-            indexGroupOptions={settings.targetIndexAllocations?.map(a => a.indexGroup) || []}
-        />
+        <>
+            <AssetList
+                assets={assets}
+                onDelete={handleDelete}
+                onTrade={handleTrade}
+                onUpdateAsset={handleUpdateAsset}
+                onUpdateCash={handleUpdateCash}
+                onRestoreFromBackup={handleRestoreFromBackup}
+                onSelectNewsQuery={(query, ticker) => {
+                    setSelectedNewsQuery(query);
+                    setSelectedNewsTicker(ticker || null);
+                }}
+                usdFxNow={settings.usdFxNow}
+                indexGroupOptions={settings.targetIndexAllocations?.map(a => a.indexGroup) || []}
+            />
+
+            {apiClient && (
+                <NewsOverlay
+                    isOpen={!!selectedNewsQuery}
+                    onClose={() => {
+                        setSelectedNewsQuery(null);
+                        setSelectedNewsTicker(null);
+                    }}
+                    query={selectedNewsQuery || ''}
+                    ticker={selectedNewsTicker}
+                    apiClient={apiClient}
+                />
+            )}
+        </>
     );
 };
 

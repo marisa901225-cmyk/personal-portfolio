@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from ...core.models import Asset, ExternalCashflow
 from ...core.schemas import ReportAiResponse, ReportAiTextResponse, ReportPeriod, TopAssetSummary
-from ...services.duckdb_refine import refine_portfolio_for_ai
 from ...services.portfolio import calculate_summary
 from .core import aggregate_activity, build_monthly_summaries, get_user
 from .expenses import merge_expense_summaries
@@ -120,7 +119,8 @@ def resolve_ai_report_prompt(
 
     period = resolve_period(resolved_year, resolved_month, resolved_quarter, resolved_half)
 
-    # DuckDB 정제 로직 호출
+    # DuckDB 정제 로직 호출 (lazy import to avoid circular import)
+    from ...services.duckdb_refine import refine_portfolio_for_ai
     refined = refine_portfolio_for_ai(
         year=period.year,
         month=period.month,
@@ -153,6 +153,8 @@ def get_refined_report_data(
     """DuckDB 정제 데이터를 반환한다."""
     if month is not None and quarter is not None:
         raise ValueError("use either month or quarter, not both")
+    # Lazy import to avoid circular import
+    from ...services.duckdb_refine import refine_portfolio_for_ai
     return refine_portfolio_for_ai(year=year, month=month, quarter=quarter)
 
 

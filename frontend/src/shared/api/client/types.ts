@@ -245,3 +245,20 @@ export interface BackendSavedAiReport {
     generated_at: string;
     created_at: string;
 }
+
+// --- News ---
+
+export interface BackendNewsArticle {
+    id: number;
+    title: string;
+    url?: string | null;
+    source_name?: string | null;
+    published_at?: string | null;
+    snippet: string;
+}
+
+export interface BackendNewsSearchResponse {
+    query: string;
+    count: number;
+    articles: BackendNewsArticle[];
+}
