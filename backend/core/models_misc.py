@@ -16,6 +16,7 @@ class IncomingAlarm(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
 
     raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    masked_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     sender: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 
     # New rich fields

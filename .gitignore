@@ -30,14 +30,27 @@ backend/__pycache__/
 *.sw?
 .vercel
 
-# Private Backup Files
+# Private Backup & Storage
 backend/crontab.bak
 backend/backups/
-
+backend/storage/backups/
+*.db
 *.db-shm
 *.db-wal
-*.db
+*.zip
+*.gz
 삼성*.xlsx
+
+# Tokens & Sensitive Data
+token*.json
+*token
+auth_token
+auth_ws_token
+access_token
+refresh_token
+*.token
+.env
+backend/.env
 
 # AI Models and Data
 backend/data/*.joblib

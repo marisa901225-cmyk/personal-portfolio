@@ -23,18 +23,40 @@ def get_spam_model():
                 logger.error(f"Failed to load Spam AI model: {e}")
     return _spam_model_instance
 
-def mask_otp(text: str) -> str:
+def mask_sensitive_info(text: str) -> str:
     """
-    인증번호/OTP 패턴을 마스킹한다.
+    인증번호, 계좌번호, 전화번호, 이메일 등 민감 정보를 마스킹한다.
     """
-    otp_patterns = [
-        r'\[(?:인증번호|OTP|확인번호)\]\s*\d{4,6}',
-        r'(?:인증번호|OTP|확인번호)는?\s*\[?\d{4,6}\]?',
-        r'(?<=:)\s*\d{6}(?=\s)', # SMS 인증번호 특화
+    patterns = [
+        # 1. OTP/인증번호
+        (r'\[(?:인증번호|OTP|확인번호)\]\s*\d{4,6}', "[인증번호]"),
+        (r'(?:인증번호|OTP|확인번호)는?\s*\[?\d{4,6}\]?', "[인증번호]"),
+        (r'(?<=:)\s*\d{6}(?=\s)', "[인증번호]"),
+        
+        # 2. 계좌번호 (3~6자리 - 2~6자리 - 3~자리)
+        # 예: 1002-556-011***, 68694229-01
+        (r'\b\d{3,6}-\d{2,6}-\d{3,}(?:\*+|)\b', "[계좌번호]"),
+        
+        # 3. 카드번호 (4자리-4자리-4자리-4자리 또는 마스킹 포함)
+        (r'\b\d{4}-\d{4}-\d{4}-\d{4}\b', "[카드번호]"),
+        (r'\b\d{4}-\*{4,}-\d{4}\b', "[카드번호]"),
+        (r'\b\d{4,}\*+\d{4,}\b', "[카드번호/계좌]"),
+        
+        # 4. 전화번호
+        (r'\b010[- ]?\d{3,4}[- ]?\d{4}\b', "[전화번호]"),
+        (r'\b02[- ]?\d{1,4}[- ]?\d{3,4}[- ]?\d{4}\b', "[전화번호]"),
+        
+        # 5. 이메일
+        (r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', "[이메일]"),
+        
+        # 6. 기타 긴 식별 번호 (11자리 이상 연속 숫자, 고객번호/송장번호 등)
+        (r'\b\d{11,}\b', "[식별번호]"),
     ]
+    
     masked_text = text
-    for pattern in otp_patterns:
-        masked_text = re.sub(pattern, "[인증번호 마스킹]", masked_text, flags=re.IGNORECASE)
+    for pattern, replacement in patterns:
+        masked_text = re.sub(pattern, replacement, masked_text, flags=re.IGNORECASE)
+    
     return masked_text
 
 def is_spam(text: str, db: Session) -> tuple[bool, str]:
