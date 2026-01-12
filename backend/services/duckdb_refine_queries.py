@@ -286,8 +286,22 @@ def fetch_top_spending_items(con, start_date: date, end_date: date) -> tuple[lis
         LIMIT 10
         """
     ).fetchall()
+    
+    # 가맹점명을 카테고리 기반 익명화 (클라우드 LLM 전송 시 개인정보 보호)
+    anonymized_rows = []
+    category_counters: dict[str, int] = {}
+    for row in rows:
+        merchant, amount, category, date_val = row
+        cat_key = category or "기타"
+        category_counters[cat_key] = category_counters.get(cat_key, 0) + 1
+        # "카페 A", "식비 B" 형태로 익명화
+        label = chr(64 + category_counters[cat_key])  # A, B, C, ...
+        anon_merchant = f"{cat_key} {label}"
+        anonymized_rows.append((anon_merchant, amount, category, date_val))
+    
     columns = ["merchant", "amount", "category", "date"]
-    return rows, columns
+    return anonymized_rows, columns
+
 
 
 def fetch_benchmark_info(con) -> tuple | None:

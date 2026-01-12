@@ -6,6 +6,8 @@ Telegram Webhook Router - 텔레그램 봇 명령어 처리
 """
 import os
 import logging
+import html
+import re
 from datetime import datetime
 
 from fastapi import APIRouter, Request, HTTPException
@@ -49,38 +51,41 @@ async def telegram_webhook(request: Request):
     
     message = update.get("message")
     if not message:
-        return {"ok": True}  # 메시지가 아닌 업데이트는 무시
+        return {"ok": True}
     
     # 3. Chat ID 검증 (본인만 허용)
     chat_id = str(message.get("chat", {}).get("id", ""))
     if ALLOWED_CHAT_ID and chat_id != ALLOWED_CHAT_ID:
         logger.warning(f"Unauthorized chat_id: {chat_id}")
-        return {"ok": True}  # 조용히 무시
+        return {"ok": True}
     
-    # 4. 텍스트 파싱 및 명령어 추출
+    # 4. 텍스트 추출 및 유효성 검사
     text = message.get("text", "").strip()
+    if not text:
+        return {"ok": True}
     
-    # 명령어 처리 (/)
+    # 5. 명령어 처리 (/)와 자연어 처리 흐름 분리
     if text.startswith("/"):
-        # 예: "/add 키워드" -> cmd="add", arg="키워드"
+        # (A) 명령어 처리 Flow
         parts = text[1:].split(maxsplit=1)
         cmd = parts[0] if len(parts) > 0 else ""
         arg = parts[1] if len(parts) > 1 else ""
         
-        if cmd == "report":
-            from ..services.reporting.template import build_telegram_steam_trend_message
-            response_text = build_telegram_steam_trend_message(arg)
-            await send_telegram_message(response_text)
-            return {"ok": True}
-
         # /spam 접두사 지원 (하이브리드)
         if cmd == "spam":
             parts = arg.split(maxsplit=1)
             cmd = parts[0] if len(parts) > 0 else ""
             arg = parts[1] if len(parts) > 1 else ""
         
+        # 명령어별 처리
+        if cmd == "report":
+            from ..services.reporting.template import build_telegram_steam_trend_message
+            response_text = build_telegram_steam_trend_message(arg)
+            await send_telegram_message(response_text)
+            return {"ok": True}
+        
         # 지원하는 명령어 리스트
-        SUPPORTED_CMDS = ["report", "add", "del", "list", "on", "off", "help"]
+        SUPPORTED_CMDS = ["add", "del", "list", "on", "off", "help"]
         if cmd not in SUPPORTED_CMDS:
             return {"ok": True}
         
@@ -89,7 +94,7 @@ async def telegram_webhook(request: Request):
             response_text = await handle_spam_command(cmd, arg, db)
             
             # 규칙 변경(add, del, on, off)이 있으면 AI 모델 재학습 트리거
-            if cmd in ["add", "del", "on", "off"] and ("✅" in response_text or "🗑️" in response_text or "⏸️" in response_text or "▶️" in response_text):
+            if cmd in ["add", "del", "on", "off"] and any(icon in response_text for icon in ["✅", "🗑️", "⏸️", "▶️"]):
                 from ..services.spam_trainer import train_spam_model
                 if train_spam_model():
                     response_text += "\n🔄 <i>AI 모델이 최신 규칙으로 재학습되었습니다.</i>"
@@ -98,24 +103,44 @@ async def telegram_webhook(request: Request):
         finally:
             db.close()
     else:
-        # 일반 텍스트: 질문 유형 분류 후 처리
-        if not text:
-            return {"ok": True}
-            
+        # (B) 자연어 처리 Flow
         logger.info(f"Natural language query received: {text}")
-        
-        # 질문 유형 분류
         query_type = classify_query(text)
         logger.info(f"Query classified as: {query_type}")
         
-        db = SessionLocal()
-        try:
-            if query_type == 'game_trend':
-                from ..services.reporting.template import build_telegram_steam_trend_message
-                response_text = build_telegram_steam_trend_message(text)
-                await send_telegram_message(response_text)
-                return {"ok": True}
+        # 분류에 따른 핸들러 매핑
+        # 1. 게임 트렌드 (템플릿 기반 - 단일화된 경로)
+        if query_type == "game_trend":
+            from ..services.reporting.template import build_telegram_steam_trend_message
+            response_text = build_telegram_steam_trend_message(text)
+            await send_telegram_message(response_text)
+            return {"ok": True}
+            
+        # 2. 투자/가계부 리포트 (LLM 기반 서술형)
+        if query_type == "report":
+            from ..services.report_service import resolve_ai_report_prompt, generate_ai_report_text
+            db = SessionLocal()
+            try:
+                # (1) 리포트 생성을 위한 프롬프트 및 기간 해석
+                period, prompt = resolve_ai_report_prompt(db, query=text)
+                await send_telegram_message(f"⏳ <b>{period.label}</b> 리포트를 생성 중입니다... (AI 분석 중)")
+                
+                # (2) AI API 호출하여 서술형 리포트 생성
+                report_ai_res = await generate_ai_report_text(period, prompt)
+                raw_report = report_ai_res.report
+                
+                # (3) 텔레그램용 HTML 변환 (Markdown -> HTML 태그)
+                formatted_report = _format_for_telegram(raw_report)
+                await send_telegram_message(formatted_report)
+            except Exception as e:
+                logger.error(f"AI Report generation failed: {e}")
+                await send_telegram_message("리포트 생성 중 오류가 발생했습니다. 😅 (데이터 부족 또는 AI 서버 일시 장애)")
+            finally:
+                db.close()
+            return {"ok": True}
 
+        # 3. 그 외 LLM 기반 질의 처리 (E스포츠, 경제 뉴스, 일반 대화)
+        try:
             from ..services.llm_service import LLMService
             llm = LLMService.get_instance()
 
@@ -123,17 +148,44 @@ async def telegram_webhook(request: Request):
                 await send_telegram_message("LLM 원격 서버가 설정되지 않아 답변을 생성할 수 없습니다.")
                 return {"ok": True}
             
-            # 1. E스포츠 일정 질의
+            prompt = ""
             if query_type == 'esports_schedule':
                 from ..services.news_collector import NewsCollector
                 context_text = NewsCollector.refine_schedules_with_duckdb(text)
-                
-                prompt = f"""<start_of_turn>user
+                prompt = _get_esports_prompt(text, context_text)
+            
+            elif query_type == 'economy_news':
+                from ..services.news_collector import NewsCollector
+                context_text = NewsCollector.refine_economy_news_with_duckdb(text)
+                prompt = _get_economy_prompt(text, context_text)
+            
+            else: # general_chat
+                prompt = _get_general_chat_prompt(text)
+            
+            # LLM 호출 및 전송
+            response_text = llm.generate_remote(prompt, max_tokens=1024)
+            if not response_text:
+                response_text = "죄송합니다. 답변을 생성하는 중에 문제가 발생했습니다. 😅"
+            
+            # 텔레그램용 HTML 변환 적용
+            formatted_response = _format_for_telegram(response_text)
+            await send_telegram_message(formatted_response)
+            
+        except Exception as e:
+            logger.error(f"Query processing failed: {e}")
+            await send_telegram_message("답변 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.")
+    
+    return {"ok": True}
+
+
+# 프롬프트 생성 헬퍼 함수들 (코드 가독성 향상)
+def _get_esports_prompt(text: str, context: str) -> str:
+    return f"""<start_of_turn>user
 당신은 e스포츠 전문가이자 사용자의 개인 비서입니다. 
 사용자의 질문과 아래 제공된 경기 일정 데이터를 바탕으로 친절하고 명확하게 답변해 주세요.
 
 [제공된 경기 일정 데이터]
-{context_text}
+{context}
 
 [사용자의 질문]
 {text}
@@ -147,18 +199,14 @@ async def telegram_webhook(request: Request):
 답변:<end_of_turn>
 <start_of_turn>model
 """
-            
-            # 2. 경제 뉴스 질의 (국내 + 해외)
-            elif query_type == 'economy_news':
-                from ..services.news_collector import NewsCollector
-                context_text = NewsCollector.refine_economy_news_with_duckdb(text)
-                
-                prompt = f"""<start_of_turn>user
-당신은 글로별 거시경제 전문가이자 사용자의 개인 비서입니다.
+
+def _get_economy_prompt(text: str, context: str) -> str:
+    return f"""<start_of_turn>user
+당신은 글로벌 거시경제 전문가이자 사용자의 개인 비서입니다.
 아래 제공된 경제 뉴스 데이터를 바탕으로 사용자의 질문에 친절하고 명확하게 답변해 주세요.
 
 [제공된 경제 뉴스 데이터]
-{context_text}
+{context}
 
 [사용자의 질문]
 {text}
@@ -172,35 +220,9 @@ async def telegram_webhook(request: Request):
 답변:<end_of_turn>
 <start_of_turn>model
 """
-            
-            # 3. 게임 트렌드 질의
-            elif query_type == 'game_trend':
-                from ..services.news_collector import NewsCollector
-                context_text = NewsCollector.refine_game_trends_with_duckdb(text, limit=12)
-                
-                prompt = f"""<start_of_turn>user
-당신은 게임 트렌드 전문가이자 사용자의 개인 비서입니다.
-아래 제공된 최신 Steam 트렌드/랭킹 데이터를 바탕으로 사용자의 질문에 친절하게 답변해 주세요.
 
-[최신 게임 트렌드 데이터]
-{context_text}
-
-[사용자의 질문]
-{text}
-
-[답변 규칙]
-- 한국어로 답변하세요.
-- 데이터에 있는 내용을 기반으로 정확하게 안내하세요.
-- 게임 제목, 출시/인기 트렌드 포인트(가능하다면), 장르 등을 명확히 제시하세요.
-- 친절하고 위트 있는 말투를 사용하세요.
-
-답변:<end_of_turn>
-<start_of_turn>model
-"""
-            
-            # 3. 일반 대화
-            else:
-                prompt = f"""<start_of_turn>user
+def _get_general_chat_prompt(text: str) -> str:
+    return f"""<start_of_turn>user
 당신은 친절하고 유머러스한 개인 비서입니다.
 사용자의 메시지에 자연스럽고 위트 있게 답변해 주세요.
 
@@ -210,21 +232,29 @@ async def telegram_webhook(request: Request):
 답변:<end_of_turn>
 <start_of_turn>model
 """
-            
-            # LLM 호출 (GPU 서버)
-            response_text = llm.generate_remote(prompt, max_tokens=1024)
-            if not response_text:
-                response_text = "죄송합니다. 답변을 생성하는 중에 문제가 발생했습니다. 😅"
-            
-            await send_telegram_message(response_text)
-            
-        except Exception as e:
-            logger.error(f"Query processing failed: {e}")
-            await send_telegram_message("답변 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.")
-        finally:
-            db.close()
+
+
+def _format_for_telegram(text: str) -> str:
+    """
+    AI 응답을 텔레그램 HTML 형식으로 변환한다.
+    - HTML 특수문자 이스케이프 (<, >, &)
+    - ### 제목 -> <b>제목</b>
+    - **강조** -> <b>강조</b>
+    - 불렛 포인트(-) -> •
+    """
+    # 1. 기본 HTML 특수문자 이스케이프 (태그 깨짐 방지)
+    safe_text = html.escape(text)
     
-    return {"ok": True}
+    # 2. 섹션 제목 변환: ### 제목 -> <b>제목</b>
+    safe_text = re.sub(r'^###\s+(.+)$', r'<b>\1</b>', safe_text, flags=re.MULTILINE)
+    
+    # 3. 굵게 변환: **텍스트** -> <b>텍스트</b>
+    safe_text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', safe_text)
+    
+    # 4. 불렛 포인트 변환: 줄 시작의 - -> •
+    safe_text = re.sub(r'^-\s+', '• ', safe_text, flags=re.MULTILINE)
+    
+    return safe_text
 
 
 def classify_query(text: str) -> str:
@@ -232,27 +262,31 @@ def classify_query(text: str) -> str:
     사용자 질문 유형 분류
     - 'esports_schedule': E스포츠 경기 일정 관련
     - 'game_trend': 게임 신작/트렌드 관련
+    - 'economy_news': 국내/외 경제 뉴스 관련
     - 'report': 투자/가계부 리포트 요청
     - 'general_chat': 일반 대화
     """
     text_lower = text.lower()
-
-    text_lower = text.lower()
     
-    # E스포츠 키워드
+    # 1. 리포트 키워드 (투자, 가계부, 자산 리포트)
+    report_keywords = ['리포트', '보고서', 'report', '자산', '수익률', '가계부', '지출']
+    if any(kw in text_lower for kw in report_keywords):
+        return 'report'
+
+    # 2. E스포츠 키워드
     esports_keywords = ['t1', 'skt', '티원', '젠지', 'geng', 'gen.g', 'lol', '롤', 
                         'lck', '발로란트', 'valorant', 'vct', '경기', '일정', 
                         '월즈', 'worlds', '챌린저스', '퍼시픽']
     if any(kw in text_lower for kw in esports_keywords):
         return 'esports_schedule'
     
-    # 게임 트렌드 키워드
+    # 3. 게임 트렌드 키워드
     game_keywords = ['게임', '스팀', 'steam', '신작', '트렌드', '인기', '출시', 
                      '추천', '플스', 'ps5', 'playstation', '닌텐도', 'switch']
     if any(kw in text_lower for kw in game_keywords):
         return 'game_trend'
     
-    # 해외 + 국내 경제 키워드
+    # 4. 해외 + 국내 경제 키워드
     economy_keywords = ['미국', '유럽', '환율', 'fomc', 'ecb', 's&p', '나스닥', '금리',
                         'cpi', 'etf', '달러', '유로', '채권', '국채', 'treasury', '코스피',
                         '코스닥', '주식', '경제', '인플레', '경기', '불황', '호황']

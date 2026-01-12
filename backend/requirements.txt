@@ -2,7 +2,6 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 httpx==0.28.1
 requests==2.32.4
-pandas==2.3.1
 pycryptodome==3.23.0
 PyYAML==6.0.2
 websockets==15.0.1
@@ -10,12 +9,8 @@ openpyxl
 SQLAlchemy>=2.0
 duckdb>=1.0.0
 joblib
-scikit-learn
-llama-cpp-python
 python-multipart
 APScheduler==3.10.4
 simhash==2.1.2
 beautifulsoup4==4.12.2
-sentence-transformers==2.2.2
-faiss-cpu
 feedparser==6.0.10
