@@ -33,11 +33,23 @@ const fetchExpensesMock = vi.fn().mockResolvedValue([
 ]);
 
 const fetchCategoriesMock = vi.fn().mockResolvedValue([]);
+const fetchExpenseSummaryMock = vi.fn().mockResolvedValue({
+  period: { year: 2025, month: 1 },
+  total_expense: 21000,
+  total_income: 0,
+  net: -21000,
+  fixed_expense: 0,
+  fixed_ratio: 0,
+  category_breakdown: [],
+  method_breakdown: [],
+  transaction_count: 2,
+});
 
 vi.mock('@/shared/api/client', () => {
   return {
     ApiClient: class {
       fetchExpenses = fetchExpensesMock;
+      fetchExpenseSummary = fetchExpenseSummaryMock;
       fetchCategories = fetchCategoriesMock;
       deleteExpense = vi.fn().mockResolvedValue({ status: 'ok' });
       restoreExpense = vi.fn().mockResolvedValue({});

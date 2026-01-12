@@ -4,7 +4,7 @@ from .rss import collect_rss, collect_google_news, collect_all_google_news
 from .naver import collect_naver_news, collect_all_naver_news
 from .steam import collect_steamspy_rankings, collect_steam_new_trends
 from .esports import collect_pandascore_schedules
-from .refiner import refine_schedules_with_duckdb, refine_news_with_duckdb, refine_economy_news_with_duckdb
+from .refiner import refine_schedules_with_duckdb, refine_news_with_duckdb, refine_economy_news_with_duckdb, refine_game_trends_with_duckdb
 
 logger = logging.getLogger(__name__)
 
@@ -69,3 +69,7 @@ class NewsCollector:
     @staticmethod
     def refine_economy_news_with_duckdb(query_text: str, limit: int = 20) -> str:
         return refine_economy_news_with_duckdb(query_text, limit)
+
+    @staticmethod
+    def refine_game_trends_with_duckdb(query_text: str, limit: int = 15) -> str:
+        return refine_game_trends_with_duckdb(query_text, limit)

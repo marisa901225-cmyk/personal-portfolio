@@ -199,3 +199,71 @@ def refine_economy_news_with_duckdb(query_text: str, limit: int = 20) -> str:
     finally:
         if 'con' in locals():
             con.close()
+
+def refine_game_trends_with_duckdb(query_text: str, limit: int = 15) -> str:
+    """
+    DuckDB를 사용하여 Steam 트렌드/랭킹 데이터를 검색하고 고밀도 텍스트로 정제한다.
+    - SteamStore: source_type='trend'
+    - SteamSpy: source_name='SteamSpy' (source_type='news')
+    """
+    logger.info(f"Refining Steam game trends using DuckDB for query: {query_text}")
+    try:
+        db_path = get_db_path()
+        con = duckdb.connect(":memory:")
+        escaped_path = db_path.replace("'", "''")
+        con.execute(f"ATTACH '{escaped_path}' AS sqlite_db (TYPE SQLITE, READ_ONLY)")
+
+        q = (query_text or "").lower()
+        where_clauses = [
+            "(source_name IN ('SteamStore', 'SteamSpy') OR game_tag = 'Steam')"
+        ]
+
+        # 간단한 의도 분기: 신작/트렌드는 trend 위주, 랭킹/인기는 SteamSpy 위주
+        if any(k in q for k in ["신작", "new", "출시", "release"]):
+            where_clauses.append("source_type = 'trend'")
+        elif any(k in q for k in ["랭킹", "순위", "top", "인기", "popular", "best"]):
+            where_clauses.append("source_name = 'SteamSpy'")
+
+        where_sql = " AND ".join(where_clauses)
+
+        sql = f"""
+            SELECT
+                strftime(published_at, '%m/%d %H:%M') as time,
+                source_name,
+                source_type,
+                title,
+                url,
+                full_content
+            FROM sqlite_db.game_news
+            WHERE {where_sql}
+            ORDER BY published_at DESC
+            LIMIT {limit}
+        """
+
+        results = con.execute(sql).fetchall()
+        if not results:
+            return "수집된 Steam 트렌드/랭킹 데이터가 없습니다. 스케줄러가 실행되면 데이터가 쌓입니다."
+
+        refined_items = []
+        for r in results:
+            time_str, _source_name, source_type, title, url, content = r
+            icon = "🔥" if source_type == "trend" else "🏆"
+            compact = (content or "").replace("\n", " ").strip()
+            if len(compact) > 160:
+                compact = compact[:160] + "…"
+
+            line = f"{icon} {time_str} | {title}"
+            if compact:
+                line += f"\n   {compact}"
+            if url:
+                line += f"\n   🔗 {url}"
+            refined_items.append(line)
+
+        return "\n".join(refined_items)
+
+    except Exception as e:
+        logger.error(f"Failed to refine Steam game trends: {e}")
+        return "게임 트렌드 정제 중 오류가 발생했습니다."
+    finally:
+        if 'con' in locals():
+            con.close()

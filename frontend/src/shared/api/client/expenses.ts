@@ -1,6 +1,7 @@
 import type {
     BackendExpense,
     BackendExpenseUploadResult,
+    BackendExpenseSummaryResponse,
 } from './types';
 import type { RequestFn } from './core';
 
@@ -28,7 +29,25 @@ export const fetchExpenses = (
     if (params?.category) search.set('category', params.category);
     if (params?.includeDeleted) search.set('include_deleted', 'true');
     const qs = search.toString();
-    return request<BackendExpense[]>(`/api/expenses${qs ? `?${qs}` : ''}`, {
+    return request<BackendExpense[]>(`/api/expenses/${qs ? `?${qs}` : ''}`, {
+        method: 'GET',
+        signal: options.signal,
+    });
+};
+
+export const fetchExpenseSummary = (
+    request: RequestFn,
+    params?: {
+        year?: number;
+        month?: number;
+    },
+    options: { signal?: AbortSignal } = {},
+): Promise<BackendExpenseSummaryResponse> => {
+    const search = new URLSearchParams();
+    if (params?.year != null) search.set('year', params.year.toString());
+    if (params?.month != null) search.set('month', params.month.toString());
+    const qs = search.toString();
+    return request<BackendExpenseSummaryResponse>(`/api/expenses/summary${qs ? `?${qs}` : ''}`, {
         method: 'GET',
         signal: options.signal,
     });

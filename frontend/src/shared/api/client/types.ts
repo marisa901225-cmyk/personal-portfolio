@@ -202,6 +202,28 @@ export interface BackendExpenseUploadResult {
     filename: string;
 }
 
+export interface BackendExpenseSummaryCategoryBreakdownItem {
+    category: string;
+    amount: number;
+}
+
+export interface BackendExpenseSummaryMethodBreakdownItem {
+    method: string;
+    amount: number;
+}
+
+export interface BackendExpenseSummaryResponse {
+    period: { year: number | null; month: number | null };
+    total_expense: number;
+    total_income: number;
+    net: number;
+    fixed_expense: number;
+    fixed_ratio: number;
+    category_breakdown: BackendExpenseSummaryCategoryBreakdownItem[];
+    method_breakdown: BackendExpenseSummaryMethodBreakdownItem[];
+    transaction_count: number;
+}
+
 // --- Ticker Search ---
 
 export interface BackendTickerInfo {
