@@ -94,10 +94,16 @@ if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
   if [[ $file_size -le $MAX_SIZE ]]; then
     # 50MB 이하: 그냥 전송
     echo "INFO: 용량 적합 ($file_size bytes). 단일 파일 전송."
+    
+    # LLM으로 창의적인 메시지 생성
+    file_size_mb=$(echo "scale=2; $file_size / 1024 / 1024" | bc)
+    backup_msg=$(python3 "$SCRIPT_DIR/generate_backup_msg.py" "$file_size_mb" "$backup_time" 2>/dev/null || echo "📦 DB 백업 완료 (${backup_time})")
+    
     curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
          -F chat_id="${TELEGRAM_CHAT_ID}" \
          -F document=@"${archive_path}" \
-         -F caption="📦 DB 백업 완료 (${backup_time})" > /dev/null
+         -F caption="${backup_msg}" \
+         -F parse_mode="HTML" > /dev/null
     echo "INFO: 전송 완료."
   else
     # 50MB 초과: 분할 전송

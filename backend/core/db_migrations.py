@@ -42,6 +42,30 @@ def _migrate_settings_table() -> None:
         statements.append("ALTER TABLE settings ADD COLUMN benchmark_return FLOAT")
     if "benchmark_updated_at" not in columns:
         statements.append("ALTER TABLE settings ADD COLUMN benchmark_updated_at DATETIME")
+    if "kis_app" not in columns:
+        statements.append("ALTER TABLE settings ADD COLUMN kis_app VARCHAR(128)")
+    if "kis_sec" not in columns:
+        statements.append("ALTER TABLE settings ADD COLUMN kis_sec VARCHAR(128)")
+    if "kis_acct_stock" not in columns:
+        statements.append("ALTER TABLE settings ADD COLUMN kis_acct_stock VARCHAR(64)")
+    if "kis_prod" not in columns:
+        statements.append("ALTER TABLE settings ADD COLUMN kis_prod VARCHAR(8)")
+    if "kis_htsid" not in columns:
+        statements.append("ALTER TABLE settings ADD COLUMN kis_htsid VARCHAR(64)")
+    if "kis_prod_url" not in columns:
+        statements.append("ALTER TABLE settings ADD COLUMN kis_prod_url VARCHAR(255)")
+    if "kis_ops_url" not in columns:
+        statements.append("ALTER TABLE settings ADD COLUMN kis_ops_url VARCHAR(255)")
+    if "kis_vps_url" not in columns:
+        statements.append("ALTER TABLE settings ADD COLUMN kis_vps_url VARCHAR(255)")
+    if "kis_vops_url" not in columns:
+        statements.append("ALTER TABLE settings ADD COLUMN kis_vops_url VARCHAR(255)")
+    if "kis_agent" not in columns:
+        statements.append("ALTER TABLE settings ADD COLUMN kis_agent VARCHAR(128)")
+    if "kis_token_encrypted" not in columns:
+        statements.append("ALTER TABLE settings ADD COLUMN kis_token_encrypted TEXT")
+    if "kis_token_expires_at" not in columns:
+        statements.append("ALTER TABLE settings ADD COLUMN kis_token_expires_at DATETIME")
 
     if not statements:
         return

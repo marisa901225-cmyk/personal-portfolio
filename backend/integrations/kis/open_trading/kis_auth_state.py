@@ -39,8 +39,54 @@ def _token_file_lock():
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
-with open(os.path.join(config_root, "kis_user.yaml"), encoding="UTF-8") as f:
-    _cfg = yaml.load(f, Loader=yaml.FullLoader)
+_ENV_MAP = {
+    "my_app": "KIS_MY_APP",
+    "my_sec": "KIS_MY_SEC",
+    "my_acct_stock": "KIS_MY_ACCT_STOCK",
+    "my_prod": "KIS_MY_PROD",
+    "my_htsid": "KIS_MY_HTSID",
+    "prod": "KIS_PROD",
+    "ops": "KIS_OPS",
+    "vps": "KIS_VPS",
+    "vops": "KIS_VOPS",
+    "my_agent": "KIS_MY_AGENT",
+    "my_token": "KIS_MY_TOKEN",
+}
+
+
+def _load_cfg_from_env() -> dict:
+    cfg = {}
+    for key, env_key in _ENV_MAP.items():
+        value = os.getenv(env_key)
+        if value is not None and str(value).strip() != "":
+            cfg[key] = value.strip()
+    return cfg
+
+
+def _load_cfg_from_file() -> dict:
+    path = os.path.join(config_root, "kis_user.yaml")
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="UTF-8") as f:
+        return yaml.load(f, Loader=yaml.FullLoader) or {}
+
+
+def _load_cfg() -> dict:
+    cfg = _load_cfg_from_file()
+    env_cfg = _load_cfg_from_env()
+    if env_cfg:
+        cfg.update(env_cfg)
+    return cfg
+
+
+def reload_config() -> None:
+    global _cfg
+    _cfg = _load_cfg()
+    if "my_agent" in _cfg:
+        _base_headers["User-Agent"] = _cfg["my_agent"]
+
+
+_cfg = _load_cfg()
 
 _TRENV = tuple()
 _last_auth_time = datetime.now()
@@ -59,7 +105,7 @@ _base_headers = {
     "Content-Type": "application/json",
     "Accept": "text/plain",
     "charset": "UTF-8",
-    "User-Agent": _cfg["my_agent"],
+    "User-Agent": _cfg.get("my_agent", "MyAsset"),
 }
 
 _base_headers_ws = {

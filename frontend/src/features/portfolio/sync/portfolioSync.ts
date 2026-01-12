@@ -113,6 +113,7 @@ export const syncPortfolioPrices = async ({
       default: `서버 연결 실패 (또는 오류 발생).\nURL: ${settings.serverUrl}`,
       unauthorized: 'API 비밀번호가 올바르지 않습니다.',
       rateLimited: '시세 제공자가 너무 많은 요청을 받아 잠시 차단했습니다.',
+      serverError: '증권사 연동이 비활성화되어 있거나 오류가 발생했습니다.',
       network: `서버 연결 실패.\nURL: ${settings.serverUrl}`,
     });
   } finally {

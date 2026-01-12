@@ -3,8 +3,8 @@
 #
 # 기존 kis_auth.py 구현을 모듈로 분리하고, 여기서 재-export 한다.
 
-from . import kis_auth_state as _state
-from .kis_auth_rest import (  # noqa: F401
+import kis_auth_state as _state
+from kis_auth_rest import (  # noqa: F401
     APIResp,
     APIRespError,
     _getBaseHeader,
@@ -22,7 +22,7 @@ from .kis_auth_rest import (  # noqa: F401
     set_order_hash_key,
     smart_sleep,
 )
-from .kis_auth_ws import (  # noqa: F401
+from kis_auth_ws import (  # noqa: F401
     KISWebSocket,
     _getBaseHeader_ws,
     add_data_map,

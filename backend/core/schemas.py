@@ -146,6 +146,16 @@ class SettingsRead(BaseModel):
     usd_fx_now: Optional[float] = None
     benchmark_name: Optional[str] = None
     benchmark_return: Optional[float] = None
+    kis_app: Optional[str] = None
+    kis_sec: Optional[str] = None
+    kis_acct_stock: Optional[str] = None
+    kis_prod: Optional[str] = None
+    kis_htsid: Optional[str] = None
+    kis_prod_url: Optional[str] = None
+    kis_ops_url: Optional[str] = None
+    kis_vps_url: Optional[str] = None
+    kis_vops_url: Optional[str] = None
+    kis_agent: Optional[str] = None
 
 
 class SettingsUpdate(BaseModel):
@@ -158,6 +168,16 @@ class SettingsUpdate(BaseModel):
     usd_fx_now: Optional[float] = None
     benchmark_name: Optional[str] = None
     benchmark_return: Optional[float] = None
+    kis_app: Optional[str] = None
+    kis_sec: Optional[str] = None
+    kis_acct_stock: Optional[str] = None
+    kis_prod: Optional[str] = None
+    kis_htsid: Optional[str] = None
+    kis_prod_url: Optional[str] = None
+    kis_ops_url: Optional[str] = None
+    kis_vps_url: Optional[str] = None
+    kis_vops_url: Optional[str] = None
+    kis_agent: Optional[str] = None
 
 
 class DistributionItem(BaseModel):

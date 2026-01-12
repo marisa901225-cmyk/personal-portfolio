@@ -13,6 +13,7 @@ KIS(한국투자증권) 관련 API 엔드포인트.
 
 from __future__ import annotations
 
+import math
 from typing import Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from ..core.auth import verify_api_token
 from ..core.db import get_db
+from ..core.models import Setting
 from ..services.market_data_service import (
     get_kis_prices_krw,
     search_tickers_by_name,
@@ -29,6 +31,7 @@ from ..services.market_data_service import (
     KisApiError,
     EmptyResultError,
 )
+from ..services.users import get_or_create_single_user
 
 
 router = APIRouter(tags=["Market Data"])
@@ -66,6 +69,23 @@ class FxRateResponse(BaseModel):
     rate: float
 
 
+def _get_cached_fx_rate(db: Session) -> float | None:
+    user = get_or_create_single_user(db)
+    setting = (
+        db.query(Setting)
+        .filter(Setting.user_id == user.id)
+        .order_by(Setting.id.asc())
+        .first()
+    )
+    if not setting or setting.usd_fx_now is None:
+        return None
+    if not isinstance(setting.usd_fx_now, (int, float)):
+        return None
+    if not math.isfinite(setting.usd_fx_now) or setting.usd_fx_now <= 0:
+        return None
+    return float(setting.usd_fx_now)
+
+
 # ============================================
 # Endpoints
 # ============================================
@@ -93,7 +113,7 @@ async def get_prices(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except KisConfigurationError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (KisApiError, EmptyResultError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -117,7 +137,7 @@ async def search_ticker(
     try:
         raw_items = await search_tickers_by_name(q)
     except KisConfigurationError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except KisApiError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -140,7 +160,9 @@ async def search_ticker(
     response_model=FxRateResponse,
     dependencies=[Depends(verify_api_token)],
 )
-async def get_fx_rate() -> FxRateResponse:
+async def get_fx_rate(
+    db: Session = Depends(get_db),
+) -> FxRateResponse:
     """
     한국투자증권 해외 현재가 상세 API를 사용해 USD/KRW 당일 환율을 조회한다.
 
@@ -151,6 +173,9 @@ async def get_fx_rate() -> FxRateResponse:
         rate = await get_usdkrw_rate()
         return FxRateResponse(base="USD", quote="KRW", rate=rate)
     except KisConfigurationError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        cached = _get_cached_fx_rate(db)
+        if cached is not None:
+            return FxRateResponse(base="USD", quote="KRW", rate=cached)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (KisApiError, EmptyResultError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

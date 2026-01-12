@@ -135,6 +135,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         unauthorized:
           'API 비밀번호가 올바르지 않습니다.\n백엔드 서버의 API_TOKEN 값과 동일한 비밀번호를 입력했는지 확인해주세요.',
         rateLimited: '시세 제공자가 너무 많은 요청을 받아 잠시 차단했습니다.\n잠시 후 다시 시도해주세요.',
+        serverError: '증권사 연동이 비활성화되어 있거나 오류가 발생했습니다.\n서버의 KIS 설정을 확인해주세요.',
         network: '서버와 통신할 수 없습니다.\n서버 연결을 확인해주세요.',
       });
     }

@@ -7,9 +7,9 @@ from collections import namedtuple
 from datetime import datetime
 
 import requests
-import yaml
 
-from . import kis_auth_state as state
+import kis_auth_state as state
+from backend.integrations.kis.token_store import read_kis_token, save_kis_token
 
 
 def _throttle_rest() -> None:
@@ -30,20 +30,12 @@ def _throttle_rest() -> None:
 
 def save_token(my_token, my_expired):
     valid_date = datetime.strptime(my_expired, "%Y-%m-%d %H:%M:%S")
-    with open(state.token_tmp, "w", encoding="utf-8") as f:
-        f.write(f"token: {my_token}\n")
-        f.write(f"valid-date: {valid_date}\n")
+    save_kis_token(my_token, valid_date)
 
 
 def read_token():
     try:
-        with open(state.token_tmp, encoding="UTF-8") as f:
-            tkg_tmp = yaml.load(f, Loader=yaml.FullLoader)
-        exp_dt = datetime.strftime(tkg_tmp["valid-date"], "%Y-%m-%d %H:%M:%S")
-        now_dt = datetime.today().strftime("%Y-%m-%d %H:%M:%S")
-        if exp_dt > now_dt:
-            return tkg_tmp["token"]
-        return None
+        return read_kis_token()
     except Exception:
         return None
 
@@ -112,6 +104,7 @@ def changeTREnv(token_key, svr="prod", product=state._cfg["my_prod"]):
     cfg["my_htsid"] = state._cfg["my_htsid"]
     cfg["my_url"] = state._cfg[svr]
     cfg["my_url_ws"] = state._cfg["ops" if svr == "prod" else "vops"]
+    cfg["my_prod"] = product
 
     if token_key is not None:
         cfg["my_token"] = token_key
@@ -142,6 +135,10 @@ def auth(svr="prod", product=state._cfg["my_prod"], url=None):
         my_token = read_token()
         if my_token:
             changeTREnv(my_token, svr, product)
+            state._base_headers["authorization"] = f"Bearer {my_token}"
+            state._base_headers["appkey"] = state._TRENV.my_app
+            state._base_headers["appsecret"] = state._TRENV.my_sec
+            state._last_auth_time = datetime.now()
             return my_token
 
         if not url:

@@ -16,8 +16,8 @@ import websockets
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
-from . import kis_auth_state as state
-from .kis_auth_rest import _getBaseHeader, _getResultObject, changeTREnv, getTREnv, smart_sleep
+import kis_auth_state as state
+from kis_auth_rest import _getBaseHeader, _getResultObject, changeTREnv, getTREnv, smart_sleep
 
 open_map: dict = {}
 data_map: dict = {}

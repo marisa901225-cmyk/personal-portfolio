@@ -176,6 +176,20 @@ class Setting(Base):
     benchmark_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     benchmark_return: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     benchmark_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    kis_app: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    kis_sec: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    kis_acct_stock: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    kis_prod: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    kis_htsid: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    kis_prod_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    kis_ops_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    kis_vps_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    kis_vops_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    kis_agent: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    kis_token_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    kis_token_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False
@@ -349,4 +363,3 @@ class AiReport(Base):
     )
 
     user: Mapped[User] = relationship("User", back_populates="ai_reports")
-
