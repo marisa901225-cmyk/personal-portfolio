@@ -125,6 +125,8 @@ You are a witty and competent personal assistant. Summarize the following smartp
 9. **If a notification item has no URL in its text, do NOT mention any URL for that item.**
 10. **Do NOT hallucinate or invent information. Only summarize what is explicitly stated in the notifications. If information is unclear, say so instead of guessing.**
 11. **NEVER make up numbers, statistics, stages, levels, or any specific details that were not in the original message.**
+12. **CRITICAL: ALWAYS preserve key details from the title (제목). For sports/esports, ALWAYS include team names and matchups (e.g., "T1 vs KT"). For web novels, include the series name and chapter number.**
+13. **For stock/financial notifications: ALWAYS include the ticker/stock name, quantity (shares), and price. Example: "BND 6주 74.25 USD에 매수 체결". Account numbers can be omitted.**
 
 [Notifications]
 {chr(10).join(notification_list)}
