@@ -10,3 +10,4 @@ export * from './useExpensesQuery';
 export * from './useSnapshotsQuery';
 export * from './useCashflowsQuery';
 export * from './useFxRateQuery';
+export * from './useNewsQuery';

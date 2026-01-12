@@ -22,6 +22,7 @@ interface AssetListProps {
   }) => void;
   onUpdateCash: (id: string, newBalance: number, cmaConfig?: CmaConfig | null) => void | Promise<void>;
   onRestoreFromBackup?: (snapshot: ImportedAssetSnapshot[]) => Promise<void>;
+  onSelectNewsQuery?: (query: string, ticker?: string | null) => void;
   usdFxNow?: number;
   indexGroupOptions?: string[];
 }
@@ -36,6 +37,7 @@ export const AssetList: React.FC<AssetListProps> = ({
   onUpdateAsset,
   onUpdateCash,
   onRestoreFromBackup,
+  onSelectNewsQuery,
   usdFxNow,
   indexGroupOptions,
 }) => {
@@ -240,6 +242,7 @@ export const AssetList: React.FC<AssetListProps> = ({
                   onDelete={onDelete}
                   onTrade={onTrade}
                   onEdit={setEditingAsset}
+                  onSelectNewsQuery={onSelectNewsQuery}
                   getDefaultFxRate={getDefaultFxRate}
                 />
               ))}

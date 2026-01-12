@@ -18,6 +18,7 @@ import type {
     BackendExpenseUploadResult,
     BackendReportResponse,
     BackendSavedAiReport,
+    BackendNewsSearchResponse,
 } from './types';
 import type { CreateHeadersFn, RequestFn } from './core';
 import { fetchPortfolio, restorePortfolio, fetchSnapshots, createSnapshot } from './portfolio';
@@ -395,5 +396,17 @@ export class ApiClient {
 
     async deleteReport(reportId: number): Promise<void> {
         return deleteReport(this.requestFn, reportId);
+    }
+
+    // --- News ---
+
+    async searchNews(query: string, ticker?: string): Promise<BackendNewsSearchResponse> {
+        let url = `/api/news/search?query=${encodeURIComponent(query)}`;
+        if (ticker) {
+            url += `&ticker=${encodeURIComponent(ticker)}`;
+        }
+        return this.requestFn(url, {
+            method: 'GET',
+        });
     }
 }

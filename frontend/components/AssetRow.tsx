@@ -8,6 +8,7 @@ interface AssetRowProps {
     onDelete: (id: string) => void;
     onTrade: (id: string, type: TradeType, quantity: number, price: number) => void;
     onEdit: (asset: Asset) => void;
+    onSelectNewsQuery?: (query: string, ticker?: string | null) => void;
     getDefaultFxRate: () => number;
 }
 
@@ -16,6 +17,7 @@ export const AssetRow: React.FC<AssetRowProps> = ({
     onDelete,
     onTrade,
     onEdit,
+    onSelectNewsQuery,
     getDefaultFxRate,
 }) => {
     const [isTradeOpen, setIsTradeOpen] = useState(false);
@@ -103,7 +105,12 @@ export const AssetRow: React.FC<AssetRowProps> = ({
                 <td className="p-4">
                     <div>
                         <div className="flex items-center space-x-2">
-                            <p className="font-semibold text-slate-800">{asset.name}</p>
+                            <p
+                                className="font-semibold text-slate-800 cursor-pointer hover:text-indigo-600 transition-colors"
+                                onClick={() => onSelectNewsQuery?.(asset.name, asset.ticker)}
+                            >
+                                {asset.name}
+                            </p>
                             {asset.ticker && (
                                 <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-mono">
                                     {asset.ticker}

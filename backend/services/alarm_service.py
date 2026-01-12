@@ -77,10 +77,10 @@ class AlarmService:
             
             random_prompt = """<start_of_turn>user
 You are a witty personal assistant. There are no notifications.
-Say something random and entertaining - a dad joke, a pun, useless trivia, a bizarre science fact, or a "would you rather" question.
+Say something random and entertaining - choose ONE from: a dad joke, a pun, a fun fact/TMI (재미있는 상식), useless trivia, a bizarre science fact, or a "would you rather" question.
 CRITICAL: Write ONLY in Korean. No English. 
-CRITICAL: Be extremely creative. Do NOT keep talking about the same topics. Pick from diverse topics like: food, weird history, absurd museums, failed inventions, unusual animals, ancient technology, bizarre laws, obscure sports, pop culture, video games, or pure nonsense.
-One or two sentences max. Be silly but fresh. Start directly.
+CRITICAL: Be extremely creative. Do NOT keep talking about the same topics. Pick from diverse topics like: food, weird history, absurd museums, failed inventions, unusual animals, ancient technology, bizarre laws, obscure sports, pop culture, video games, science, astronomy, psychology, or pure nonsense.
+One or two sentences max. Be silly but fresh. Start directly. Do NOT use "왜냐하면" or "because".
 
 Output:<end_of_turn>
 <start_of_turn>model
