@@ -167,9 +167,11 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
 
   // === Handlers ===
   const reload = useCallback(async () => {
-    await queryClient.refetchQueries({ queryKey: queryKeys.portfolio });
-    await queryClient.refetchQueries({ queryKey: queryKeys.snapshots(365) });
-    await queryClient.refetchQueries({ queryKey: queryKeys.cashflows });
+    await Promise.all([
+      queryClient.refetchQueries({ queryKey: queryKeys.portfolio }),
+      queryClient.refetchQueries({ queryKey: queryKeys.snapshots(365) }),
+      queryClient.refetchQueries({ queryKey: queryKeys.cashflows }),
+    ]);
   }, [queryClient]);
 
   const handleUpdateAsset = useCallback(async (id: string, updates: any) => {

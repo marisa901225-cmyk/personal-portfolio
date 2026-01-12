@@ -82,6 +82,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
                     benchmarkReturn: data.benchmark_return ?? undefined,
                 }));
             }
+
         } catch (error) {
             alertError('Save settings error', error, {
                 default: '서버와 통신 중 오류가 발생했습니다.\n설정이 서버에 저장되지 않았을 수 있습니다.',
@@ -127,6 +128,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
                         benchmarkReturn: data.benchmark_return ?? undefined,
                     }));
                 }
+
             } catch (error) {
                 alertError('Failed to load settings from server', error, {
                     default: '설정을 불러오지 못했습니다.\n서버 상태를 확인해주세요.',

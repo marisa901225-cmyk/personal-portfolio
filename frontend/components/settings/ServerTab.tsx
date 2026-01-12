@@ -57,5 +57,6 @@ export const ServerTab: React.FC<ServerTabProps> = ({ settings, onSettingsChange
                 <li>우측 상단의 '가격 동기화' 버튼을 눌러 업데이트하세요.</li>
             </ul>
         </div>
+
     </div>
 );

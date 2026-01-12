@@ -8,6 +8,8 @@ import logging
 import requests
 import yaml
 
+from ..integrations.kis.token_store import read_kis_token
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_BENCHMARK_NAME = "SPY TR"
@@ -72,26 +74,10 @@ def _load_kis_config() -> dict | None:
 def _load_kis_token() -> str | None:
     """Load KIS token, returning None on failure instead of raising."""
     try:
-        config_dir = Path.home() / "KIS" / "config"
-        if not config_dir.exists():
-            logger.warning("KIS config directory not found")
-            return None
-        candidates = sorted(config_dir.glob("KIS20*"), reverse=True)
-        now = datetime.now()
-        for path in candidates:
-            try:
-                data = yaml.safe_load(path.read_text(encoding="utf-8"))
-                token = data.get("token")
-                valid = data.get("valid-date")
-                
-                # Safely parse valid-date
-                valid_dt = _parse_datetime(valid)
-                if token and valid_dt and valid_dt > now:
-                    return token
-            except Exception as e:
-                logger.warning(f"Failed to parse token file {path}: {e}")
-                continue
-        logger.warning("No valid KIS token file found")
+        token = read_kis_token()
+        if token:
+            return token
+        logger.warning("No valid KIS token found in DB")
         return None
     except Exception as e:
         logger.warning(f"Failed to load KIS token: {e}")
