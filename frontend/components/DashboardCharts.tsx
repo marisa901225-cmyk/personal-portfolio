@@ -1,8 +1,11 @@
 import React, { useMemo } from 'react';
 import { PortfolioSummary } from '../lib/types';
 import { formatCurrency } from '@/shared/portfolio';
-import { PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Legend } from 'recharts';
-import { TrendingUp, TrendingDown } from 'lucide-react';
+import {
+    PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area,
+    XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Legend
+} from 'recharts';
+import { TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react';
 
 interface DashboardChartsProps {
     summary: PortfolioSummary;
@@ -47,7 +50,6 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
         if (!historyStats) return null;
         if (benchmarkReturn === undefined || !Number.isFinite(benchmarkReturn)) return null;
 
-        // XIRR이 있으면 XIRR(%)을 기준으로, 없으면 기간 변동(ROI)을 기준으로 비교
         const baseReturn = (summary.xirr_rate !== undefined && summary.xirr_rate !== null)
             ? summary.xirr_rate * 100
             : historyStats.changeRate;
@@ -62,109 +64,147 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
 
     const benchmarkLabel = useMemo(() => {
         const base = benchmarkName?.trim()
-            ? `시장지수 대비 (${benchmarkName.trim()})`
+            ? `시장지수 (${benchmarkName.trim()}) 대비`
             : '시장지수 대비';
         return (summary.xirr_rate !== undefined && summary.xirr_rate !== null)
-            ? `${base} (XIRR 기준)`
+            ? `${base} (XIRR)`
             : base;
     }, [benchmarkName, summary.xirr_rate]);
 
+    const CustomTooltip = ({ active, payload, label }: any) => {
+        if (active && payload && payload.length) {
+            return (
+                <div className="bg-slate-900/90 backdrop-blur-md p-3 rounded-xl border border-white/10 shadow-xl text-xs text-white z-50">
+                    <p className="font-semibold mb-2 text-slate-300">{label}</p>
+                    {payload.map((entry: any, index: number) => (
+                        <div key={index} className="flex items-center gap-3 mb-1 justify-between min-w-[120px]">
+                            <div className="flex items-center gap-1.5">
+                                <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: entry.color }} />
+                                <span className="opacity-80">{entry.name}</span>
+                            </div>
+                            <span className="font-medium font-mono">
+                                {formatCurrency(entry.value)}
+                            </span>
+                        </div>
+                    ))}
+                </div>
+            );
+        }
+        return null;
+    };
+
     return (
         <div className="space-y-6">
-            {/* Rebalance Warnings - Moved to Top of Charts Section */}
+            {/* Rebalance Warnings */}
             {rebalanceNotices.length > 0 && (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800">
-                    <p className="font-semibold mb-1">목표 비중 점검</p>
-                    <ul className="list-disc list-inside space-y-0.5">
-                        {rebalanceNotices.map((msg, idx) => (
-                            <li key={idx}>{msg} 리밸런싱이 필요한지 한 번 점검해 보세요.</li>
-                        ))}
-                    </ul>
+                <div className="animate-fade-in-up">
+                    <div className="bg-amber-50/50 backdrop-blur-sm border border-amber-100 rounded-2xl p-4 flex items-start gap-3 shadow-sm">
+                        <div className="p-2 bg-amber-100/50 rounded-xl text-amber-600 shrink-0">
+                            <AlertTriangle size={18} />
+                        </div>
+                        <div>
+                            <h4 className="text-sm font-semibold text-amber-800 mb-1">리밸런싱 제안</h4>
+                            <ul className="text-xs text-amber-700 space-y-1">
+                                {rebalanceNotices.map((msg, idx) => (
+                                    <li key={idx} className="flex items-center gap-2">
+                                        <span className="w-1 h-1 bg-amber-400 rounded-full" />
+                                        {msg}
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    </div>
                 </div>
             )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
-                {/* Allocation Chart */}
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col h-full">
-                    <h3 className="text-lg font-bold text-slate-800 mb-6">포트폴리오 비중</h3>
-                    <div className="h-[300px] w-full shrink-0">
-                        <ResponsiveContainer width="100%" height="100%" minHeight={300} minWidth={0}>
+                {/* 1. Allocation Chart (Donut) */}
+                <div className="bg-white p-6 rounded-3xl shadow-sm hover:shadow-lg transition-shadow duration-300 border border-slate-100 flex flex-col h-full group">
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                            <span className="w-1 h-5 bg-indigo-500 rounded-full" />
+                            포트폴리오 비중
+                        </h3>
+                        <div className="px-3 py-1 bg-slate-50 rounded-full text-xs font-medium text-slate-500">
+                            자산 구성
+                        </div>
+                    </div>
+
+                    <div className="h-[320px] w-full shrink-0 relative">
+                        <ResponsiveContainer width="100%" height="100%">
                             <PieChart>
                                 <Pie
                                     data={summary.categoryDistribution}
                                     cx="50%"
                                     cy="50%"
-                                    innerRadius={60}
-                                    outerRadius={100}
-                                    paddingAngle={5}
+                                    innerRadius={80}
+                                    outerRadius={110}
+                                    paddingAngle={4}
                                     dataKey="value"
+                                    cornerRadius={6}
                                 >
                                     {summary.categoryDistribution.map((entry, index) => (
                                         <Cell key={`cell-${index}`} fill={entry.color} stroke="none" />
                                     ))}
                                 </Pie>
-                                <Tooltip
-                                    formatter={(value: number | undefined) => (value !== undefined ? formatCurrency(value) : '')}
-                                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                />
+                                <Tooltip content={<CustomTooltip />} />
                             </PieChart>
                         </ResponsiveContainer>
+
+                        {/* Center Text for Donut */}
+                        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                            <span className="text-xs text-slate-400 font-medium">TOTAL ASSETS</span>
+                            <span className="text-xl font-bold text-slate-800 tabular-nums tracking-tight mt-0.5">
+                                {formatCurrency(summary.totalValue)}
+                            </span>
+                        </div>
                     </div>
 
-                    <div className="mt-4 flex-1 flex flex-col justify-end">
-                        <div className="grid grid-cols-2 gap-2">
+                    <div className="mt-4 border-t border-slate-50 pt-4 max-h-[200px] overflow-y-auto custom-scrollbar">
+                        <div className="grid grid-cols-2 gap-3">
                             {summary.categoryDistribution.map((item, idx) => (
-                                <div key={idx} className="flex items-center text-sm">
-                                    <div className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: item.color }}></div>
-                                    <span className="text-slate-600 flex-1 truncate">{item.name}</span>
-                                    <span className="font-medium text-slate-900">
+                                <div key={idx} className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 transition-colors">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
+                                        <span className="text-xs text-slate-600 truncate font-medium">{item.name}</span>
+                                    </div>
+                                    <span className="text-xs font-bold text-slate-800 tabular-nums">
                                         {((item.value / summary.totalValue) * 100).toFixed(1)}%
                                     </span>
                                 </div>
                             ))}
                         </div>
-
-                        {summary.indexDistribution.length > 0 && summary.totalValue > 0 && (
-                            <div className="mt-5 pt-4 border-t border-slate-100">
-                                <h4 className="text-xs font-semibold text-slate-500 mb-3">
-                                    지수별 비중
-                                </h4>
-                                <div className="space-y-2">
-                                    {summary.indexDistribution.map((item, idx) => (
-                                        <div key={idx} className="flex items-center text-xs">
-                                            <div
-                                                className="w-2.5 h-2.5 rounded-full mr-2"
-                                                style={{ backgroundColor: item.color }}
-                                            />
-                                            <span className="text-slate-600 flex-1 truncate">
-                                                {item.name}
-                                            </span>
-                                            <span className="font-medium text-slate-900">
-                                                {((item.value / summary.totalValue) * 100).toFixed(1)}%
-                                            </span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
                     </div>
                 </div>
 
-                {/* History Chart */}
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col h-full">
-                    <h3 className="text-lg font-bold text-slate-800 mb-6">자산 추이 (1년)</h3>
-                    <div className="h-[350px] w-full flex items-center justify-center shrink-0">
+                {/* 2. History Chart (Gradient Area) */}
+                <div className="bg-white p-6 rounded-3xl shadow-sm hover:shadow-lg transition-shadow duration-300 border border-slate-100 flex flex-col h-full group">
+                    <div className="flex items-center justify-between mb-6">
+                        <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                            <span className="w-1 h-5 bg-emerald-500 rounded-full" />
+                            자산 추이 (1년)
+                        </h3>
+                        {historyStats && (
+                            <div className={`flex items-center gap-1 text-sm font-bold bg-slate-50 px-3 py-1 rounded-full ${historyStats.change >= 0 ? 'text-emerald-600' : 'text-rose-600'
+                                }`}>
+                                {historyStats.changeRate >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                                {historyStats.changeRate > 0 ? '+' : ''}{historyStats.changeRate.toFixed(1)}%
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="h-[300px] w-full flex items-center justify-center shrink-0">
                         {summary.historyData.length > 0 ? (
-                            <ResponsiveContainer width="100%" height="100%" minHeight={300} minWidth={0}>
-                                <AreaChart data={summary.historyData}>
+                            <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={summary.historyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                                     <defs>
-                                        <linearGradient id="colorStocks" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#2563eb" stopOpacity={0.2} />
-                                            <stop offset="95%" stopColor="#2563eb" stopOpacity={0} />
+                                        <linearGradient id="gradientStock" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="#6366f1" stopOpacity={0.4} />
+                                            <stop offset="100%" stopColor="#6366f1" stopOpacity={0} />
                                         </linearGradient>
-                                        <linearGradient id="colorRealEstate" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.2} />
-                                            <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
+                                        <linearGradient id="gradientRealEstate" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="#f59e0b" stopOpacity={0.3} />
+                                            <stop offset="100%" stopColor="#f59e0b" stopOpacity={0} />
                                         </linearGradient>
                                     </defs>
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -172,154 +212,113 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
                                         dataKey="date"
                                         axisLine={false}
                                         tickLine={false}
-                                        tick={{ fill: '#94a3b8', fontSize: 12 }}
+                                        tick={{ fill: '#94a3b8', fontSize: 11 }}
                                         dy={10}
+                                        minTickGap={30}
                                     />
                                     <YAxis
                                         hide={true}
                                         domain={['dataMin', 'dataMax']}
                                     />
-                                    <Tooltip
-                                        formatter={(value: number | undefined) => (value !== undefined ? formatCurrency(value) : '')}
-                                        labelStyle={{ color: '#64748b' }}
-                                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                    />
-                                    <Legend verticalAlign="top" height={24} wrapperStyle={{ fontSize: '12px', color: '#64748b' }} />
+                                    <Tooltip content={<CustomTooltip />} />
                                     <Area
                                         type="monotone"
                                         dataKey="stockValue"
-                                        name="주식"
-                                        stroke="#2563eb"
+                                        name="주식 자산"
+                                        stroke="#6366f1"
                                         strokeWidth={3}
-                                        fillOpacity={1}
-                                        fill="url(#colorStocks)"
+                                        fill="url(#gradientStock)"
+                                        activeDot={{ r: 6, strokeWidth: 0, fill: '#6366f1' }}
                                     />
                                     {showRealEstate && (
                                         <Area
                                             type="monotone"
                                             dataKey="realEstateValue"
-                                            name="부동산(내 지분)"
+                                            name="부동산(지분)"
                                             stroke="#f59e0b"
                                             strokeWidth={2}
-                                            fillOpacity={1}
-                                            fill="url(#colorRealEstate)"
+                                            fill="url(#gradientRealEstate)"
                                         />
                                     )}
                                 </AreaChart>
                             </ResponsiveContainer>
                         ) : (
-                            <div className="text-slate-400 text-sm">
-                                아직 자산 추이 데이터가 충분하지 않습니다.
+                            <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2">
+                                <div className="p-4 bg-slate-50 rounded-full">
+                                    <TrendingUp size={24} className="opacity-40" />
+                                </div>
+                                <span className="text-sm">데이터가 충분하지 않습니다</span>
                             </div>
                         )}
                     </div>
 
                     {historyStats && (
-                        <div className="mt-4 pt-4 border-t border-slate-100">
-                            <div className="text-[11px] text-slate-400 mb-3">주식 기준</div>
-                            <div className="grid grid-cols-3 gap-y-4 gap-x-6">
-                                <div>
-                                    <span className="text-xs text-slate-500 block mb-1">총 원금</span>
-                                    <span className="text-sm font-semibold text-slate-700">{formatCurrency(actualInvested ?? summary.totalInvested)}</span>
+                        <div className="mt-auto pt-6 grid grid-cols-2 gap-4">
+                            <div className="p-3 bg-slate-50 rounded-2xl">
+                                <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1">Total Return</div>
+                                <div className={`text-lg font-bold tabular-nums ${historyStats.change >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                    {historyStats.change > 0 ? '+' : ''}{formatCurrency(historyStats.change)}
                                 </div>
-                                <div>
-                                    <span className="text-xs text-slate-500 block mb-1">데이터 시작점</span>
-                                    <span className="text-sm font-semibold text-slate-700">{formatCurrency(historyStats.start)}</span>
-                                </div>
-                                <div>
-                                    <span className="text-xs text-slate-500 block mb-1">현재 금액</span>
-                                    <span className="text-sm font-semibold text-slate-700">{formatCurrency(historyStats.end)}</span>
-                                </div>
-                                <div>
-                                    <span className="text-xs text-slate-500 block mb-1">최고 금액</span>
-                                    <span className="text-sm font-semibold text-slate-700">{formatCurrency(historyStats.max)}</span>
-                                </div>
-                                <div>
-                                    <span className="text-xs text-slate-500 block mb-1">최저 금액</span>
-                                    <span className="text-sm font-semibold text-slate-700">{formatCurrency(historyStats.min)}</span>
-                                </div>
-                                <div>
-                                    <span className="text-xs text-slate-500 block mb-1">기간 변동</span>
-                                    <div className={`flex items-center gap-1 text-sm font-bold ${historyStats.change >= 0 ? 'text-red-500' : 'text-blue-500'}`}>
-                                        {historyStats.changeRate >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                                        {historyStats.changeRate > 0 ? '+' : ''}{historyStats.changeRate.toFixed(2)}%
-                                    </div>
-                                </div>
-                                {benchmarkDiff !== null && (
-                                    <div className="col-span-3 mt-2 pt-3 border-t border-slate-100">
-                                        <div className="flex items-center justify-between">
-                                            <div>
-                                                <span className="text-xs text-slate-500 block mb-1">{benchmarkLabel}</span>
-                                                <span className="text-[11px] text-slate-400">
-                                                    시장지수 수익률 {benchmarkReturn?.toFixed(2)}%
-                                                </span>
-                                            </div>
-                                            <div className={`flex items-center gap-1 text-sm font-bold ${benchmarkDiff >= 0 ? 'text-red-500' : 'text-blue-500'}`}>
-                                                {benchmarkDiff >= 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                                                {benchmarkDiff > 0 ? '+' : ''}{benchmarkDiff.toFixed(2)}%p
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
                             </div>
+
+                            {benchmarkDiff !== null && (
+                                <div className="p-3 bg-slate-50 rounded-2xl">
+                                    <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-1 truncate" title={benchmarkLabel}>
+                                        Vs Benchmark
+                                    </div>
+                                    <div className={`text-lg font-bold tabular-nums ${benchmarkDiff >= 0 ? 'text-emerald-600' : 'text-blue-600'}`}>
+                                        {benchmarkDiff > 0 ? '+' : ''}{benchmarkDiff.toFixed(2)}%p
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
             </div>
 
-            {/* Yearly Stats Chart */}
+            {/* Yearly Stats (Bar Chart) - Full Width */}
             {yearlyStats && yearlyStats.length > 0 && (
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                    <h3 className="text-lg font-bold text-slate-800 mb-6">연도별 자산 흐름</h3>
-                    <div className="h-[300px] w-full">
+                <div className="bg-white p-8 rounded-3xl shadow-sm hover:shadow-lg transition-shadow duration-300 border border-slate-100 group">
+                    <div className="flex items-center justify-between mb-8">
+                        <div>
+                            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                                <span className="w-1 h-5 bg-violet-500 rounded-full" />
+                                연도별 자산 흐름
+                            </h3>
+                            <p className="text-sm text-slate-500 mt-1 pl-3">입금, 출금 및 순자산 변동 내역</p>
+                        </div>
+                    </div>
+
+                    <div className="h-[320px] w-full">
                         <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={yearlyStats} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                            <BarChart data={yearlyStats} barGap={8}>
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                                 <XAxis
                                     dataKey="year"
                                     axisLine={false}
                                     tickLine={false}
-                                    tick={{ fill: '#94a3b8', fontSize: 12 }}
+                                    tick={{ fill: '#94a3b8', fontSize: 12, fontWeight: 500 }}
                                     dy={10}
                                 />
                                 <YAxis
                                     axisLine={false}
                                     tickLine={false}
-                                    tick={{ fill: '#94a3b8', fontSize: 12 }}
+                                    tick={{ fill: '#94a3b8', fontSize: 11 }}
                                     tickFormatter={(value) => `${(value / 1000000).toFixed(0)}M`}
                                 />
                                 <Tooltip
-                                    cursor={{ fill: '#f8fafc' }}
-                                    content={({ active, payload, label }) => {
-                                        if (active && payload && payload.length) {
-                                            const data = payload[0].payload;
-                                            return (
-                                                <div className="bg-white p-4 border border-slate-100 shadow-md rounded-xl text-sm min-w-[150px]">
-                                                    <p className="font-bold text-slate-800 mb-2">{label}년</p>
-                                                    {payload.map((entry: any, index: number) => (
-                                                        <div key={index} className="flex items-center gap-2 mb-1 justify-between">
-                                                            <div className="flex items-center gap-2">
-                                                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
-                                                                <span className="text-slate-500">{entry.name}</span>
-                                                            </div>
-                                                            <span className="font-semibold ml-4">{formatCurrency(entry.value)}</span>
-                                                        </div>
-                                                    ))}
-                                                    {data.note && (
-                                                        <div className="mt-2 pt-2 border-t border-slate-100 text-xs text-slate-500 break-keep">
-                                                            💡 {data.note}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            );
-                                        }
-                                        return null;
-                                    }}
+                                    cursor={{ fill: '#f8fafc', radius: 8 }}
+                                    content={<CustomTooltip />}
                                 />
-                                <Legend wrapperStyle={{ position: 'relative', marginTop: '10px' }} />
-                                <Bar dataKey="deposit" name="입금" fill="#818cf8" radius={[4, 4, 0, 0]} />
-                                <Bar dataKey="withdrawal" name="출금" fill="#fda4af" radius={[4, 4, 0, 0]} />
-                                <Bar dataKey="net" name="순입금" fill="#34d399" radius={[4, 4, 0, 0]} />
+                                <Legend
+                                    verticalAlign="top"
+                                    align="right"
+                                    iconType="circle"
+                                    wrapperStyle={{ top: -10, fontSize: '12px' }}
+                                />
+                                <Bar dataKey="deposit" name="입금" fill="#818cf8" radius={[6, 6, 0, 0]} maxBarSize={50} />
+                                <Bar dataKey="withdrawal" name="출금" fill="#fda4af" radius={[6, 6, 0, 0]} maxBarSize={50} />
+                                <Bar dataKey="net" name="순입금" fill="#34d399" radius={[6, 6, 0, 0]} maxBarSize={50} />
                             </BarChart>
                         </ResponsiveContainer>
                     </div>

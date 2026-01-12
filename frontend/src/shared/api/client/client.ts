@@ -16,6 +16,7 @@ import type {
     BackendAiReportTextResponse,
     BackendExpense,
     BackendExpenseUploadResult,
+    BackendExpenseSummaryResponse,
     BackendReportResponse,
     BackendSavedAiReport,
     BackendNewsSearchResponse,
@@ -58,6 +59,7 @@ import {
     fetchCategories,
     triggerLearning,
     fetchExpenses,
+    fetchExpenseSummary,
     deleteExpense,
     restoreExpense,
     updateExpense,
@@ -357,6 +359,13 @@ export class ApiClient {
         includeDeleted?: boolean;
     }, options: { signal?: AbortSignal } = {}): Promise<BackendExpense[]> {
         return fetchExpenses(this.requestFn, params, options);
+    }
+
+    async fetchExpenseSummary(params?: {
+        year?: number;
+        month?: number;
+    }, options: { signal?: AbortSignal } = {}): Promise<BackendExpenseSummaryResponse> {
+        return fetchExpenseSummary(this.requestFn, params, options);
     }
 
     async deleteExpense(expenseId: number): Promise<{ status: string; deleted_at?: string | null }> {

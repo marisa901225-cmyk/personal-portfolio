@@ -67,6 +67,12 @@ async def telegram_webhook(request: Request):
         cmd = parts[0] if len(parts) > 0 else ""
         arg = parts[1] if len(parts) > 1 else ""
         
+        if cmd == "report":
+            from ..services.reporting.template import build_telegram_steam_trend_message
+            response_text = build_telegram_steam_trend_message(arg)
+            await send_telegram_message(response_text)
+            return {"ok": True}
+
         # /spam 접두사 지원 (하이브리드)
         if cmd == "spam":
             parts = arg.split(maxsplit=1)
@@ -74,7 +80,7 @@ async def telegram_webhook(request: Request):
             arg = parts[1] if len(parts) > 1 else ""
         
         # 지원하는 명령어 리스트
-        SUPPORTED_CMDS = ["add", "del", "list", "on", "off", "help"]
+        SUPPORTED_CMDS = ["report", "add", "del", "list", "on", "off", "help"]
         if cmd not in SUPPORTED_CMDS:
             return {"ok": True}
         
@@ -104,9 +110,15 @@ async def telegram_webhook(request: Request):
         
         db = SessionLocal()
         try:
+            if query_type == 'game_trend':
+                from ..services.reporting.template import build_telegram_steam_trend_message
+                response_text = build_telegram_steam_trend_message(text)
+                await send_telegram_message(response_text)
+                return {"ok": True}
+
             from ..services.llm_service import LLMService
             llm = LLMService.get_instance()
-            
+
             if not llm.is_remote_ready():
                 await send_telegram_message("LLM 원격 서버가 설정되지 않아 답변을 생성할 수 없습니다.")
                 return {"ok": True}
@@ -164,12 +176,11 @@ async def telegram_webhook(request: Request):
             # 3. 게임 트렌드 질의
             elif query_type == 'game_trend':
                 from ..services.news_collector import NewsCollector
-                # Steam 트렌드 + E스포츠 뉴스 모두 포함
-                context_text = NewsCollector.refine_news_with_duckdb('esports', limit=10)
+                context_text = NewsCollector.refine_game_trends_with_duckdb(text, limit=12)
                 
                 prompt = f"""<start_of_turn>user
 당신은 게임 트렌드 전문가이자 사용자의 개인 비서입니다.
-아래 제공된 최신 게임 뉴스 및 트렌드 데이터를 바탕으로 사용자의 질문에 친절하게 답변해 주세요.
+아래 제공된 최신 Steam 트렌드/랭킹 데이터를 바탕으로 사용자의 질문에 친절하게 답변해 주세요.
 
 [최신 게임 트렌드 데이터]
 {context_text}
@@ -180,7 +191,7 @@ async def telegram_webhook(request: Request):
 [답변 규칙]
 - 한국어로 답변하세요.
 - 데이터에 있는 내용을 기반으로 정확하게 안내하세요.
-- 게임 제목, 출시일, 장르 등을 명확히 제시하세요.
+- 게임 제목, 출시/인기 트렌드 포인트(가능하다면), 장르 등을 명확히 제시하세요.
 - 친절하고 위트 있는 말투를 사용하세요.
 
 답변:<end_of_turn>
@@ -221,8 +232,11 @@ def classify_query(text: str) -> str:
     사용자 질문 유형 분류
     - 'esports_schedule': E스포츠 경기 일정 관련
     - 'game_trend': 게임 신작/트렌드 관련
+    - 'report': 투자/가계부 리포트 요청
     - 'general_chat': 일반 대화
     """
+    text_lower = text.lower()
+
     text_lower = text.lower()
     
     # E스포츠 키워드
@@ -334,7 +348,11 @@ async def handle_spam_command(cmd: str, arg: str, db: Session) -> str:
         return f"▶️ 규칙 #{rule_id} 활성화됨"
     
     else:
-        return """<b>ℹ️ 스팸 규칙 관리 도움말</b>
+        return """<b>ℹ️ 봇 명령어 도움말</b>
+/report {내용} - 스팀 게임 트렌드 리포트 생성 (DuckDB 기반)
+(예: /report, /report 신작)
+
+<b>스팸 규칙 관리</b>
 /add {키워드} - 새 키워드 추가 (콤마 구분 가능)
 /del {ID} - 규칙 완전 삭제
 /list - 전체 목록 및 상태 보기
