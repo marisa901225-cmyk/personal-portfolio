@@ -7,12 +7,14 @@ from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
+from pytz import timezone
 
 # .env 파일 로드
-load_dotenv("backend/.env")
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+load_dotenv(os.path.join(PROJECT_ROOT, "backend/.env"))
 
 # 프로젝트 루트를 패스에 추가 (backend 패키지 임포트용)
-sys.path.append(os.getcwd())
+sys.path.append(PROJECT_ROOT)
 
 from backend.services.llm_service import LLMService
 from backend.services.alarm_service import AlarmService
@@ -22,12 +24,17 @@ from backend.core.db import SessionLocal
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(os.path.join(PROJECT_ROOT, "backend/logs/sync_prices_scheduler.log"), encoding='utf-8')
+    ]
 )
 logger = logging.getLogger("sync_prices_scheduler")
+KST = timezone("Asia/Seoul")
 
 def send_telegram_sync(text: str):
     """
-    시세 동기화 전용 텔레그램 전송 (기존 봇 토큰 사용)
+    시세 동기화 전용 텔레그램 전송 (기존 봇 토큰 사용 - DB 백업 봇)
     """
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
@@ -38,68 +45,61 @@ def send_telegram_sync(text: str):
     import requests
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     try:
-        res = requests.post(url, json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"})
+        res = requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=10)
         res.raise_for_status()
     except Exception as e:
         logger.error(f"Failed to send telegram: {e}")
 
-def generate_creative_msg(ticker_count: int):
+async def generate_creative_msg(ticker_count: int):
     """
     LLM을 사용하여 창의적인 업데이트 메시지 생성
     """
-    llm = LLMService.get_instance()
-    if not llm.is_loaded():
-        return f"💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 기준"
+    try:
+        llm = LLMService.get_instance()
+        if not llm.is_loaded():
+            return f"💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')} 기준"
 
-    prompt = f"""<start_of_turn>user
-You are a witty and competent assistant synchronizing investment portfolio prices. You just finished updating {ticker_count} tickers.
-[Rules]
-1. Inform the user that the update is complete in Korean.
-2. You MUST include the exact ticker count ({ticker_count}). Do not hallucinate numbers.
-3. Use a polite and friendly tone in Korean, and be creative and varied in each response.
-4. Keep it concise (2-3 sentences).
-5. Use HTML tags (e.g., <b>, <i>) sparingly to style the Telegram message.
-6. Start directly without introductory phrases.
-
-Message (in Korean):<end_of_turn>
+        prompt = f"""<start_of_turn>user
+You synced {ticker_count} tickers. Inform user in casual Korean (반말). Include ticker count. Add fun/encouraging comment. 2-3 sentences. No HTML. Emojis OK. No intro.
+<end_of_turn>
 <start_of_turn>model
 """
-    try:
         creative_text = llm.generate(prompt, max_tokens=256, temperature=0.8)
-        # 종목 숫자가 환각으로 바뀌었을 경우를 방지하기 위해 강제로 재검증
         if str(ticker_count) not in creative_text:
             creative_text += f"\n\n(참고: 총 {ticker_count}개 종목 업데이트 완료)"
         
-        # 하단에 시간 정보 추가
-        sync_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        final_msg = f"{creative_text}\n\n🕒 {sync_time} 기준"
-        return final_msg
+        sync_time = datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
+        return f"{creative_text}\n\n🕒 {sync_time} 기준"
     except Exception as e:
         logger.error(f"LLM generation failed: {e}")
-        return f"💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 기준"
+        return f"💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')} 기준"
 
-def run_sync_script():
+async def run_sync_script():
     """
-    Executes the existing sync_prices.sh bash script.
+    Executes the existing sync_prices.sh bash script asynchronously.
     """
-    script_path = os.path.join(os.path.dirname(__file__), "sync_prices.sh")
-    logger.info(f"--- Starting Sync Job at {datetime.now()} ---")
+    script_path = os.path.join(PROJECT_ROOT, "backend/scripts/sync_prices.sh")
+    logger.info(f"--- Starting Sync Job at {datetime.now(KST)} ---")
     
     try:
-        # Pass SKIP_TELEGRAM_NOTIFY=true to avoid double notifications
         env = os.environ.copy()
         env["SKIP_TELEGRAM_NOTIFY"] = "true"
+        # PYTHONPATH를 ROOT로 설정하여 스크립트 내부에서 backend 모듈 호출 원활하게 함
+        env["PYTHONPATH"] = PROJECT_ROOT
         
-        result = subprocess.run(
-            ["bash", script_path],
+        process = await asyncio.create_subprocess_exec(
+            "bash", script_path,
             env=env,
-            capture_output=True,
-            text=True
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
         
+        stdout, stderr = await process.communicate()
+        
         ticker_count = 0
-        if result.stdout:
-            for line in result.stdout.strip().split('\n'):
+        if stdout:
+            lines = stdout.decode('utf-8', errors='ignore').strip().split('\n')
+            for line in lines:
                 logger.info(f"[Script STDOUT] {line}")
                 if "TICKER_COUNT=" in line:
                     try:
@@ -107,21 +107,22 @@ def run_sync_script():
                     except:
                         pass
 
-        if result.returncode == 0:
+        if stderr:
+            lines = stderr.decode('utf-8', errors='ignore').strip().split('\n')
+            for line in lines:
+                logger.error(f"[Script STDERR] {line}")
+
+        if process.returncode == 0:
             logger.info(f"Sync script executed successfully. Tickers: {ticker_count}")
-            # Generate and send creative message
-            msg = generate_creative_msg(ticker_count)
+            msg = await generate_creative_msg(ticker_count)
             send_telegram_sync(msg)
         else:
-            logger.error(f"Sync script failed with return code {result.returncode}")
-            if result.stderr:
-                for line in result.stderr.strip().split('\n'):
-                    logger.error(f"[Script STDERR] {line}")
+            logger.error(f"Sync script failed with return code {process.returncode}")
                     
     except Exception as e:
         logger.error(f"Error during sync script execution: {e}")
     finally:
-        logger.info(f"--- Sync Job Finished at {datetime.now()} ---")
+        logger.info(f"--- Sync Job Finished at {datetime.now(KST)} ---")
 
 async def run_alarm_processing():
     """
@@ -138,30 +139,62 @@ async def run_alarm_processing():
         db.close()
         logger.info("--- Alarm Processing Job Finished ---")
 
+async def run_backup_job():
+    """
+    Executes the database backup script.
+    """
+    script_path = os.path.join(PROJECT_ROOT, "backend/scripts/backup_db.sh")
+    logger.info("--- Starting DB Backup Job ---")
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "bash", script_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate()
+        
+        if stdout:
+            for line in stdout.decode().strip().split('\n'):
+                logger.info(f"[Backup STDOUT] {line}")
+        if stderr:
+            for line in stderr.decode().strip().split('\n'):
+                logger.error(f"[Backup STDERR] {line}")
+                
+        if process.returncode == 0:
+            logger.info("DB Backup completed successfully.")
+        else:
+            logger.error(f"DB Backup failed with return code {process.returncode}")
+    except Exception as e:
+        logger.error(f"DB Backup job failed: {e}")
+    finally:
+        logger.info("--- DB Backup Job Finished ---")
+
 async def main():
-    logger.info(f"Current System Time: {datetime.now()}")
+    logger.info(f"Current System Time: {datetime.now(KST)}")
+    
     # Initialize LLM early
     try:
         LLMService.get_instance()
+        logger.info("LLMService initialized successfully.")
     except Exception as e:
         logger.error(f"Failed to initialize LLMService: {e}")
 
-    scheduler = AsyncIOScheduler() # Uses local timezone
+    # Explicitly use Asia/Seoul timezone for scheduler
+    scheduler = AsyncIOScheduler(timezone=KST)
     
-    # 1. KR Market Close: Mon-Fri 15:35
-    # (Matches 06:35 UTC if the machine is on UTC, but we use timezone="Asia/Seoul")
+    # 1. KR Market Close: Mon-Fri 15:35 KST
     scheduler.add_job(
         run_sync_script,
-        CronTrigger(day_of_week='mon-fri', hour=15, minute=35),
+        CronTrigger(day_of_week='mon-fri', hour=15, minute=35, timezone=KST),
         id="kr_market_close",
         name="KR Market Close Sync (15:35 KST)"
     )
+
     
-    # 2. US Market Close: Tue-Sat 06:30
-    # (Matches 21:30 UTC day before if the machine is on UTC)
+    # 2. US Market Close: Tue-Sat 06:30 KST
     scheduler.add_job(
         run_sync_script,
-        CronTrigger(day_of_week='tue-sat', hour=6, minute=30),
+        CronTrigger(day_of_week='tue-sat', hour=6, minute=30, timezone=KST),
         id="us_market_close",
         name="US Market Close Sync (06:30 KST)"
     )
@@ -169,17 +202,27 @@ async def main():
     # 3. Alarm Processing: Every 5 minutes (07:00 - 21:59 KST)
     scheduler.add_job(
         run_alarm_processing,
-        CronTrigger(hour='7-21', minute='*/5'),
+        CronTrigger(hour='7-21', minute='*/5', timezone=KST),
         id="alarm_processing",
         name="Periodic Alarm Summary (Every 5 mins, 7am-10pm)"
+    )
+
+    # 4. Daily DB Backup: Every day at 03:00 KST
+    scheduler.add_job(
+        run_backup_job,
+        CronTrigger(hour=3, minute=0, timezone=KST),
+        id="daily_backup",
+        name="Daily DB Backup (03:00 KST)"
     )
     
     logger.info("Starting Price Sync Scheduler...")
     scheduler.start()
     
+    # 시작 알림 제거 (불필요)
+    
     logger.info("Jobs scheduled:")
     for job in scheduler.get_jobs():
-        next_run = getattr(job, 'next_run_time', 'Unknown')
+        next_run = job.next_run_time
         logger.info(f"  - {job.name} | Next run: {next_run}")
     
     try:
@@ -195,3 +238,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
+
