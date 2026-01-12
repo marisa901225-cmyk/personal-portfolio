@@ -95,15 +95,25 @@ if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
     # 50MB 이하: 그냥 전송
     echo "INFO: 용량 적합 ($file_size bytes). 단일 파일 전송."
     
-    # LLM으로 창의적인 메시지 생성
+    # LLM으로 창의적인 메시지 생성 (도커 컨테이너 안에서 실행)
     file_size_mb=$(echo "scale=2; $file_size / 1024 / 1024" | bc)
-    backup_msg=$(python3 "$SCRIPT_DIR/generate_backup_msg.py" "$file_size_mb" "$backup_time" 2>/dev/null || echo "📦 DB 백업 완료 (${backup_time})")
+    backup_msg=$(docker exec myasset-sync-prices python3 -c "
+import sys
+sys.path.append('/app')
+from backend.services.llm_service import LLMService
+llm = LLMService.get_instance()
+if not llm.is_loaded():
+    print('📦 DB 백업 완료! ${file_size_mb}MB')
+else:
+    prompt = '<start_of_turn>user\nDB backup done. Size: ${file_size_mb}MB. Inform user in casual Korean (반말). Include exact size. Add fun/reassuring comment. 2-3 sentences. No HTML. Emojis OK. No intro. Do NOT mention time.\n<end_of_turn>\n<start_of_turn>model\n'
+    result = llm.generate(prompt, max_tokens=256, temperature=0.8)
+    print(result)
+" 2>/dev/null || echo "📦 DB 백업 완료 (${backup_time})")
     
     curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
          -F chat_id="${TELEGRAM_CHAT_ID}" \
          -F document=@"${archive_path}" \
-         -F caption="${backup_msg}" \
-         -F parse_mode="HTML" > /dev/null
+         -F caption="${backup_msg}" > /dev/null
     echo "INFO: 전송 완료."
   else
     # 50MB 초과: 분할 전송
@@ -187,7 +197,11 @@ else
   echo "WARN: 외장하드 경로($EXTERNAL_BACKUP_DIR)에 접근할 수 없어 복사를 건너뜁니다."
 fi
 
-# (선택) 로컬 백업 정리: 드롭박스 업로드 성공 시 2일 초과 파일 삭제
-if [[ "$dropbox_upload_ok" == "true" ]]; then
-  find "$LOCAL_BACKUP_DIR" \( -name "portfolio_*.db.gz" -o -name "portfolio_*.db.zip" \) -mmin +2880 -delete
+
+# --- 5. 보관 정책 적용 (Retention Policy) ---
+MAINTENANCE_SCRIPT="$(dirname "$0")/maintenance/clean_old_backups.sh"
+if [[ -f "$MAINTENANCE_SCRIPT" ]]; then
+  bash "$MAINTENANCE_SCRIPT" 2 5
+else
+  find "$LOCAL_BACKUP_DIR" \( -name "portfolio_*.db.gz" -o -name "portfolio_*.db.zip" \) -mtime +2 -delete
 fi

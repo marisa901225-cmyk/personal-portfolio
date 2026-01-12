@@ -13,6 +13,15 @@ from pydantic import BaseModel
 # .env 파일 로드
 load_dotenv()
 
+# 마스킹 함수 로드 (데이터 진입점에서 원천 차단)
+try:
+    from backend.services.alarm.filters import mask_sensitive_info
+except ImportError:
+    # 경로 문제 대비 (직접 실행 시)
+    import sys
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from backend.services.alarm.filters import mask_sensitive_info
+
 # 로깅 설정
 logging.basicConfig(
     level=logging.INFO,
@@ -111,12 +120,13 @@ async def collect_alarm(
         
         insert_query = """
         INSERT INTO incoming_alarms (
-            raw_text, sender, app_name, package, app_title, conversation, status, received_at
+            raw_text, masked_text, sender, app_name, package, app_title, conversation, status, received_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
         """
         cursor.execute(insert_query, (
             payload.raw_text, 
+            mask_sensitive_info(payload.raw_text), 
             payload.sender, 
             payload.app_name, 
             payload.package, 
@@ -127,7 +137,7 @@ async def collect_alarm(
         conn.commit()
         conn.close()
         
-        logger.info(f"Alarm received from {payload.sender}")
+        logger.info(f"Alarm received from {mask_sensitive_info(payload.sender) if payload.sender else 'Unknown'}")
         return {"status": "ok", "id": cursor.lastrowid}
         
     except Exception as e:

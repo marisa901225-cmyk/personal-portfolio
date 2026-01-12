@@ -21,22 +21,8 @@ def generate_backup_message(file_size_mb: float, backup_time: str) -> str:
         return f"📦 DB 백업 완료!\n- 파일 크기: {file_size_mb:.2f}MB\n- {backup_time} 기준"
     
     prompt = f"""<start_of_turn>user
-You are a reliable and witty database backup assistant. You just completed a successful database backup.
-
-[Backup Info]
-- File Size: {file_size_mb:.2f}MB
-- Backup Time: {backup_time}
-
-[Rules]
-1. Inform the user that the backup is complete in Korean.
-2. You MUST include the exact file size ({file_size_mb:.2f}MB). Do not hallucinate numbers.
-3. Use a polite, friendly, and reassuring tone in Korean.
-4. Be creative and varied in each response - celebrate the successful backup!
-5. Keep it concise (2-3 sentences).
-6. Use HTML tags (e.g., <b>, <i>) sparingly to style the Telegram message.
-7. Start directly without introductory phrases.
-
-Message (in Korean):<end_of_turn>
+DB backup done. Size: {file_size_mb:.2f}MB, Time: {backup_time}. Inform user in casual Korean (반말). Include exact size. Add fun/reassuring comment. 2-3 sentences. No HTML. Emojis OK. No intro.
+<end_of_turn>
 <start_of_turn>model
 """
     
