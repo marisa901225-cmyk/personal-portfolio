@@ -113,11 +113,19 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
 
                     <div className="mt-6 flex items-end justify-between">
                         <div className="space-y-2">
-                            <div className="flex items-center gap-2 text-indigo-200 text-xs font-medium">
-                                <span>투자 원금(순입금)</span>
-                                <span className="font-bold text-white tabular-nums">
-                                    {formatCurrency(actualInvested ?? summary.totalInvested)}
-                                </span>
+                            <div className="space-y-1.5 bg-white/10 p-3 rounded-2xl border border-white/5 backdrop-blur-sm">
+                                <div className="flex items-center justify-between gap-4 text-indigo-100 text-[11px] font-medium">
+                                    <span className="opacity-70">주식/금융 원금</span>
+                                    <span className="font-bold tabular-nums">
+                                        {formatCurrency((actualInvested ?? summary.totalInvested) - (realEstateSummary?.totalInvested ?? 0))}
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-4 text-indigo-100 text-[11px] font-medium">
+                                    <span className="opacity-70">부동산 지분 원금</span>
+                                    <span className="font-bold tabular-nums">
+                                        {formatCurrency(realEstateSummary?.totalInvested ?? 0)}
+                                    </span>
+                                </div>
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
                                 <div className={`flex items-center gap-1.5 px-3 py-1 bg-white/10 rounded-lg backdrop-blur-md border ${isPositive

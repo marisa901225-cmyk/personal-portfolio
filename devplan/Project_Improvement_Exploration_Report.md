@@ -30,16 +30,14 @@
 |------|------|
 | 🔴 긴급 (P1) | 0 |
 | 🟡 중요 (P2) | 1 |
-| 🟢 개선 (P3) | 1 |
+| 🟢 개선 (P3) | 0 |
 
-총 미적용: 2건
-카테고리별 분포: 🐞 기능/RAG 1, ✨ 시각화 1
+총 미적용: 1건
+카테고리별 분포: 🧹 코드 품질 1
 우선순위별 한줄 요약:
 - P1: 긴급 이슈 없음.
-- P2: 게임 트렌드 질의에서 Steam 트렌드/랭킹 컨텍스트가 누락되어 응답 품질 저하.
-- P3: 지출 요약 차트 부재로 분석 가독성 개선 필요.
-
-> ✅ 이전 세션 대비 변경: 미적용 3건 → 2건. 신규 발견 1건, 적용 완료 2건(세션 로그 기록).
+- P2: 텔레그램 웹훅 라우터 중복/도달 불가 분기 정리 필요.
+- P3: 현재 시점에서 신규 기능 추가 과제는 없음.
 <!-- AUTO-SUMMARY-END -->
 
 ---
@@ -49,43 +47,32 @@
 
 ### 🟡 중요 (P2)
 
-#### [P2-1] 게임 트렌드 질의에서 Steam 트렌드/랭킹 컨텍스트 누락 수정 (Include Steam Trends in Game Trend RAG)
+#### [P2-1] 텔레그램 웹훅 라우터 중복/도달 불가 분기 정리 및 분류 함수 정합성 개선
 | 항목 | 내용 |
 |------|------|
-| **ID** | `telegram-game-trend-context` |
-| **카테고리** | 🐞 기능/RAG |
+| **ID** | `telegram-webhook-refactor` |
+| **카테고리** | 🧹 코드 품질 |
 | **복잡도** | Medium |
-| **대상 파일** | backend/services/news/refiner.py, backend/services/news/collector.py, backend/routers/telegram_webhook.py |
+| **대상 파일** | backend/routers/telegram_webhook.py |
 
-**현재 상태:** 텔레그램 `game_trend` 분기에서 `refine_news_with_duckdb()`를 사용하지만, 해당 함수는 `source_type='news'` + e스포츠 태그 위주로 조회하여 SteamStore(`source_type='trend'`) 및 SteamSpy 랭킹이 컨텍스트에 포함되지 않음.  
-**개선 내용:** DuckDB 정제 단계에 Steam 트렌드/랭킹을 포함하는 전용 정제 함수(예: `refine_game_trends_with_duckdb`)를 추가하고, `NewsCollector` 및 텔레그램 라우터가 이를 사용하도록 연결.  
-**기대 효과:** 게임 신작/인기 트렌드 질의에 실제 Steam 데이터가 포함되어 답변 정확도와 일관성이 향상.
+**현재 상태:** `classify_query()` 내 중복 코드/문서 불일치가 존재하고, 핸들러에는 도달 불가한 분기(중복 `game_trend`)와 유사 로직이 섞여 있어 유지보수성과 동작 예측성이 저하됨.  
+**개선 내용:** 명령어 처리(/report 등)와 자연어 처리 흐름을 명확히 분리하고, 분류 함수의 반환값/문서를 일치시키며, `game_trend` 경로를 단일화. 필요 시 최소 단위 테스트로 회귀를 방지.  
+**기대 효과:** 코드 복잡도 감소, 버그 가능성 감소, 기능 확장(새 분기 추가) 용이.
 <!-- AUTO-IMPROVEMENT-LIST-END -->
 
 ---
 
 <!-- AUTO-FEATURE-LIST-START -->
 ## ✨ 기능 추가 항목 (새 기능)
-
-### 🟢 개선 (P3)
-
-#### [P3-1] 지출 요약 차트 추가 (Expense Summary Charts)
-| 항목 | 내용 |
-|------|------|
-| **ID** | `expense-summary-chart` |
-| **카테고리** | ✨ 시각화 |
-| **복잡도** | Medium |
-| **대상 파일** | frontend/components/ExpensesDashboard.tsx, frontend/lib/api/client.ts, frontend/lib/api/types.ts, frontend/test/expensesDashboard.test.tsx |
-
-**현재 상태:** 지출 요약 API가 존재하지만 프론트에서 사용하지 않아 리스트 중심의 화면 구성.  
-**개선 내용:** `fetchExpenseSummary` 메서드를 추가하고, 카테고리 파이 차트 및 요약 지표를 대시보드에 렌더링.  
-**기대 효과:** 소비 패턴과 고정지출 비중을 직관적으로 파악 가능.
+*(None)*
 <!-- AUTO-FEATURE-LIST-END -->
 
 ---
 
 <!-- AUTO-SESSION-LOG-START -->
 ## 📜 분석 이력
+ - 2026-01-12 17:35 - 세션: P2-2(백업 보관 정책)를 2일 유지로 강화하여 도커 스케줄러에 통합 완료 (Daily 03:00). 로컬 스토리지에 백업이 무분별하게 쌓이지 않도록 자동화함.
+ - 2026-01-12 16:40 - 세션: 알림 수집 파이프라인에 `raw_text`/`masked_text` 분리 및 이중 마스킹 적용으로 외부 노출 경로(로그/LLM/텔레그램) 기준 민감정보 이슈를 해소. 프로젝트 변경사항(백업 압축본, KIS 토큰 저장소, 리포팅 템플릿, 텔레그램 스크립트 등) 기반으로 개선 항목을 재정리. 현재 미적용 2건(P1:0, P2:2, P3:0). 적용 완료 3건.
  - 2026-01-09 16:21 - 세션: 이전 개선 과제 중 적용 완료 2건 확인. 신규 미적용 항목 1건(게임 트렌드 컨텍스트) 발굴, 기존 P3 1건 유지. 현재 미적용 2건(P2:1, P3:1). 적용 완료 2건.
  - 2026-01-09 09:26 - 세션: 알림/스팸/뉴스 모듈 확인. 미적용 항목 3건(P2:2, P3:1) 정리, 신규 항목 1건(스팸 규칙 API 인증) 추가. 적용 완료 0건.
  - 2026-01-05 11:55 - 세션: `backendClient.ts`가 `lib/api/client.ts`로 리팩토링됨에 따라 관련 P2-1(삭제 기능) 완료 처리. P3-1(차트)는 대상 파일을 업데이트하여 유지. 신규 항목으로 [P2-1] API Client 테스트 추가를 제안함.

@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # NB 모델 경로
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "../data/expense_model.joblib")
 
-from .alarm.filters import mask_otp, is_spam, is_promo_spam, is_whitelisted, should_ignore
+from .alarm.filters import mask_sensitive_info, is_spam, is_promo_spam, is_whitelisted, should_ignore
 from .alarm.sanitizer import infer_source, escape_html_preserve_urls, sanitize_llm_output
 from .alarm.parsers import parse_card_approval
 
@@ -203,31 +203,36 @@ Analysis (in Korean):<end_of_turn>
         import html
 
         for alarm in pending:
-            # 1. 마스킹 및 스팸 필터링 (보안 및 1단계)
-            masked_text = mask_otp(alarm.raw_text)
+            # 1. 원문(unmasked)과 마스킹된 텍스트 확보
+            # DB에 masked_text가 있으면 사용, 없으면 온더플라이 마스킹
+            original_text = alarm.raw_text
+            masked_text = (alarm.masked_text if hasattr(alarm, "masked_text") and alarm.masked_text 
+                           else mask_sensitive_info(original_text))
             
-            # 태스크어 변수가 아직 치환되지 않은 경우 필터링
-            if "%antext" in masked_text or "%evtprm" in masked_text:
+            # 마스킹 및 스팸 필터링 (보안 및 1단계)
+            
+            # 태스크어 변수가 아직 치환되지 않은 경우 필터링 (원문 기준 체크)
+            if "%antext" in original_text or "%evtprm" in original_text:
                 alarm.status = "discarded"
                 alarm.classification = "placeholder"
                 continue
 
-            # 1.3 무시할 알림인지 확인 (인증번호 등)
-            if should_ignore(masked_text):
+            # 1.3 무시할 알림인지 확인 (인증번호 등 - 원문 기준 체크)
+            if should_ignore(original_text):
                 alarm.status = "discarded"
                 alarm.classification = "ignored"
                 logger.info(f"Alarm ignored (OTP/Security): {masked_text[:30]}...")
                 continue
 
-            # 1.5 화이트리스트 체크 (스팸 필터보다 우선)
-            if not is_whitelisted(masked_text):
-                is_spam_result, classification = is_spam(masked_text, db)
+            # 1.5 화이트리스트 체크 (원문 기준)
+            if not is_whitelisted(original_text):
+                is_spam_result, classification = is_spam(original_text, db)
                 if is_spam_result:
                     alarm.status = "discarded"
                     alarm.classification = classification
                     continue
 
-                if is_promo_spam(masked_text, db):
+                if is_promo_spam(original_text, db):
                     alarm.status = "discarded"
                     alarm.classification = "promo_rule"
                     continue
@@ -237,8 +242,8 @@ Analysis (in Korean):<end_of_turn>
             if alarm.sender:
                 senders.add(alarm.sender)
 
-            # 2. 카드 승인 내역 시도
-            card_info = parse_card_approval(masked_text)
+            # 2. 카드 승인 내역 시도 (정확한 파싱을 위해 원문 사용)
+            card_info = parse_card_approval(original_text)
             if card_info:
                 # 가맹점 분류 고도화 (NB 적용)
                 category = "기타"
@@ -273,16 +278,16 @@ Analysis (in Korean):<end_of_turn>
                 summaries.append(f"💳 <b>결제 승인</b>: {merchant_esc} ({abs(card_info['amount']):,.0f}원)")
                 continue
 
-            # 3. 그 외 알림 (요약 대상)
+            # 3. 그 외 알림 (요약 대상 - 이미 마스킹된 정보를 리스트에 담음)
             alarm.status = "processed"
             alarm.classification = "llm" 
             to_summarize_alarms.append({
                 "text": masked_text,
-                "sender": alarm.sender,
+                "sender": mask_sensitive_info(alarm.sender) if alarm.sender else None,
                 "app_name": alarm.app_name,
                 "package": alarm.package,
-                "app_title": alarm.app_title,
-                "conversation": alarm.conversation
+                "app_title": mask_sensitive_info(alarm.app_title) if alarm.app_title else None,
+                "conversation": mask_sensitive_info(alarm.conversation) if alarm.conversation else None
             })
 
         # 가계부 리포트 (Expense 인사이트)
