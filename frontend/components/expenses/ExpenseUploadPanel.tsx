@@ -29,6 +29,20 @@ export const ExpenseUploadPanel: React.FC<ExpenseUploadPanelProps> = ({
     onDismissLearnResult,
     fileInputRef,
 }) => {
+    const skipReasonLabels: Record<string, string> = {
+        duplicate: '중복',
+        skip_merchant: '중복 가능 항목 자동 제외(통장)',
+        skip_generic_method: '일반 결제수단 스킵',
+    };
+    const skipBreakdown = uploadResult?.skip_breakdown ?? {};
+    const skipBreakdownItems = Object.entries(skipBreakdown)
+        .filter(([, count]) => count > 0)
+        .map(([key, count]) => ({
+            key,
+            count,
+            label: skipReasonLabels[key] ?? key,
+        }));
+
     return (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -119,9 +133,19 @@ export const ExpenseUploadPanel: React.FC<ExpenseUploadPanelProps> = ({
                         </div>
                         <div className="bg-white/60 rounded-lg py-2">
                             <div className="font-semibold">{uploadResult.skipped}</div>
-                            <div className="text-xs text-emerald-700/80">중복 제외</div>
+                            <div className="text-xs text-emerald-700/80">스킵</div>
                         </div>
                     </div>
+                    {skipBreakdownItems.length > 0 && (
+                        <div className="mt-3 grid gap-2 text-xs text-emerald-700/80">
+                            {skipBreakdownItems.map((item) => (
+                                <div key={item.key} className="flex items-center justify-between">
+                                    <span>{item.label}</span>
+                                    <span className="font-semibold text-emerald-700">{item.count}</span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                     <div className="mt-2 text-xs text-emerald-700/80">
                         파일: {uploadResult.filename}
                     </div>

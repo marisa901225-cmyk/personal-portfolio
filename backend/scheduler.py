@@ -48,7 +48,7 @@ def start_scheduler():
         # 1시간마다 실행
         scheduler.add_job(
             job_collect_news, 
-            IntervalTrigger(hours=1), 
+            IntervalTrigger(minutes=10), 
             id="collect_game_news", 
             replace_existing=True
         )

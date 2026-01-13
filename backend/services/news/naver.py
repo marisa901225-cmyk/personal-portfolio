@@ -29,7 +29,7 @@ async def collect_naver_news(db: Session, query: str, category: str = "esports")
     }
     params = {
         "query": query,
-        "display": 10,  # 최대 100까지 가능
+        "display": 100,  # 최대 100까지 가능
         "start": 1,
         "sort": "date",  # 최신순
     }

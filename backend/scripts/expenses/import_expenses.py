@@ -75,7 +75,7 @@ def main():
             continue
         
         try:
-            rows, added, skipped = import_expenses_from_file(
+            rows, added, skipped, skip_breakdown = import_expenses_from_file(
                 db_path=str(db_path),
                 file_path=file_path,
                 dry_run=args.dry_run,
@@ -86,7 +86,9 @@ def main():
             total_added += added
             total_skipped += skipped
             
-            print(f"  • 총 {rows}개 | ✅ 추가 {added}개 | ⏭️  중복 {skipped}개\n")
+            breakdown_text = ", ".join(f"{key} {value}" for key, value in skip_breakdown.items() if value)
+            breakdown_label = f" (사유: {breakdown_text})" if breakdown_text else ""
+            print(f"  • 총 {rows}개 | ✅ 추가 {added}개 | ⏭️  스킵 {skipped}개{breakdown_label}\n")
             
         except Exception as e:
             print(f"❌ 오류 발생: {e}\n")

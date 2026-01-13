@@ -191,6 +191,8 @@ def parse_excel_or_csv(file_path: Path) -> pd.DataFrame:
     if missing:
         raise ValueError(f"필수 컬럼이 없습니다: {missing}\n현재 컬럼: {list(df.columns)}")
     
+    return mapped_df
+
     # method가 없으면 파일명에서 추출
     if 'method' not in mapped_df.columns:
         mapped_df['method'] = file_path.stem
@@ -199,17 +201,76 @@ def parse_excel_or_csv(file_path: Path) -> pd.DataFrame:
     raw_dates = mapped_df['date'].astype(str)
     mapped_df['date'] = pd.to_datetime(mapped_df['date'], errors='coerce')
     
-    # 날짜 파싱 실패 시 연도 추출 시도
-    if mapped_df['date'].isna().any():
-        sample = raw_dates[raw_dates.notna()].head(1)
-        if not sample.empty and re.match(r"^\d{2}\.\d{2}(\s+\d{2}:\d{2}:\d{2})?$", sample.iloc[0]):
+    # [FIX] 파일명에서 연도 추출 (가장 우선순위 높음)
+    filename_year = None
+    year_match = re.search(r"(20\d{2})", file_path.stem)
+    if year_match:
+        filename_year = year_match.group(1)
+        
+    # 날짜 파싱 실패 시 또는 파일명에 연도가 있는 경우 보정
+    if mapped_df['date'].isna().any() or filename_year:
+        # 헤더에서 연도 찾기 (파일명 연도가 없으면 fallback)
+        header_year = None
+        if not filename_year:
             header_text = " ".join(header_text_source.astype(str).head(10).fillna("").values.flatten())
-            year_match = re.search(r"(20\d{2})\.\d{2}\.\d{2}", header_text)
-            if year_match:
-                year = year_match.group(1)
-                date_str = year + "." + raw_dates
-                fmt = "%Y.%m.%d %H:%M:%S" if " " in sample.iloc[0] else "%Y.%m.%d"
-                mapped_df['date'] = pd.to_datetime(date_str, format=fmt, errors='coerce')
+            header_match = re.search(r"(20\d{2})\.\d{2}\.\d{2}", header_text)
+            if header_match:
+                header_year = header_match.group(1)
+        
+        target_year = filename_year or header_year
+        
+        if target_year:
+            # 기존 파싱된 날짜가 있어도 연도가 다르면 교체, 아니면 새로 파싱
+            def fix_year(d, y):
+                if pd.isna(d):
+                    return d
+                try:
+                    # 원본 문자열에서 월/일 추출 시도 (단순 파싱)
+                    # 이미 파싱된 d가 있다면 월/일은 믿을 수 있음 -> 연도만 교체
+                    return d.replace(year=int(y))
+                except:
+                    return d
+
+            # 날짜가 NaT인 경우 원본 문자열과 target_year 조합 시도
+            if mapped_df['date'].isna().any():
+                # 포맷 추정 (점. 구분)
+                date_str = target_year + "." + raw_dates
+                # 이미 점이 포함된 짧은 형식(12.31 등)이라고 가정
+                # 하지만 raw_dates가 이미 '2025-12-31' 포맷일 수도 있음.
+                # 단순하게: 우선 pd.to_datetime으로 파싱된 것의 연도를 강제 변경
+                pass
+
+            # 1. 일단 다시 파싱 (연도 붙여서) - raw_dates가 'MM.DD' 형식일 때 유효
+            #    raw_dates가 이미 'YYYY...' 형식이면 꼬일 수 있음.
+            #    따라서 'MM.DD' 패턴인지 확인 필요
+            
+            # 전략: 
+            # 1) 파싱 성공한 날짜들 -> filename_year로 연도 교체
+            # 2) 파싱 실패한 날짜들 -> 'Year.Raw' 로 다시 시도
+            
+            if filename_year:
+                # 파싱 성공한 것들 연도 교체
+                mask_ok = mapped_df['date'].notna()
+                if mask_ok.any():
+                    mapped_df.loc[mask_ok, 'date'] = mapped_df.loc[mask_ok, 'date'].apply(lambda x: x.replace(year=int(filename_year)))
+            
+            # 파싱 실패한 것들 (또는 아직 처리 안된 것들)
+            mask_na = mapped_df['date'].isna()
+            if mask_na.any():
+                # 'MM.DD' 형태라고 가정하고 연도 붙이기
+                # raw_dates에 이미 연도가 있을 수도 있으니 주의.
+                # 하지만 보통 엑셀에서 날짜가 깨지면 텍스트로 오거나...
+                # 여기서는 'MM.DD' 텍스트로 온 경우를 상정
+                
+                # 원본 텍스트 정제 (점 구분 가정)
+                clean_dates = raw_dates[mask_na].str.strip()
+                # 20xx로 시작하지 않는 경우만 처리
+                needs_year = ~clean_dates.str.match(r'^20\d{2}')
+                
+                if needs_year.any():
+                    date_str = target_year + "." + clean_dates[needs_year]
+                    mapped_df.loc[mask_na & needs_year, 'date'] = pd.to_datetime(date_str, errors='coerce')
+
     
     # 금액 형식 변환 (쉼표 제거)
     mapped_df['amount'] = mapped_df['amount'].astype(str).str.replace(',', '').str.replace(' ', '')

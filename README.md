@@ -105,6 +105,33 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8000
 
 ---
 
+## 🧾 지출/수입 업로드 데이터 흐름 (가이드)
+
+### 1) 어떤 파일을 올려야 하나?
+- **권장**: 카드사 이용내역 (카드사 엑셀/CSV)
+- **가능**: 계좌/통장 내역 (은행 엑셀/CSV)
+- **주의**: 통장 내역은 카드 결제/체크카드/네이버페이 출금이 함께 섞여 있어 중복 방지 필터로 많이 제외됩니다.
+
+### 2) 업로드 흐름
+- 프론트: `frontend/components/ExpensesDashboard.tsx` → `uploadExpenseFile`
+- API: `backend/routers/expense_upload.py`
+- 파서: `backend/scripts/expenses/parsers/excel_csv.py` (컬럼 자동 매핑)
+- 임포터: `backend/scripts/expenses/importer.py`
+- 저장: `backend/storage/db/portfolio.db` 의 `expenses` 테이블
+
+### 3) 중복/스킵 규칙 요약
+- **중복 판정**: 날짜 + 가맹점 + 금액 + 결제수단 기준으로 기존 DB와 비교
+- **통장 내역 스킵**: 아래 패턴은 중복 가능성이 높아 자동 제외
+  - `체크*` (체크카드 출금)
+  - `네이버파이낸셜`
+  - 카드 결제대금 키워드 (신한카드/우리카드결제/삼성카드/국민카드/현대카드/롯데카드/BC카드)
+
+### 4) 권장 운영 방식
+- 카드사 내역으로 업로드하면 중복 스킵이 줄어듭니다.
+- 통장 내역만 올릴 경우 “중복 제외”가 많아 보이는 것이 정상입니다.
+
+---
+
 ## 🧪 테스트
 
 ```bash

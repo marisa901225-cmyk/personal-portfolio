@@ -60,7 +60,7 @@ async def upload_expense_file(
         db_path = Path(__file__).resolve().parents[1] / "storage" / "db" / "portfolio.db"
         
         # 임포트 실행
-        total_rows, added, skipped = import_expenses_from_file(
+        total_rows, added, skipped, skip_breakdown = import_expenses_from_file(
             db_path=str(db_path),
             file_path=tmp_path,
             dry_run=False,
@@ -72,6 +72,7 @@ async def upload_expense_file(
             "total_rows": total_rows,
             "added": added,
             "skipped": skipped,
+            "skip_breakdown": skip_breakdown,
             "filename": file.filename,
         }
     
