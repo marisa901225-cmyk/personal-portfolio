@@ -86,7 +86,7 @@ async def collect_google_news(db: Session, query: str, region: str = "US"):
         feed = feedparser.parse(feed_url)
         count = 0
         
-        for entry in feed.entries[:10]:  # 쿼리당 최대 10개
+        for entry in feed.entries[:20]:  # 쿼리당 최대 20개
             title = entry.get("title", "")
             link = entry.get("link", "")
             published_str = entry.get("published", "")

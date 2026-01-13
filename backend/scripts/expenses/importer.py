@@ -85,7 +85,7 @@ def import_expenses_from_file(
     file_path: Path,
     dry_run: bool = False,
     auto_category: bool = True
-) -> Tuple[int, int, int]:
+) -> Tuple[int, int, int, dict[str, int]]:
     """
     파일에서 지출 데이터를 읽어서 DB에 임포트
     
@@ -96,7 +96,7 @@ def import_expenses_from_file(
         auto_category: True이면 자동 카테고리 분류
     
     Returns:
-        (총 행수, 새로 추가된 행수, 중복 스킵 행수)
+        (총 행수, 새로 추가된 행수, 중복 스킵 행수, 스킵 사유 카운트)
     """
     engine = create_engine(f"sqlite:///{db_path}")
     
@@ -119,6 +119,11 @@ def import_expenses_from_file(
     added_count = 0
     skipped_count = 0
     updated_count = 0
+    skip_breakdown = {
+        "skip_merchant": 0,
+        "skip_generic_method": 0,
+        "duplicate": 0,
+    }
     is_naverpay_file = file_path.suffix.lower() == '.txt'
 
     with Session(engine) as session:
@@ -188,6 +193,7 @@ def import_expenses_from_file(
             # 중복 가능 항목 건너뛰기
             if should_skip_merchant(merchant, amount, is_naverpay_file):
                 skipped_count += 1
+                skip_breakdown["skip_merchant"] += 1
                 continue
 
             # 카테고리 자동 분류
@@ -233,6 +239,7 @@ def import_expenses_from_file(
                 has_non_generic = any(not is_generic_method(m) for _, m in methodless_entries if m)
                 if is_generic_method(method) and has_non_generic:
                     skipped_count += 1
+                    skip_breakdown["skip_generic_method"] += 1
                     continue
                 if not is_generic_method(method) and not has_non_generic:
                     updated_count += 1
@@ -248,6 +255,7 @@ def import_expenses_from_file(
             # 중복 체크
             if tx_hash in existing_hashes or dedup_key in existing_keys:
                 skipped_count += 1
+                skip_breakdown["duplicate"] += 1
                 continue
             
             # Expense 생성
@@ -280,4 +288,4 @@ def import_expenses_from_file(
     if updated_count:
         print(f"🔧 기존 거래 수정 {updated_count}개")
 
-    return len(df), added_count, skipped_count
+    return len(df), added_count, skipped_count, skip_breakdown

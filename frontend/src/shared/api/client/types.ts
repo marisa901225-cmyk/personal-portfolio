@@ -199,6 +199,7 @@ export interface BackendExpenseUploadResult {
     total_rows: number;
     added: number;
     skipped: number;
+    skip_breakdown?: Record<string, number>;
     filename: string;
 }
 
