@@ -54,10 +54,7 @@ async def upload_expense_file(
     
     try:
         # import_expenses 로직 호출
-        import sys
-        sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-        
-        from scripts.expenses.import_expenses import import_expenses_from_file
+        from ..scripts.expenses.importer import import_expenses_from_file
         
         # DB 경로
         db_path = Path(__file__).resolve().parents[1] / "storage" / "db" / "portfolio.db"
@@ -81,6 +78,8 @@ async def upload_expense_file(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
     
     finally:
