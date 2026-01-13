@@ -141,6 +141,20 @@ python -m unittest backend/tests
 
 ---
 
+## 🚀 배포 (Deployment)
+
+### 프론트엔드 (Vercel 수동 배포)
+```bash
+npx vercel --prod
+```
+
+### 백엔드
+```bash
+git pull && docker-compose up -d --build
+```
+
+---
+
 ## 📌 참고
 
 - `devplan/` 폴더에 개선 보고서와 프롬프트가 관리됩니다.

@@ -3,6 +3,12 @@
 #   docker build -f Dockerfile.base -t myasset-base:latest .
 FROM myasset-base:latest
 
+# Install lightweight backup utilities (sqlite3 for hot backup, zip for encryption)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    sqlite3 \
+    zip \
+    && rm -rf /var/lib/apt/lists/*
+
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1

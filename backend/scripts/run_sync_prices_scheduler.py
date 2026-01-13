@@ -59,12 +59,26 @@ async def generate_creative_msg(ticker_count: int):
         if not llm.is_loaded():
             return f"💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')} 기준"
 
-        prompt = f"""<start_of_turn>user
-You synced {ticker_count} tickers. Inform user in casual Korean (반말). Include ticker count. Add fun/encouraging comment. 2-3 sentences. No HTML. Emojis OK. No intro.
-<end_of_turn>
-<start_of_turn>model
+        # 모델 템플릿에 의존하지 않고 generate_chat 사용
+        messages = [
+            {
+                "role": "user",
+                "content": f"""
+{ticker_count}개 종목 시세 동기화 완료됐어. 사용자한테 알려줄 짧은 메시지 만들어줘.
+
+[규칙]
+- 반말로 친근하게 (예: "동기화 끝났어!")
+- 종목 수({ticker_count}개) 반드시 포함
+- 한두 문장으로 짧게
+- 재미있거나 응원하는 한마디 추가
+- 이모지 OK
+- 한국어만
+
+바로 메시지만 출력!
 """
-        creative_text = llm.generate(prompt, max_tokens=256, temperature=0.8)
+            }
+        ]
+        creative_text = llm.generate_chat(messages, max_tokens=128, temperature=0.8)
         if str(ticker_count) not in creative_text:
             creative_text += f"\n\n(참고: 총 {ticker_count}개 종목 업데이트 완료)"
         
@@ -73,6 +87,7 @@ You synced {ticker_count} tickers. Inform user in casual Korean (반말). Includ
     except Exception as e:
         logger.error(f"LLM generation failed: {e}")
         return f"💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')} 기준"
+
 
 async def run_sync_script():
     """

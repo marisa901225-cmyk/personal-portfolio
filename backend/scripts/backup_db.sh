@@ -95,20 +95,9 @@ if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
     # 50MB 이하: 그냥 전송
     echo "INFO: 용량 적합 ($file_size bytes). 단일 파일 전송."
     
-    # LLM으로 창의적인 메시지 생성 (도커 컨테이너 안에서 실행)
+    # LLM으로 창의적인 메시지 생성 (별도 스크립트 호출)
     file_size_mb=$(echo "scale=2; $file_size / 1024 / 1024" | bc)
-    backup_msg=$(docker exec myasset-sync-prices python3 -c "
-import sys
-sys.path.append('/app')
-from backend.services.llm_service import LLMService
-llm = LLMService.get_instance()
-if not llm.is_loaded():
-    print('📦 DB 백업 완료! ${file_size_mb}MB')
-else:
-    prompt = '<start_of_turn>user\nDB backup done. Size: ${file_size_mb}MB. Inform user in casual Korean (반말). Include exact size. Add fun/reassuring comment. 2-3 sentences. No HTML. Emojis OK. No intro. Do NOT mention time.\n<end_of_turn>\n<start_of_turn>model\n'
-    result = llm.generate(prompt, max_tokens=256, temperature=0.8)
-    print(result)
-" 2>/dev/null || echo "📦 DB 백업 완료 (${backup_time})")
+    backup_msg=$(docker exec myasset-sync-prices python3 /app/backend/scripts/generate_backup_msg.py "${file_size_mb}" "${backup_time}" 2>/dev/null || echo "📦 DB 백업 완료 (${file_size_mb}MB)")
     
     curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
          -F chat_id="${TELEGRAM_CHAT_ID}" \

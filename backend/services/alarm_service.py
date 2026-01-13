@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # NB 모델 경로
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "../data/expense_model.joblib")
 
-from .alarm.filters import mask_sensitive_info, is_spam, is_promo_spam, is_whitelisted, should_ignore
+from .alarm.filters import mask_sensitive_info, is_spam, is_promo_spam, is_whitelisted, should_ignore, is_spam_llm
 from .alarm.sanitizer import infer_source, escape_html_preserve_urls, sanitize_llm_output
 from .alarm.parsers import parse_card_approval
 
@@ -63,10 +63,6 @@ class AlarmService:
             current_minute = datetime.now().minute
             # 10분 간격이 아니면 조용히 스킵 (:00, :10, :20, :30, :40, :50만 전송)
             if current_minute % 10 != 0:
-                # TODO: LLM Random Message Improvements
-                # - [x] UX Refinement
-                # - [x] Remove redundant prefixes from random messages
-                # - [x] Improve LLM message variety (bye bye penguins/dogs)
                 logger.info(f"No alarms, but skipping random message (minute={current_minute}, not 10-min interval)")
                 return None  # 메시지 안 보냄
             
@@ -75,18 +71,60 @@ class AlarmService:
                 llm_service.reset_context()
                 logger.info("Hourly LLM context reset performed.")
             
-            random_prompt = """<start_of_turn>user
-You are a witty personal assistant. There are no notifications.
-Say something random and entertaining - choose ONE from: a dad joke, a pun, a fun fact/TMI (재미있는 상식), useless trivia, a bizarre science fact, or a "would you rather" question.
-CRITICAL: Write ONLY in Korean. No English. 
-CRITICAL: Be extremely creative. Do NOT keep talking about the same topics. Pick from diverse topics like: food, weird history, absurd museums, failed inventions, unusual animals, ancient technology, bizarre laws, obscure sports, pop culture, video games, science, astronomy, psychology, or pure nonsense.
-One or two sentences max. Be silly but fresh. Start directly. Do NOT use "왜냐하면" or "because".
+            # 현재 시간의 분(minute)을 기반으로 카테고리 & 형식 강제 선택 (다양성 확보)
+            category_index = (current_minute // 10) % 5  # 0~4 범위
+            format_index = (datetime.now().hour + category_index) % 5  # 시간 + 카테고리로 형식도 분산
+            
+            categories = [
+                "지식/과학 (우주, 물리학, 생물학, 기술사, 수학 퍼즐)",
+                "역사/문화 (고대문명, 이상한 역사, 폐기된 발명품, 기묘한 법률)",
+                "엔터/취미 (게임 트리비아, e스포츠, 마이너 스포츠, 영화/드라마 비하인드)",
+                "언어유희/드립 (말장난, 아재개그, 논리 역설, 수수께끼)",
+                "철학/심리 (사고실험, 심리학 실험, 인지 편향, 재미있는 통계)"
+            ]
+            
+            # 문장 시작 형식도 강제 (반복 방지)
+            formats = [
+                "질문형으로 시작해라 (예: '혹시 알아?' / '이거 들어봤어?')",
+                "팩트 단언형으로 시작해라 (예: '사실...' / '진짜 신기한 건...')",
+                "감탄형으로 시작해라 (예: '와!' / '헐!' / '대박!')",
+                "수수께끼/퀴즈형으로 시작해라 (예: 'OO는 왜 OO일까?')",
+                "선택형으로 시작해라 (예: 'A vs B 중 뭐가 나을까?')"
+            ]
+            
+            forced_category = categories[category_index]
+            forced_format = formats[format_index]
+            
+            messages = [
+                {
+                    "role": "user",
+                    "content": f"""
+기분 전환용 짧은 메시지 하나 만들어줘!
 
-Output:<end_of_turn>
-<start_of_turn>model
+[규칙]
+- 200자 이내, 한국어만
+- 밝고 유쾌한 톤 (재미있거나 신기한 내용)
+
+[이번 주제]
+🎯 {forced_category}
+
+[이번 형식]
+✏️ {forced_format}
+
+[절대 금지 - 이거 쓰면 실패!]
+❌ "오늘도 하루가", "오늘 하루도", "하루가 ~네" 같은 일상 회고 패턴
+❌ 커피, 퇴근, 출근, 주말, 월요일 등 직장인 일상
+❌ 위로/동정 구하는 말투 ("쉬고 싶다", "힘들다")
+❌ 부정적 감정 단어 (우울, 슬프다, 피곤, 지친다)
+❌ 음식, 동물 잡학, 날씨
+
+바로 내용만 출력!
 """
+                }
+            ]
+            
             logger.info("No alarms to process. Asking LLM for random wisdom...")
-            result = llm_service.generate(random_prompt, max_tokens=128, temperature=0.9)
+            result = llm_service.generate_chat(messages, max_tokens=128, temperature=0.9)
             logger.info(f"LLM Random Response: {result}")
             return result
 
@@ -109,33 +147,43 @@ Output:<end_of_turn>
             
             notification_list.append(f"- {context} 본문: {text}")
 
-        # Gemma-3에 최적화된 프롬프트 구성 (English Prompt for better 3-bit performance)
-        prompt = f"""<start_of_turn>user
-You are a witty and competent personal assistant. Summarize the following smartphone notifications strictly in Korean. Use NO English in your final summary.
+        messages = [
+            {
+                "role": "user",
+                "content": f"""
+너는 위트 있고 유능한 개인 비서야. 아래 스마트폰 알림들을 한국어로 요약해줘.
 
-[Rules]
-1. Group similar topics and write in concise Korean bullet points.
-2. Include the app name or sender information for each item.
-3. **ONLY include URLs that are EXPLICITLY present in the original notifications. NEVER invent or guess URLs.**
-4. **NEVER output self-referential or meta phrases like "I will summarize", "Here is the summary", "비서의 말투로 작성해드리겠습니다", etc. Just output the actual summary content directly.**
-5. **Exclude all ads, spam, or low-value messages.**
-6. Use casual-polite Korean (해요체). Be friendly and slightly witty.
-7. Write ONLY in Korean. No English.
-8. **CRITICAL: You MUST NOT mention any app/service name that is not explicitly present in the [앱: ...] context. Do not invent service names like "Credo".**
-9. **If a notification item has no URL in its text, do NOT mention any URL for that item.**
-10. **Do NOT hallucinate or invent information. Only summarize what is explicitly stated in the notifications. If information is unclear, say so instead of guessing.**
-11. **NEVER make up numbers, statistics, stages, levels, or any specific details that were not in the original message.**
-12. **CRITICAL: ALWAYS preserve key details from the title (제목). For sports/esports, ALWAYS include team names and matchups (e.g., "T1 vs KT"). For web novels, include the series name and chapter number.**
-13. **For stock/financial notifications: ALWAYS include the ticker/stock name, quantity (shares), and price. Example: "BND 6주 74.25 USD에 매수 체결". Account numbers can be omitted.**
+[필터링 규칙 - 1단계]
+다음 유형의 알림은 무조건 제외해라:
+- 광고나 프로모션 (예: (광고), [광고], 특가, 할인, 이벤트)
+- 포인트/리워드/쇼핑 혜택 (예: 포인트 적립, 혜택, 쿠폰, 증정, 응모)
+- 의미 없는 시스템 메시지나 반복적인 잡음
 
-[Notifications]
+[요약 규칙 - 2단계]
+남은 중요한 알림들만 요약해라:
+- 비슷한 주제는 묶어서 간결한 불릿 포인트로 작성
+- 각 항목에 앱 이름이나 발신자 정보를 포함
+- 해요체로 친근하게 작성
+- 제목에 있는 핵심 정보(스포츠 대진표, 소설 제목, 주식 종목/가격 등)는 반드시 유지
+
+[마스킹된 정보 처리]
+- 개인정보 보호를 위해 이름, 계좌번호, 전화번호 등이 *로 마스킹되어 있음
+- 마스킹된 텍스트는 그대로 유지해라 (예: "이*후님" → "이*후님", "[계좌번호]" → "[계좌번호]")
+- 마스킹을 풀거나 추측해서 채우지 마라
+
+[출력 형식]
+- "요약입니다", "필터링했습니다" 같은 메타 문구 없이 바로 내용으로 시작
+- 오직 한국어로만 작성 (영어 금지)
+- URL은 원문에 명시되어 있을 때만 포함, 절대 만들어내지 마라
+
+[알림 목록]
 {chr(10).join(notification_list)}
-
-Summary (in Korean):<end_of_turn>
-<start_of_turn>model
 """
-        logger.info(f"LLM Prompt: {prompt}")
-        result = llm_service.generate(prompt, max_tokens=512)
+            }
+        ]
+        
+        logger.info(f"LLM Chat Messages: {messages}")
+        result = llm_service.generate_chat(messages, max_tokens=512)
         logger.info(f"LLM Response: {result}")
         
         # 환각 제거 후 반환
@@ -160,17 +208,14 @@ Summary (in Korean):<end_of_turn>
         for e in expenses:
             expense_list.append(f"- {e['merchant']}: {abs(e['amount']):,.0f}원 ({e['category']})")
 
-        prompt = f"""<start_of_turn>user
-You are a financial assistant. Analyze the following payment records and provide a short, witty one-sentence analysis in Korean about the user's spending patterns or characteristics.
+        messages = [
+            {"role": "user", "content": f"""You are a financial assistant. Analyze the following payment records and provide a short, witty one-sentence analysis in Korean about the user's spending patterns or characteristics.
 Start directly with the result without any introductory phrases or greetings.
 
 [Payments]
-{chr(10).join(expense_list)}
-
-Analysis (in Korean):<end_of_turn>
-<start_of_turn>model
-"""
-        return llm_service.generate(prompt, max_tokens=128)
+{chr(10).join(expense_list)}"""}
+        ]
+        return llm_service.generate_chat(messages, max_tokens=128)
 
     @classmethod
     async def process_pending_alarms(cls, db: Session):
@@ -226,17 +271,27 @@ Analysis (in Korean):<end_of_turn>
                 logger.info(f"Alarm ignored (OTP/Security): {masked_text[:30]}...")
                 continue
 
-            # 1.5 화이트리스트 체크 (원문 기준)
-            if not is_whitelisted(original_text):
-                is_spam_result, classification = is_spam(original_text, db)
+            # 1.5 화이트리스트 및 스팸 체크 (본문 + 발신자 + 제목 합쳐서 검사)
+            # 발신자나 제목에만 (광고)가 적혀 있는 경우를 잡기 위함
+            full_check_text = f"[{alarm.sender or ''}] {alarm.app_title or ''} {original_text}"
+            
+            if not is_whitelisted(full_check_text):
+                is_spam_result, classification = is_spam(full_check_text, db)
                 if is_spam_result:
                     alarm.status = "discarded"
                     alarm.classification = classification
                     continue
 
-                if is_promo_spam(original_text, db):
+                if is_promo_spam(full_check_text, db):
                     alarm.status = "discarded"
                     alarm.classification = "promo_rule"
+                    continue
+                
+                # 1.6 LLM 기반 스팸 필터링 (실험적 단계 - 화이트리스트가 아닐 때만)
+                is_spam_llm_result, classification = is_spam_llm(full_check_text)
+                if is_spam_llm_result:
+                    alarm.status = "discarded"
+                    alarm.classification = classification
                     continue
             else:
                 logger.info(f"Alarm whitelisted: {masked_text[:50]}...")

@@ -97,6 +97,47 @@ def is_spam(text: str, db: Session) -> tuple[bool, str]:
 
     return False, ""
 
+def is_spam_llm(text: str) -> tuple[bool, str]:
+    """
+    3단계: LLM을 사용하여 스팸 여부를 판단한다. (실험적 기능)
+    Returns: (is_spam, confidence_label)
+    """
+    from ..llm_service import LLMService
+    llm = LLMService.get_instance()
+    
+    if not llm.is_loaded():
+        return False, ""
+
+    # 모델 템플릿에 의존하지 않고 generate_chat 사용
+    messages = [
+        {
+            "role": "user",
+            "content": f"""
+스팸인지 판단해줘. "spam" 또는 "ham" 중 하나만 출력해.
+
+[스팸 기준]
+- 광고, 프로모션, 할인, 이벤트, 쿠폰, 포인트
+- 대출, 금융상품 권유
+
+[정상(ham) 기준]  
+- 결제 승인, 배송 안내, 택시 도착
+- 개인 메시지, 중요 공지
+
+확실하지 않으면 "ham" 출력.
+
+내용:
+{text}
+"""
+        }
+    ]
+    result = llm.generate_chat(messages, max_tokens=10, temperature=0.1).lower()
+    
+    if "spam" in result:
+        logger.info(f"LLM classified as SPAM: {text[:50]}...")
+        return True, "llm_spam"
+    
+    return False, "llm_ham"
+
 def is_promo_spam(text: str, db: Session) -> bool:
     """
     프로모션 + 긴급성 조합 스팸 필터링 (DB 규칙)
@@ -133,7 +174,8 @@ def is_whitelisted(text: str) -> bool:
         "내역", "안내", "공지", "리포트"
     ]
     
-    if "(광고)" in text:
+    # 광고가 포함되어 있으면 절대 화이트리스트가 아님
+    if any(p in text for p in ["(광고)", "[광고]", "((광고)"]):
         return False
         
     if any(kw in text for kw in whitelist_keywords):
