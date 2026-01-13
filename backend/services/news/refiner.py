@@ -4,7 +4,7 @@ from ..duckdb_refine import get_db_path
 
 logger = logging.getLogger(__name__)
 
-def refine_schedules_with_duckdb(query_text: str, limit: int = 15) -> str:
+def refine_schedules_with_duckdb(query_text: str, limit: int = 10) -> str:
     """
     DuckDB를 사용하여 e스포츠 일정을 검색하고 고밀도 텍스트로 정제한다.
     """
@@ -78,7 +78,7 @@ def refine_schedules_with_duckdb(query_text: str, limit: int = 15) -> str:
         if 'con' in locals():
             con.close()
 
-def refine_news_with_duckdb(category: str = "economy", limit: int = 15) -> str:
+def refine_news_with_duckdb(category: str = "economy", limit: int = 10) -> str:
     """
     DuckDB를 사용하여 일반 뉴스(경제, 기술 등)를 검색하고 고밀도 텍스트로 정제한다.
     """
@@ -129,7 +129,7 @@ def refine_news_with_duckdb(category: str = "economy", limit: int = 15) -> str:
         if 'con' in locals():
             con.close()
 
-def refine_economy_news_with_duckdb(query_text: str, limit: int = 20) -> str:
+def refine_economy_news_with_duckdb(query_text: str, limit: int = 12) -> str:
     """
     DuckDB를 사용하여 경제 뉴스(국내+해외)를 검색하고 고밀도 텍스트로 정제한다.
     국내(Naver) + 해외(GoogleNews) 통합 조회
@@ -200,7 +200,7 @@ def refine_economy_news_with_duckdb(query_text: str, limit: int = 20) -> str:
         if 'con' in locals():
             con.close()
 
-def refine_game_trends_with_duckdb(query_text: str, limit: int = 15) -> str:
+def refine_game_trends_with_duckdb(query_text: str, limit: int = 5) -> str:
     """
     DuckDB를 사용하여 Steam 트렌드/랭킹 데이터를 검색하고 고밀도 텍스트로 정제한다.
     - SteamStore: source_type='trend'
@@ -249,8 +249,9 @@ def refine_game_trends_with_duckdb(query_text: str, limit: int = 15) -> str:
             time_str, _source_name, source_type, title, url, content = r
             icon = "🔥" if source_type == "trend" else "🏆"
             compact = (content or "").replace("\n", " ").strip()
-            if len(compact) > 160:
-                compact = compact[:160] + "…"
+            # LLM 컨텍스트 최적화를 위해 스니펫 길이를 줄임 (160 -> 100)
+            if len(compact) > 100:
+                compact = compact[:100] + "…"
 
             line = f"{icon} {time_str} | {title}"
             if compact:

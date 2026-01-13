@@ -85,13 +85,18 @@ async def telegram_webhook(request: Request):
             return {"ok": True}
         
         # 지원하는 명령어 리스트
-        SUPPORTED_CMDS = ["add", "del", "list", "on", "off", "help"]
+        SUPPORTED_CMDS = ["add", "del", "list", "on", "off", "help", "model"]
         if cmd not in SUPPORTED_CMDS:
             return {"ok": True}
         
         db = SessionLocal()
         try:
-            response_text = await handle_spam_command(cmd, arg, db)
+            if cmd == "model":
+                # /model 명령어는 별도 핸들러
+                model_parts = arg.split(maxsplit=1)
+                response_text = await handle_model_command(model_parts)
+            else:
+                response_text = await handle_spam_command(cmd, arg, db)
             
             # 규칙 변경(add, del, on, off)이 있으면 AI 모델 재학습 트리거
             if cmd in ["add", "del", "on", "off"] and any(icon in response_text for icon in ["✅", "🗑️", "⏸️", "▶️"]):
@@ -110,10 +115,27 @@ async def telegram_webhook(request: Request):
         
         # 분류에 따른 핸들러 매핑
         # 1. 게임 트렌드 (템플릿 기반 - 단일화된 경로)
+        # 1. 게임 트렌드 (EXAONE 로컬 요약)
         if query_type == "game_trend":
-            from ..services.reporting.template import build_telegram_steam_trend_message
-            response_text = build_telegram_steam_trend_message(text)
-            await send_telegram_message(response_text)
+            from ..services.news.refiner import refine_game_trends_with_duckdb
+            from ..services.llm_service import LLMService
+            
+            # (1) DuckDB 데이터 조회
+            context_text = refine_game_trends_with_duckdb(text)
+            
+            # (2) 프롬프트 구성
+            prompt = _get_game_trend_prompt(text, context_text)
+            
+            # (3) 로컬 LLM 생성
+            llm = LLMService.get_instance()
+            messages = [
+                {"role": "system", "content": "당신은 게임 트렌드 분석가이자 스팀(Steam) 전문가입니다."},
+                {"role": "user", "content": prompt}
+            ]
+            
+            response_text = llm.generate_chat(messages, max_tokens=1536)
+            formatted_response = _format_for_telegram(response_text)
+            await send_telegram_message(formatted_response)
             return {"ok": True}
             
         # 2. 투자/가계부 리포트 (LLM 기반 서술형)
@@ -143,31 +165,37 @@ async def telegram_webhook(request: Request):
         try:
             from ..services.llm_service import LLMService
             llm = LLMService.get_instance()
-
-            if not llm.is_remote_ready():
-                await send_telegram_message("LLM 원격 서버가 설정되지 않아 답변을 생성할 수 없습니다.")
-                return {"ok": True}
             
-            prompt = ""
+            # (1) Context 및 Prompt 구성
+            system_instruction = ""
+            user_prompt = ""
+            
             if query_type == 'esports_schedule':
                 from ..services.news_collector import NewsCollector
                 context_text = NewsCollector.refine_schedules_with_duckdb(text)
-                prompt = _get_esports_prompt(text, context_text)
+                system_instruction = "당신은 e스포츠 전문가이자 사용자의 개인 비서입니다. 친절하고 위트 있게 답변하세요."
+                user_prompt = _get_esports_prompt(text, context_text)
             
             elif query_type == 'economy_news':
                 from ..services.news_collector import NewsCollector
                 context_text = NewsCollector.refine_economy_news_with_duckdb(text)
-                prompt = _get_economy_prompt(text, context_text)
+                system_instruction = "당신은 글로벌 경제 전문가입니다. 어려운 내용도 쉽게 설명해 주세요."
+                user_prompt = _get_economy_prompt(text, context_text)
             
             else: # general_chat
-                prompt = _get_general_chat_prompt(text)
+                system_instruction = "당신은 친절하고 유머러스한 개인 비서입니다."
+                user_prompt = text
             
-            # LLM 호출 및 전송
-            response_text = llm.generate_remote(prompt, max_tokens=1024)
+            # (2) 로컬 EXAONE 호출 (Chat Completion)
+            messages = [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": user_prompt}
+            ]
+            response_text = llm.generate_chat(messages, max_tokens=1536)
+            
             if not response_text:
                 response_text = "죄송합니다. 답변을 생성하는 중에 문제가 발생했습니다. 😅"
             
-            # 텔레그램용 HTML 변환 적용
             formatted_response = _format_for_telegram(response_text)
             await send_telegram_message(formatted_response)
             
@@ -178,10 +206,25 @@ async def telegram_webhook(request: Request):
     return {"ok": True}
 
 
-# 프롬프트 생성 헬퍼 함수들 (코드 가독성 향상)
+def _get_game_trend_prompt(text: str, context: str) -> str:
+    return f"""
+[제공된 스팀 게임 트렌드 데이터]
+{context}
+
+[사용자의 질문]
+{text}
+
+[답변 규칙]
+- 데이터를 기반으로 신작이나 인기 게임을 3-4개 정도 추천해 주세요.
+- 각 게임의 특징을 짧고 강렬하게 요약하여 흥미를 유발하세요.
+- 너무 길지 않게 핵심만 전달하여 빠르게 답변하세요.
+- EXAONE으로서의 위트 있는 말투를 보여주세요.
+"""
+
+
+# 프롬프트 생성 헬퍼 함수들 (현재 메인 로직에서 직접 generate_chat 사용, 레거시용)
 def _get_esports_prompt(text: str, context: str) -> str:
-    return f"""<start_of_turn>user
-당신은 e스포츠 전문가이자 사용자의 개인 비서입니다. 
+    return f"""
 사용자의 질문과 아래 제공된 경기 일정 데이터를 바탕으로 친절하고 명확하게 답변해 주세요.
 
 [제공된 경기 일정 데이터]
@@ -195,14 +238,10 @@ def _get_esports_prompt(text: str, context: str) -> str:
 - 데이터에 있는 내용을 기반으로 정확하게 안내하세요. 만약 데이터에 없는 내용이라면 모른다고 정직하게 말하세요.
 - 친절하고 위트 있는 말투를 사용하세요.
 - 일시 정보를 포함하여 경기 정보를 깔끔하게 정리해 주세요.
-
-답변:<end_of_turn>
-<start_of_turn>model
 """
 
 def _get_economy_prompt(text: str, context: str) -> str:
-    return f"""<start_of_turn>user
-당신은 글로벌 거시경제 전문가이자 사용자의 개인 비서입니다.
+    return f"""
 아래 제공된 경제 뉴스 데이터를 바탕으로 사용자의 질문에 친절하고 명확하게 답변해 주세요.
 
 [제공된 경제 뉴스 데이터]
@@ -216,21 +255,14 @@ def _get_economy_prompt(text: str, context: str) -> str:
 - 영문 뉴스 제목이라면 핵심만 번역하여 설명하세요.
 - 데이터에 있는 내용을 기반으로 정확하게 안내하세요. 데이터에 없는 내용은 모른다고 말하세요.
 - 친절하고 위트 있는 말투를 사용하세요.
-
-답변:<end_of_turn>
-<start_of_turn>model
 """
 
 def _get_general_chat_prompt(text: str) -> str:
-    return f"""<start_of_turn>user
-당신은 친절하고 유머러스한 개인 비서입니다.
+    return f"""
 사용자의 메시지에 자연스럽고 위트 있게 답변해 주세요.
 
 [사용자 메시지]
 {text}
-
-답변:<end_of_turn>
-<start_of_turn>model
 """
 
 
@@ -296,6 +328,65 @@ def classify_query(text: str) -> str:
     # 기타 일반 대화
     return 'general_chat'
 
+
+
+async def handle_model_command(parts: list) -> str:
+    """/model 명령어 처리"""
+    from ..services.llm_service import LLMService
+    llm = LLMService.get_instance()
+    
+    subcmd = parts[0] if len(parts) > 0 else "목록"
+    arg = parts[1] if len(parts) > 1 else ""
+    
+    # 모델 별칭 매핑
+    MODEL_ALIASES = {
+        "E3.5": "EXAONE-3.5-2.4B-Instruct-BF16.gguf",
+        "E4": "EXAONE-4.0-1.2B-BF16.gguf",
+        "G3": "gemma-3-4b-it-Q3_K_M.gguf",
+        "G4": "gemma-3-4b-it-q4_k_m.gguf"
+    }
+    
+    if subcmd in ["list", "목록", "리스트"]:
+        models = llm.list_available_models()
+        current = llm.get_current_model()
+        
+        if not models:
+            return "📁 사용 가능한 GGUF 모델이 없습니다. (backend/data 디렉토리 확인)"
+        
+        lines = ["<b>🤖 사용 가능한 모델 목록</b>"]
+        # 역방향 매핑 준비
+        rev_aliases = {v: k for k, v in MODEL_ALIASES.items()}
+        
+        for m in models:
+            is_active = " (활성)" if m == current else ""
+            fname = os.path.basename(m)
+            alias = rev_aliases.get(fname)
+            alias_str = f" [<b>{alias}</b>]" if alias else ""
+            lines.append(f"• <code>{fname}</code>{alias_str}{is_active}")
+        
+        lines.append("\n💡 <code>/model 교체 별칭</code> 또는 <code>파일명</code>으로 교체")
+        return "\n".join(lines)
+    
+    elif subcmd in ["switch", "교체", "변경", "선택"] and arg:
+        # 별칭 확인
+        target_file = MODEL_ALIASES.get(arg, arg)
+        
+        # 파일명만 입력했을 경우 대비
+        full_path = target_file if target_file.startswith("backend/data/") else os.path.join("backend/data", target_file)
+        if not full_path.endswith(".gguf"):
+            full_path += ".gguf"
+            
+        if llm.switch_model(full_path):
+            return f"✅ 모델이 교체되었습니다: <code>{os.path.basename(full_path)}</code>"
+        else:
+            if not os.path.exists(full_path):
+                return f"❌ 모델 교체 실패: <code>{arg}</code> 파일을 찾을 수 없습니다."
+            last_error = llm.get_last_error()
+            if last_error:
+                return f"❌ 모델 교체 실패: <code>{os.path.basename(full_path)}</code> 로드 오류 ({last_error})"
+            return f"❌ 모델 교체 실패: <code>{os.path.basename(full_path)}</code> 로드에 실패했습니다."
+            
+    return "ℹ️ 사용법: /model 목록 또는 /model 교체 {별칭|파일명}"
 
 
 async def handle_spam_command(cmd: str, arg: str, db: Session) -> str:
@@ -385,6 +476,9 @@ async def handle_spam_command(cmd: str, arg: str, db: Session) -> str:
         return """<b>ℹ️ 봇 명령어 도움말</b>
 /report {내용} - 스팀 게임 트렌드 리포트 생성 (DuckDB 기반)
 (예: /report, /report 신작)
+
+/model 목록 - 사용 가능한 LLM 모델 목록
+/model 교체 {별칭|파일명} - 실시간 모델 교체
 
 <b>스팸 규칙 관리</b>
 /add {키워드} - 새 키워드 추가 (콤마 구분 가능)

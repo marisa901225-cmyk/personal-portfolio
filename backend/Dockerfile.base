@@ -7,18 +7,20 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Install build dependencies
+# Install build dependencies + backup utilities
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libstdc++6 \
     curl \
     ca-certificates \
+    sqlite3 \
+    zip \
     && rm -rf /var/lib/apt/lists/*
 
 # Pre-install heavy/compiled dependencies (cached in base image)
 RUN pip install --no-cache-dir \
     pandas==2.3.1 \
     scikit-learn \
-    llama-cpp-python \
+    llama-cpp-python==0.3.16 \
     sentence-transformers==2.2.2 \
     faiss-cpu

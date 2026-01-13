@@ -20,14 +20,28 @@ def generate_backup_message(file_size_mb: float, backup_time: str) -> str:
     if not llm.is_loaded():
         return f"📦 DB 백업 완료!\n- 파일 크기: {file_size_mb:.2f}MB\n- {backup_time} 기준"
     
-    prompt = f"""<start_of_turn>user
-DB backup done. Size: {file_size_mb:.2f}MB, Time: {backup_time}. Inform user in casual Korean (반말). Include exact size. Add fun/reassuring comment. 2-3 sentences. No HTML. Emojis OK. No intro.
-<end_of_turn>
-<start_of_turn>model
+    # 모델 템플릿에 의존하지 않고 generate_chat 사용
+    messages = [
+        {
+            "role": "user",
+            "content": f"""
+DB 백업 완료! 용량: {file_size_mb:.2f}MB. 사용자한테 알려줄 짧은 메시지 만들어줘.
+
+[규칙]
+- 반말로 친근하게
+- 파일 크기({file_size_mb:.2f}MB) 반드시 포함
+- 한두 문장으로 짧게
+- 안심시키거나 재미있는 코멘트 추가
+- 이모지 OK
+- 한국어만
+
+바로 메시지만 출력!
 """
+        }
+    ]
     
     try:
-        creative_text = llm.generate(prompt, max_tokens=256, temperature=0.8)
+        creative_text = llm.generate_chat(messages, max_tokens=128, temperature=0.8)
         
         # 파일 크기가 환각으로 바뀌었을 경우를 방지하기 위해 재검증
         if f"{file_size_mb:.2f}" not in creative_text and f"{file_size_mb:.1f}" not in creative_text:

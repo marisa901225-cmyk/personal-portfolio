@@ -45,10 +45,11 @@ async def job_collect_news():
 
 def start_scheduler():
     if not scheduler.running:
-        # 1시간마다 실행
+        # 10분마다 실행 (LLM 알람 처리와 5분 오프셋 - CPU 충돌 방지)
+        # LLM 농담은 :00, :10, :20... / 뉴스수집은 :05, :15, :25...
         scheduler.add_job(
             job_collect_news, 
-            IntervalTrigger(minutes=10), 
+            CronTrigger(minute='5,15,25,35,45,55'), 
             id="collect_game_news", 
             replace_existing=True
         )

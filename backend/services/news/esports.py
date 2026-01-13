@@ -1,7 +1,7 @@
 import logging
 import httpx
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 from ...core.models import GameNews
 from .core import calculate_simhash, PANDASCORE_URL
@@ -35,7 +35,9 @@ async def collect_pandascore_schedules(db: Session):
             begin_at_str = match.get("begin_at")
             if not begin_at_str: continue
             
-            begin_at = datetime.fromisoformat(begin_at_str.replace("Z", "+00:00"))
+            begin_at_utc = datetime.fromisoformat(begin_at_str.replace("Z", "+00:00"))
+            # PandaScore는 UTC로 제공되므로 한국 시간(KST, UTC+9)으로 변환하여 저장
+            begin_at = begin_at_utc + timedelta(hours=9)
             
             title = f"[Esports Schedule] {game} - {name}"
             content = f"Match: {name}\nLeague: {league}\nTournament: {match.get('tournament', {}).get('name')}\nStart Time: {begin_at_str}\nLink: {match.get('official_stream_url', '')}"
