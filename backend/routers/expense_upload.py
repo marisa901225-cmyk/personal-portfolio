@@ -40,10 +40,10 @@ async def upload_expense_file(
         raise HTTPException(status_code=400, detail="Filename is required")
     
     file_ext = Path(file.filename).suffix.lower()
-    if file_ext not in ['.xlsx', '.xls', '.csv']:
+    if file_ext not in ['.xlsx', '.xls', '.csv', '.txt']:
         raise HTTPException(
             status_code=400,
-            detail="Only Excel (.xlsx, .xls) and CSV (.csv) files are supported"
+            detail="Only Excel (.xlsx, .xls), CSV (.csv), and NaverPay TXT (.txt) files are supported"
         )
     
     # 임시 파일로 저장
