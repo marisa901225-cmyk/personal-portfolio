@@ -243,11 +243,9 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
     setDeletingId(expenseId);
     setSaveError(null);
     try {
-      const result = await apiClient.deleteExpense(expenseId);
-      // 로컬 상태 업데이트
-      setExpenses((prev) => prev.map((e) =>
-        e.id === expenseId ? { ...e, deleted_at: result.deleted_at ?? new Date().toISOString() } : e
-      ));
+      await apiClient.deleteExpense(expenseId);
+      // 삭제 후 전체 데이터 리로드 (요약 포함)
+      void loadExpenses(selectedYearMonth.year, selectedYearMonth.month);
     } catch (err) {
       setSaveError(getUserErrorMessage(err, { default: '내역 삭제에 실패했습니다.' }));
     } finally {
@@ -261,10 +259,8 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
     setSaveError(null);
     try {
       await apiClient.restoreExpense(expenseId);
-      // 로컬 상태 업데이트
-      setExpenses((prev) => prev.map((e) =>
-        e.id === expenseId ? { ...e, deleted_at: null } : e
-      ));
+      // 복구 후 전체 데이터 리로드 (요약 포함)
+      void loadExpenses(selectedYearMonth.year, selectedYearMonth.month);
     } catch (err) {
       setSaveError(getUserErrorMessage(err, { default: '내역 복구에 실패했습니다.' }));
     } finally {
