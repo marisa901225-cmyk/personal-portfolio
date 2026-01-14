@@ -42,18 +42,24 @@ def refine_schedules_with_duckdb(query_text: str, limit: int = 10) -> str:
                 strftime(event_time, '%m/%d %H:%M') as time,
                 game_tag,
                 title,
-                url
+                url,
+                CASE 
+                    WHEN (title ILIKE '%LCK%' OR title ILIKE '%Worlds%' OR title ILIKE '%월즈%' OR title ILIKE '%MSI%') THEN 0
+                    WHEN (title ILIKE '%Challengers%' OR title ILIKE '%CL%' OR title ILIKE '%Pacific%' OR title ILIKE '%퍼시픽%') THEN 1
+                    WHEN (title ILIKE '%LPL%' OR title ILIKE '%PCL%' OR title ILIKE '%LEC%' OR title ILIKE '%LCS%') THEN 2
+                    ELSE 3
+                END as priority
             FROM sqlite_db.game_news
             WHERE {where_sql}
-            ORDER BY event_time ASC
-            LIMIT {limit}
+            ORDER BY priority ASC, event_time ASC
+            LIMIT 20
         """
         
         results = con.execute(sql).fetchall()
         
         if not results:
             results = con.execute("""
-                SELECT strftime(event_time, '%m/%d %H:%M'), game_tag, title, url 
+                SELECT strftime(event_time, '%m/%d %H:%M'), game_tag, title, url, 3 as priority
                 FROM sqlite_db.game_news 
                 WHERE source_type = 'schedule' AND event_time >= now() 
                 ORDER BY event_time ASC LIMIT 5
@@ -61,13 +67,34 @@ def refine_schedules_with_duckdb(query_text: str, limit: int = 10) -> str:
             if not results: return "검색된 관련 일정이 없습니다."
             
         refined_items = []
+        p0_count = sum(1 for r in results if r[4] == 0)
+        p1_count = sum(1 for r in results if r[4] == 1)
+        
+        # 필터링 로직: 주요 리그(p0, p1)가 있다면 마이너 리그(p2, p3)는 최대 3개까지만
+        minor_limit = 3 if (p0_count + p1_count > 0) else 10
+        minor_added = 0
+        
         for r in results:
+            priority = r[4]
+            if priority >= 2:
+                if minor_added >= minor_limit:
+                    continue
+                minor_added += 1
+            
             display_title = r[2].replace("[Esports Schedule] ", "").replace(f"{r[1]} - ", "")
+            # 팀명만 강조해서 가독성 향상
+            display_title = display_title.replace(" vs ", " ⚔️ ")
+            
             url = r[3] if r[3] else ""
+            item = f"📅 {r[0]} | {display_title}"
             if url:
-                refined_items.append(f"📅 {r[0]} | [{r[1]}] {display_title}\n   🔗 {url}")
-            else:
-                refined_items.append(f"📅 {r[0]} | [{r[1]}] {display_title}")
+                item += f" (🔗)"
+            
+            refined_items.append(item)
+            
+            # LLM 컨텍스트가 너무 커지지 않도록 최대 12개 아이템으로 제한
+            if len(refined_items) >= 12:
+                break
             
         return "\n".join(refined_items)
         

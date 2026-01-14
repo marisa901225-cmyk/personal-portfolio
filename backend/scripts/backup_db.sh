@@ -96,14 +96,29 @@ if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
     echo "INFO: 용량 적합 ($file_size bytes). 단일 파일 전송."
     
     # LLM으로 창의적인 메시지 생성 (별도 스크립트 호출)
-    file_size_mb=$(echo "scale=2; $file_size / 1024 / 1024" | bc)
-    backup_msg=$(docker exec myasset-sync-prices python3 /app/backend/scripts/generate_backup_msg.py "${file_size_mb}" "${backup_time}" 2>/dev/null || echo "📦 DB 백업 완료 (${file_size_mb}MB)")
+    # bc 대신 Python 사용 (Docker 컨테이너 호환성)
+    file_size_mb=$(python3 -c "print(f'{$file_size / 1024 / 1024:.2f}')")
+    echo "INFO: LLM 메시지 생성 중... (파일 크기: ${file_size_mb}MB)"
     
-    curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
+    # LLM 로딩 메시지(stderr)는 무시하되, 실제 메시지(stdout)는 받음
+    backup_msg=$(docker exec myasset-sync-prices python3 /app/backend/scripts/generate_backup_msg.py "${file_size_mb}" "${backup_time}" 2>&1 | grep -v "llama_" | grep -v "ggml_" || echo "📦 DB 백업 완료 (${file_size_mb}MB)")
+    
+    echo "INFO: 생성된 메시지: ${backup_msg:0:50}..."
+    echo "INFO: 텔레그램으로 파일 전송 중..."
+    
+    # 텔레그램 전송 및 응답 확인
+    telegram_response=$(curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendDocument" \
          -F chat_id="${TELEGRAM_CHAT_ID}" \
          -F document=@"${archive_path}" \
-         -F caption="${backup_msg}" > /dev/null
-    echo "INFO: 전송 완료."
+         -F caption="${backup_msg}")
+    
+    # 응답 확인
+    if echo "$telegram_response" | grep -q '"ok":true'; then
+      echo "INFO: 텔레그램 전송 성공 ✓"
+    else
+      echo "ERROR: 텔레그램 전송 실패"
+      echo "Response: $telegram_response"
+    fi
   else
     # 50MB 초과: 분할 전송
     echo "INFO: 용량 초과 ($file_size bytes). 49MB 단위로 분할하여 전송합니다..."

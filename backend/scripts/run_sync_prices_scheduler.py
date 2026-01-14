@@ -187,13 +187,6 @@ async def run_backup_job():
 async def main():
     logger.info(f"Current System Time: {datetime.now(KST)}")
     
-    # Initialize LLM early
-    try:
-        LLMService.get_instance()
-        logger.info("LLMService initialized successfully.")
-    except Exception as e:
-        logger.error(f"Failed to initialize LLMService: {e}")
-
     # Explicitly use Asia/Seoul timezone for scheduler
     scheduler = AsyncIOScheduler(timezone=KST)
     
@@ -253,4 +246,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
-

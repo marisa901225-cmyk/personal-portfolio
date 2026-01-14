@@ -14,34 +14,11 @@ logger = logging.getLogger(__name__)
 # NB 모델 경로
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "../data/expense_model.joblib")
 
-from .alarm.filters import mask_sensitive_info, is_spam, is_promo_spam, is_whitelisted, should_ignore, is_spam_llm
+from .alarm.filters import mask_sensitive_info, is_spam, is_promo_spam, is_whitelisted, should_ignore, is_spam_llm, is_review_spam
 from .alarm.sanitizer import infer_source, escape_html_preserve_urls, sanitize_llm_output
 from .alarm.parsers import parse_card_approval
 
 class AlarmService:
-    _llm_instance = None
-
-    @classmethod
-    def get_llm(cls):
-        """
-        LLM 인스턴스를 싱글톤으로 반환한다.
-        """
-        model_path = os.getenv("LOCAL_LLM_MODEL_PATH", "backend/data/gemma-3-4b-it-q4_k_m.gguf")
-        if cls._llm_instance is None:
-            try:
-                from llama_cpp import Llama
-                if os.path.exists(model_path):
-                    logger.info(f"Loading LLM model from {model_path}...")
-                    cls._llm_instance = Llama(model_path=model_path, n_ctx=2048, verbose=False)
-                else:
-                    logger.warning(f"LLM model not found at {model_path}")
-            except ImportError:
-                logger.error("llama-cpp-python not installed.")
-            except Exception as e:
-                logger.error(f"Failed to load LLM: {e}")
-        return cls._llm_instance
-
-
     @classmethod
     async def summarize_with_llm(cls, items: List[dict]) -> str:
         """
@@ -101,24 +78,30 @@ class AlarmService:
                     "content": f"""
 기분 전환용 짧은 메시지 하나 만들어줘!
 
+[중요! 출력 언어]
+⭐ 오직 한국어로만 작성해라! 영어 단어는 절대 사용 금지!
+⭐ 한글로만 표현 불가능한 고유명사(예: NASA, DNA)만 예외적으로 허용
+
 [규칙]
-- 200자 이내, 한국어만
+- 200자 이내
 - 밝고 유쾌한 톤 (재미있거나 신기한 내용)
+- 반말 또는 해요체 사용
 
 [이번 주제]
-🎯 {forced_category}
+{forced_category}
 
 [이번 형식]
-✏️ {forced_format}
+{forced_format}
 
 [절대 금지 - 이거 쓰면 실패!]
+❌ 영어로 작성하거나 영어 문장 섞기
 ❌ "오늘도 하루가", "오늘 하루도", "하루가 ~네" 같은 일상 회고 패턴
 ❌ 커피, 퇴근, 출근, 주말, 월요일 등 직장인 일상
 ❌ 위로/동정 구하는 말투 ("쉬고 싶다", "힘들다")
 ❌ 부정적 감정 단어 (우울, 슬프다, 피곤, 지친다)
 ❌ 음식, 동물 잡학, 날씨
 
-바로 내용만 출력!
+바로 내용만 출력! (예시, 설명, 메타 문구 없이)
 """
                 }
             ]
@@ -151,30 +134,51 @@ class AlarmService:
             {
                 "role": "user",
                 "content": f"""
-너는 위트 있고 유능한 개인 비서야. 아래 스마트폰 알림들을 한국어로 요약해줘.
+아래 스마트폰 알림들을 한국어로 요약해줘.
 
-[필터링 규칙 - 1단계]
-다음 유형의 알림은 무조건 제외해라:
-- 광고나 프로모션 (예: (광고), [광고], 특가, 할인, 이벤트)
-- 포인트/리워드/쇼핑 혜택 (예: 포인트 적립, 혜택, 쿠폰, 증정, 응모)
-- 의미 없는 시스템 메시지나 반복적인 잡음
+[중요! 출력 규칙]
+⭐ 첫 문장부터 바로 알림 내용으로 시작해라!
+⭐ "요약입니다", "필터링했습니다", "알려드릴게요" 같은 인사/메타 문구는 절대 금지!
+⭐ 오직 한국어로만 작성 (영어 단어 사용 금지)
 
-[요약 규칙 - 2단계]
-남은 중요한 알림들만 요약해라:
-- 비슷한 주제는 묶어서 간결한 불릿 포인트로 작성
-- 각 항목에 앱 이름이나 발신자 정보를 포함
-- 해요체로 친근하게 작성
-- 제목에 있는 핵심 정보(스포츠 대진표, 소설 제목, 주식 종목/가격 등)는 반드시 유지
+[필터링 규칙 - 1단계: 무조건 제외할 알림]
+다음 알림들은 절대 요약에 포함하지 마라:
+
+1. 명백한 광고/프로모션
+   - (광고), [광고] 표시가 있는 알림
+   - "득템", "찬스", "놓치지 마세요", "마감임박", "오늘만" 등 긴박감 조성
+
+2. 포인트/캐시/쿠폰 관련
+   - "포인트 받기", "캐시 지급", "쿠폰 도착", "무료 이용권"
+   - 단, 결제 승인이나 환불 알림은 예외 (중요!)
+
+3. 리뷰/평가 요청
+   - "리뷰를 남겨주세요", "평가를 기다립니다", "별점을 매겨주세요"
+   - "주문하신 음식은 어떠셨나요"
+
+4. 게임 이벤트
+   - "연참", "뽑기", "가챠", "이벤트 참여", "로그인 보상"
+   - "아래로 드래그", "클릭하고 받기"
+
+[요약할 알림: 2단계]
+남은 알림 중 다음만 요약해라:
+- 사람이 보낸 메시지 (카카오톡, Discord, Slack 등)
+- 배달 진행 상황 (배달 시작/완료)
+- 금융 거래 (주식 체결, 송금 - 카드 승인은 시스템이 별도 처리)
+- 웹툰/웹소설 업데이트, 라이브 방송 시작 알림 (사용자 취미)
+- 중요한 시스템 알림 (보안, 계정, API 토큰 등)
 
 [마스킹된 정보 처리]
 - 개인정보 보호를 위해 이름, 계좌번호, 전화번호 등이 *로 마스킹되어 있음
 - 마스킹된 텍스트는 그대로 유지해라 (예: "이*후님" → "이*후님", "[계좌번호]" → "[계좌번호]")
 - 마스킹을 풀거나 추측해서 채우지 마라
 
-[출력 형식]
-- "요약입니다", "필터링했습니다" 같은 메타 문구 없이 바로 내용으로 시작
-- 오직 한국어로만 작성 (영어 금지)
-- URL은 원문에 명시되어 있을 때만 포함, 절대 만들어내지 마라
+[출력 예시]
+좋은 예: "- 카카오톡에서 친구가 메시지 3개 보냈어요\\n- 삼성증권에서 벨로3D 주식 매수가 체결됐어요"
+나쁜 예: "요약입니다 😊 카카오톡에서..."
+나쁜 예: "필터링했습니다. 남은 알림은..."
+
+참고: 모든 알림이 필터링되어 남은 게 없다면 빈 문자열 반환.
 
 [알림 목록]
 {chr(10).join(notification_list)}
@@ -235,6 +239,10 @@ Start directly with the result without any introductory phrases or greetings.
         senders = set()
         has_expenses = False
         
+        # 필터링 통계 추적
+        filtered_count = 0
+        filtered_reasons = {"광고/프로모션": 0, "OTP/보안": 0, "플레이스홀더": 0}
+        
         # NB 모델 로드 (캐싱 가능)
         nb_pipeline = None
         if os.path.exists(MODEL_PATH):
@@ -262,12 +270,16 @@ Start directly with the result without any introductory phrases or greetings.
             if "%antext" in original_text or "%evtprm" in original_text:
                 alarm.status = "discarded"
                 alarm.classification = "placeholder"
+                filtered_count += 1
+                filtered_reasons["플레이스홀더"] += 1
                 continue
 
             # 1.3 무시할 알림인지 확인 (인증번호 등 - 원문 기준 체크)
             if should_ignore(original_text):
                 alarm.status = "discarded"
                 alarm.classification = "ignored"
+                filtered_count += 1
+                filtered_reasons["OTP/보안"] += 1
                 logger.info(f"Alarm ignored (OTP/Security): {masked_text[:30]}...")
                 continue
 
@@ -276,15 +288,27 @@ Start directly with the result without any introductory phrases or greetings.
             full_check_text = f"[{alarm.sender or ''}] {alarm.app_title or ''} {original_text}"
             
             if not is_whitelisted(full_check_text):
+                # 리뷰 요청 / 게임 이벤트 필터링 추가
+                if is_review_spam(full_check_text):
+                    alarm.status = "discarded"
+                    alarm.classification = "review_spam"
+                    filtered_count += 1
+                    filtered_reasons["광고/프로모션"] += 1
+                    continue
+                
                 is_spam_result, classification = is_spam(full_check_text, db)
                 if is_spam_result:
                     alarm.status = "discarded"
                     alarm.classification = classification
+                    filtered_count += 1
+                    filtered_reasons["광고/프로모션"] += 1
                     continue
 
                 if is_promo_spam(full_check_text, db):
                     alarm.status = "discarded"
                     alarm.classification = "promo_rule"
+                    filtered_count += 1
+                    filtered_reasons["광고/프로모션"] += 1
                     continue
                 
                 # 1.6 LLM 기반 스팸 필터링 (실험적 단계 - 화이트리스트가 아닐 때만)
@@ -292,6 +316,8 @@ Start directly with the result without any introductory phrases or greetings.
                 if is_spam_llm_result:
                     alarm.status = "discarded"
                     alarm.classification = classification
+                    filtered_count += 1
+                    filtered_reasons["광고/프로모션"] += 1
                     continue
             else:
                 logger.info(f"Alarm whitelisted: {masked_text[:50]}...")
@@ -377,10 +403,29 @@ Start directly with the result without any introductory phrases or greetings.
             elif to_summarize_alarms:
                 title = "알림 리포트"
             else:
-                title = "일일 체크인"  # 알람도 없고 결제도 없을 때
+                # 알람도 없고 결제도 없을 때 - 다양한 제목 사용
+                random_titles = [
+                    "랜덤 토픽",
+                    "잡학사전",
+                    "브레이크 타임",
+                    "오늘의 TMI",
+                    "잠깐 쉬어가기",
+                    "심심풀이 지식"
+                ]
+                title = random_titles[category_index % len(random_titles)]
 
             sender_info = f" ({', '.join(list(senders)[:3])}{'...' if len(senders) > 3 else ''})" if senders else ""
             header = f"<b>[{title}]{sender_info}</b>\n\n"
+            
+            # 필터링 통계 추가 (필터링된 알림이 있을 때만)
+            if filtered_count > 0:
+                filter_details = []
+                for reason, count in filtered_reasons.items():
+                    if count > 0:
+                        filter_details.append(f"{reason} {count}개")
+                if filter_details:
+                    header += f"🗑️ <i>필터링됨: {', '.join(filter_details)}</i>\n\n"
+            
             summary_text = header + "\n".join(summaries)
             await send_telegram_message(summary_text)
 

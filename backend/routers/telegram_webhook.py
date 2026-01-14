@@ -21,8 +21,8 @@ router = APIRouter(prefix="/api/telegram", tags=["telegram"])
 logger = logging.getLogger(__name__)
 
 # 환경변수에서 시크릿 토큰과 허용된 채팅 ID 로드
-WEBHOOK_SECRET = os.getenv("X_TELEGRAM_BOT_API_SECRET_TOKEN")
-ALLOWED_CHAT_ID = os.getenv("ALARM_TELEGRAM_CHAT_ID")
+WEBHOOK_SECRET = os.getenv("X_TELEGRAM_BOT_API_SECRET_TOKEN") or os.getenv("TELEGRAM_WEBHOOK_SECRET_TOKEN")
+ALLOWED_CHAT_ID = os.getenv("ALARM_TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
 
 
 def get_db():
@@ -40,7 +40,10 @@ async def telegram_webhook(request: Request):
     # 1. Secret Token 검증
     secret_header = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
     if WEBHOOK_SECRET and secret_header != WEBHOOK_SECRET:
-        logger.warning(f"Invalid webhook secret: {secret_header}")
+        logger.warning(
+            "Invalid webhook secret token (len=%s)",
+            len(secret_header) if secret_header else 0,
+        )
         raise HTTPException(status_code=403, detail="Invalid secret")
     
     # 2. 업데이트 파싱
@@ -109,7 +112,7 @@ async def telegram_webhook(request: Request):
             db.close()
     else:
         # (B) 자연어 처리 Flow
-        logger.info(f"Natural language query received: {text}")
+        logger.info("Natural language query received (len=%s)", len(text))
         query_type = classify_query(text)
         logger.info(f"Query classified as: {query_type}")
         
@@ -368,19 +371,31 @@ async def handle_model_command(parts: list) -> str:
         return "\n".join(lines)
     
     elif subcmd in ["switch", "교체", "변경", "선택"] and arg:
-        # 별칭 확인
-        target_file = MODEL_ALIASES.get(arg, arg)
+        # 1. 별칭 우선 확인
+        target_file = MODEL_ALIASES.get(arg)
         
-        # 파일명만 입력했을 경우 대비
+        # 2. 별칭이 없으면 파일명 부분 일치 검색
+        if not target_file:
+            available_models = llm.list_available_models()
+            for m in available_models:
+                fname = os.path.basename(m)
+                if arg.lower() in fname.lower():
+                    target_file = fname
+                    break
+        
+        if not target_file:
+            target_file = arg # 검색 실패 시 입력값 그대로 사용
+            
+        # 파일 경로 구성
         full_path = target_file if target_file.startswith("backend/data/") else os.path.join("backend/data", target_file)
-        if not full_path.endswith(".gguf"):
+        if not full_path.endswith(".gguf") and "." not in target_file:
             full_path += ".gguf"
             
         if llm.switch_model(full_path):
             return f"✅ 모델이 교체되었습니다: <code>{os.path.basename(full_path)}</code>"
         else:
             if not os.path.exists(full_path):
-                return f"❌ 모델 교체 실패: <code>{arg}</code> 파일을 찾을 수 없습니다."
+                return f"❌ 모델 교체 실패: <code>{arg}</code>와 일치하는 모델을 찾을 수 없습니다."
             last_error = llm.get_last_error()
             if last_error:
                 return f"❌ 모델 교체 실패: <code>{os.path.basename(full_path)}</code> 로드 오류 ({last_error})"
