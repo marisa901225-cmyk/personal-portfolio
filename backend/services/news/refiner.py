@@ -1,14 +1,25 @@
 import logging
 import duckdb
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from ..duckdb_refine import get_db_path
+import time as time_module
 
 logger = logging.getLogger(__name__)
+
+# KST 시간대 상수
+KST = ZoneInfo("Asia/Seoul")
+
 
 def refine_schedules_with_duckdb(query_text: str, limit: int = 10) -> str:
     """
     DuckDB를 사용하여 e스포츠 일정을 검색하고 고밀도 텍스트로 정제한다.
+    - KST 기준으로 "오늘" 범위 계산
+    - 쿼리 타이밍 로그 출력
+    - 폴백은 최대 1단계로 제한
     """
-    logger.info(f"Refining Esports schedules using DuckDB for query: {query_text}")
+    start_time = time_module.perf_counter()
+    logger.info(f"[Esports] 쿼리 시작: {query_text}")
     
     try:
         db_path = get_db_path()
@@ -16,27 +27,42 @@ def refine_schedules_with_duckdb(query_text: str, limit: int = 10) -> str:
         escaped_path = db_path.replace("'", "''")
         con.execute(f"ATTACH '{escaped_path}' AS sqlite_db (TYPE SQLITE, READ_ONLY)")
         
+        # KST 기준으로 오늘 범위 계산
+        now_kst = datetime.now(KST)
+        today_start = now_kst.replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = today_start + timedelta(days=1)
+        
         where_clauses = ["source_type = 'schedule'"]
         
         q = query_text.lower()
+        # 게임 필터 (단순 LIKE로 최적화)
         if "롤" in q or "lol" in q:
-            where_clauses.append("(game_tag ILIKE '%LoL%' OR title ILIKE '%LoL%')")
+            where_clauses.append("game_tag = 'LoL'")
         if "발로란트" in q or "valorant" in q:
-            where_clauses.append("(game_tag ILIKE '%Valorant%' OR title ILIKE '%Valorant%')")
+            where_clauses.append("game_tag = 'Valorant'")
+        # 팀/리그 필터 (league_tag/is_international 사용)
+        if "lck" in q:
+            where_clauses.append("league_tag IN ('LCK', 'LCK-CL')")
+        if "국제대회" in q or "국제" in q or "worlds" in q or "msi" in q:
+            where_clauses.append("is_international = 1")
         if "t1" in q:
-            where_clauses.append("title ILIKE '%T1%'")
+            where_clauses.append("title LIKE '%T1%'")
         if "젠지" in q or "geng" in q:
-            where_clauses.append("(title ILIKE '%GenG%' OR title ILIKE '%젠지%')")
+            where_clauses.append("(title LIKE '%Gen%' OR title LIKE '%젠지%')")
         
+        # 시간 범위 필터 (KST 기준으로 파이썬에서 계산)
         if "오늘" in q:
-            where_clauses.append("event_time >= CURRENT_DATE AND event_time < CURRENT_DATE + INTERVAL '1 day'")
+            where_clauses.append(f"event_time >= '{today_start.isoformat()}' AND event_time < '{today_end.isoformat()}'")
         elif "이번달" in q or "1월" in q:
-            where_clauses.append("event_time >= date_trunc('month', CURRENT_DATE)")
+            month_start = today_start.replace(day=1)
+            where_clauses.append(f"event_time >= '{month_start.isoformat()}'")
         else:
-            where_clauses.append("event_time >= now()")
+            # 기본: 지금부터 미래 일정
+            where_clauses.append(f"event_time >= '{now_kst.isoformat()}'")
 
         where_sql = " AND ".join(where_clauses)
         
+        # 주요 리그 우선 정렬 - LIMIT 고정
         sql = f"""
             SELECT 
                 strftime(event_time, '%m/%d %H:%M') as time,
@@ -44,66 +70,68 @@ def refine_schedules_with_duckdb(query_text: str, limit: int = 10) -> str:
                 title,
                 url,
                 CASE 
-                    WHEN (title ILIKE '%LCK%' OR title ILIKE '%Worlds%' OR title ILIKE '%월즈%' OR title ILIKE '%MSI%') THEN 0
-                    WHEN (title ILIKE '%Challengers%' OR title ILIKE '%CL%' OR title ILIKE '%Pacific%' OR title ILIKE '%퍼시픽%') THEN 1
-                    WHEN (title ILIKE '%LPL%' OR title ILIKE '%PCL%' OR title ILIKE '%LEC%' OR title ILIKE '%LCS%') THEN 2
-                    ELSE 3
+                    WHEN league_tag = 'LCK' OR is_international = 1 THEN 0
+                    WHEN league_tag = 'LCK-CL' THEN 1
+                    ELSE 2
                 END as priority
             FROM sqlite_db.game_news
             WHERE {where_sql}
             ORDER BY priority ASC, event_time ASC
-            LIMIT 20
+            LIMIT 15
         """
         
+        query_start = time_module.perf_counter()
         results = con.execute(sql).fetchall()
+        query_time = (time_module.perf_counter() - query_start) * 1000
+        logger.info(f"[Esports] 메인 쿼리 완료: {len(results)}건, {query_time:.1f}ms")
         
+        # 폴백: 결과 없으면 "오늘/이번달" 제약을 풀고 "해당 필터(LCK 등)" 내에서 가장 가까운 일정 5개 검색
         if not results:
-            results = con.execute("""
-                SELECT strftime(event_time, '%m/%d %H:%M'), game_tag, title, url, 3 as priority
+            # 시간 제약만 제외한 나머지 필터 유지
+            fallback_where = [c for c in where_clauses if "event_time" not in c]
+            fallback_where.append(f"event_time >= '{now_kst.isoformat()}'")
+            fallback_where_sql = " AND ".join(fallback_where)
+            
+            fallback_sql = f"""
+                SELECT strftime(event_time, '%m/%d %H:%M'), game_tag, title, url, 2 as priority
                 FROM sqlite_db.game_news 
-                WHERE source_type = 'schedule' AND event_time >= now() 
-                ORDER BY event_time ASC LIMIT 5
-            """).fetchall()
-            if not results: return "검색된 관련 일정이 없습니다."
+                WHERE {fallback_where_sql}
+                ORDER BY event_time ASC 
+                LIMIT 5
+            """
+            query_start = time_module.perf_counter()
+            results = con.execute(fallback_sql).fetchall()
+            query_time = (time_module.perf_counter() - query_start) * 1000
+            logger.info(f"[Esports] 폴백 쿼리 완료: {len(results)}건, {query_time:.1f}ms")
             
+            if not results:
+                total_time = (time_module.perf_counter() - start_time) * 1000
+                logger.info(f"[Esports] 결과 없음, 총 소요시간: {total_time:.1f}ms")
+                return "검색된 관련 일정이 없습니다."
+            
+        # 결과 포맷팅 (최대 12개)
         refined_items = []
-        p0_count = sum(1 for r in results if r[4] == 0)
-        p1_count = sum(1 for r in results if r[4] == 1)
-        
-        # 필터링 로직: 주요 리그(p0, p1)가 있다면 마이너 리그(p2, p3)는 최대 3개까지만
-        minor_limit = 3 if (p0_count + p1_count > 0) else 10
-        minor_added = 0
-        
-        for r in results:
-            priority = r[4]
-            if priority >= 2:
-                if minor_added >= minor_limit:
-                    continue
-                minor_added += 1
-            
+        for r in results[:12]:
             display_title = r[2].replace("[Esports Schedule] ", "").replace(f"{r[1]} - ", "")
-            # 팀명만 강조해서 가독성 향상
             display_title = display_title.replace(" vs ", " ⚔️ ")
-            
-            url = r[3] if r[3] else ""
             item = f"📅 {r[0]} | {display_title}"
-            if url:
-                item += f" (🔗)"
-            
+            if r[3]:
+                item += " (🔗)"
             refined_items.append(item)
             
-            # LLM 컨텍스트가 너무 커지지 않도록 최대 12개 아이템으로 제한
-            if len(refined_items) >= 12:
-                break
-            
-        return "\n".join(refined_items)
+        total_time = (time_module.perf_counter() - start_time) * 1000
+        context_str = "\n".join(refined_items)
+        logger.info(f"[Esports] 완료: {len(refined_items)}건 반환, 컨텐츠 길이: {len(context_str)}자, 총 소요시간: {total_time:.1f}ms")
+        return context_str
         
     except Exception as e:
-        logger.error(f"DuckDB e-sports refinement failed: {e}")
+        total_time = (time_module.perf_counter() - start_time) * 1000
+        logger.error(f"[Esports] 오류 발생: {e}, 소요시간: {total_time:.1f}ms")
         return "일정 정제 중 오류가 발생했습니다."
     finally:
         if 'con' in locals():
             con.close()
+
 
 def refine_news_with_duckdb(category: str = "economy", limit: int = 10) -> str:
     """
@@ -118,9 +146,9 @@ def refine_news_with_duckdb(category: str = "economy", limit: int = 10) -> str:
         
         where_clauses = ["source_type = 'news'"]
         if category == "economy":
-            where_clauses.append("game_tag IN ('Economy', 'Tech/Semiconductor', 'FX', 'Fed/Macro')")
+            where_clauses.append("category_tag IN ('Macro', 'Tech/Semicon', 'FX/Rates', 'Market', 'Crypto', 'EV/Auto', 'Economy')")
         elif category == "esports":
-            where_clauses.append("game_tag IN ('LoL', 'Valorant', 'LCK-CK', 'Esports')")
+            where_clauses.append("category_tag IN ('LCK', 'LCK-CL', 'VCT', 'General')")
         
         where_sql = " AND ".join(where_clauses)
         
@@ -147,7 +175,9 @@ def refine_news_with_duckdb(category: str = "economy", limit: int = 10) -> str:
             else:
                 refined_items.append(f"📰 {r[0]} | [{r[1]}] {r[2]}")
         
-        return "\n".join(refined_items)
+        context_str = "\n".join(refined_items)
+        logger.info(f"[News] {category} 완료: {len(refined_items)}건 반환, 컨텐츠 길이: {len(context_str)}자")
+        return context_str
         
     except Exception as e:
         logger.error(f"Failed to refine news: {e}")
@@ -170,25 +200,29 @@ def refine_economy_news_with_duckdb(query_text: str, limit: int = 12) -> str:
         
         where_clauses = [
             "source_type = 'news'",
-            "(game_tag IN ('Economy', 'Tech/Semiconductor', 'FX', 'Fed/Macro') OR game_tag LIKE 'GlobalMacro%')"
+            "category_tag IN ('Macro', 'Tech/Semicon', 'FX/Rates', 'Market', 'Crypto', 'EV/Auto', 'Economy', 'General')"
         ]
         
         q = query_text.lower()
-        if "미국" in q or "us" in q or "나스닥" in q or "s&p" in q:
-            where_clauses.append("game_tag LIKE '%US%' OR title ILIKE '%nasdaq%' OR title ILIKE '%S&P%'")
-        if "유럽" in q or "eu" in q or "ecb" in q:
-            where_clauses.append("game_tag LIKE '%EU%' OR title ILIKE '%ECB%'")
-        if "한국" in q or "코스피" in q or "원화" in q:
-            where_clauses.append("source_name = 'Naver'")
+        if "미국" in q or "us" in q or "국제" in q or "해외" in q:
+            where_clauses.append("is_international = 1")
+        elif "한국" in q or "국내" in q:
+            where_clauses.append("is_international = 0 AND source_name = 'Naver'")
+        
+        if "나스닥" in q or "nasdaq" in q or "s&p" in q:
+            where_clauses.append("category_tag = 'Market'")
+        if "금리" in q or "환율" in q:
+            where_clauses.append("category_tag = 'FX/Rates'")
         
         where_sql = " AND ".join(where_clauses)
         
         sql = f"""
             SELECT 
                 strftime(published_at, '%m/%d %H:%M') as time,
-                game_tag,
+                category_tag,
                 title,
-                source_name
+                source_name,
+                is_international
             FROM sqlite_db.game_news
             WHERE {where_sql}
             ORDER BY published_at DESC
@@ -203,14 +237,17 @@ def refine_economy_news_with_duckdb(query_text: str, limit: int = 12) -> str:
         global_news = []
         
         for r in results:
-            source = r[3]
             tag = r[1]
-            line = f"📰 {r[0]} | {r[2]}"
+            title = r[2]
+            source = r[3]
+            is_intl = r[4]
             
-            if source == "Naver" or tag in ('Economy', 'Tech/Semiconductor', 'FX', 'Fed/Macro'):
-                domestic.append(line)
-            else:
+            line = f"📰 {r[0]} | [{tag}] {title}"
+            
+            if is_intl:
                 global_news.append(line)
+            else:
+                domestic.append(line)
         
         output_parts = []
         if global_news:
@@ -218,7 +255,9 @@ def refine_economy_news_with_duckdb(query_text: str, limit: int = 12) -> str:
         if domestic:
             output_parts.append("🇰🇷 **국내 경제**\n" + "\n".join(domestic[:10]))
         
-        return "\n\n".join(output_parts) if output_parts else "관련 뉴스가 없습니다."
+        context_str = "\n\n".join(output_parts) if output_parts else "관련 뉴스가 없습니다."
+        logger.info(f"[Economy] 완료: {len(output_parts)}개 섹션 반환, 컨텐츠 길이: {len(context_str)}자")
+        return context_str
         
     except Exception as e:
         logger.error(f"Failed to refine economy news: {e}")
@@ -227,7 +266,7 @@ def refine_economy_news_with_duckdb(query_text: str, limit: int = 12) -> str:
         if 'con' in locals():
             con.close()
 
-def refine_game_trends_with_duckdb(query_text: str, limit: int = 5) -> str:
+def refine_game_trends_with_duckdb(query_text: str, limit: int = 10) -> str:
     """
     DuckDB를 사용하여 Steam 트렌드/랭킹 데이터를 검색하고 고밀도 텍스트로 정제한다.
     - SteamStore: source_type='trend'
@@ -287,7 +326,9 @@ def refine_game_trends_with_duckdb(query_text: str, limit: int = 5) -> str:
                 line += f"\n   🔗 {url}"
             refined_items.append(line)
 
-        return "\n".join(refined_items)
+        context_str = "\n".join(refined_items)
+        logger.info(f"[GameTrend] 완료: {len(refined_items)}건 반환, 컨텐츠 길이: {len(context_str)}자")
+        return context_str
 
     except Exception as e:
         logger.error(f"Failed to refine Steam game trends: {e}")

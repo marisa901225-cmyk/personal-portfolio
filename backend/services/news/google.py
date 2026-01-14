@@ -83,22 +83,32 @@ def _is_english_content(text: str) -> bool:
     return korean_chars / max(total_chars, 1) < 0.1
 
 
-def _determine_game_tag(query: str) -> str:
-    """쿼리 기반 game_tag 결정"""
+def _determine_tags(query: str) -> tuple[str, str, bool]:
+    """쿼리 기반 tags 결정 (game_tag, category_tag, is_international)"""
     q_lower = query.lower()
     
-    if "nvidia" in q_lower or "semiconductor" in q_lower or "chip" in q_lower or "amd" in q_lower or "반도체" in q_lower:
-        return "Tech/Semiconductor"
-    elif "tesla" in q_lower or "ev" in q_lower or "electric vehicle" in q_lower or "전기차" in q_lower:
-        return "EV/Auto"
-    elif "fed" in q_lower or "fomc" in q_lower or "interest rate" in q_lower or "금리" in q_lower:
-        return "Fed/Macro"
-    elif "s&p" in q_lower or "nasdaq" in q_lower or "dow" in q_lower or "stock" in q_lower:
-        return "Markets"
-    elif "crypto" in q_lower or "bitcoin" in q_lower or "ethereum" in q_lower or "비트코인" in q_lower:
-        return "Crypto"
-    else:
-        return "Economy"
+    game_tag = "Economy"
+    category_tag = "General"
+    is_international = False
+
+    # 1. Tech/Semiconductor
+    if any(kw in q_lower for kw in ["nvidia", "semiconductor", "chip", "amd", "반도체", "hbm"]):
+        category_tag = "Tech/Semicon"
+    # 2. EV/Auto
+    elif any(kw in q_lower for kw in ["tesla", "ev", "electric vehicle", "전기차"]):
+        category_tag = "EV/Auto"
+    # 3. Macro
+    elif any(kw in q_lower for kw in ["fed", "fomc", "interest rate", "금리", "inflation", "cpi"]):
+        category_tag = "Macro"
+        is_international = "us" in q_lower or "eu" in q_lower or "fed" in q_lower
+    # 4. Market
+    elif any(kw in q_lower for kw in ["s&p", "nasdaq", "dow", "stock", "주식시장", "market"]):
+        category_tag = "Market"
+    # 5. Crypto
+    elif any(kw in q_lower for kw in ["crypto", "bitcoin", "ethereum", "비트코인"]):
+        category_tag = "Crypto"
+        
+    return game_tag, category_tag, is_international
 
 
 async def collect_google_news(
@@ -143,7 +153,7 @@ async def collect_google_news(
         
         items = channel.findall("item")
         count = 0
-        game_tag = _determine_game_tag(query)
+        game_tag, category_tag, is_international = _determine_tags(query)
         
         for item in items:
             title_elem = item.find("title")
@@ -178,6 +188,8 @@ async def collect_google_news(
             news = GameNews(
                 content_hash=content_hash,
                 game_tag=game_tag,
+                category_tag=category_tag,
+                is_international=is_international,
                 source_name=f"Google/{source_name}",
                 source_type="news",
                 title=title,  # 원본 제목 유지

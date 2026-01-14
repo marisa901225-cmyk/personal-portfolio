@@ -59,17 +59,17 @@ class NewsCollector:
         return await collect_pandascore_schedules(db)
 
     @staticmethod
-    def refine_schedules_with_duckdb(query_text: str, limit: int = 15) -> str:
+    def refine_schedules_with_duckdb(query_text: str, limit: int = 10) -> str:
         return refine_schedules_with_duckdb(query_text, limit)
 
     @staticmethod
-    def refine_news_with_duckdb(category: str = "economy", limit: int = 15) -> str:
+    def refine_news_with_duckdb(category: str = "economy", limit: int = 10) -> str:
         return refine_news_with_duckdb(category, limit)
 
     @staticmethod
-    def refine_economy_news_with_duckdb(query_text: str, limit: int = 20) -> str:
+    def refine_economy_news_with_duckdb(query_text: str, limit: int = 12) -> str:
         return refine_economy_news_with_duckdb(query_text, limit)
 
     @staticmethod
-    def refine_game_trends_with_duckdb(query_text: str, limit: int = 15) -> str:
+    def refine_game_trends_with_duckdb(query_text: str, limit: int = 10) -> str:
         return refine_game_trends_with_duckdb(query_text, limit)

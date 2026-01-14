@@ -37,6 +37,7 @@ while true; do
         --port 8080 \
         --threads "$THREADS" \
         --ctx-size 2048 \
+        --reasoning-budget 0 \
         --jinja \
         --chat-template-file "$TEMPLATE_PATH" &
 
