@@ -194,7 +194,9 @@ async def telegram_webhook(request: Request):
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": user_prompt}
             ]
-            response_text = llm.generate_chat(messages, max_tokens=1536)
+            total_prompt_len = sum(len(m['content']) for m in messages)
+            logger.info(f"LLM Prompt total length: {total_prompt_len} characters")
+            response_text = llm.generate_chat(messages, max_tokens=768)
             
             if not response_text:
                 response_text = "죄송합니다. 답변을 생성하는 중에 문제가 발생했습니다. 😅"
@@ -227,21 +229,19 @@ def _get_game_trend_prompt(text: str, context: str) -> str:
 
 # 프롬프트 생성 헬퍼 함수들 (현재 메인 로직에서 직접 generate_chat 사용, 레거시용)
 def _get_esports_prompt(text: str, context: str) -> str:
-    return f"""
-사용자의 질문과 아래 제공된 경기 일정 데이터를 바탕으로 친절하고 명확하게 답변해 주세요.
+    """e스포츠 프롬프트 - LCK/국제대회 포함, 친근한 스타일 (환각 방지 강화)"""
+    return f"""아래 일정을 보고 질문에 답해줘.
 
-[제공된 경기 일정 데이터]
+[일정]
 {context}
 
-[사용자의 질문]
-{text}
+[질문] {text}
 
-[답변 규칙]
-- 한국어로 답변하세요.
-- 데이터에 있는 내용을 기반으로 정확하게 안내하세요. 만약 데이터에 없는 내용이라면 모른다고 정직하게 말하세요.
-- 친절하고 위트 있는 말투를 사용하세요.
-- 일시 정보를 포함하여 경기 정보를 깔끔하게 정리해 주세요.
-"""
+답변 규칙:
+- 제공된 [일정] 데이터의 팀 이름과 경기 시간을 정확히 매칭해서 알려줘
+- **반드시 3줄 이내로 답변해 (경기는 한 줄에 여러 개 써도 됨)**
+- **EXAONE 특유의 자신감 넘치고 재치 있는 말투와 함께 상황에 맞는 적절한 이모지(🎮, 🔥, 🏆 등)를 섞어서 사용해**
+- 마지막에 열정적인 응원 한 마디와 함께 화이팅 이모지 추가"""
 
 def _get_economy_prompt(text: str, context: str) -> str:
     return f"""
@@ -276,7 +276,13 @@ def _format_for_telegram(text: str) -> str:
     - ### 제목 -> <b>제목</b>
     - **강조** -> <b>강조</b>
     - 불렛 포인트(-) -> •
+    - LLM 특수 토큰 제거
     """
+    from ..services.alarm.sanitizer import clean_exaone_tokens
+    
+    # 0. LLM 특수 토큰 제거
+    text = clean_exaone_tokens(text)
+    
     # 1. 기본 HTML 특수문자 이스케이프 (태그 깨짐 방지)
     safe_text = html.escape(text)
     
@@ -289,7 +295,7 @@ def _format_for_telegram(text: str) -> str:
     # 4. 불렛 포인트 변환: 줄 시작의 - -> •
     safe_text = re.sub(r'^-\s+', '• ', safe_text, flags=re.MULTILINE)
     
-    return safe_text
+    return safe_text.strip()
 
 
 def classify_query(text: str) -> str:
@@ -343,8 +349,9 @@ async def handle_model_command(parts: list) -> str:
     
     # 모델 별칭 매핑
     MODEL_ALIASES = {
-        "E3.5": "EXAONE-3.5-2.4B-Instruct-BF16.gguf",
+        "K1.5": "Kanana-Nano-2.1B-Instruct-v1.5-Q8_0.gguf",
         "E4": "EXAONE-4.0-1.2B-BF16.gguf",
+        "Q3": "Qwen3-1.7B-Instruct-f16.gguf",
         "G3": "gemma-3-4b-it-Q3_K_M.gguf",
         "G4": "gemma-3-4b-it-q4_k_m.gguf"
     }

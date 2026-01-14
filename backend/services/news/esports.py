@@ -72,6 +72,31 @@ async def collect_pandascore_schedules(db: Session):
             # PandaScore는 UTC로 제공되므로 한국 시간(KST, UTC+9)으로 변환하여 저장
             begin_at = begin_at_utc + timedelta(hours=9)
             
+            game = "LoL" if is_lol else "Valorant"
+            
+            # 리그 및 국제대회 태깅
+            league_name = match.get("league", {}).get("name", "")
+            league_tag = "기타"
+            is_international = False
+            
+            lower_league = league_name.lower()
+            if "lck" in lower_league:
+                league_tag = "LCK"
+            elif "challengers korea" in lower_league or "lck cl" in lower_league:
+                league_tag = "LCK-CL"
+            elif "lpl" in lower_league:
+                league_tag = "LPL"
+            elif "lec" in lower_league:
+                league_tag = "LEC"
+            elif "lcs" in lower_league:
+                league_tag = "LCS"
+            elif any(kw in lower_league for kw in ["worlds", "msi", "mid-season invitational"]):
+                league_tag = "Worlds/MSI"
+                is_international = True
+            elif any(kw in lower_league for kw in ["champions", "masters", "vct"]):
+                league_tag = "VCT"
+                is_international = True
+            
             title = f"[Esports Schedule] {game} - {name}"
             content = f"Match: {name}\nLeague: {league}\nTournament: {match.get('tournament', {}).get('name')}\nStart Time: {begin_at_str}\nLink: {match.get('official_stream_url', '')}"
             
@@ -83,6 +108,8 @@ async def collect_pandascore_schedules(db: Session):
             news = GameNews(
                 content_hash=content_hash,
                 game_tag=game,
+                league_tag=league_tag,
+                is_international=is_international,
                 source_name="PandaScore",
                 source_type="schedule",
                 event_time=begin_at,

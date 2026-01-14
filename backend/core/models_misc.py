@@ -62,6 +62,9 @@ class GameNews(Base):
     # Metadata for Hybrid Search
     game_tag: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # LoL, Valorant
     team_tag: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # T1, GenG
+    league_tag: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # LCK, LPL, Worlds
+    category_tag: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # Macro, Tech, Stock, FX 등
+    is_international: Mapped[bool] = mapped_column(Integer, default=False)
     event_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)  # 경기 일정 등
 
     source_type: Mapped[str] = mapped_column(String(20), default="news")  # news, schedule, patch

@@ -29,14 +29,29 @@ def _throttle_rest() -> None:
 
 
 def save_token(my_token, my_expired):
-    valid_date = datetime.strptime(my_expired, "%Y-%m-%d %H:%M:%S")
-    save_kis_token(my_token, valid_date)
+    import logging
+    logger = logging.getLogger(__name__)
+    try:
+        valid_date = datetime.strptime(my_expired, "%Y-%m-%d %H:%M:%S")
+        logger.info("[KIS] save_token 호출 - 만료시간 raw: %s, parsed: %s", my_expired, valid_date)
+        save_kis_token(my_token, valid_date)
+    except Exception as e:
+        logger.error("[KIS] save_token 실패: %s (my_expired=%s)", e, my_expired)
+        raise
 
 
 def read_token():
+    import logging
+    logger = logging.getLogger(__name__)
     try:
-        return read_kis_token()
-    except Exception:
+        token = read_kis_token()
+        if token:
+            logger.debug("[KIS] read_token 성공 - 토큰 존재")
+        else:
+            logger.warning("[KIS] read_token - 토큰 없음 또는 만료됨 (재발급 필요)")
+        return token
+    except Exception as e:
+        logger.error("[KIS] read_token 실패: %s", e)
         return None
 
 
@@ -119,7 +134,19 @@ def _getResultObject(json_data):
     return _tb_(**json_data)
 
 
-def auth(svr="prod", product=state._cfg["my_prod"], url=None):
+def auth(svr="prod", product=state._cfg["my_prod"], url=None, force=False):
+    """
+    KIS 접근 토큰 발급/로딩.
+
+    Args:
+        svr: 서버 타입 ("prod" 또는 "vps")
+        product: 상품 타입
+        url: 토큰 발급 URL (기본값: None)
+        force: True면 캐시된 토큰 무시하고 강제 재발급 (기본값: False)
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
     p = {"grant_type": "client_credentials"}
     if svr == "prod":
         ak1 = "my_app"
@@ -132,15 +159,20 @@ def auth(svr="prod", product=state._cfg["my_prod"], url=None):
     p["appsecret"] = state._cfg[ak2]
 
     with state._token_file_lock():
-        my_token = read_token()
-        if my_token:
-            changeTREnv(my_token, svr, product)
-            state._base_headers["authorization"] = f"Bearer {my_token}"
-            state._base_headers["appkey"] = state._TRENV.my_app
-            state._base_headers["appsecret"] = state._TRENV.my_sec
-            state._last_auth_time = datetime.now()
-            return my_token
+        # 강제 재발급이 아니면 캐시된 토큰 확인
+        if not force:
+            my_token = read_token()
+            if my_token:
+                changeTREnv(my_token, svr, product)
+                state._base_headers["authorization"] = f"Bearer {my_token}"
+                state._base_headers["appkey"] = state._TRENV.my_app
+                state._base_headers["appsecret"] = state._TRENV.my_sec
+                state._last_auth_time = datetime.now()
+                logger.debug("[KIS Auth] 캐시된 토큰 사용 (만료 전)")
+                return my_token
 
+        # 새 토큰 발급
+        logger.warning("[KIS Auth] 새 토큰 발급 시도 (force=%s)", force)
         if not url:
             url = f"{state._cfg[svr]}/oauth2/tokenP"
         res = requests.post(url, data=json.dumps(p), headers=_getBaseHeader())
@@ -148,8 +180,10 @@ def auth(svr="prod", product=state._cfg["my_prod"], url=None):
         if rescode == 200:
             my_token = _getResultObject(res.json()).access_token
             my_expired = _getResultObject(res.json()).access_token_token_expired
+            logger.warning("[KIS Auth] 토큰 발급 성공! 만료시간: %s", my_expired)
             save_token(my_token, my_expired)
         else:
+            logger.error("[KIS Auth] 토큰 발급 실패: %s", res.text)
             print("Get Auth Token Fail. (Check your AppKey, AppSecret)")
             return
 

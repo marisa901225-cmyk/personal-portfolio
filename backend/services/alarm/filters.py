@@ -165,7 +165,7 @@ def is_spam_llm(text: str) -> tuple[bool, str]:
 """
         }
     ]
-    result = llm.generate_chat(messages, max_tokens=10, temperature=0.1).lower()
+    result = llm.generate_chat(messages, max_tokens=10, temperature=0.1, enable_thinking=True).lower()
     
     if "spam" in result:
         logger.info(f"LLM classified as SPAM: {text[:50]}...")

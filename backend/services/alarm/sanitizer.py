@@ -5,6 +5,21 @@ from typing import List
 
 logger = logging.getLogger(__name__)
 
+def clean_exaone_tokens(text: str) -> str:
+    """
+    EXAONE, Qwen 등 LLM 특수 토큰을 제거한다.
+    """
+    if not text:
+        return ""
+    # EXAONE 특수 토큰: [|user|], [|assistant|], [|system|], [|endofturn|], [|endtransmission|] 등
+    text = re.sub(r'\[\|(user|assistant|system|tool|endofturn|endtransmission|end_of_turn)\|\]', '', text)
+    # Qwen/기타 <|...|> 스타일 토큰
+    text = re.sub(r'<\|.*?\|>', '', text)
+    # <think> 태그 내 내용 제거 (혹시 남아있을 경우)
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    
+    return text.strip()
+
 def infer_source(item: dict) -> str:
     """
     패키지명, 앱 이름, 텍스트 등을 기반으로 서비스 출처를 추론한다.

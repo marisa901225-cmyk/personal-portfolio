@@ -264,7 +264,7 @@ class LLMService:
             self._http_client = httpx.Client(timeout=LLM_TIMEOUT)
         return self._http_client
 
-    def _generate_chat_remote(self, messages: List[dict], max_tokens: int, temperature: float, stop: Optional[list] = None) -> str:
+    def _generate_chat_remote(self, messages: List[dict], max_tokens: int, temperature: float, stop: Optional[list] = None, enable_thinking: bool = False) -> str:
         """llama-server의 OpenAI 호환 API 호출."""
         if not self._base_url:
             logger.warning("LLM_BASE_URL not configured.")
@@ -283,6 +283,8 @@ class LLMService:
             }
             if stop:
                 payload["stop"] = stop
+            if enable_thinking:
+                payload["enable_thinking"] = True
             response = client.post(url, json=payload, headers=headers)
             response.raise_for_status()
             data = response.json()
@@ -330,13 +332,16 @@ class LLMService:
             logger.error(f"LLM generation failed: {e}")
             return ""
 
-    def generate_chat(self, messages: List[dict], max_tokens: int = 512, temperature: float = 0.7, stop: list = None, seed: int = None) -> str:
+    def generate_chat(self, messages: List[dict], max_tokens: int = 512, temperature: float = 0.7, stop: list = None, seed: int = None, enable_thinking: bool = False) -> str:
         """
         Chat Completion API를 사용하여 대화 형식으로 텍스트를 생성한다.
         로드된 모델의 chat_template이 자동으로 적용된다.
+        
+        Args:
+            enable_thinking: True이면 <think> 모드 활성화 (스킸 필터링 등 복잡한 판단 필요 시)
         """
         if self._is_remote_mode():
-            return self._generate_chat_remote(messages, max_tokens, temperature, stop=stop)
+            return self._generate_chat_remote(messages, max_tokens, temperature, stop=stop, enable_thinking=enable_thinking)
         if self._model is None:
             logger.warning("LLM model is not loaded.")
             return ""

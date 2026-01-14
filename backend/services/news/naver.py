@@ -72,30 +72,37 @@ async def collect_naver_news(db: Session, query: str, category: str = "esports")
             if existing:
                 continue
             
-            # game_tag 결정 (검색어 기반)
+            # game_tag 및 category_tag 결정 (검색어 기반)
+            game_tag = "Esports" if category == "esports" else "Economy"
+            category_tag = "General"
+            
+            q_lower = query.lower()
             if category == "esports":
-                game_tag = "Esports"
-                # 세부 분류
-                q_lower = query.lower()
-                if "lol" in q_lower or "롤" in q_lower or "lck" in q_lower or "월즈" in q_lower:
+                if any(kw in q_lower for kw in ["lol", "롤", "lck", "월즈"]):
                     game_tag = "LoL"
-                elif "vct" in q_lower or "발로" in q_lower or "퍼시픽" in q_lower:
+                    category_tag = "LCK"
+                elif any(kw in q_lower for kw in ["vct", "발로", "퍼시픽"]):
                     game_tag = "Valorant"
-                elif "챌린저스" in q_lower or "2군" in q_lower or "ck" in q_lower:
-                    game_tag = "LCK-CK"
+                    category_tag = "VCT"
+                elif any(kw in q_lower for kw in ["챌린저스", "2군", "ck"]):
+                    game_tag = "LoL"
+                    category_tag = "LCK-CL"
             else:
-                game_tag = "Economy"
-                # 세부 분류
-                if "삼성" in query or "반도체" in query or "hbm" in query.lower():
-                    game_tag = "Tech/Semiconductor"
-                elif "환율" in query or "달러" in query:
-                    game_tag = "FX"
-                elif "fomc" in query.lower() or "연준" in query:
-                    game_tag = "Fed/Macro"
+                if any(kw in q_lower for kw in ["삼성", "반도체", "hbm", "nvidia", "엔비디아", "sk하이닉스"]):
+                    category_tag = "Tech/Semicon"
+                elif any(kw in q_lower for kw in ["환율", "달러", "금리", "한국은행"]):
+                    category_tag = "FX/Rates"
+                elif any(kw in q_lower for kw in ["fomc", "연준", "매크로", "인플레이션", "cpi"]):
+                    category_tag = "Macro"
+                elif any(kw in q_lower for kw in ["주식시장", "코스피", "코스닥", "나스닥", "s&p"]):
+                    category_tag = "Market"
+                elif any(kw in q_lower for kw in ["비트코인", "코인", "가상자산", "crypto"]):
+                    category_tag = "Crypto"
             
             news = GameNews(
                 content_hash=content_hash,
                 game_tag=game_tag,
+                category_tag=category_tag,
                 source_name="Naver",
                 source_type="news",
                 title=clean_title,

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "../data/expense_model.joblib")
 
 from .alarm.filters import mask_sensitive_info, is_spam, is_promo_spam, is_whitelisted, should_ignore, is_spam_llm, is_review_spam
-from .alarm.sanitizer import infer_source, escape_html_preserve_urls, sanitize_llm_output
+from .alarm.sanitizer import infer_source, escape_html_preserve_urls, sanitize_llm_output, clean_exaone_tokens
 from .alarm.parsers import parse_card_approval
 
 class AlarmService:
@@ -187,11 +187,14 @@ class AlarmService:
         ]
         
         logger.info(f"LLM Chat Messages: {messages}")
+        total_prompt_len = sum(len(m['content']) for m in messages)
+        logger.info(f"LLM Prompt total length: {total_prompt_len} characters")
         result = llm_service.generate_chat(messages, max_tokens=512)
         logger.info(f"LLM Response: {result}")
         
-        # 환각 제거 후 반환
+        # 환각 제거 및 특수 토큰 제거 후 반환
         result = sanitize_llm_output(items, result)
+        result = clean_exaone_tokens(result)
         return result
 
     @classmethod
@@ -219,7 +222,8 @@ Start directly with the result without any introductory phrases or greetings.
 [Payments]
 {chr(10).join(expense_list)}"""}
         ]
-        return llm_service.generate_chat(messages, max_tokens=128)
+        result = llm_service.generate_chat(messages, max_tokens=128)
+        return clean_exaone_tokens(result)
 
     @classmethod
     async def process_pending_alarms(cls, db: Session):
@@ -412,7 +416,8 @@ Start directly with the result without any introductory phrases or greetings.
                     "잠깐 쉬어가기",
                     "심심풀이 지식"
                 ]
-                title = random_titles[category_index % len(random_titles)]
+                title_index = (datetime.now().minute // 10) % len(random_titles)
+                title = random_titles[title_index]
 
             sender_info = f" ({', '.join(list(senders)[:3])}{'...' if len(senders) > 3 else ''})" if senders else ""
             header = f"<b>[{title}]{sender_info}</b>\n\n"
