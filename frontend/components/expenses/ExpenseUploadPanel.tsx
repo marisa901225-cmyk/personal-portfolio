@@ -49,7 +49,7 @@ export const ExpenseUploadPanel: React.FC<ExpenseUploadPanelProps> = ({
                 <div>
                     <h2 className="text-lg font-semibold text-slate-900">가계부 내역 업로드</h2>
                     <p className="text-sm text-slate-500 mt-1">
-                        카드/계좌 내역 파일(.xlsx, .xls, .csv)을 업로드하면 자동으로 분류됩니다.
+                        카드/계좌 내역 파일(.xlsx, .xls, .csv) 및 네이버페이 텍스트(.txt)를 업로드하면 자동으로 분류됩니다.
                     </p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -58,7 +58,7 @@ export const ExpenseUploadPanel: React.FC<ExpenseUploadPanelProps> = ({
                         type="file"
                         onChange={onFileChange}
                         className="hidden"
-                        accept=".xlsx,.xls,.csv"
+                        accept=".xlsx,.xls,.csv,.txt"
                     />
                     <button
                         type="button"

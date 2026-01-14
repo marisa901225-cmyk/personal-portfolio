@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, BarChart2 } from 'lucide-react';
 
 interface ReportViewProps {
     displayReport: any;
@@ -31,16 +31,31 @@ export const ReportView: React.FC<ReportViewProps> = ({
     generalPeriod,
     generalError,
 }) => {
+    const [showGeneral, setShowGeneral] = React.useState(false);
     const generalSummary = generalReport?.portfolio.summary ?? null;
 
     return (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
             <div className="flex items-center justify-between gap-3">
-                <div>
-                    <h2 className="text-lg font-semibold text-slate-900">AI 리포트 결과</h2>
-                    <p className="text-sm text-slate-500 mt-1">
-                        {displayReport?.isNew ? '방금 생성된 리포트입니다.' : '선택된 리포트를 표시합니다.'}
-                    </p>
+                <div className="flex items-center gap-3">
+                    <div>
+                        <h2 className="text-lg font-semibold text-slate-900">AI 리포트 결과</h2>
+                        <p className="text-sm text-slate-500 mt-1">
+                            {displayReport?.isNew ? '방금 생성된 리포트입니다.' : '선택된 리포트를 표시합니다.'}
+                        </p>
+                    </div>
+                    {generalReport && (
+                        <button
+                            onClick={() => setShowGeneral(!showGeneral)}
+                            className={`p-2 rounded-xl transition-colors ${showGeneral
+                                    ? 'bg-indigo-100 text-indigo-600'
+                                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                }`}
+                            title={showGeneral ? '일반 리포트 숨기기' : '일반 리포트 함께 보기'}
+                        >
+                            <BarChart2 size={18} />
+                        </button>
+                    )}
                 </div>
                 {displayReport && (
                     <div className="text-xs text-slate-400 text-right">
@@ -53,9 +68,9 @@ export const ReportView: React.FC<ReportViewProps> = ({
                 )}
             </div>
 
-            <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <div className={`mt-6 grid grid-cols-1 gap-6 ${showGeneral ? 'lg:grid-cols-2' : ''}`}>
                 {/* AI Report Section */}
-                <div>
+                <div className={showGeneral ? '' : 'max-w-4xl mx-auto w-full'}>
                     <div className="flex items-center justify-between mb-3">
                         <h3 className="text-sm font-semibold text-slate-800">AI 리포트</h3>
                         {isLoading && (
@@ -78,84 +93,86 @@ export const ReportView: React.FC<ReportViewProps> = ({
                 </div>
 
                 {/* General Report (Comparison) Section */}
-                <div className="border-t border-slate-100 pt-6 lg:border-t-0 lg:border-l lg:pl-6 lg:pt-0">
-                    <div className="flex items-center justify-between mb-3">
-                        <div>
-                            <h3 className="text-sm font-semibold text-slate-800">일반 리포트</h3>
-                            <p className="text-xs text-slate-500 mt-1">
-                                요약 수치와 건수 기준으로 비교합니다.
-                            </p>
+                {showGeneral && (
+                    <div className="border-t border-slate-100 pt-6 lg:border-t-0 lg:border-l lg:pl-6 lg:pt-0">
+                        <div className="flex items-center justify-between mb-3">
+                            <div>
+                                <h3 className="text-sm font-semibold text-slate-800">일반 리포트</h3>
+                                <p className="text-xs text-slate-500 mt-1">
+                                    요약 수치와 건수 기준으로 비교합니다.
+                                </p>
+                            </div>
+                            {isGeneralLoading && (
+                                <Loader2 size={14} className="animate-spin text-slate-400" />
+                            )}
                         </div>
-                        {isGeneralLoading && (
-                            <Loader2 size={14} className="animate-spin text-slate-400" />
+
+                        {generalError && (
+                            <div className="mb-3 text-xs text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2">
+                                {generalError}
+                            </div>
+                        )}
+
+                        {!generalReport && !generalError && !isGeneralLoading && (
+                            <div className="text-sm text-slate-400 text-center py-8">
+                                비교할 일반 리포트를 불러오지 않았습니다.
+                            </div>
+                        )}
+
+                        {generalReport && generalSummary && (
+                            <div className="space-y-4 text-sm text-slate-700">
+                                {generalPeriod && (
+                                    <div className="text-xs text-slate-400">
+                                        기간: {formatPeriodLabel({ period: generalPeriod })}
+                                    </div>
+                                )}
+                                <div className="grid grid-cols-2 gap-3 text-xs">
+                                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                                        <div className="text-slate-400">총 평가액</div>
+                                        <div className="text-sm font-semibold text-slate-800">
+                                            {generalSummary.total_value.toLocaleString('ko-KR')}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                                        <div className="text-slate-400">총 매입액</div>
+                                        <div className="text-sm font-semibold text-slate-800">
+                                            {generalSummary.total_invested.toLocaleString('ko-KR')}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                                        <div className="text-slate-400">실현 손익</div>
+                                        <div className="text-sm font-semibold text-slate-800">
+                                            {generalSummary.realized_profit_total.toLocaleString('ko-KR')}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                                        <div className="text-slate-400">평가 손익</div>
+                                        <div className="text-sm font-semibold text-slate-800">
+                                            {generalSummary.unrealized_profit_total.toLocaleString('ko-KR')}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3 text-xs">
+                                    <div className="rounded-lg border border-slate-100 bg-white p-3">
+                                        <div className="text-slate-400">자산/거래</div>
+                                        <div className="text-sm font-semibold text-slate-800">
+                                            {generalReport.portfolio.assets.length} / {generalReport.portfolio.trades.length}
+                                        </div>
+                                    </div>
+                                    <div className="rounded-lg border border-slate-100 bg-white p-3">
+                                        <div className="text-slate-400">스냅샷/입출금</div>
+                                        <div className="text-sm font-semibold text-slate-800">
+                                            {generalReport.snapshots.length} / {generalReport.external_cashflows.length}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="text-xs text-slate-400">
+                                    생성: {new Date(generalReport.generated_at).toLocaleString('ko-KR')}
+                                </div>
+                            </div>
                         )}
                     </div>
-
-                    {generalError && (
-                        <div className="mb-3 text-xs text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2">
-                            {generalError}
-                        </div>
-                    )}
-
-                    {!generalReport && !generalError && !isGeneralLoading && (
-                        <div className="text-sm text-slate-400 text-center py-8">
-                            비교할 일반 리포트를 불러오지 않았습니다.
-                        </div>
-                    )}
-
-                    {generalReport && generalSummary && (
-                        <div className="space-y-4 text-sm text-slate-700">
-                            {generalPeriod && (
-                                <div className="text-xs text-slate-400">
-                                    기간: {formatPeriodLabel({ period: generalPeriod })}
-                                </div>
-                            )}
-                            <div className="grid grid-cols-2 gap-3 text-xs">
-                                <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                                    <div className="text-slate-400">총 평가액</div>
-                                    <div className="text-sm font-semibold text-slate-800">
-                                        {generalSummary.total_value.toLocaleString('ko-KR')}
-                                    </div>
-                                </div>
-                                <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                                    <div className="text-slate-400">총 매입액</div>
-                                    <div className="text-sm font-semibold text-slate-800">
-                                        {generalSummary.total_invested.toLocaleString('ko-KR')}
-                                    </div>
-                                </div>
-                                <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                                    <div className="text-slate-400">실현 손익</div>
-                                    <div className="text-sm font-semibold text-slate-800">
-                                        {generalSummary.realized_profit_total.toLocaleString('ko-KR')}
-                                    </div>
-                                </div>
-                                <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-                                    <div className="text-slate-400">평가 손익</div>
-                                    <div className="text-sm font-semibold text-slate-800">
-                                        {generalSummary.unrealized_profit_total.toLocaleString('ko-KR')}
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="grid grid-cols-2 gap-3 text-xs">
-                                <div className="rounded-lg border border-slate-100 bg-white p-3">
-                                    <div className="text-slate-400">자산/거래</div>
-                                    <div className="text-sm font-semibold text-slate-800">
-                                        {generalReport.portfolio.assets.length} / {generalReport.portfolio.trades.length}
-                                    </div>
-                                </div>
-                                <div className="rounded-lg border border-slate-100 bg-white p-3">
-                                    <div className="text-slate-400">스냅샷/입출금</div>
-                                    <div className="text-sm font-semibold text-slate-800">
-                                        {generalReport.snapshots.length} / {generalReport.external_cashflows.length}
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="text-xs text-slate-400">
-                                생성: {new Date(generalReport.generated_at).toLocaleString('ko-KR')}
-                            </div>
-                        </div>
-                    )}
-                </div>
+                )}
             </div>
         </div>
     );

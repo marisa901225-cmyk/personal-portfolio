@@ -5,10 +5,20 @@ import re
 import asyncio
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
-from ...core.models import GameNews
+from ...core.models import GameNews, SpamNews
 from .core import calculate_simhash, NAVER_NEWS_URL, NAVER_ESPORTS_QUERIES, NAVER_ECONOMY_QUERIES
 
 logger = logging.getLogger(__name__)
+
+def _is_ad(title: str) -> str:
+    """
+    제목이 광고성인지 체크한다.
+    광고면 해당 키워드(이유)를 반환하고, 아니면 None을 반환.
+    """
+    for kw in ["이벤트", "세미나", "기획전", "가이드북", "서포터즈", "참가자 모집", "수강생 모집"]:
+        if kw in title:
+            return kw
+    return None
 
 async def collect_naver_news(db: Session, query: str, category: str = "esports"):
     """
@@ -99,19 +109,40 @@ async def collect_naver_news(db: Session, query: str, category: str = "esports")
                 elif any(kw in q_lower for kw in ["비트코인", "코인", "가상자산", "crypto"]):
                     category_tag = "Crypto"
             
-            news = GameNews(
-                content_hash=content_hash,
-                game_tag=game_tag,
-                category_tag=category_tag,
-                source_name="Naver",
-                source_type="news",
-                title=clean_title,
-                url=original_link or link,
-                full_content=clean_desc,
-                published_at=published_at,
-            )
-            db.add(news)
-            count += 1
+            # 광고 체크
+            spam_reason = _is_ad(clean_title)
+            
+            if spam_reason:
+                # 스팸 테이블에 저장
+                news = SpamNews(
+                    content_hash=content_hash,
+                    game_tag=game_tag,
+                    category_tag=category_tag,
+                    source_name="Naver",
+                    source_type="news",
+                    title=clean_title,
+                    url=original_link or link,
+                    full_content=clean_desc,
+                    published_at=published_at,
+                    spam_reason=f"Keyword: {spam_reason}",
+                    rule_version=1  # 2026.01 기준 버전 1
+                )
+                db.add(news)
+                logger.info(f"Naver: Routed ad to SpamNews: {clean_title[:30]}... ({spam_reason})")
+            else:
+                news = GameNews(
+                    content_hash=content_hash,
+                    game_tag=game_tag,
+                    category_tag=category_tag,
+                    source_name="Naver",
+                    source_type="news",
+                    title=clean_title,
+                    url=original_link or link,
+                    full_content=clean_desc,
+                    published_at=published_at,
+                )
+                db.add(news)
+                count += 1
         
         db.commit()
         logger.info(f"Collected {count} Naver news for '{query}'")

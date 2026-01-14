@@ -179,8 +179,8 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
     const selectedFile = event.target.files?.[0];
     if (!selectedFile) return;
     const fileName = selectedFile.name.toLowerCase();
-    if (!['.xlsx', '.xls', '.csv'].some((ext) => fileName.endsWith(ext))) {
-      setUploadError('Excel(.xlsx/.xls) 또는 CSV(.csv) 파일만 업로드할 수 있습니다.');
+    if (!['.xlsx', '.xls', '.csv', '.txt'].some((ext) => fileName.endsWith(ext))) {
+      setUploadError('Excel(.xlsx/.xls), CSV(.csv), 또는 네이버페이 TXT(.txt) 파일만 업로드할 수 있습니다.');
       setUploadResult(null);
       event.target.value = '';
       return;

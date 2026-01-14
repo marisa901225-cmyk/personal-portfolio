@@ -82,7 +82,9 @@ def _build_review_info(
 
     pattern_category = learned_patterns.get(merchant)
     if pattern_category and pattern_category not in {"급여", "기타수입"}:
-        return (f"학습된 패턴: {pattern_category}", pattern_category)
+        # 패턴이 현재 카테고리와 다를 때만 검토 필요 표시
+        if expense.category != pattern_category:
+            return (f"학습된 패턴: {pattern_category}", pattern_category)
 
     if model is None or not hasattr(model, "predict"):
         return None
@@ -101,6 +103,10 @@ def _build_review_info(
             confidence = None
 
     if confidence is None or confidence < _REVIEW_CONFIDENCE_THRESHOLD:
+        return None
+
+    # AI 추정이 현재 카테고리와 다를 때만 검토 필요 표시
+    if expense.category == str(predicted):
         return None
 
     return (f"AI 추정: {predicted} (신뢰 {confidence:.2f})", str(predicted))

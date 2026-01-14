@@ -172,6 +172,17 @@ def import_expenses_from_file(
                 existing_core.setdefault(core_key, []).append((exp_id, float(exp_amount)))
                 methodless_key = build_methodless_key(exp_date, str(exp_merchant), float(exp_amount))
                 existing_methodless.setdefault(methodless_key, []).append((exp_id, str(exp_method or "")))
+
+        # [NEW] 복구 데이터 매칭용맵 (merchant, amount) -> list of exp_id
+        # 오늘 날짜(2026-01-14) 부근이거나 [복구] 메모가 있는 건들
+        recovery_candidates = {}
+        stmt_recovery = select(Expense.id, Expense.merchant, Expense.amount).where(
+            Expense.user_id == user.id,
+            Expense.memo.like('[복구]%')
+        )
+        for r_id, r_mer, r_amt in session.execute(stmt_recovery):
+            key = (str(r_mer).strip(), float(r_amt))
+            recovery_candidates.setdefault(key, []).append(r_id)
         
         for idx, row in df.iterrows():
             # 날짜 파싱
@@ -258,6 +269,24 @@ def import_expenses_from_file(
                 skip_breakdown["duplicate"] += 1
                 continue
             
+            # [NEW] [복구] 데이터 보정 로직
+            # 엑셀 날짜는 정확한데, DB에는 오늘 날짜로 들어간 [복구] 데이터가 있는 경우
+            m_a_key = (merchant, amount)
+            if m_a_key in recovery_candidates:
+                r_ids = recovery_candidates[m_a_key]
+                if r_ids:
+                    r_id = r_ids.pop(0) # 하나씩 소진
+                    updated_count += 1
+                    if not dry_run:
+                        session.query(Expense).filter(Expense.id == r_id).update({
+                            "date": date,
+                            "method": method,
+                            "memo": f'HASH:{tx_hash}' # 정상 해시로 교체
+                        })
+                    existing_hashes.add(tx_hash)
+                    existing_keys.add(dedup_key)
+                    continue
+
             # Expense 생성
             expense = Expense(
                 user_id=user.id,
