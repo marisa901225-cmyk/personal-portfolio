@@ -6,7 +6,7 @@ import json
 from datetime import datetime
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from ..core.models import IncomingAlarm, Expense
+from ..core.models import IncomingAlarm, Expense, SpamAlarm
 from ..integrations.telegram import send_telegram_message
 
 logger = logging.getLogger(__name__)
@@ -17,6 +17,7 @@ MODEL_PATH = os.path.join(os.path.dirname(__file__), "../data/expense_model.jobl
 from .alarm.filters import mask_sensitive_info, is_spam, is_promo_spam, is_whitelisted, should_ignore, is_spam_llm, is_review_spam
 from .alarm.sanitizer import infer_source, escape_html_preserve_urls, sanitize_llm_output, clean_exaone_tokens
 from .alarm.parsers import parse_card_approval
+from .prompt_loader import load_prompt
 
 class AlarmService:
     @classmethod
@@ -72,37 +73,16 @@ class AlarmService:
             forced_category = categories[category_index]
             forced_format = formats[format_index]
             
+            # 외부 프롤프트 파일에서 로드 (핵 리로드 지원)
+            prompt_content = load_prompt("random_topic", category=forced_category, format=forced_format)
+            if not prompt_content:
+                # 펴백: 파일이 없으면 기본 메시지
+                return "🤔 오늘도 심심한 하루... 뭐 재미있는 거 없나?"
+            
             messages = [
                 {
                     "role": "user",
-                    "content": f"""
-기분 전환용 짧은 메시지 하나 만들어줘!
-
-[중요! 출력 언어]
-⭐ 오직 한국어로만 작성해라! 영어 단어는 절대 사용 금지!
-⭐ 한글로만 표현 불가능한 고유명사(예: NASA, DNA)만 예외적으로 허용
-
-[규칙]
-- 200자 이내
-- 밝고 유쾌한 톤 (재미있거나 신기한 내용)
-- 반말 또는 해요체 사용
-
-[이번 주제]
-{forced_category}
-
-[이번 형식]
-{forced_format}
-
-[절대 금지 - 이거 쓰면 실패!]
-❌ 영어로 작성하거나 영어 문장 섞기
-❌ "오늘도 하루가", "오늘 하루도", "하루가 ~네" 같은 일상 회고 패턴
-❌ 커피, 퇴근, 출근, 주말, 월요일 등 직장인 일상
-❌ 위로/동정 구하는 말투 ("쉬고 싶다", "힘들다")
-❌ 부정적 감정 단어 (우울, 슬프다, 피곤, 지친다)
-❌ 음식, 동물 잡학, 날씨
-
-바로 내용만 출력! (예시, 설명, 메타 문구 없이)
-"""
+                    "content": prompt_content
                 }
             ]
             
@@ -130,59 +110,18 @@ class AlarmService:
             
             notification_list.append(f"- {context} 본문: {text}")
 
+        # 외부 프롤프트 파일에서 로드 (핵 리로드 지원)
+        notifications_str = chr(10).join(notification_list)
+        prompt_content = load_prompt("alarm_summary", notifications=notifications_str)
+        
+        if not prompt_content:
+            # 펴백: 파일이 없으면 기본 포맷 사용
+            prompt_content = f"아래 스마트폰 알림들을 한국어로 요약해줘:\n{notifications_str}"
+        
         messages = [
             {
                 "role": "user",
-                "content": f"""
-아래 스마트폰 알림들을 한국어로 요약해줘.
-
-[중요! 출력 규칙]
-⭐ 첫 문장부터 바로 알림 내용으로 시작해라!
-⭐ "요약입니다", "필터링했습니다", "알려드릴게요" 같은 인사/메타 문구는 절대 금지!
-⭐ 오직 한국어로만 작성 (영어 단어 사용 금지)
-
-[필터링 규칙 - 1단계: 무조건 제외할 알림]
-다음 알림들은 절대 요약에 포함하지 마라:
-
-1. 명백한 광고/프로모션
-   - (광고), [광고] 표시가 있는 알림
-   - "득템", "찬스", "놓치지 마세요", "마감임박", "오늘만" 등 긴박감 조성
-
-2. 포인트/캐시/쿠폰 관련
-   - "포인트 받기", "캐시 지급", "쿠폰 도착", "무료 이용권"
-   - 단, 결제 승인이나 환불 알림은 예외 (중요!)
-
-3. 리뷰/평가 요청
-   - "리뷰를 남겨주세요", "평가를 기다립니다", "별점을 매겨주세요"
-   - "주문하신 음식은 어떠셨나요"
-
-4. 게임 이벤트
-   - "연참", "뽑기", "가챠", "이벤트 참여", "로그인 보상"
-   - "아래로 드래그", "클릭하고 받기"
-
-[요약할 알림: 2단계]
-남은 알림 중 다음만 요약해라:
-- 사람이 보낸 메시지 (카카오톡, Discord, Slack 등)
-- 배달 진행 상황 (배달 시작/완료)
-- 금융 거래 (주식 체결, 송금 - 카드 승인은 시스템이 별도 처리)
-- 웹툰/웹소설 업데이트, 라이브 방송 시작 알림 (사용자 취미)
-- 중요한 시스템 알림 (보안, 계정, API 토큰 등)
-
-[마스킹된 정보 처리]
-- 개인정보 보호를 위해 이름, 계좌번호, 전화번호 등이 *로 마스킹되어 있음
-- 마스킹된 텍스트는 그대로 유지해라 (예: "이*후님" → "이*후님", "[계좌번호]" → "[계좌번호]")
-- 마스킹을 풀거나 추측해서 채우지 마라
-
-[출력 예시]
-좋은 예: "- 카카오톡에서 친구가 메시지 3개 보냈어요\\n- 삼성증권에서 벨로3D 주식 매수가 체결됐어요"
-나쁜 예: "요약입니다 😊 카카오톡에서..."
-나쁜 예: "필터링했습니다. 남은 알림은..."
-
-참고: 모든 알림이 필터링되어 남은 게 없다면 빈 문자열 반환.
-
-[알림 목록]
-{chr(10).join(notification_list)}
-"""
+                "content": prompt_content
             }
         ]
         
@@ -274,6 +213,14 @@ Start directly with the result without any introductory phrases or greetings.
             if "%antext" in original_text or "%evtprm" in original_text:
                 alarm.status = "discarded"
                 alarm.classification = "placeholder"
+                # SpamAlarm에 저장
+                db.add(SpamAlarm(
+                    raw_text=alarm.raw_text, masked_text=masked_text, sender=alarm.sender,
+                    app_name=alarm.app_name, package=alarm.package, app_title=alarm.app_title,
+                    conversation=alarm.conversation, classification="placeholder",
+                    discard_reason="Tasker placeholder",
+                    rule_version=1
+                ))
                 filtered_count += 1
                 filtered_reasons["플레이스홀더"] += 1
                 continue
@@ -282,6 +229,14 @@ Start directly with the result without any introductory phrases or greetings.
             if should_ignore(original_text):
                 alarm.status = "discarded"
                 alarm.classification = "ignored"
+                # SpamAlarm에 저장
+                db.add(SpamAlarm(
+                    raw_text=alarm.raw_text, masked_text=masked_text, sender=alarm.sender,
+                    app_name=alarm.app_name, package=alarm.package, app_title=alarm.app_title,
+                    conversation=alarm.conversation, classification="ignored",
+                    discard_reason="OTP/Security filter",
+                    rule_version=1
+                ))
                 filtered_count += 1
                 filtered_reasons["OTP/보안"] += 1
                 logger.info(f"Alarm ignored (OTP/Security): {masked_text[:30]}...")
@@ -296,6 +251,13 @@ Start directly with the result without any introductory phrases or greetings.
                 if is_review_spam(full_check_text):
                     alarm.status = "discarded"
                     alarm.classification = "review_spam"
+                    db.add(SpamAlarm(
+                        raw_text=alarm.raw_text, masked_text=masked_text, sender=alarm.sender,
+                        app_name=alarm.app_name, package=alarm.package, app_title=alarm.app_title,
+                        conversation=alarm.conversation, classification="review_spam",
+                        discard_reason="Review/Rating request",
+                        rule_version=1
+                    ))
                     filtered_count += 1
                     filtered_reasons["광고/프로모션"] += 1
                     continue
@@ -304,6 +266,13 @@ Start directly with the result without any introductory phrases or greetings.
                 if is_spam_result:
                     alarm.status = "discarded"
                     alarm.classification = classification
+                    db.add(SpamAlarm(
+                        raw_text=alarm.raw_text, masked_text=masked_text, sender=alarm.sender,
+                        app_name=alarm.app_name, package=alarm.package, app_title=alarm.app_title,
+                        conversation=alarm.conversation, classification=classification,
+                        discard_reason="Spam rule match",
+                        rule_version=1
+                    ))
                     filtered_count += 1
                     filtered_reasons["광고/프로모션"] += 1
                     continue
@@ -311,6 +280,13 @@ Start directly with the result without any introductory phrases or greetings.
                 if is_promo_spam(full_check_text, db):
                     alarm.status = "discarded"
                     alarm.classification = "promo_rule"
+                    db.add(SpamAlarm(
+                        raw_text=alarm.raw_text, masked_text=masked_text, sender=alarm.sender,
+                        app_name=alarm.app_name, package=alarm.package, app_title=alarm.app_title,
+                        conversation=alarm.conversation, classification="promo_rule",
+                        discard_reason="Promotion rule match",
+                        rule_version=1
+                    ))
                     filtered_count += 1
                     filtered_reasons["광고/프로모션"] += 1
                     continue
@@ -320,6 +296,13 @@ Start directly with the result without any introductory phrases or greetings.
                 if is_spam_llm_result:
                     alarm.status = "discarded"
                     alarm.classification = classification
+                    db.add(SpamAlarm(
+                        raw_text=alarm.raw_text, masked_text=masked_text, sender=alarm.sender,
+                        app_name=alarm.app_name, package=alarm.package, app_title=alarm.app_title,
+                        conversation=alarm.conversation, classification=classification,
+                        discard_reason="LLM spam classification",
+                        rule_version=1
+                    ))
                     filtered_count += 1
                     filtered_reasons["광고/프로모션"] += 1
                     continue
@@ -422,8 +405,8 @@ Start directly with the result without any introductory phrases or greetings.
             sender_info = f" ({', '.join(list(senders)[:3])}{'...' if len(senders) > 3 else ''})" if senders else ""
             header = f"<b>[{title}]{sender_info}</b>\n\n"
             
-            # 필터링 통계 추가 (필터링된 알림이 있을 때만)
-            if filtered_count > 0:
+            # 필터링 통계 추가 (알람이나 결제가 있을 때만, 랜덤 메시지에는 표시 안 함)
+            if filtered_count > 0 and (to_summarize_alarms or has_expenses):
                 filter_details = []
                 for reason, count in filtered_reasons.items():
                     if count > 0:

@@ -8,14 +8,16 @@ import os
 import logging
 import html
 import re
-from datetime import datetime
+import json
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Request, HTTPException
 from sqlalchemy.orm import Session
 
 from ..core.db import SessionLocal
-from ..core.models import SpamRule
+from ..core.models import SpamRule, UserMemory, User
 from ..integrations.telegram import send_telegram_message
+from ..services.prompt_loader import load_prompt
 
 router = APIRouter(prefix="/api/telegram", tags=["telegram"])
 logger = logging.getLogger(__name__)
@@ -23,6 +25,10 @@ logger = logging.getLogger(__name__)
 # 환경변수에서 시크릿 토큰과 허용된 채팅 ID 로드
 WEBHOOK_SECRET = os.getenv("X_TELEGRAM_BOT_API_SECRET_TOKEN") or os.getenv("TELEGRAM_WEBHOOK_SECRET_TOKEN")
 ALLOWED_CHAT_ID = os.getenv("ALARM_TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
+
+# 채팅 세션 관리 (메모리 내 저장, 재시작 시 초기화됨)
+_chat_sessions = {}  # chat_id -> list of messages
+MAX_SESSION_MESSAGES = 10  # 최대 대화 유지 개수
 
 
 def get_db():
@@ -88,7 +94,7 @@ async def telegram_webhook(request: Request):
             return {"ok": True}
         
         # 지원하는 명령어 리스트
-        SUPPORTED_CMDS = ["add", "del", "list", "on", "off", "help", "model"]
+        SUPPORTED_CMDS = ["add", "del", "list", "on", "off", "help", "model", "reset"]
         if cmd not in SUPPORTED_CMDS:
             return {"ok": True}
         
@@ -98,6 +104,10 @@ async def telegram_webhook(request: Request):
                 # /model 명령어는 별도 핸들러
                 model_parts = arg.split(maxsplit=1)
                 response_text = await handle_model_command(model_parts)
+            elif cmd == "reset":
+                if chat_id in _chat_sessions:
+                    _chat_sessions[chat_id] = []
+                response_text = "✅ 대화 내용이 초기화되었습니다."
             else:
                 response_text = await handle_spam_command(cmd, arg, db)
             
@@ -116,8 +126,79 @@ async def telegram_webhook(request: Request):
         query_type = classify_query(text)
         logger.info(f"Query classified as: {query_type}")
         
-        # 분류에 따른 핸들러 매핑
-        # 1. 게임 트렌드 (템플릿 기반 - 단일화된 경로)
+        # 1-1. 기억하기 (장기 기억 저장)
+        if query_type == "memory_store":
+            from ..services.llm_service import LLMService
+            llm = LLMService.get_instance()
+            db = SessionLocal()
+            try:
+                user = db.query(User).first()
+                if not user:
+                    user = User(name="Owner")
+                    db.add(user)
+                    db.commit()
+                
+                # LLM을 이용해 기억 구조화
+                extraction_prompt = load_prompt("memory_extractor", text=text)
+                extraction_res = llm.generate_paid_chat([{"role": "user", "content": extraction_prompt}], model="gpt-5-nano")
+                
+                try:
+                    # JSON 부분만 추출 (가끔 여분의 텍스트가 붙을 수 있음)
+                    json_match = re.search(r'\{.*\}', extraction_res, re.DOTALL)
+                    if json_match:
+                        mem_data = json.loads(json_match.group())
+                    else:
+                        mem_data = json.loads(extraction_res)
+                except Exception as je:
+                    logger.warning(f"Failed to parse memory JSON: {je}. Raw: {extraction_res}")
+                    # 파싱 실패 시 기본 텍스트 기반 저장
+                    mem_data = {"content": text, "category": "general", "key": None, "importance": 1, "ttl_days": 0}
+
+                content = mem_data.get("content", text)
+                category = mem_data.get("category", "general")
+                key = mem_data.get("key")
+                importance = mem_data.get("importance", 1)
+                ttl_days = mem_data.get("ttl_days", 0)
+
+                expires_at = None
+                if ttl_days > 0:
+                    expires_at = datetime.utcnow() + timedelta(days=ttl_days)
+
+                # Latest-wins (Key가 있으면 기존 기록 업데이트)
+                existing = None
+                if key:
+                    existing = db.query(UserMemory).filter(UserMemory.user_id == user.id, UserMemory.key == key).first()
+                
+                if existing:
+                    existing.content = content
+                    existing.category = category
+                    existing.importance = importance
+                    existing.expires_at = expires_at
+                    existing.updated_at = datetime.utcnow()
+                    db.commit()
+                    await send_telegram_message(f"🔄 기존 기억을 업데이트했습니다: \"{content}\" (키: {key})")
+                else:
+                    new_mem = UserMemory(
+                        user_id=user.id, 
+                        content=content, 
+                        category=category, 
+                        key=key, 
+                        importance=importance,
+                        expires_at=expires_at
+                    )
+                    db.add(new_mem)
+                    db.commit()
+                    msg = f"✅ 기억하겠습니다: \"{content}\""
+                    if category != "general":
+                        msg += f" (분류: {category})"
+                    await send_telegram_message(msg)
+            except Exception as e:
+                logger.error(f"Memory store failed: {e}")
+                await send_telegram_message("기억하는 중에 오류가 발생했습니다. 😅")
+            finally:
+                db.close()
+            return {"ok": True}
+
         # 1. 게임 트렌드 (EXAONE 로컬 요약)
         if query_type == "game_trend":
             from ..services.news.refiner import refine_game_trends_with_duckdb
@@ -185,18 +266,67 @@ async def telegram_webhook(request: Request):
                 system_instruction = "당신은 글로벌 경제 전문가입니다. 어려운 내용도 쉽게 설명해 주세요."
                 user_prompt = _get_economy_prompt(text, context_text)
             
-            else: # general_chat
-                system_instruction = "당신은 친절하고 유머러스한 개인 비서입니다."
-                user_prompt = text
+            elif query_type == 'general_chat':
+                # (A) 일반 대화인 경우 유료 모델(Paid AI) 사용 및 세션/기억 관리
+                session = _chat_sessions.get(chat_id, [])
+                if len(session) >= MAX_SESSION_MESSAGES:
+                    session = []
+
+                # 사용자의 장기 기억(Memories) 조회 (구조화 및 필터링)
+                db = SessionLocal()
+                memories_text = ""
+                try:
+                    user = db.query(User).first()
+                    if user:
+                        now = datetime.utcnow()
+                        # 만료되지 않았거나 만료 설정이 없는 기억들 조회
+                        memories = db.query(UserMemory).filter(
+                            UserMemory.user_id == user.id,
+                            (UserMemory.expires_at == None) | (UserMemory.expires_at > now)
+                        ).order_by(UserMemory.importance.desc(), UserMemory.updated_at.desc()).limit(10).all()
+                        
+                        if memories:
+                            # 카테고리별 그룹화
+                            cat_map = {}
+                            for m in memories:
+                                if m.category not in cat_map: cat_map[m.category] = []
+                                cat_map[m.category].append(m.content)
+                            
+                            lines = ["[사용자에 대한 장기 기억]"]
+                            for cat, m_list in cat_map.items():
+                                lines.append(f"• {cat.upper()}:")
+                                for content in m_list:
+                                    lines.append(f"  - {content}")
+                            memories_text = "\n".join(lines)
+                finally:
+                    db.close()
+
+                session.append({"role": "user", "content": text})
+                system_content = _get_general_chat_prompt()
+                
+                # 의도 기반 주입: 단순 인사말 등에는 기억 주입 생략하여 토큰 절약
+                is_simple_greeting = len(text) < 5 and any(kw in text.lower() for kw in ['안녕', 'hi', 'hello', 'ㅎㅇ'])
+                if memories_text and not is_simple_greeting:
+                    system_content += "\n\n" + memories_text
+
+                api_messages = [{"role": "system", "content": system_content}] + session
+                response_text = llm.generate_paid_chat(api_messages, model="gpt-5-nano")
+                
+                if response_text:
+                    session.append({"role": "assistant", "content": response_text})
+                    _chat_sessions[chat_id] = session
+                else:
+                    response_text = "유료 AI 서버 응답 실패. 잠시 후 다시 시도해 주세요. 😅"
             
-            # (2) 로컬 EXAONE 호출 (Chat Completion)
-            messages = [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": user_prompt}
-            ]
-            total_prompt_len = sum(len(m['content']) for m in messages)
-            logger.info(f"LLM Prompt total length: {total_prompt_len} characters")
-            response_text = llm.generate_chat(messages, max_tokens=768)
+            if query_type != "general_chat":
+                # (B) 그 외(E스포츠, 경제 등)는 로컬 EXAONE 호출
+                messages = [
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": user_prompt}
+                ]
+                total_prompt_len = sum(len(m['content']) for m in messages)
+                logger.info(f"Local LLM Prompt total length: {total_prompt_len} characters")
+                response_text = llm.generate_chat(messages, max_tokens=768)
             
             if not response_text:
                 response_text = "죄송합니다. 답변을 생성하는 중에 문제가 발생했습니다. 😅"
@@ -212,61 +342,19 @@ async def telegram_webhook(request: Request):
 
 
 def _get_game_trend_prompt(text: str, context: str) -> str:
-    return f"""
-[제공된 스팀 게임 트렌드 데이터]
-{context}
-
-[사용자의 질문]
-{text}
-
-[답변 규칙]
-- 데이터를 기반으로 신작이나 인기 게임을 3-4개 정도 추천해 주세요.
-- 각 게임의 특징을 짧고 강렬하게 요약하여 흥미를 유발하세요.
-- 너무 길지 않게 핵심만 전달하여 빠르게 답변하세요.
-- EXAONE으로서의 위트 있는 말투를 보여주세요.
-"""
+    return load_prompt("game_trend", text=text, context=context)
 
 
 # 프롬프트 생성 헬퍼 함수들 (현재 메인 로직에서 직접 generate_chat 사용, 레거시용)
 def _get_esports_prompt(text: str, context: str) -> str:
     """e스포츠 프롬프트 - LCK/국제대회 포함, 친근한 스타일 (환각 방지 강화)"""
-    return f"""아래 일정을 보고 질문에 답해줘.
-
-[일정]
-{context}
-
-[질문] {text}
-
-답변 규칙:
-- 제공된 [일정] 데이터의 팀 이름과 경기 시간을 정확히 매칭해서 알려줘
-- **반드시 3줄 이내로 답변해 (경기는 한 줄에 여러 개 써도 됨)**
-- **EXAONE 특유의 자신감 넘치고 재치 있는 말투와 함께 상황에 맞는 적절한 이모지(🎮, 🔥, 🏆 등)를 섞어서 사용해**
-- 마지막에 열정적인 응원 한 마디와 함께 화이팅 이모지 추가"""
+    return load_prompt("esports", text=text, context=context)
 
 def _get_economy_prompt(text: str, context: str) -> str:
-    return f"""
-아래 제공된 경제 뉴스 데이터를 바탕으로 사용자의 질문에 친절하고 명확하게 답변해 주세요.
+    return load_prompt("economy", text=text, context=context)
 
-[제공된 경제 뉴스 데이터]
-{context}
-
-[사용자의 질문]
-{text}
-
-[답변 규칙]
-- 한국어로 답변하세요.
-- 영문 뉴스 제목이라면 핵심만 번역하여 설명하세요.
-- 데이터에 있는 내용을 기반으로 정확하게 안내하세요. 데이터에 없는 내용은 모른다고 말하세요.
-- 친절하고 위트 있는 말투를 사용하세요.
-"""
-
-def _get_general_chat_prompt(text: str) -> str:
-    return f"""
-사용자의 메시지에 자연스럽고 위트 있게 답변해 주세요.
-
-[사용자 메시지]
-{text}
-"""
+def _get_general_chat_prompt() -> str:
+    return load_prompt("general_chat")
 
 
 def _format_for_telegram(text: str) -> str:
@@ -334,6 +422,11 @@ def classify_query(text: str) -> str:
     if any(kw in text_lower for kw in economy_keywords):
         return 'economy_news'
     
+    # 5. 기억하기 키워드 (장기 기억 저장)
+    memory_keywords = ['기억해', '저장해', '기억해줘', '기억해라', '기억해주길', 'remember']
+    if any(kw in text_lower for kw in memory_keywords):
+        return 'memory_store'
+
     # 기타 일반 대화
     return 'general_chat'
 
@@ -496,9 +589,8 @@ async def handle_spam_command(cmd: str, arg: str, db: Session) -> str:
     
     else:
         return """<b>ℹ️ 봇 명령어 도움말</b>
-/report {내용} - 스팀 게임 트렌드 리포트 생성 (DuckDB 기반)
-(예: /report, /report 신작)
-
+/help - 봇 명령어 도움말
+/reset - 대화 내용(컨텍스트) 초기화
 /model 목록 - 사용 가능한 LLM 모델 목록
 /model 교체 {별칭|파일명} - 실시간 모델 교체
 

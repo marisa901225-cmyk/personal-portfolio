@@ -8,10 +8,34 @@ from .core import calculate_simhash, PANDASCORE_URL
 
 logger = logging.getLogger(__name__)
 
+async def cleanup_old_schedules(db: Session):
+    """
+    7일 이상 지난 과거 e스포츠 일정을 삭제한다.
+    """
+    try:
+        # KST(현지시간) 기준으로 event_time이 저장되어 있으므로, 
+        # 현재 시간(KST)에서 7일 전 시간을 계산한다.
+        # (collect 시 timedelta(hours=9)를 더해 저장하므로 KST 기준임)
+        threshold = datetime.now() - timedelta(days=7)
+        
+        deleted = db.query(GameNews).filter(
+            GameNews.source_type == "schedule",
+            GameNews.event_time < threshold
+        ).delete()
+        
+        if deleted > 0:
+            db.commit()
+            logger.info(f"Cleanup: Deleted {deleted} old esports schedules (older than {threshold}).")
+    except Exception as e:
+        logger.error(f"Failed to cleanup old esports schedules: {e}")
+        db.rollback()
+
 async def collect_pandascore_schedules(db: Session):
     """
     PandaScore API를 사용하여 향후 e스포츠 경기 일정을 수집한다.
     """
+    # 0. 오래된 데이터 정리 (일주일 이상 경과)
+    await cleanup_old_schedules(db)
     api_key = os.getenv("PANDASCORE_API_KEY")
     if not api_key:
         logger.warning("PANDASCORE_API_KEY not set. Skipping PandaScore collection.")

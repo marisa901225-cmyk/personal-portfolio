@@ -39,7 +39,7 @@ def parse_naver_pay_text(file_path: Path) -> pd.DataFrame:
         r"(?P<merchant>[^\n]+?)\s+"  # 상태 다음 줄 = 가맹점명
         r"(?:포함\s+\d+건\s+)?"  # "포함 5건" 같은 옵션 텍스트
         r"(?P<amount>[\d,]+)원결제일시"
-        r"(?P<year>\d{4})\.\s*(?P<month>\d{1,2})\.\s*(?P<day>\d{1,2})\.\s*"
+        r"(?P<year>\d{1,4})\.\s*(?P<month>\d{1,2})\.\s*(?P<day>\d{1,2})?\s*"
         r"(?P<time>\d{1,2}:\d{2})",
         re.DOTALL
     )
@@ -48,7 +48,21 @@ def parse_naver_pay_text(file_path: Path) -> pd.DataFrame:
     for match in pattern.finditer(content):
         m = match.groupdict()
         try:
-            date_str = f"{m['year']}-{m['month'].zfill(2)}-{m['day'].zfill(2)} {m['time']}"
+            # 년도 처리: 1-2자리면 현재 년도로 가정 (월로 해석)
+            year_raw = m['year']
+            if len(year_raw) <= 2:
+                # "1. 12. 08:45" 형식 → year=월, month=일, day=None
+                from datetime import datetime
+                year = datetime.now().year
+                month = int(year_raw)
+                day = int(m['month'])
+            else:
+                # "2025. 12. 26." 형식 → 정상
+                year = int(year_raw)
+                month = int(m['month'])
+                day = int(m['day']) if m['day'] else 1
+            
+            date_str = f"{year}-{str(month).zfill(2)}-{str(day).zfill(2)} {m['time']}"
             date = pd.to_datetime(date_str)
             amount_str = m['amount'].replace(',', '').replace(' ', '')
             amount_value = int(amount_str)

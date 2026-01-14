@@ -11,12 +11,15 @@ def clean_exaone_tokens(text: str) -> str:
     """
     if not text:
         return ""
-    # EXAONE 특수 토큰: [|user|], [|assistant|], [|system|], [|endofturn|], [|endtransmission|] 등
-    text = re.sub(r'\[\|(user|assistant|system|tool|endofturn|endtransmission|end_of_turn)\|\]', '', text)
+    # EXAONE 특수 토큰: [|user|], [|assistant|], [|system|], [|endofturn|], [|endtransmission|], [|file|], [|endfut|] 등
+    # 알려진 토큰과 알 수 없는 토큰 모두 포괄적으로 제거
+    text = re.sub(r'\[\|[a-z_]+\|\]', '', text, flags=re.IGNORECASE)
     # Qwen/기타 <|...|> 스타일 토큰
     text = re.sub(r'<\|.*?\|>', '', text)
     # <think> 태그 내 내용 제거 (혹시 남아있을 경우)
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    # 연속된 빈 줄 정리
+    text = re.sub(r'\n{3,}', '\n\n', text)
     
     return text.strip()
 

@@ -1,0 +1,22 @@
+사용자의 다음 요청에서 기억해야 할 사실을 추출해서 JSON 형식으로 출력해줘.
+
+[사용자 요청]
+{text}
+
+[출력 형식 (JSON)]
+{{
+  "content": "기억할 핵심 내용 (한국어)",
+  "category": "profile | preference | project | fact | general 중 하나",
+  "key": "해당 정보의 고유 키워드 (예: birthday, coffee_pref, current_project 등. 중복 시 최신 정보를 덮어쓰기 위함)",
+  "importance": 1-5 사이의 숫자,
+  "ttl_days": 유효기여(일수). 영구적이면 0
+}}
+
+[분류 가이드]
+- profile: 생일, 이름, 직업 등 변하지 않는 정보
+- preference: 좋아하는 것, 싫어하는 것, 말투 취향 등
+- project: 현재 진행 중인 작업, 목표 등 (유효기간이 있을 수 있음)
+- fact: 자주 참조하거나 기억해야 할 일반적인 사실
+- general: 그 외 기타 분류하기 애매한 것
+
+JSON 외의 다른 텍스트는 출력하지 마.

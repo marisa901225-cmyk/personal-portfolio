@@ -15,10 +15,19 @@ from datetime import datetime, timezone
 from xml.etree import ElementTree
 from urllib.parse import quote
 from sqlalchemy.orm import Session
-from ...core.models import GameNews
+from ...core.models import GameNews, SpamNews
 from .core import calculate_simhash, GOOGLE_NEWS_MACRO_QUERIES
 
 logger = logging.getLogger(__name__)
+
+def _is_ad(title: str) -> str:
+    """
+    제목이 광고성인지 체크한다.
+    """
+    for kw in ["이벤트", "세미나", "기획전", "가이드북", "서포터즈", "참가자 모집", "수강생 모집"]:
+        if kw in title:
+            return kw
+    return None
 
 # Google News RSS URL 템플릿
 GOOGLE_NEWS_RSS_URL = "https://news.google.com/rss/search"
@@ -184,37 +193,59 @@ async def collect_google_news(
             if existing:
                 continue
             
-            # 원문 그대로 저장
-            news = GameNews(
-                content_hash=content_hash,
-                game_tag=game_tag,
-                category_tag=category_tag,
-                is_international=is_international,
-                source_name=f"Google/{source_name}",
-                source_type="news",
-                title=title,  # 원본 제목 유지
-                url=link,
-                full_content=clean_desc,  # 원문 그대로 저장
-                summary=None,  # 일단 None으로 저장
-                published_at=published_at,
-            )
-            db.add(news)
-            db.flush()  # ID 생성을 위해 flush
+            # 광고 체크
+            spam_reason = _is_ad(title)
             
-            # 영문 뉴스인 경우 LLM 요약 생성
-            if summarize_english and _is_english_content(title + clean_desc):
-                # 동기 함수를 스레드에서 실행
-                summary = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    _summarize_english_article,
-                    title,
-                    clean_desc,
-                    ticker
+            if spam_reason:
+                # 스팸 테이블에 저장
+                news = SpamNews(
+                    content_hash=content_hash,
+                    game_tag=game_tag,
+                    category_tag=category_tag,
+                    is_international=is_international,
+                    source_name=f"Google/{source_name}",
+                    source_type="news",
+                    title=title,
+                    url=link,
+                    full_content=clean_desc,
+                    published_at=published_at,
+                    spam_reason=f"Keyword: {spam_reason}",
+                    rule_version=1  # 2026.01 기준 버전 1
                 )
-                if summary:
-                    news.summary = summary
-            
-            count += 1
+                db.add(news)
+                logger.info(f"Google: Routed ad to SpamNews: {title[:30]}... ({spam_reason})")
+            else:
+                # 원문 그대로 저장
+                news = GameNews(
+                    content_hash=content_hash,
+                    game_tag=game_tag,
+                    category_tag=category_tag,
+                    is_international=is_international,
+                    source_name=f"Google/{source_name}",
+                    source_type="news",
+                    title=title,  # 원본 제목 유지
+                    url=link,
+                    full_content=clean_desc,  # 원문 그대로 저장
+                    summary=None,  # 일단 None으로 저장
+                    published_at=published_at,
+                )
+                db.add(news)
+                db.flush()  # ID 생성을 위해 flush
+                
+                # 영문 뉴스인 경우 LLM 요약 생성
+                if summarize_english and _is_english_content(title + clean_desc):
+                    # 동기 함수를 스레드에서 실행
+                    summary = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        _summarize_english_article,
+                        title,
+                        clean_desc,
+                        ticker
+                    )
+                    if summary:
+                        news.summary = summary
+                
+                count += 1
         
         db.commit()
         logger.info(f"Collected {count} Google News articles for '{query}'")

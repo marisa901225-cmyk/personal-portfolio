@@ -33,6 +33,37 @@ class IncomingAlarm(Base):
     received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class SpamAlarm(Base):
+    """필터링되어 버려진 알림 데이터 (필터링 규칙 정교화용)"""
+    __tablename__ = "spam_alarms"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+
+    raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    masked_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sender: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+    # Rich fields
+    app_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    package: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    app_title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    conversation: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+    # 필터링 타입 (placeholder, ignored, spam, promo 등)
+    classification: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    # 구체적인 사유 (매칭된 키워드 등)
+    discard_reason: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+    # 운영 고도화용 컬럼 추가
+    rule_version: Mapped[int] = mapped_column(Integer, default=1)
+    is_restored: Mapped[bool] = mapped_column(Integer, default=False)
+    restored_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    restored_reason: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class SpamRule(Base):
     """동적 스팸 필터링 규칙"""
     __tablename__ = "spam_rules"
@@ -80,6 +111,52 @@ class GameNews(Base):
     summary: Mapped[Optional[Text]] = mapped_column(Text, nullable=True)
 
     published_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+
+class SpamNews(Base):
+    """광고성/스팸으로 분류된 뉴스 데이터 (필터링 로직 고도화용)"""
+    __tablename__ = "spam_news"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+
+    # 중복 방지 (SimHash)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+
+    # Metadata
+    game_tag: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    category_tag: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    is_international: Mapped[bool] = mapped_column(Integer, default=False)
+    event_time: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    source_type: Mapped[str] = mapped_column(String(20), default="news") # news, schedule
+    source_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    full_content: Mapped[Text] = mapped_column(Text, nullable=False)
+    summary: Mapped[Optional[Text]] = mapped_column(Text, nullable=True)
+
+    published_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    
+    # 왜 스팸으로 분류되었는지 기록 (패턴 매칭 결과 등)
+    spam_reason: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # 운영 고도화용 컬럼 추가
+    rule_version: Mapped[int] = mapped_column(Integer, default=1)
+    is_restored: Mapped[bool] = mapped_column(Integer, default=False)
+    restored_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    restored_reason: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False

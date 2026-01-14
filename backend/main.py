@@ -13,8 +13,10 @@ MyAsset Portfolio Backend - Main Application Entry Point
 from __future__ import annotations
 
 from typing import Dict
-import logging
 import os
+import logging
+
+from .core.logging_config import setup_global_logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,11 +42,8 @@ from .routers.telegram_webhook import router as telegram_webhook_router
 
 app = FastAPI(title="MyAsset Portfolio Backend")
 
-# Logging Configuration
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+# Logging Configuration (Sensitive Data Masking enabled)
+setup_global_logging(logging.INFO)
 
 ensure_schema()
 logger = logging.getLogger("myasset.startup")

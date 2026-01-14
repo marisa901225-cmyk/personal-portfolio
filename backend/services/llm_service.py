@@ -264,7 +264,7 @@ class LLMService:
             self._http_client = httpx.Client(timeout=LLM_TIMEOUT)
         return self._http_client
 
-    def _generate_chat_remote(self, messages: List[dict], max_tokens: int, temperature: float, stop: Optional[list] = None, enable_thinking: bool = False) -> str:
+    def _generate_chat_remote(self, messages: List[dict], model: Optional[str] = None, max_tokens: int = 512, temperature: float = 0.7, stop: Optional[list] = None, enable_thinking: bool = False) -> str:
         """llama-server의 OpenAI 호환 API 호출."""
         if not self._base_url:
             logger.warning("LLM_BASE_URL not configured.")
@@ -277,6 +277,7 @@ class LLMService:
             if LLM_API_KEY:
                 headers["Authorization"] = f"Bearer {LLM_API_KEY}"
             payload = {
+                "model": model or "gpt-3.5-turbo", # Default fallback if not provided
                 "messages": messages,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
@@ -298,9 +299,9 @@ class LLMService:
             logger.error("Remote LLM response parsing failed.")
             return ""
 
-    def _generate_prompt_remote(self, prompt: str, max_tokens: int, temperature: float, stop: Optional[list] = None) -> str:
+    def _generate_prompt_remote(self, prompt: str, model: Optional[str] = None, max_tokens: int = 512, temperature: float = 0.7, stop: Optional[list] = None) -> str:
         messages = [{"role": "user", "content": prompt}]
-        return self._generate_chat_remote(messages, max_tokens, temperature, stop=stop)
+        return self._generate_chat_remote(messages, model=model, max_tokens=max_tokens, temperature=temperature, stop=stop)
 
     def generate(self, prompt: str, max_tokens: int = 512, temperature: float = 0.7, stop: list = None, echo: bool = False, seed: int = None) -> str:
         """
@@ -332,16 +333,17 @@ class LLMService:
             logger.error(f"LLM generation failed: {e}")
             return ""
 
-    def generate_chat(self, messages: List[dict], max_tokens: int = 512, temperature: float = 0.7, stop: list = None, seed: int = None, enable_thinking: bool = False) -> str:
+    def generate_chat(self, messages: List[dict], model: Optional[str] = None, max_tokens: int = 512, temperature: float = 0.7, stop: list = None, seed: int = None, enable_thinking: bool = False) -> str:
         """
         Chat Completion API를 사용하여 대화 형식으로 텍스트를 생성한다.
         로드된 모델의 chat_template이 자동으로 적용된다.
         
         Args:
-            enable_thinking: True이면 <think> 모드 활성화 (스킸 필터링 등 복잡한 판단 필요 시)
+            model: 원격 모드 시 사용할 모델 이름
+            enable_thinking: True이면 <think> 모드 활성화
         """
         if self._is_remote_mode():
-            return self._generate_chat_remote(messages, max_tokens, temperature, stop=stop, enable_thinking=enable_thinking)
+            return self._generate_chat_remote(messages, model=model, max_tokens=max_tokens, temperature=temperature, stop=stop, enable_thinking=enable_thinking)
         if self._model is None:
             logger.warning("LLM model is not loaded.")
             return ""
@@ -364,6 +366,40 @@ class LLMService:
             if messages:
                 last_content = messages[-1]["content"]
                 return self.generate(last_content, max_tokens, temperature, stop, seed=seed)
+            return ""
+
+    def generate_paid_chat(self, messages: List[dict], model: Optional[str] = None, max_tokens: int = 1024, temperature: float = 0.5) -> str:
+        """
+        AI_REPORT_BASE_URL/API_KEY 등을 사용하여 외부 유료 LLM을 호출한다.
+        """
+        base_url = os.getenv("AI_REPORT_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+        api_key = os.getenv("AI_REPORT_API_KEY")
+        selected_model = model or os.getenv("AI_REPORT_MODEL", "gpt-5.2")
+        
+        if not api_key:
+            logger.warning("AI_REPORT_API_KEY not set. Cannot use paid LLM.")
+            return ""
+
+        try:
+            import httpx
+            with httpx.Client(timeout=LLM_TIMEOUT) as client:
+                url = f"{base_url}/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                }
+                payload = {
+                    "model": selected_model,
+                    "messages": messages,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                }
+                response = client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                return data["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            logger.error(f"Paid LLM request failed: {e}")
             return ""
 
     def is_loaded(self) -> bool:

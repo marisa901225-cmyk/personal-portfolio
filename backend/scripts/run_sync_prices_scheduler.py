@@ -19,15 +19,12 @@ sys.path.append(PROJECT_ROOT)
 from backend.services.llm_service import LLMService
 from backend.services.alarm_service import AlarmService
 from backend.core.db import SessionLocal
+from backend.core.logging_config import setup_global_logging
 
-# Set up logging
-logging.basicConfig(
+# Set up logging (Sensitive Data Masking enabled)
+setup_global_logging(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(os.path.join(PROJECT_ROOT, "backend/logs/sync_prices_scheduler.log"), encoding='utf-8')
-    ]
+    log_file=os.path.join(PROJECT_ROOT, "backend/logs/sync_prices_scheduler.log")
 )
 logger = logging.getLogger("sync_prices_scheduler")
 KST = timezone("Asia/Seoul")
@@ -54,28 +51,23 @@ async def generate_creative_msg(ticker_count: int):
     """
     LLM을 사용하여 창의적인 업데이트 메시지 생성
     """
+    from backend.services.prompt_loader import load_prompt
+    
     try:
         llm = LLMService.get_instance()
         if not llm.is_loaded():
             return f"💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')} 기준"
 
-        # 모델 템플릿에 의존하지 않고 generate_chat 사용
+        # 외부 프롬프트 파일에서 로드 (핫 리로드 지원)
+        prompt_content = load_prompt("sync_prices", ticker_count=ticker_count)
+        if not prompt_content:
+            # 폴백: 파일이 없으면 기본 메시지
+            return f"💰 {ticker_count}개 종목 시세 업데이트 완료!"
+        
         messages = [
             {
                 "role": "user",
-                "content": f"""
-{ticker_count}개 종목 시세 동기화 완료됐어. 사용자한테 알려줄 짧은 메시지 만들어줘.
-
-[규칙]
-- 반말로 친근하게 (예: "동기화 끝났어!")
-- 종목 수({ticker_count}개) 반드시 포함
-- 한두 문장으로 짧게
-- 재미있거나 응원하는 한마디 추가
-- 이모지 OK
-- 한국어만
-
-바로 메시지만 출력!
-"""
+                "content": prompt_content
             }
         ]
         creative_text = llm.generate_chat(messages, max_tokens=128, temperature=0.8)
@@ -87,6 +79,7 @@ async def generate_creative_msg(ticker_count: int):
     except Exception as e:
         logger.error(f"LLM generation failed: {e}")
         return f"💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')} 기준"
+
 
 
 async def run_sync_script():
@@ -184,6 +177,28 @@ async def run_backup_job():
     finally:
         logger.info("--- DB Backup Job Finished ---")
 
+async def run_monthly_maintenance():
+    """
+    매월 1일 수행되는 유지보수 작업 (스팸 리포트 및 데이터 정리)
+    """
+    logger.info("--- Starting Monthly Maintenance Job ---")
+    db = SessionLocal()
+    try:
+        from backend.services.maintenance import generate_monthly_spam_report, cleanup_old_spam_data
+        
+        # 1. 스팸 리포트 전송
+        await generate_monthly_spam_report(db)
+        
+        # 2. 오래된 스팸 데이터 정리 (3개월 기준)
+        await cleanup_old_spam_data(db, months=3)
+        
+        logger.info("Monthly maintenance completed successfully.")
+    except Exception as e:
+        logger.error(f"Monthly maintenance job failed: {e}")
+    finally:
+        db.close()
+        logger.info("--- Monthly Maintenance Job Finished ---")
+
 async def main():
     logger.info(f"Current System Time: {datetime.now(KST)}")
     
@@ -221,6 +236,15 @@ async def main():
         CronTrigger(hour=3, minute=0, timezone=KST),
         id="daily_backup",
         name="Daily DB Backup (03:00 KST)"
+    )
+
+    # 5. Monthly Maintenance: 1st day of every month at 04:00 KST (Cleanup) and 09:00 KST (Report)
+    # 리포트는 보기 편하게 아침 9시에 전송
+    scheduler.add_job(
+        run_monthly_maintenance,
+        CronTrigger(day=1, hour=9, minute=0, timezone=KST),
+        id="monthly_maintenance",
+        name="Monthly Spam Report & Cleanup (1st of Month)"
     )
     
     logger.info("Starting Price Sync Scheduler...")
