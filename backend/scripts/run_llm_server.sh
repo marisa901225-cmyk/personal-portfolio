@@ -1,29 +1,55 @@
 #!/bin/bash
+MODEL_PATH_DEFAULT=${LLM_MODEL_PATH:-/data/EXAONE-4.0-1.2B-BF16.gguf}
+MODEL_PATH_FILE=${LLM_MODEL_PATH_FILE:-/data/llm_model_path.txt}
+TEMPLATE_PATH=/data/chat_template_exaone.jinja
+THREADS=${LLM_THREADS:-4}
 
-# EXAONE-4.0-1.2B-GGUF 실행 스크립트 예시 (llama-server)
-# 사용법: ./run_llm_server.sh [MODEL_PATH] [PORT]
+resolve_model_path() {
+    if [ -f "$MODEL_PATH_FILE" ]; then
+        local raw
+        raw=$(tr -d '\r\n' < "$MODEL_PATH_FILE")
+        if [ -n "$raw" ]; then
+            if [[ "$raw" == backend/data/* ]]; then
+                echo "/data/$(basename "$raw")"
+                return
+            fi
+            if [[ "$raw" == /app/backend/data/* ]]; then
+                echo "/data/$(basename "$raw")"
+                return
+            fi
+            if [[ "$raw" == /* ]]; then
+                echo "$raw"
+                return
+            fi
+            echo "/data/$raw"
+            return
+        fi
+    fi
+    echo "$MODEL_PATH_DEFAULT"
+}
 
-MODEL_PATH=${1:-"backend/data/EXAONE-4.0-1.2B-BF16.gguf"}
-PORT=${2:-8820}
-TEMPLATE_FILE="backend/data/chat_template_exaone.jinja"
+while true; do
+    MODEL_PATH=$(resolve_model_path)
+    echo "Starting llama-server with model: $MODEL_PATH"
+    /app/llama-server \
+        --model "$MODEL_PATH" \
+        --host 0.0.0.0 \
+        --port 8080 \
+        --threads "$THREADS" \
+        --ctx-size 2048 \
+        --jinja \
+        --chat-template-file "$TEMPLATE_PATH" &
 
-if [ ! -f "$MODEL_PATH" ]; then
-    echo "Error: Model file not found at $MODEL_PATH"
-    exit 1
-fi
+    SERVER_PID=$!
 
-if [ ! -f "$TEMPLATE_FILE" ]; then
-    echo "Error: Template file not found at $TEMPLATE_FILE"
-    exit 1
-fi
-
-echo "Starting llama-server with EXAONE model and official template..."
-echo "Model: $MODEL_PATH"
-echo "Port: $PORT"
-echo "Template: $TEMPLATE_FILE"
-
-# LG 공식 가이드에 따른 실행 방식
-llama-server -m "$MODEL_PATH" \
-  -c 8192 -fa -ngl 999 \
-  --jinja --chat-template-file "$TEMPLATE_FILE" \
-  --host 0.0.0.0 --port "$PORT"
+    while kill -0 "$SERVER_PID" 2>/dev/null; do
+        NEXT_MODEL_PATH=$(resolve_model_path)
+        if [ "$NEXT_MODEL_PATH" != "$MODEL_PATH" ]; then
+            echo "Model change detected: $MODEL_PATH -> $NEXT_MODEL_PATH"
+            kill "$SERVER_PID"
+            wait "$SERVER_PID"
+            break
+        fi
+        sleep 2
+    done
+done

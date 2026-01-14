@@ -28,26 +28,39 @@ CONFIG_PATH = "backend/data/llm_config.json"
 DEFAULT_MODEL_PATH = os.getenv("LOCAL_LLM_MODEL_PATH", "backend/data/gemma-3-4b-it-Q3_K_M.gguf")
 LLM_THREADS = int(os.getenv("LOCAL_LLM_THREADS", "4")) # 기본값 4 (저전력 PC에서 빠르게 작업을 끝내기 위함)
 LOCAL_LLM_CHAT_FORMAT = os.getenv("LOCAL_LLM_CHAT_FORMAT")
-# NEWS_LLM_BASE_URL = os.getenv("NEWS_LLM_BASE_URL")
-# NEWS_LLM_MODEL = os.getenv("NEWS_LLM_MODEL", "local")
-# NEWS_LLM_API_KEY = os.getenv("NEWS_LLM_API_KEY")
-NEWS_LLM_BASE_URL = None
-NEWS_LLM_MODEL = "local"
-NEWS_LLM_API_KEY = None
+LLM_BASE_URL = os.getenv("LLM_BASE_URL")
+LLM_API_KEY = os.getenv("LLM_API_KEY")
+LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "120"))
+REMOTE_MODEL_PATH_FILE = os.getenv(
+    "LLM_REMOTE_MODEL_PATH_FILE",
+    os.path.join("backend", "data", "llm_model_path.txt"),
+)
+REMOTE_MODEL_DIR = os.getenv("LLM_REMOTE_MODEL_DIR", "/data")
+REMOTE_DEFAULT_MODEL = os.getenv("LLM_REMOTE_DEFAULT_MODEL")
 
 class LLMService:
     _instance = None
     _model = None
     _current_model_path = None
     _last_error = None
+    _http_client = None
+    _base_url = None
 
     def __init__(self):
         if LLMService._instance is not None:
             raise Exception("This class is a singleton!")
         else:
             self._last_error = None
-            self._current_model_path = self._load_config()
-            self._load_model()
+            self._base_url = LLM_BASE_URL
+            if self._is_remote_mode():
+                self._current_model_path = (
+                    self._load_remote_model_path()
+                    or self._resolve_remote_default_model()
+                    or DEFAULT_MODEL_PATH
+                )
+            else:
+                self._current_model_path = self._load_config()
+                self._load_model()
             LLMService._instance = self
 
     @classmethod
@@ -76,6 +89,8 @@ class LLMService:
             logger.error(f"Failed to save LLM config: {e}")
 
     def _load_model(self):
+        if self._is_remote_mode():
+            return
         try:
             from llama_cpp import Llama
             model_path = self._current_model_path
@@ -141,6 +156,17 @@ class LLMService:
 
     def switch_model(self, model_path: str) -> bool:
         """실시간으로 모델을 교체한다."""
+        if self._is_remote_mode():
+            if not os.path.exists(model_path):
+                logger.error(f"Cannot switch to non-existent model: {model_path}")
+                self._last_error = f"model not found: {model_path}"
+                return False
+            remote_path = self._to_remote_model_path(model_path)
+            if not self._write_remote_model_path(remote_path):
+                return False
+            self._current_model_path = model_path
+            self._last_error = None
+            return True
         if not os.path.exists(model_path):
             logger.error(f"Cannot switch to non-existent model: {model_path}")
             return False
@@ -166,15 +192,120 @@ class LLMService:
         return sorted(models)
 
     def get_current_model(self) -> str:
+        if self._is_remote_mode():
+            remote_path = self._read_remote_model_path()
+            if remote_path:
+                self._current_model_path = self._to_local_model_path(remote_path)
         return self._current_model_path
 
     def get_last_error(self) -> Optional[str]:
         return self._last_error
 
+    def _is_remote_mode(self) -> bool:
+        """원격 llama-server 모드인지 확인."""
+        return bool(self._base_url)
+
+    def _to_remote_model_path(self, local_path: str) -> str:
+        if local_path.startswith(REMOTE_MODEL_DIR.rstrip("/") + "/"):
+            return local_path
+        filename = os.path.basename(local_path)
+        return f"{REMOTE_MODEL_DIR.rstrip('/')}/{filename}"
+
+    def _to_local_model_path(self, remote_path: str) -> str:
+        filename = os.path.basename(remote_path)
+        return os.path.join("backend", "data", filename)
+
+    def _read_remote_model_path(self) -> Optional[str]:
+        if not os.path.exists(REMOTE_MODEL_PATH_FILE):
+            return None
+        try:
+            with open(REMOTE_MODEL_PATH_FILE, "r") as f:
+                raw = f.read().strip()
+        except Exception as e:
+            logger.error(f"Failed to read remote model path file: {e}")
+            return None
+        if not raw:
+            return None
+        if raw.startswith("backend/data/"):
+            return self._to_remote_model_path(raw)
+        if raw.startswith("/app/backend/data/"):
+            return self._to_remote_model_path(raw)
+        if raw.startswith("/"):
+            return raw
+        return f"{REMOTE_MODEL_DIR.rstrip('/')}/{raw}"
+
+    def _load_remote_model_path(self) -> Optional[str]:
+        remote_path = self._read_remote_model_path()
+        if not remote_path:
+            return None
+        return self._to_local_model_path(remote_path)
+
+    def _resolve_remote_default_model(self) -> Optional[str]:
+        if not REMOTE_DEFAULT_MODEL:
+            return None
+        if REMOTE_DEFAULT_MODEL.startswith("/"):
+            return self._to_local_model_path(REMOTE_DEFAULT_MODEL)
+        return os.path.join("backend", "data", REMOTE_DEFAULT_MODEL)
+
+    def _write_remote_model_path(self, remote_path: str) -> bool:
+        try:
+            os.makedirs(os.path.dirname(REMOTE_MODEL_PATH_FILE), exist_ok=True)
+            with open(REMOTE_MODEL_PATH_FILE, "w") as f:
+                f.write(remote_path)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to write remote model path file: {e}")
+            self._last_error = str(e)
+            return False
+
+    def _get_http_client(self):
+        if self._http_client is None:
+            import httpx
+            self._http_client = httpx.Client(timeout=LLM_TIMEOUT)
+        return self._http_client
+
+    def _generate_chat_remote(self, messages: List[dict], max_tokens: int, temperature: float, stop: Optional[list] = None) -> str:
+        """llama-server의 OpenAI 호환 API 호출."""
+        if not self._base_url:
+            logger.warning("LLM_BASE_URL not configured.")
+            return ""
+
+        try:
+            client = self._get_http_client()
+            url = f"{self._base_url.rstrip('/')}/v1/chat/completions"
+            headers = {"Content-Type": "application/json"}
+            if LLM_API_KEY:
+                headers["Authorization"] = f"Bearer {LLM_API_KEY}"
+            payload = {
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            }
+            if stop:
+                payload["stop"] = stop
+            response = client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+        except Exception as e:
+            logger.error(f"Remote LLM request failed: {e}")
+            return ""
+
+        try:
+            return data["choices"][0]["message"]["content"].strip()
+        except Exception:
+            logger.error("Remote LLM response parsing failed.")
+            return ""
+
+    def _generate_prompt_remote(self, prompt: str, max_tokens: int, temperature: float, stop: Optional[list] = None) -> str:
+        messages = [{"role": "user", "content": prompt}]
+        return self._generate_chat_remote(messages, max_tokens, temperature, stop=stop)
+
     def generate(self, prompt: str, max_tokens: int = 512, temperature: float = 0.7, stop: list = None, echo: bool = False, seed: int = None) -> str:
         """
         텍스트 생성 (Inference) - Legacy Wrapper
         """
+        if self._is_remote_mode():
+            return self._generate_prompt_remote(prompt, max_tokens, temperature, stop=stop)
         if self._model is None:
             logger.warning("LLM model is not loaded.")
             return ""
@@ -204,6 +335,8 @@ class LLMService:
         Chat Completion API를 사용하여 대화 형식으로 텍스트를 생성한다.
         로드된 모델의 chat_template이 자동으로 적용된다.
         """
+        if self._is_remote_mode():
+            return self._generate_chat_remote(messages, max_tokens, temperature, stop=stop)
         if self._model is None:
             logger.warning("LLM model is not loaded.")
             return ""
@@ -228,51 +361,9 @@ class LLMService:
                 return self.generate(last_content, max_tokens, temperature, stop, seed=seed)
             return ""
 
-    # def is_remote_ready(self) -> bool:
-    #     return bool(NEWS_LLM_BASE_URL)
-
-    # def generate_remote(self, prompt: str, max_tokens: int = 512, temperature: float = 0.7) -> str:
-    #     """
-    #     llama.cpp OpenAI 호환 서버로 원격 텍스트 생성 요청.
-    #     """
-    #     if not NEWS_LLM_BASE_URL:
-    #         logger.warning("NEWS_LLM_BASE_URL not configured.")
-    #         return ""
-
-    #     try:
-    #         import httpx
-    #     except ImportError:
-    #         logger.error("httpx not installed.")
-    #         return ""
-
-    #     url = f"{NEWS_LLM_BASE_URL.rstrip('/')}/v1/chat/completions"
-    #     headers = {"Content-Type": "application/json"}
-    #     if NEWS_LLM_API_KEY:
-    #         headers["Authorization"] = f"Bearer {NEWS_LLM_API_KEY}"
-
-    #     payload = {
-    #         "model": NEWS_LLM_MODEL,
-    #         "messages": [{"role": "user", "content": prompt}],
-    #         "temperature": temperature,
-    #         "max_tokens": max_tokens,
-    #     }
-
-    #     try:
-    #         with httpx.Client(timeout=60.0) as client:
-    #             response = client.post(url, json=payload, headers=headers)
-    #             response.raise_for_status()
-    #             data = response.json()
-    #     except Exception as e:
-    #         logger.error(f"Remote LLM request failed: {e}")
-    #         return ""
-
-    #     try:
-    #         return data["choices"][0]["message"]["content"].strip()
-    #     except Exception:
-    #         logger.error("Remote LLM response parsing failed.")
-    #         return ""
-
     def is_loaded(self) -> bool:
+        if self._is_remote_mode():
+            return True
         return self._model is not None
 
     def reset_context(self):
@@ -280,6 +371,9 @@ class LLMService:
         LLM의 KV 캐시를 초기화하여 이전 대화 컨텍스트를 리셋한다.
         특정 주제에 집착하는 문제를 해결하기 위해 주기적으로 호출.
         """
+        if self._is_remote_mode():
+            logger.info("Remote LLM mode does not support local context reset.")
+            return
         if self._model is None:
             logger.warning("LLM model is not loaded; nothing to reset.")
             return

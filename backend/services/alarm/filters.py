@@ -97,6 +97,35 @@ def is_spam(text: str, db: Session) -> tuple[bool, str]:
 
     return False, ""
 
+def is_review_spam(text: str) -> bool:
+    """
+    리뷰 요청 및 게임 이벤트 스팸 필터링 (규칙 기반)
+    """
+    # 리뷰 요청 패턴
+    review_patterns = [
+        r'리뷰.*기록', r'리뷰.*남기', r'리뷰.*작성',
+        r'평가.*기다', r'별점.*매겨', r'후기.*남겨',
+        r'어떠셨나요.*리뷰'
+    ]
+    
+    # 게임 이벤트 패턴
+    game_event_patterns = [
+        r'득템', r'찬스.*놓치지', r'마감.*임박',
+        r'\d+연참', r'뽑기.*오픈', r'가챠',
+        r'아래로.*드래그', r'클릭.*받기',
+        r'오늘만.*특가', r'지금.*안.*사면'
+    ]
+    
+    import re
+    all_patterns = review_patterns + game_event_patterns
+    
+    for pattern in all_patterns:
+        if re.search(pattern, text):
+            logger.info(f"Review/Event spam filtered: {pattern} in {text[:50]}...")
+            return True
+    
+    return False
+
 def is_spam_llm(text: str) -> tuple[bool, str]:
     """
     3단계: LLM을 사용하여 스팸 여부를 판단한다. (실험적 기능)
@@ -116,12 +145,18 @@ def is_spam_llm(text: str) -> tuple[bool, str]:
 스팸인지 판단해줘. "spam" 또는 "ham" 중 하나만 출력해.
 
 [스팸 기준]
-- 광고, 프로모션, 할인, 이벤트, 쿠폰, 포인트
+- 광고, 프로모션, 할인, 이벤트, 쿠폰
+- 포인트/캐시 적립, 리워드
+- 리뷰 작성 요청, 평가 유도
+- 게임 이벤트 (연참, 뽑기, 득템)
 - 대출, 금융상품 권유
 
 [정상(ham) 기준]  
 - 결제 승인, 배송 안내, 택시 도착
-- 개인 메시지, 중요 공지
+- 개인 메시지 (카카오톡, Discord 등)
+- 웹툰/웹소설 업데이트, 라이브 방송 시작
+- 주식 체결, 금융 거래 알림
+- 중요 공지, API 토큰 발급
 
 확실하지 않으면 "ham" 출력.
 
@@ -171,15 +206,23 @@ def is_whitelisted(text: str) -> bool:
     whitelist_keywords = [
         "현재가", "시세", "주가지수", "코스피", "코스닥", 
         "도착", "배송", "택배", "우체국", "AliExpress", 
-        "내역", "안내", "공지", "리포트"
+        "내역", "안내", "공지", "리포트",
+        # 배달 알림 보호 (중요!)
+        "배달이 시작", "배달이 완료", "배달 되었습니다", "배달.*완료",
+        "주문.*배달", "문앞.*배달", "배달.*감사",
+        # 금융 거래
+        "매매 체결", "접근 토큰", "체결 안내"
     ]
     
     # 광고가 포함되어 있으면 절대 화이트리스트가 아님
     if any(p in text for p in ["(광고)", "[광고]", "((광고)"]):
         return False
-        
-    if any(kw in text for kw in whitelist_keywords):
-        return True
+    
+    # 정규식 패턴도 지원
+    import re
+    for kw in whitelist_keywords:
+        if re.search(kw, text):
+            return True
         
     return False
 

@@ -19,340 +19,296 @@
 
 | # | Prompt ID | Title | Priority | Status |
 |:---:|:---|:---|:---:|:---:|
-| 1 | PROMPT-001 | Telegram Webhook Refactor & Query Classification Fix | P2 | ⬜ Pending |
-| 2 | PROMPT-002 | Telegram Webhook Regression Tests | P2 | ⬜ Pending |
+| 1 | PROMPT-001 | Redact Telegram webhook logs (no secrets/user text) | P1 | ⬜ Pending |
+| 2 | PROMPT-002 | Align Telegram/LLM env vars (fallbacks + `.env.example`) | P2 | ⬜ Pending |
+| 3 | PROMPT-003 | Add unittest regression tests for Telegram webhook auth flow | P2 | ⬜ Pending |
 
-**Total: 2 prompts** | **Completed: 0** | **Remaining: 2**
+**Total: 3 prompts** | **Completed: 0** | **Remaining: 3**
 
 ---
 
 ## 🔴 Priority 1 (Critical) - Execute First
 
-*(None)*
-
----
-
-## 🟡 Priority 2 (High) - Execute Second
-
-### [PROMPT-001] Telegram Webhook Refactor & Query Classification Fix
+### [PROMPT-001] Redact Telegram webhook logs (no secrets/user text)
 
 **⏱️ Execute this prompt now, then proceed to PROMPT-002**
 
-> **🚨 REQUIRED: Use `replace_string_in_file` or `create_file` to make changes. Do NOT just show code.**
+> **🚨 REQUIRED: Use `replace_string_in_file` or `multi_replace_string_in_file` to make changes. Do NOT just show code.**
 
-**Task**: Clean up unreachable/duplicated branches in `telegram_webhook`, avoid logging secret values, and fix `classify_query()` duplication/doc mismatch.
-
-**Files to Modify**:
-- `/home/dlckdgn/personal-portfolio/backend/routers/telegram_webhook.py`
+**Task**: Prevent sensitive data leakage by removing the raw secret token header value and the raw user text from Telegram webhook logs.
+**Files to Modify**: `backend/routers/telegram_webhook.py`
 
 #### Instructions:
 
-1. Open `/home/dlckdgn/personal-portfolio/backend/routers/telegram_webhook.py`
-2. Replace the entire `telegram_webhook` function with the implementation below.
-3. Replace the entire `classify_query` function with the implementation below.
+1. Open `backend/routers/telegram_webhook.py`
+2. Apply both replacements below using `multi_replace_string_in_file`
 
 #### Implementation Code:
 
-```python
-# /home/dlckdgn/personal-portfolio/backend/routers/telegram_webhook.py
-# Replace the ENTIRE `telegram_webhook` function with the following.
-
-@router.post("/webhook")
-async def telegram_webhook(request: Request):
-    """텔레그램 업데이트 수신 웹훅"""
-
-    # 1. Secret Token 검증 (시크릿 값은 로그에 남기지 않는다)
-    secret_header = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
-    if WEBHOOK_SECRET and secret_header != WEBHOOK_SECRET:
-        logger.warning(
-            "Invalid webhook secret (present=%s).",
-            bool(secret_header),
-        )
-        raise HTTPException(status_code=403, detail="Invalid secret")
-
-    # 2. 업데이트 파싱
-    try:
-        update = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON")
-
-    message = update.get("message")
-    if not message:
-        return {"ok": True}  # 메시지가 아닌 업데이트는 무시
-
-    # 3. Chat ID 검증 (본인만 허용)
-    chat_id = str(message.get("chat", {}).get("id", ""))
-    if ALLOWED_CHAT_ID and chat_id != ALLOWED_CHAT_ID:
-        logger.warning("Unauthorized chat_id: %s", chat_id)
-        return {"ok": True}  # 조용히 무시
-
-    # 4. 텍스트 파싱 및 명령어 추출
-    text = (message.get("text") or "").strip()
-
-    # 명령어 처리 (/)
-    if text.startswith("/"):
-        parts = text[1:].split(maxsplit=1)
-        cmd = parts[0] if len(parts) > 0 else ""
-        arg = parts[1] if len(parts) > 1 else ""
-
-        if cmd == "report":
-            from ..services.reporting.template import build_telegram_steam_trend_message
-            response_text = build_telegram_steam_trend_message(arg)
-            await send_telegram_message(response_text)
-            return {"ok": True}
-
-        # /spam 접두사 지원 (하이브리드)
-        if cmd == "spam":
-            parts = arg.split(maxsplit=1)
-            cmd = parts[0] if len(parts) > 0 else ""
-            arg = parts[1] if len(parts) > 1 else ""
-
-        SUPPORTED_CMDS = ["report", "add", "del", "list", "on", "off", "help"]
-        if cmd not in SUPPORTED_CMDS:
-            return {"ok": True}
-
-        db = SessionLocal()
-        try:
-            response_text = await handle_spam_command(cmd, arg, db)
-
-            # 규칙 변경(add, del, on, off)이 있으면 AI 모델 재학습 트리거
-            if cmd in ["add", "del", "on", "off"] and (
-                "✅" in response_text
-                or "🗑️" in response_text
-                or "⏸️" in response_text
-                or "▶️" in response_text
-            ):
-                from ..services.spam_trainer import train_spam_model
-                if train_spam_model():
-                    response_text += "\n🔄 <i>AI 모델이 최신 규칙으로 재학습되었습니다.</i>"
-
-            await send_telegram_message(response_text)
-        finally:
-            db.close()
-        return {"ok": True}
-
-    # 일반 텍스트: 질문 유형 분류 후 처리
-    if not text:
-        return {"ok": True}
-
-    # 본문은 민감할 수 있으니 길이만 로깅
-    logger.info("Natural language query received (len=%d).", len(text))
-    query_type = classify_query(text)
-    logger.info("Query classified as: %s", query_type)
-
-    # 게임 트렌드는 템플릿 기반 리포트로 처리 (LLM 원격 호출 불필요)
-    if query_type == "game_trend":
-        from ..services.reporting.template import build_telegram_steam_trend_message
-        response_text = build_telegram_steam_trend_message(text)
-        await send_telegram_message(response_text)
-        return {"ok": True}
-
-    from ..services.llm_service import LLMService
-    llm = LLMService.get_instance()
-
-    if not llm.is_remote_ready():
-        await send_telegram_message("LLM 원격 서버가 설정되지 않아 답변을 생성할 수 없습니다.")
-        return {"ok": True}
-
-    try:
-        if query_type == "esports_schedule":
-            from ..services.news_collector import NewsCollector
-            context_text = NewsCollector.refine_schedules_with_duckdb(text)
-
-            prompt = f"""<start_of_turn>user
-당신은 e스포츠 전문가이자 사용자의 개인 비서입니다.
-사용자의 질문과 아래 제공된 경기 일정 데이터를 바탕으로 친절하고 명확하게 답변해 주세요.
-
-[제공된 경기 일정 데이터]
-{context_text}
-
-[사용자의 질문]
-{text}
-
-[답변 규칙]
-- 한국어로 답변하세요.
-- 데이터에 있는 내용을 기반으로 정확하게 안내하세요. 만약 데이터에 없는 내용이라면 모른다고 정직하게 말하세요.
-- 친절하고 위트 있는 말투를 사용하세요.
-- 일시 정보를 포함하여 경기 정보를 깔끔하게 정리해 주세요.
-
-답변:<end_of_turn>
-<start_of_turn>model
-"""
-        elif query_type == "economy_news":
-            from ..services.news_collector import NewsCollector
-            context_text = NewsCollector.refine_economy_news_with_duckdb(text)
-
-            prompt = f"""<start_of_turn>user
-당신은 글로별 거시경제 전문가이자 사용자의 개인 비서입니다.
-아래 제공된 경제 뉴스 데이터를 바탕으로 사용자의 질문에 친절하고 명확하게 답변해 주세요.
-
-[제공된 경제 뉴스 데이터]
-{context_text}
-
-[사용자의 질문]
-{text}
-
-[답변 규칙]
-- 한국어로 답변하세요.
-- 영문 뉴스 제목이라면 핵심만 번역하여 설명하세요.
-- 데이터에 있는 내용을 기반으로 정확하게 안내하세요. 데이터에 없는 내용은 모른다고 말하세요.
-- 친절하고 위트 있는 말투를 사용하세요.
-
-답변:<end_of_turn>
-<start_of_turn>model
-"""
-        else:
-            prompt = f"""<start_of_turn>user
-당신은 친절하고 유머러스한 개인 비서입니다.
-사용자의 메시지에 자연스럽고 위트 있게 답변해 주세요.
-
-[사용자 메시지]
-{text}
-
-답변:<end_of_turn>
-<start_of_turn>model
-"""
-
-        response_text = llm.generate_remote(prompt, max_tokens=1024)
-        if not response_text:
-            response_text = "죄송합니다. 답변을 생성하는 중에 문제가 발생했습니다."
-        await send_telegram_message(response_text)
-    except Exception as e:
-        logger.error("Query processing failed: %s", e)
-        await send_telegram_message("답변 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.")
-
-    return {"ok": True}
-
-
-# Replace the ENTIRE `classify_query` function with the following.
-
-def classify_query(text: str) -> str:
-    """
-    사용자 질문 유형 분류
-    - 'esports_schedule': E스포츠 경기 일정 관련
-    - 'game_trend': 게임 신작/트렌드 관련
-    - 'economy_news': 국내/해외 경제 뉴스 관련
-    - 'general_chat': 일반 대화
-    """
-    text_lower = text.lower()
-
-    esports_keywords = [
-        "t1", "skt", "티원", "젠지", "geng", "gen.g", "lol", "롤",
-        "lck", "발로란트", "valorant", "vct", "경기", "일정",
-        "월즈", "worlds", "챌린저스", "퍼시픽",
-    ]
-    if any(kw in text_lower for kw in esports_keywords):
-        return "esports_schedule"
-
-    game_keywords = [
-        "게임", "스팀", "steam", "신작", "트렌드", "인기", "출시",
-        "추천", "플스", "ps5", "playstation", "닌텐도", "switch",
-    ]
-    if any(kw in text_lower for kw in game_keywords):
-        return "game_trend"
-
-    economy_keywords = [
-        "미국", "유럽", "환율", "fomc", "ecb", "s&p", "나스닥", "금리",
-        "cpi", "etf", "달러", "유로", "채권", "국채", "treasury", "코스피",
-        "코스닥", "주식", "경제", "인플레", "경기", "불황", "호황",
-    ]
-    if any(kw in text_lower for kw in economy_keywords):
-        return "economy_news"
-
-    return "general_chat"
+```text
+multi_replace_string_in_file({
+  "path": "backend/routers/telegram_webhook.py",
+  "replacements": [
+    {
+      "oldString": "    secret_header = request.headers.get(\"X-Telegram-Bot-Api-Secret-Token\")\n    if WEBHOOK_SECRET and secret_header != WEBHOOK_SECRET:\n        logger.warning(f\"Invalid webhook secret: {secret_header}\")\n        raise HTTPException(status_code=403, detail=\"Invalid secret\")\n",
+      "newString": "    secret_header = request.headers.get(\"X-Telegram-Bot-Api-Secret-Token\")\n    if WEBHOOK_SECRET and secret_header != WEBHOOK_SECRET:\n        logger.warning(\n            \"Invalid webhook secret token (len=%s)\",\n            len(secret_header) if secret_header else 0,\n        )\n        raise HTTPException(status_code=403, detail=\"Invalid secret\")\n"
+    },
+    {
+      "oldString": "        # (B) 자연어 처리 Flow\n        logger.info(f\"Natural language query received: {text}\")\n        query_type = classify_query(text)\n",
+      "newString": "        # (B) 자연어 처리 Flow\n        logger.info(\"Natural language query received (len=%s)\", len(text))\n        query_type = classify_query(text)\n"
+    }
+  ]
+})
 ```
 
 #### Verification:
-
-- Run: `python3 -m unittest discover backend/tests`
-- Expected: All tests pass
+- Run: `npm run test:backend`
+- Expected: All backend unit tests pass.
 
 **✅ After completing this prompt, proceed to [PROMPT-002]**
 
 ---
 
-### [PROMPT-002] Telegram Webhook Regression Tests
+## 🟡 Priority 2 (High) - Execute Second
 
-**⏱️ Execute this prompt now, then proceed to PROMPT-002**
+### [PROMPT-002] Align Telegram/LLM env vars (fallbacks + `.env.example`)
 
-> **🚨 REQUIRED: Use `replace_string_in_file` or `create_file` to make changes. Do NOT just show code.**
+**⏱️ Execute this prompt now, then proceed to PROMPT-003**
 
-**Task**: Add unit tests to prevent regressions in `classify_query()` behavior and webhook secret handling.
+> **🚨 REQUIRED: Use `replace_string_in_file`, `multi_replace_string_in_file`, or `create_file` to make changes. Do NOT just show code.**
 
-**Files to Modify / Create**:
-- `/home/dlckdgn/personal-portfolio/backend/tests/test_telegram_webhook.py` (new)
+**Task**: Make Telegram env-var configuration consistent and backward-compatible across the webhook router and Telegram sender; update `.env.example` to reflect the actual runtime keys and remote LLM options.
+**Files to Modify**: `backend/routers/telegram_webhook.py`, `backend/integrations/telegram.py`, `backend/.env.example`
 
 #### Instructions:
 
-1. Create `/home/dlckdgn/personal-portfolio/backend/tests/test_telegram_webhook.py` with the content below.
-2. Ensure tests pass.
+1. Update env-var reading in `backend/routers/telegram_webhook.py` to support fallback keys.
+2. Update env-var reading in `backend/integrations/telegram.py` to support fallback keys and fix the misleading warning message.
+3. Replace `backend/.env.example` content with the updated example below (no real secrets).
+
+#### Implementation Code:
+
+```text
+multi_replace_string_in_file({
+  "path": "backend/routers/telegram_webhook.py",
+  "replacements": [
+    {
+      "oldString": "# 환경변수에서 시크릿 토큰과 허용된 채팅 ID 로드\nWEBHOOK_SECRET = os.getenv(\"X_TELEGRAM_BOT_API_SECRET_TOKEN\")\nALLOWED_CHAT_ID = os.getenv(\"ALARM_TELEGRAM_CHAT_ID\")\n",
+      "newString": "# 환경변수에서 시크릿 토큰과 허용된 채팅 ID 로드\nWEBHOOK_SECRET = os.getenv(\"X_TELEGRAM_BOT_API_SECRET_TOKEN\") or os.getenv(\"TELEGRAM_WEBHOOK_SECRET_TOKEN\")\nALLOWED_CHAT_ID = os.getenv(\"ALARM_TELEGRAM_CHAT_ID\") or os.getenv(\"TELEGRAM_CHAT_ID\")\n"
+    }
+  ]
+})
+```
+
+```python
+# Replace the entire file: backend/integrations/telegram.py
+import os
+import logging
+import httpx
+
+from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
+
+
+async def send_telegram_message(text: str):
+    """
+    텔레그램으로 단일 메시지를 전송한다.
+    """
+    load_dotenv()
+
+    bot_token = os.getenv("ALARM_TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("ALARM_TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
+
+    if not bot_token or not chat_id:
+        logger.warning("Telegram bot token/chat id not configured")
+        return False
+
+    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=payload, timeout=10.0)
+            response.raise_for_status()
+            return True
+    except Exception as e:
+        logger.error(f"Telegram message failed: {e}")
+        return False
+```
+
+```dotenv
+# Replace the entire file: backend/.env.example
+# === Server & Security ===
+API_TOKEN=your_secure_api_token
+SECRET_KEY=your_secret_key_for_jwt
+ALLOWED_HOSTS=*
+
+# === Database ===
+# SQLite (Default)
+DATABASE_URL=sqlite:///./portfolio.db
+
+# === Telegram Bot ===
+# Preferred keys (used by: backend/integrations/telegram.py, backend/routers/telegram_webhook.py)
+ALARM_TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+ALARM_TELEGRAM_CHAT_ID=123456789
+
+# Backwards-compatible aliases (optional)
+TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+TELEGRAM_CHAT_ID=123456789
+
+# Telegram webhook secret token (recommended)
+# Configure this in Telegram via setWebhook's `secret_token` option.
+X_TELEGRAM_BOT_API_SECRET_TOKEN=your_webhook_secret_token
+
+# === Local LLM ===
+# Path to the GGUF model file
+LOCAL_LLM_MODEL_PATH=backend/data/gemma-3-4b-it-q4_k_m.gguf
+# Number of CPU threads to use for LLM (default: 4 or 2 for coding safety)
+LOCAL_LLM_THREADS=2
+
+# === Remote LLM (OpenAI-compatible llama-server) ===
+# If set, the backend will call the remote server instead of loading a local GGUF model.
+LLM_BASE_URL=http://llama-server:8080
+LLM_TIMEOUT=120
+LLM_REMOTE_DEFAULT_MODEL=EXAONE-4.0-1.2B-BF16.gguf
+# Optional (if your remote server requires auth)
+LLM_API_KEY=
+
+# === Game News APIs (Optional) ===
+# PandaScore (Esports Schedule) - https://pandascore.co/
+PANDASCORE_API_KEY=your_pandascore_key
+
+# Steam Web API - https://steamcommunity.com/dev/apikey
+STEAM_API_KEY=your_steam_api_key
+
+# Naver Search API (News) - https://developers.naver.com/apps/
+NAVER_CLIENT_ID=your_naver_client_id
+NAVER_CLIENT_SECRET=your_naver_client_secret
+
+# === KIS (Korea Investment & Securities) ===
+KIS_APP_KEY=your_kis_app_key
+KIS_APP_SECRET=your_kis_app_secret
+KIS_CANO=your_account_number_prefix
+KIS_ACNT_PRDT_CD=01
+
+# === Discord (Optional) ===
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+```
+
+#### Verification:
+- Run: `npm run test:backend`
+- Expected: All backend unit tests pass.
+
+**✅ After completing this prompt, proceed to [PROMPT-003]**
+
+---
+
+### [PROMPT-003] Add unittest regression tests for Telegram webhook auth flow
+
+**⏱️ Execute this prompt now, then proceed to PROMPT-003**
+
+> **🚨 REQUIRED: Use `create_file` to add the test file. Do NOT just show code.**
+
+**Task**: Add unittest-based regression tests for the Telegram webhook endpoint's security/early-return behavior (secret token validation, chat id restriction, invalid JSON, missing message).
+**Files to Modify**: `backend/tests/test_telegram_webhook.py`
+
+#### Instructions:
+
+1. Create `backend/tests/test_telegram_webhook.py`
+2. Paste the complete test code below
 
 #### Implementation Code:
 
 ```python
-# /home/dlckdgn/personal-portfolio/backend/tests/test_telegram_webhook.py
-
 import unittest
 
 from fastapi.testclient import TestClient
 
 from backend.main import app
-from backend.routers import telegram_webhook as webhook_module
+import backend.routers.telegram_webhook as telegram_webhook
 
 
-class TestTelegramWebhook(unittest.TestCase):
-    def setUp(self) -> None:
+class TelegramWebhookAuthTests(unittest.TestCase):
+    def setUp(self):
         self.client = TestClient(app)
+        self._orig_secret = telegram_webhook.WEBHOOK_SECRET
+        self._orig_allowed = telegram_webhook.ALLOWED_CHAT_ID
+        self._orig_send = telegram_webhook.send_telegram_message
 
-    def test_classify_query_game_trend(self) -> None:
-        self.assertEqual(webhook_module.classify_query("스팀 신작 추천해줘"), "game_trend")
-        self.assertEqual(webhook_module.classify_query("steam trending games?"), "game_trend")
+    def tearDown(self):
+        telegram_webhook.WEBHOOK_SECRET = self._orig_secret
+        telegram_webhook.ALLOWED_CHAT_ID = self._orig_allowed
+        telegram_webhook.send_telegram_message = self._orig_send
 
-    def test_classify_query_esports(self) -> None:
-        self.assertEqual(webhook_module.classify_query("LCK 경기 일정 알려줘"), "esports_schedule")
+    def test_rejects_invalid_secret_token(self):
+        telegram_webhook.WEBHOOK_SECRET = "expected-secret"
+        telegram_webhook.ALLOWED_CHAT_ID = None
 
-    def test_classify_query_economy(self) -> None:
-        self.assertEqual(webhook_module.classify_query("미국 금리 전망"), "economy_news")
+        res = self.client.post(
+            "/api/telegram/webhook",
+            headers={"X-Telegram-Bot-Api-Secret-Token": "wrong-secret"},
+            json={"message": {"chat": {"id": "123"}, "text": "hi"}},
+        )
+        self.assertEqual(res.status_code, 403)
 
-    def test_webhook_rejects_invalid_secret(self) -> None:
-        original_secret = webhook_module.WEBHOOK_SECRET
-        original_allowed_chat_id = webhook_module.ALLOWED_CHAT_ID
-        original_sender = webhook_module.send_telegram_message
+    def test_ignores_unauthorized_chat_id(self):
+        telegram_webhook.WEBHOOK_SECRET = None
+        telegram_webhook.ALLOWED_CHAT_ID = "123"
 
-        async def _noop_send(_text: str) -> None:
-            return None
+        called = {"count": 0}
 
-        try:
-            webhook_module.WEBHOOK_SECRET = "expected"
-            webhook_module.ALLOWED_CHAT_ID = "123"
-            webhook_module.send_telegram_message = _noop_send
+        async def fake_send(_text: str):
+            called["count"] += 1
+            return True
 
-            payload = {
-                "message": {
-                    "chat": {"id": 123},
-                    "text": "hello",
-                }
-            }
-            res = self.client.post(
-                "/api/telegram/webhook",
-                json=payload,
-                headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"},
-            )
-            self.assertEqual(res.status_code, 403)
-            self.assertEqual(res.json().get("detail"), "Invalid secret")
-        finally:
-            webhook_module.WEBHOOK_SECRET = original_secret
-            webhook_module.ALLOWED_CHAT_ID = original_allowed_chat_id
-            webhook_module.send_telegram_message = original_sender
+        telegram_webhook.send_telegram_message = fake_send
 
+        res = self.client.post(
+            "/api/telegram/webhook",
+            json={"message": {"chat": {"id": "999"}, "text": "/help"}},
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), {"ok": True})
+        self.assertEqual(called["count"], 0)
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_returns_ok_when_message_missing(self):
+        telegram_webhook.WEBHOOK_SECRET = None
+        telegram_webhook.ALLOWED_CHAT_ID = None
+
+        res = self.client.post("/api/telegram/webhook", json={"update_id": 1})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), {"ok": True})
+
+    def test_returns_ok_when_text_empty(self):
+        telegram_webhook.WEBHOOK_SECRET = None
+        telegram_webhook.ALLOWED_CHAT_ID = None
+
+        res = self.client.post(
+            "/api/telegram/webhook",
+            json={"message": {"chat": {"id": "123"}, "text": "   "}},
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), {"ok": True})
+
+    def test_returns_400_on_invalid_json_body(self):
+        telegram_webhook.WEBHOOK_SECRET = None
+        telegram_webhook.ALLOWED_CHAT_ID = None
+
+        res = self.client.post(
+            "/api/telegram/webhook",
+            data="not-json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(res.status_code, 400)
 ```
 
 #### Verification:
+- Run: `npm run test:backend`
+- Expected: `backend/tests/test_telegram_webhook.py` passes and the overall test suite is green.
 
-- Run: `python3 -m unittest discover backend/tests`
-- Expected: All tests pass
-
-**🎉 ALL PROMPTS COMPLETED!**
+**🎉 ALL PROMPTS COMPLETED! Run final verification.**

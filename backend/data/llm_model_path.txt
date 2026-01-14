@@ -1,0 +1,1 @@
+/data/gemma-3-4b-it-q4_k_m.gguf

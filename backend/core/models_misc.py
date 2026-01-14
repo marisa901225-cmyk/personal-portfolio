@@ -72,6 +72,9 @@ class GameNews(Base):
 
     full_content: Mapped[Text] = mapped_column(Text, nullable=False)
     chunk_content: Mapped[Optional[Text]] = mapped_column(Text, nullable=True)
+    
+    # 영문 뉴스의 경우 LLM으로 생성한 한국어 요약 (원문은 full_content에 유지)
+    summary: Mapped[Optional[Text]] = mapped_column(Text, nullable=True)
 
     published_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

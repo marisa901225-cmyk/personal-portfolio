@@ -266,7 +266,7 @@ async def root() -> str:
       <body>
         <div class="container">
           <header>
-            <h1>MyAsset Portfolio API</h1>
+            <h1>MyAsset Portfolio Backend</h1>
             <div class="status">시스템 정상 작동 중</div>
           </header>
 
