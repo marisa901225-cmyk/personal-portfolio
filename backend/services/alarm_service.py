@@ -17,6 +17,8 @@ MODEL_PATH = os.path.join(os.path.dirname(__file__), "../data/expense_model.jobl
 from .alarm.filters import mask_sensitive_info, is_spam, is_promo_spam, is_whitelisted, should_ignore, is_spam_llm, is_review_spam
 from .alarm.sanitizer import infer_source, escape_html_preserve_urls, sanitize_llm_output, clean_exaone_tokens
 from .alarm.parsers import parse_card_approval
+from .alarm.match_notifier import check_upcoming_matches
+from .alarm.processor import process_alarms_batch
 from .prompt_loader import load_prompt
 
 class AlarmService:
@@ -171,6 +173,13 @@ Start directly with the result without any introductory phrases or greetings.
         알람이 없을 때는 LLM이 랜덤으로 재미있는 말을 한다.
         """
         pending = db.query(IncomingAlarm).filter(IncomingAlarm.status == "pending").all()
+        
+        # 경기 시작 알림 체크 (별도 try/except로 감싸서 실패해도 메인 처리 계속)
+        try:
+            catchphrases_file = os.path.join(os.path.dirname(__file__), "../data/esports_catchphrases.json")
+            await check_upcoming_matches(db, catchphrases_file)
+        except Exception as e:
+            logger.warning(f"Match notification check failed: {e}")
         
         # 알람이 없을 때도 처리 (LLM 랜덤 메시지용)
         # if not pending:

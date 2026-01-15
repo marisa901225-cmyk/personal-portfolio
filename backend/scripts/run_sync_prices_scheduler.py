@@ -19,6 +19,7 @@ sys.path.append(PROJECT_ROOT)
 from backend.services.llm_service import LLMService
 from backend.services.alarm_service import AlarmService
 from backend.core.db import SessionLocal
+from backend.services.scheduler_monitor import monitor_job_async
 from backend.core.logging_config import setup_global_logging
 
 # Set up logging (Sensitive Data Masking enabled)
@@ -82,122 +83,136 @@ async def generate_creative_msg(ticker_count: int):
 
 
 
-async def run_sync_script():
+async def run_sync_script(job_id: str = "market_sync"):
     """
     Executes the existing sync_prices.sh bash script asynchronously.
     """
-    script_path = os.path.join(PROJECT_ROOT, "backend/scripts/sync_prices.sh")
-    logger.info(f"--- Starting Sync Job at {datetime.now(KST)} ---")
-    
-    try:
-        env = os.environ.copy()
-        env["SKIP_TELEGRAM_NOTIFY"] = "true"
-        # PYTHONPATH를 ROOT로 설정하여 스크립트 내부에서 backend 모듈 호출 원활하게 함
-        env["PYTHONPATH"] = PROJECT_ROOT
+    db = SessionLocal()
+    async with monitor_job_async(job_id, db):
+        script_path = os.path.join(PROJECT_ROOT, "backend/scripts/sync_prices.sh")
+        logger.info(f"--- Starting Sync Job [{job_id}] at {datetime.now(KST)} ---")
         
-        process = await asyncio.create_subprocess_exec(
-            "bash", script_path,
-            env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        
-        stdout, stderr = await process.communicate()
-        
-        ticker_count = 0
-        if stdout:
-            lines = stdout.decode('utf-8', errors='ignore').strip().split('\n')
-            for line in lines:
-                logger.info(f"[Script STDOUT] {line}")
-                if "TICKER_COUNT=" in line:
-                    try:
-                        ticker_count = int(line.split("=")[1])
-                    except:
-                        pass
+        try:
+            env = os.environ.copy()
+            env["SKIP_TELEGRAM_NOTIFY"] = "true"
+            # PYTHONPATH를 ROOT로 설정하여 스크립트 내부에서 backend 모듈 호출 원활하게 함
+            env["PYTHONPATH"] = PROJECT_ROOT
+            
+            process = await asyncio.create_subprocess_exec(
+                "bash", script_path,
+                env=env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await process.communicate()
+            
+            ticker_count = 0
+            if stdout:
+                lines = stdout.decode('utf-8', errors='ignore').strip().split('\n')
+                for line in lines:
+                    logger.info(f"[Script STDOUT] {line}")
+                    if "TICKER_COUNT=" in line:
+                        try:
+                            ticker_count = int(line.split("=")[1])
+                        except:
+                            pass
 
-        if stderr:
-            lines = stderr.decode('utf-8', errors='ignore').strip().split('\n')
-            for line in lines:
-                logger.error(f"[Script STDERR] {line}")
+            if stderr:
+                lines = stderr.decode('utf-8', errors='ignore').strip().split('\n')
+                for line in lines:
+                    logger.error(f"[Script STDERR] {line}")
 
-        if process.returncode == 0:
-            logger.info(f"Sync script executed successfully. Tickers: {ticker_count}")
-            msg = await generate_creative_msg(ticker_count)
-            send_telegram_sync(msg)
-        else:
-            logger.error(f"Sync script failed with return code {process.returncode}")
-                    
-    except Exception as e:
-        logger.error(f"Error during sync script execution: {e}")
-    finally:
-        logger.info(f"--- Sync Job Finished at {datetime.now(KST)} ---")
+            if process.returncode == 0:
+                logger.info(f"Sync script executed successfully. Tickers: {ticker_count}")
+                msg = await generate_creative_msg(ticker_count)
+                send_telegram_sync(msg)
+            else:
+                logger.error(f"Sync script failed with return code {process.returncode}")
+                raise Exception(f"Sync script failed with return code {process.returncode}")
+                        
+        except Exception as e:
+            logger.error(f"Error during sync script execution: {e}")
+            raise e
+        finally:
+            db.close()
+            logger.info(f"--- Sync Job [{job_id}] Finished at {datetime.now(KST)} ---")
 
 async def run_alarm_processing():
     """
     Periodically processes pending alarms using the shared LLM model.
     """
-    logger.info("--- Starting Alarm Processing Job ---")
     db = SessionLocal()
-    try:
-        await AlarmService.process_pending_alarms(db)
-        logger.info("Alarm processing completed successfully.")
-    except Exception as e:
-        logger.error(f"Alarm processing job failed: {e}")
-    finally:
-        db.close()
-        logger.info("--- Alarm Processing Job Finished ---")
+    async with monitor_job_async("alarm_processing", db):
+        logger.info("--- Starting Alarm Processing Job ---")
+        try:
+            await AlarmService.process_pending_alarms(db)
+            logger.info("Alarm processing completed successfully.")
+        except Exception as e:
+            logger.error(f"Alarm processing job failed: {e}")
+            raise e
+        finally:
+            db.close()
+            logger.info("--- Alarm Processing Job Finished ---")
 
 async def run_backup_job():
     """
     Executes the database backup script.
     """
-    script_path = os.path.join(PROJECT_ROOT, "backend/scripts/backup_db.sh")
-    logger.info("--- Starting DB Backup Job ---")
-    try:
-        process = await asyncio.create_subprocess_exec(
-            "bash", script_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await process.communicate()
-        
-        if stdout:
-            for line in stdout.decode().strip().split('\n'):
-                logger.info(f"[Backup STDOUT] {line}")
-        if stderr:
-            for line in stderr.decode().strip().split('\n'):
-                logger.error(f"[Backup STDERR] {line}")
-                
-        if process.returncode == 0:
-            logger.info("DB Backup completed successfully.")
-        else:
-            logger.error(f"DB Backup failed with return code {process.returncode}")
-    except Exception as e:
-        logger.error(f"DB Backup job failed: {e}")
-    finally:
-        logger.info("--- DB Backup Job Finished ---")
+    db = SessionLocal()
+    async with monitor_job_async("daily_backup", db):
+        script_path = os.path.join(PROJECT_ROOT, "backend/scripts/backup_db.sh")
+        logger.info("--- Starting DB Backup Job ---")
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "bash", script_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if stdout:
+                for line in stdout.decode().strip().split('\n'):
+                    logger.info(f"[Backup STDOUT] {line}")
+            if stderr:
+                for line in stderr.decode().strip().split('\n'):
+                    logger.error(f"[Backup STDERR] {line}")
+                    
+            if process.returncode == 0:
+                logger.info("DB Backup completed successfully.")
+            else:
+                logger.error(f"DB Backup failed with return code {process.returncode}")
+                raise Exception(f"Backup failed with return code {process.returncode}")
+        except Exception as e:
+            logger.error(f"DB Backup job failed: {e}")
+            raise e
+        finally:
+            db.close()
+            logger.info("--- DB Backup Job Finished ---")
 
 async def run_monthly_maintenance():
     """
     매월 1일 수행되는 유지보수 작업 (스팸 리포트 및 데이터 정리)
     """
-    logger.info("--- Starting Monthly Maintenance Job ---")
     db = SessionLocal()
-    try:
-        from backend.services.maintenance import generate_monthly_spam_report, cleanup_old_spam_data
-        
-        # 1. 스팸 리포트 전송
-        await generate_monthly_spam_report(db)
-        
-        # 2. 오래된 스팸 데이터 정리 (3개월 기준)
-        await cleanup_old_spam_data(db, months=3)
-        
-        logger.info("Monthly maintenance completed successfully.")
-    except Exception as e:
-        logger.error(f"Monthly maintenance job failed: {e}")
-    finally:
-        db.close()
-        logger.info("--- Monthly Maintenance Job Finished ---")
+    async with monitor_job_async("monthly_maintenance", db):
+        logger.info("--- Starting Monthly Maintenance Job ---")
+        try:
+            from backend.services.maintenance import generate_monthly_spam_report, cleanup_old_spam_data
+            
+            # 1. 스팸 리포트 전송
+            await generate_monthly_spam_report(db)
+            
+            # 2. 오래된 스팸 데이터 정리 (3개월 기준)
+            await cleanup_old_spam_data(db, months=3)
+            
+            logger.info("Monthly maintenance completed successfully.")
+        except Exception as e:
+            logger.error(f"Monthly maintenance job failed: {e}")
+            raise e
+        finally:
+            db.close()
+            logger.info("--- Monthly Maintenance Job Finished ---")
 
 async def main():
     logger.info(f"Current System Time: {datetime.now(KST)}")
@@ -210,7 +225,8 @@ async def main():
         run_sync_script,
         CronTrigger(day_of_week='mon-fri', hour=15, minute=35, timezone=KST),
         id="kr_market_close",
-        name="KR Market Close Sync (15:35 KST)"
+        name="KR Market Close Sync (15:35 KST)",
+        kwargs={"job_id": "kr_market_close"}
     )
 
     
@@ -219,7 +235,8 @@ async def main():
         run_sync_script,
         CronTrigger(day_of_week='tue-sat', hour=6, minute=30, timezone=KST),
         id="us_market_close",
-        name="US Market Close Sync (06:30 KST)"
+        name="US Market Close Sync (06:30 KST)",
+        kwargs={"job_id": "us_market_close"}
     )
     
     # 3. Alarm Processing: Every 5 minutes (07:00 - 21:59 KST)

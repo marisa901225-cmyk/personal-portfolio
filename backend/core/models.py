@@ -16,7 +16,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
-from .models_misc import GameNews, IncomingAlarm, SpamRule, SpamNews, SpamAlarm
+from .models_misc import GameNews, IncomingAlarm, SpamRule, SpamNews, SpamAlarm, SchedulerState
 
 
 class User(Base):
