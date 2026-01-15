@@ -380,24 +380,111 @@ class LLMService:
             logger.warning("AI_REPORT_API_KEY not set. Cannot use paid LLM.")
             return ""
 
+        def _safe_body(text: str) -> str:
+            body = (text or "").strip()
+            if len(body) > 4000:
+                return body[:4000] + "…(truncated)"
+            return body
+
+        def _parse_openai_chat_completions(data: dict) -> str:
+            try:
+                return data["choices"][0]["message"]["content"].strip()
+            except Exception:
+                return ""
+
+        def _parse_openai_responses(data: dict) -> str:
+            # Prefer the server-provided aggregate when present.
+            output_text = data.get("output_text")
+            if isinstance(output_text, str) and output_text.strip():
+                return output_text.strip()
+
+            # Otherwise, best-effort extraction from the structured output.
+            chunks: list[str] = []
+            output = data.get("output") or []
+            if isinstance(output, list):
+                for item in output:
+                    if not isinstance(item, dict):
+                        continue
+                    content = item.get("content") or []
+                    if not isinstance(content, list):
+                        continue
+                    for part in content:
+                        if not isinstance(part, dict):
+                            continue
+                        if part.get("type") in ("output_text", "text") and isinstance(part.get("text"), str):
+                            chunks.append(part["text"])
+            return "".join(chunks).strip()
+
+        def _to_responses_input(msgs: List[dict]) -> list[dict]:
+            converted: list[dict] = []
+            for m in msgs:
+                role = m.get("role")
+                content = m.get("content", "")
+                if not isinstance(content, str):
+                    content = str(content)
+                converted.append(
+                    {
+                        "role": role,
+                        "content": [{"type": "input_text", "text": content}],
+                    }
+                )
+            return converted
+
         try:
             import httpx
             with httpx.Client(timeout=LLM_TIMEOUT) as client:
-                url = f"{base_url}/chat/completions"
                 headers = {
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
                 }
-                payload = {
+
+                # 1) Try Chat Completions (legacy endpoint).
+                chat_url = f"{base_url}/chat/completions"
+                # Some newer model families require `max_completion_tokens` instead of `max_tokens`.
+                is_gpt5_family = str(selected_model).startswith("gpt-5")
+                chat_payload = {
                     "model": selected_model,
                     "messages": messages,
-                    "max_tokens": max_tokens,
-                    "temperature": temperature,
                 }
-                response = client.post(url, json=payload, headers=headers)
-                response.raise_for_status()
-                data = response.json()
-                return data["choices"][0]["message"]["content"].strip()
+                if not is_gpt5_family:
+                    chat_payload["temperature"] = temperature
+                if is_gpt5_family:
+                    chat_payload["max_completion_tokens"] = max_tokens
+                else:
+                    chat_payload["max_tokens"] = max_tokens
+                chat_res = client.post(chat_url, json=chat_payload, headers=headers)
+                if chat_res.status_code < 400:
+                    chat_text = _parse_openai_chat_completions(chat_res.json()) or ""
+                    if chat_text:
+                        return chat_text
+                    # Some model families may return an empty `content` while consuming tokens (e.g. reasoning-only output).
+                    # In that case, fall back to the Responses API.
+
+                # If Chat Completions fails (common with some newer model families),
+                # retry with Responses API.
+                responses_url = f"{base_url}/responses"
+                responses_payload = {
+                    "model": selected_model,
+                    "input": _to_responses_input(messages),
+                    "max_output_tokens": max_tokens,
+                }
+                if not is_gpt5_family:
+                    responses_payload["temperature"] = temperature
+                else:
+                    responses_payload["reasoning"] = {"effort": "low"}
+                resp_res = client.post(responses_url, json=responses_payload, headers=headers)
+                if resp_res.status_code < 400:
+                    return _parse_openai_responses(resp_res.json()) or ""
+
+                logger.error(
+                    "Paid LLM request failed: chat/completions=%s, responses=%s, model=%s. chat_body=%s responses_body=%s",
+                    chat_res.status_code,
+                    resp_res.status_code,
+                    selected_model,
+                    _safe_body(chat_res.text),
+                    _safe_body(resp_res.text),
+                )
+                return ""
         except Exception as e:
             logger.error(f"Paid LLM request failed: {e}")
             return ""

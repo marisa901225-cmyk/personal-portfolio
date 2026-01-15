@@ -103,7 +103,7 @@ async def collect_alarm(
         raise HTTPException(status_code=422, detail=f"Invalid JSON format: {str(e)}")
 
     # 3. 데이터 정제 (Timestamp 처리)
-    received_at_dt = datetime.utcnow()
+    received_at_dt = datetime.now()
     if payload.received_at:
         try:
             val = payload.received_at.strip()
