@@ -1,6 +1,7 @@
 from __future__ import annotations
 import re
 import logging
+import os
 
 class SensitiveDataFormatter(logging.Formatter):
     """
@@ -60,5 +61,4 @@ def setup_global_logging(level=logging.INFO, log_file: str | None = None):
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     
-    import os
     return root_logger

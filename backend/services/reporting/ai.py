@@ -16,7 +16,8 @@ from .expenses import merge_expense_summaries
 from .periods import parse_report_query, resolve_period
 from ..prompt_loader import load_prompt
 
-# System prompt is now loaded from backend/prompts/ai_report.txt
+# System prompt is loaded from backend/prompts/ai_report.txt
+AI_REPORT_SYSTEM_PROMPT = load_prompt("ai_report")
 
 
 

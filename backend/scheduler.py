@@ -43,6 +43,20 @@ async def job_collect_news():
         logger.info("News collection job finished.")
 
 
+async def job_generate_catchphrases():
+    """
+    매일 밤 12시(00:01)에 e스포츠 알림 멘트 자동 생성
+    """
+    logger.info("Starting scheduled catchphrase generation job...")
+    from .services.alarm_service import AlarmService
+    try:
+        await AlarmService.generate_daily_catchphrases()
+    except Exception as e:
+        logger.error(f"Catchphrase generation job failed: {e}")
+    finally:
+        logger.info("Catchphrase generation job finished.")
+
+
 def start_scheduler():
     if not scheduler.running:
         # 10분마다 실행 (LLM 알람 처리와 5분 오프셋 - CPU 충돌 방지)
@@ -54,7 +68,13 @@ def start_scheduler():
             replace_existing=True
         )
         
-        # 스팀 트렌드 요약 (자동 발송 제거 -> 채팅 RAG로 위임)
+        # 3일에 한 번 밤 12시 1분에 e스포츠 멘트 생성
+        scheduler.add_job(
+            job_generate_catchphrases,
+            CronTrigger(day='*/3', hour=0, minute=1),
+            id="generate_esports_catchphrases",
+            replace_existing=True
+        )
         
         scheduler.start()
         logger.info("AsyncIOScheduler started.")

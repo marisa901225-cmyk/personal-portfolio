@@ -1,23 +1,17 @@
 """
-Telegram Webhook Router - 텔레그램 봇 명령어 처리
-/spam add {pattern} - 스팸 규칙 추가
-/spam del {id} - 스팸 규칙 삭제
-/spam list - 스팸 규칙 목록
+Telegram Webhook Router - 텔레그램 봇 웹훅 엔드포인트
+명령어와 자연어 질의를 적절한 핸들러로 라우팅
 """
 import os
 import logging
-import html
-import re
-import json
-from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Request, HTTPException
-from sqlalchemy.orm import Session
 
 from ..core.db import SessionLocal
-from ..core.models import SpamRule, UserMemory, User
 from ..integrations.telegram import send_telegram_message
-from ..services.prompt_loader import load_prompt
+from .handlers.model_handler import handle_model_command
+from .handlers.spam_handler import handle_spam_command
+from .handlers.query_handler import handle_query, reset_session, classify_query
 
 router = APIRouter(prefix="/api/telegram", tags=["telegram"])
 logger = logging.getLogger(__name__)
@@ -25,18 +19,6 @@ logger = logging.getLogger(__name__)
 # 환경변수에서 시크릿 토큰과 허용된 채팅 ID 로드
 WEBHOOK_SECRET = os.getenv("X_TELEGRAM_BOT_API_SECRET_TOKEN") or os.getenv("TELEGRAM_WEBHOOK_SECRET_TOKEN")
 ALLOWED_CHAT_ID = os.getenv("ALARM_TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
-
-# 채팅 세션 관리 (메모리 내 저장, 재시작 시 초기화됨)
-_chat_sessions = {}  # chat_id -> list of messages
-MAX_SESSION_MESSAGES = 10  # 최대 대화 유지 개수
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 @router.post("/webhook")
@@ -46,10 +28,7 @@ async def telegram_webhook(request: Request):
     # 1. Secret Token 검증
     secret_header = request.headers.get("X-Telegram-Bot-Api-Secret-Token")
     if WEBHOOK_SECRET and secret_header != WEBHOOK_SECRET:
-        logger.warning(
-            "Invalid webhook secret token (len=%s)",
-            len(secret_header) if secret_header else 0,
-        )
+        logger.warning("Invalid webhook secret token (len=%s)", len(secret_header) if secret_header else 0)
         raise HTTPException(status_code=403, detail="Invalid secret")
     
     # 2. 업데이트 파싱
@@ -75,265 +54,12 @@ async def telegram_webhook(request: Request):
     
     # 5. 명령어 처리 (/)와 자연어 처리 흐름 분리
     if text.startswith("/"):
-        # (A) 명령어 처리 Flow
-        parts = text[1:].split(maxsplit=1)
-        cmd = parts[0] if len(parts) > 0 else ""
-        arg = parts[1] if len(parts) > 1 else ""
-        
-        # /spam 접두사 지원 (하이브리드)
-        if cmd == "spam":
-            parts = arg.split(maxsplit=1)
-            cmd = parts[0] if len(parts) > 0 else ""
-            arg = parts[1] if len(parts) > 1 else ""
-        
-        # 명령어별 처리
-        if cmd == "report":
-            from ..services.reporting.template import build_telegram_steam_trend_message
-            response_text = build_telegram_steam_trend_message(arg)
-            await send_telegram_message(response_text)
-            return {"ok": True}
-        
-        # 지원하는 명령어 리스트
-        SUPPORTED_CMDS = ["add", "del", "list", "on", "off", "help", "model", "reset"]
-        if cmd not in SUPPORTED_CMDS:
-            return {"ok": True}
-        
-        db = SessionLocal()
-        try:
-            if cmd == "model":
-                # /model 명령어는 별도 핸들러
-                model_parts = arg.split(maxsplit=1)
-                response_text = await handle_model_command(model_parts)
-            elif cmd == "reset":
-                if chat_id in _chat_sessions:
-                    _chat_sessions[chat_id] = []
-                response_text = "✅ 대화 내용이 초기화되었습니다."
-            else:
-                response_text = await handle_spam_command(cmd, arg, db)
-            
-            # 규칙 변경(add, del, on, off)이 있으면 AI 모델 재학습 트리거
-            if cmd in ["add", "del", "on", "off"] and any(icon in response_text for icon in ["✅", "🗑️", "⏸️", "▶️"]):
-                from ..services.spam_trainer import train_spam_model
-                if train_spam_model():
-                    response_text += "\n🔄 <i>AI 모델이 최신 규칙으로 재학습되었습니다.</i>"
-            
-            await send_telegram_message(response_text)
-        finally:
-            db.close()
+        await _handle_command(text, chat_id)
     else:
-        # (B) 자연어 처리 Flow
+        # 자연어 처리
         logger.info("Natural language query received (len=%s)", len(text))
-        query_type = classify_query(text)
-        logger.info(f"Query classified as: {query_type}")
-        
-        # 1-1. 기억하기 (장기 기억 저장)
-        if query_type == "memory_store":
-            from ..services.llm_service import LLMService
-            llm = LLMService.get_instance()
-            db = SessionLocal()
-            try:
-                user = db.query(User).first()
-                if not user:
-                    user = User(name="Owner")
-                    db.add(user)
-                    db.commit()
-                
-                # LLM을 이용해 기억 구조화
-                extraction_prompt = load_prompt("memory_extractor", text=text)
-                extraction_res = llm.generate_paid_chat([{"role": "user", "content": extraction_prompt}], model="gpt-5-nano")
-                
-                try:
-                    # JSON 부분만 추출 (가끔 여분의 텍스트가 붙을 수 있음)
-                    json_match = re.search(r'\{.*\}', extraction_res, re.DOTALL)
-                    if json_match:
-                        mem_data = json.loads(json_match.group())
-                    else:
-                        mem_data = json.loads(extraction_res)
-                except Exception as je:
-                    logger.warning(f"Failed to parse memory JSON: {je}. Raw: {extraction_res}")
-                    # 파싱 실패 시 기본 텍스트 기반 저장
-                    mem_data = {"content": text, "category": "general", "key": None, "importance": 1, "ttl_days": 0}
-
-                content = mem_data.get("content", text)
-                category = mem_data.get("category", "general")
-                key = mem_data.get("key")
-                importance = mem_data.get("importance", 1)
-                ttl_days = mem_data.get("ttl_days", 0)
-
-                expires_at = None
-                if ttl_days > 0:
-                    expires_at = datetime.utcnow() + timedelta(days=ttl_days)
-
-                # Latest-wins (Key가 있으면 기존 기록 업데이트)
-                existing = None
-                if key:
-                    existing = db.query(UserMemory).filter(UserMemory.user_id == user.id, UserMemory.key == key).first()
-                
-                if existing:
-                    existing.content = content
-                    existing.category = category
-                    existing.importance = importance
-                    existing.expires_at = expires_at
-                    existing.updated_at = datetime.utcnow()
-                    db.commit()
-                    await send_telegram_message(f"🔄 기존 기억을 업데이트했습니다: \"{content}\" (키: {key})")
-                else:
-                    new_mem = UserMemory(
-                        user_id=user.id, 
-                        content=content, 
-                        category=category, 
-                        key=key, 
-                        importance=importance,
-                        expires_at=expires_at
-                    )
-                    db.add(new_mem)
-                    db.commit()
-                    msg = f"✅ 기억하겠습니다: \"{content}\""
-                    if category != "general":
-                        msg += f" (분류: {category})"
-                    await send_telegram_message(msg)
-            except Exception as e:
-                logger.error(f"Memory store failed: {e}")
-                await send_telegram_message("기억하는 중에 오류가 발생했습니다. 😅")
-            finally:
-                db.close()
-            return {"ok": True}
-
-        # 1. 게임 트렌드 (EXAONE 로컬 요약)
-        if query_type == "game_trend":
-            from ..services.news.refiner import refine_game_trends_with_duckdb
-            from ..services.llm_service import LLMService
-            
-            # (1) DuckDB 데이터 조회
-            context_text = refine_game_trends_with_duckdb(text)
-            
-            # (2) 프롬프트 구성
-            prompt = _get_game_trend_prompt(text, context_text)
-            
-            # (3) 로컬 LLM 생성
-            llm = LLMService.get_instance()
-            messages = [
-                {"role": "system", "content": "당신은 게임 트렌드 분석가이자 스팀(Steam) 전문가입니다."},
-                {"role": "user", "content": prompt}
-            ]
-            
-            response_text = llm.generate_chat(messages, max_tokens=1536)
-            formatted_response = _format_for_telegram(response_text)
-            await send_telegram_message(formatted_response)
-            return {"ok": True}
-            
-        # 2. 투자/가계부 리포트 (LLM 기반 서술형)
-        if query_type == "report":
-            from ..services.report_service import resolve_ai_report_prompt, generate_ai_report_text
-            db = SessionLocal()
-            try:
-                # (1) 리포트 생성을 위한 프롬프트 및 기간 해석
-                period, prompt = resolve_ai_report_prompt(db, query=text)
-                await send_telegram_message(f"⏳ <b>{period.label}</b> 리포트를 생성 중입니다... (AI 분석 중)")
-                
-                # (2) AI API 호출하여 서술형 리포트 생성
-                report_ai_res = await generate_ai_report_text(period, prompt)
-                raw_report = report_ai_res.report
-                
-                # (3) 텔레그램용 HTML 변환 (Markdown -> HTML 태그)
-                formatted_report = _format_for_telegram(raw_report)
-                await send_telegram_message(formatted_report)
-            except Exception as e:
-                logger.error(f"AI Report generation failed: {e}")
-                await send_telegram_message("리포트 생성 중 오류가 발생했습니다. 😅 (데이터 부족 또는 AI 서버 일시 장애)")
-            finally:
-                db.close()
-            return {"ok": True}
-
-        # 3. 그 외 LLM 기반 질의 처리 (E스포츠, 경제 뉴스, 일반 대화)
         try:
-            from ..services.llm_service import LLMService
-            llm = LLMService.get_instance()
-            
-            # (1) Context 및 Prompt 구성
-            system_instruction = ""
-            user_prompt = ""
-            
-            if query_type == 'esports_schedule':
-                from ..services.news_collector import NewsCollector
-                context_text = NewsCollector.refine_schedules_with_duckdb(text)
-                system_instruction = "당신은 e스포츠 전문가이자 사용자의 개인 비서입니다. 친절하고 위트 있게 답변하세요."
-                user_prompt = _get_esports_prompt(text, context_text)
-            
-            elif query_type == 'economy_news':
-                from ..services.news_collector import NewsCollector
-                context_text = NewsCollector.refine_economy_news_with_duckdb(text)
-                system_instruction = "당신은 글로벌 경제 전문가입니다. 어려운 내용도 쉽게 설명해 주세요."
-                user_prompt = _get_economy_prompt(text, context_text)
-            
-            elif query_type == 'general_chat':
-                # (A) 일반 대화인 경우 유료 모델(Paid AI) 사용 및 세션/기억 관리
-                session = _chat_sessions.get(chat_id, [])
-                if len(session) >= MAX_SESSION_MESSAGES:
-                    session = []
-
-                # 사용자의 장기 기억(Memories) 조회 (구조화 및 필터링)
-                db = SessionLocal()
-                memories_text = ""
-                try:
-                    user = db.query(User).first()
-                    if user:
-                        now = datetime.utcnow()
-                        # 만료되지 않았거나 만료 설정이 없는 기억들 조회
-                        memories = db.query(UserMemory).filter(
-                            UserMemory.user_id == user.id,
-                            (UserMemory.expires_at == None) | (UserMemory.expires_at > now)
-                        ).order_by(UserMemory.importance.desc(), UserMemory.updated_at.desc()).limit(10).all()
-                        
-                        if memories:
-                            # 카테고리별 그룹화
-                            cat_map = {}
-                            for m in memories:
-                                if m.category not in cat_map: cat_map[m.category] = []
-                                cat_map[m.category].append(m.content)
-                            
-                            lines = ["[사용자에 대한 장기 기억]"]
-                            for cat, m_list in cat_map.items():
-                                lines.append(f"• {cat.upper()}:")
-                                for content in m_list:
-                                    lines.append(f"  - {content}")
-                            memories_text = "\n".join(lines)
-                finally:
-                    db.close()
-
-                session.append({"role": "user", "content": text})
-                system_content = _get_general_chat_prompt()
-                
-                # 의도 기반 주입: 단순 인사말 등에는 기억 주입 생략하여 토큰 절약
-                is_simple_greeting = len(text) < 5 and any(kw in text.lower() for kw in ['안녕', 'hi', 'hello', 'ㅎㅇ'])
-                if memories_text and not is_simple_greeting:
-                    system_content += "\n\n" + memories_text
-
-                api_messages = [{"role": "system", "content": system_content}] + session
-                response_text = llm.generate_paid_chat(api_messages, model="gpt-5-nano")
-                
-                if response_text:
-                    session.append({"role": "assistant", "content": response_text})
-                    _chat_sessions[chat_id] = session
-                else:
-                    response_text = "유료 AI 서버 응답 실패. 잠시 후 다시 시도해 주세요. 😅"
-            
-            if query_type != "general_chat":
-                # (B) 그 외(E스포츠, 경제 등)는 로컬 EXAONE 호출
-                messages = [
-                    {"role": "system", "content": system_instruction},
-                    {"role": "user", "content": user_prompt}
-                ]
-                total_prompt_len = sum(len(m['content']) for m in messages)
-                logger.info(f"Local LLM Prompt total length: {total_prompt_len} characters")
-                response_text = llm.generate_chat(messages, max_tokens=768)
-            
-            if not response_text:
-                response_text = "죄송합니다. 답변을 생성하는 중에 문제가 발생했습니다. 😅"
-            
-            formatted_response = _format_for_telegram(response_text)
-            await send_telegram_message(formatted_response)
-            
+            await handle_query(text, chat_id)
         except Exception as e:
             logger.error(f"Query processing failed: {e}")
             await send_telegram_message("답변 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.")
@@ -341,262 +67,50 @@ async def telegram_webhook(request: Request):
     return {"ok": True}
 
 
-def _get_game_trend_prompt(text: str, context: str) -> str:
-    return load_prompt("game_trend", text=text, context=context)
-
-
-# 프롬프트 생성 헬퍼 함수들 (현재 메인 로직에서 직접 generate_chat 사용, 레거시용)
-def _get_esports_prompt(text: str, context: str) -> str:
-    """e스포츠 프롬프트 - LCK/국제대회 포함, 친근한 스타일 (환각 방지 강화)"""
-    return load_prompt("esports", text=text, context=context)
-
-def _get_economy_prompt(text: str, context: str) -> str:
-    return load_prompt("economy", text=text, context=context)
-
-def _get_general_chat_prompt() -> str:
-    return load_prompt("general_chat")
-
-
-def _format_for_telegram(text: str) -> str:
-    """
-    AI 응답을 텔레그램 HTML 형식으로 변환한다.
-    - HTML 특수문자 이스케이프 (<, >, &)
-    - ### 제목 -> <b>제목</b>
-    - **강조** -> <b>강조</b>
-    - 불렛 포인트(-) -> •
-    - LLM 특수 토큰 제거
-    """
-    from ..services.alarm.sanitizer import clean_exaone_tokens
-    
-    # 0. LLM 특수 토큰 제거
-    text = clean_exaone_tokens(text)
-    
-    # 1. 기본 HTML 특수문자 이스케이프 (태그 깨짐 방지)
-    safe_text = html.escape(text)
-    
-    # 2. 섹션 제목 변환: ### 제목 -> <b>제목</b>
-    safe_text = re.sub(r'^###\s+(.+)$', r'<b>\1</b>', safe_text, flags=re.MULTILINE)
-    
-    # 3. 굵게 변환: **텍스트** -> <b>텍스트</b>
-    safe_text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', safe_text)
-    
-    # 4. 불렛 포인트 변환: 줄 시작의 - -> •
-    safe_text = re.sub(r'^-\s+', '• ', safe_text, flags=re.MULTILINE)
-    
-    return safe_text.strip()
-
-
-def classify_query(text: str) -> str:
-    """
-    사용자 질문 유형 분류
-    - 'esports_schedule': E스포츠 경기 일정 관련
-    - 'game_trend': 게임 신작/트렌드 관련
-    - 'economy_news': 국내/외 경제 뉴스 관련
-    - 'report': 투자/가계부 리포트 요청
-    - 'general_chat': 일반 대화
-    """
-    text_lower = text.lower()
-    
-    # 1. 리포트 키워드 (투자, 가계부, 자산 리포트)
-    report_keywords = ['리포트', '보고서', 'report', '자산', '수익률', '가계부', '지출']
-    if any(kw in text_lower for kw in report_keywords):
-        return 'report'
-
-    # 2. E스포츠 키워드
-    esports_keywords = ['t1', 'skt', '티원', '젠지', 'geng', 'gen.g', 'lol', '롤', 
-                        'lck', '발로란트', 'valorant', 'vct', '경기', '일정', 
-                        '월즈', 'worlds', '챌린저스', '퍼시픽']
-    if any(kw in text_lower for kw in esports_keywords):
-        return 'esports_schedule'
-    
-    # 3. 게임 트렌드 키워드
-    game_keywords = ['게임', '스팀', 'steam', '신작', '트렌드', '인기', '출시', 
-                     '추천', '플스', 'ps5', 'playstation', '닌텐도', 'switch']
-    if any(kw in text_lower for kw in game_keywords):
-        return 'game_trend'
-    
-    # 4. 해외 + 국내 경제 키워드
-    economy_keywords = ['미국', '유럽', '환율', 'fomc', 'ecb', 's&p', '나스닥', '금리',
-                        'cpi', 'etf', '달러', '유로', '채권', '국채', 'treasury', '코스피',
-                        '코스닥', '주식', '경제', '인플레', '경기', '불황', '호황']
-    if any(kw in text_lower for kw in economy_keywords):
-        return 'economy_news'
-    
-    # 5. 기억하기 키워드 (장기 기억 저장)
-    memory_keywords = ['기억해', '저장해', '기억해줘', '기억해라', '기억해주길', 'remember']
-    if any(kw in text_lower for kw in memory_keywords):
-        return 'memory_store'
-
-    # 기타 일반 대화
-    return 'general_chat'
-
-
-
-async def handle_model_command(parts: list) -> str:
-    """/model 명령어 처리"""
-    from ..services.llm_service import LLMService
-    llm = LLMService.get_instance()
-    
-    subcmd = parts[0] if len(parts) > 0 else "목록"
+async def _handle_command(text: str, chat_id: str):
+    """슬래시 명령어 처리"""
+    parts = text[1:].split(maxsplit=1)
+    cmd = parts[0] if len(parts) > 0 else ""
     arg = parts[1] if len(parts) > 1 else ""
     
-    # 모델 별칭 매핑
-    MODEL_ALIASES = {
-        "K1.5": "Kanana-Nano-2.1B-Instruct-v1.5-Q8_0.gguf",
-        "E4": "EXAONE-4.0-1.2B-BF16.gguf",
-        "Q3": "Qwen3-1.7B-Instruct-f16.gguf",
-        "G3": "gemma-3-4b-it-Q3_K_M.gguf",
-        "G4": "gemma-3-4b-it-q4_k_m.gguf"
-    }
+    # /spam 접두사 지원 (하이브리드)
+    if cmd == "spam":
+        parts = arg.split(maxsplit=1)
+        cmd = parts[0] if len(parts) > 0 else ""
+        arg = parts[1] if len(parts) > 1 else ""
     
-    if subcmd in ["list", "목록", "리스트"]:
-        models = llm.list_available_models()
-        current = llm.get_current_model()
-        
-        if not models:
-            return "📁 사용 가능한 GGUF 모델이 없습니다. (backend/data 디렉토리 확인)"
-        
-        lines = ["<b>🤖 사용 가능한 모델 목록</b>"]
-        # 역방향 매핑 준비
-        rev_aliases = {v: k for k, v in MODEL_ALIASES.items()}
-        
-        for m in models:
-            is_active = " (활성)" if m == current else ""
-            fname = os.path.basename(m)
-            alias = rev_aliases.get(fname)
-            alias_str = f" [<b>{alias}</b>]" if alias else ""
-            lines.append(f"• <code>{fname}</code>{alias_str}{is_active}")
-        
-        lines.append("\n💡 <code>/model 교체 별칭</code> 또는 <code>파일명</code>으로 교체")
-        return "\n".join(lines)
+    # 지원하는 명령어 리스트
+    SUPPORTED_CMDS = ["add", "del", "list", "on", "off", "help", "model", "reset", "report"]
+    if cmd not in SUPPORTED_CMDS:
+        return
     
-    elif subcmd in ["switch", "교체", "변경", "선택"] and arg:
-        # 1. 별칭 우선 확인
-        target_file = MODEL_ALIASES.get(arg)
-        
-        # 2. 별칭이 없으면 파일명 부분 일치 검색
-        if not target_file:
-            available_models = llm.list_available_models()
-            for m in available_models:
-                fname = os.path.basename(m)
-                if arg.lower() in fname.lower():
-                    target_file = fname
-                    break
-        
-        if not target_file:
-            target_file = arg # 검색 실패 시 입력값 그대로 사용
-            
-        # 파일 경로 구성
-        full_path = target_file if target_file.startswith("backend/data/") else os.path.join("backend/data", target_file)
-        if not full_path.endswith(".gguf") and "." not in target_file:
-            full_path += ".gguf"
-            
-        if llm.switch_model(full_path):
-            return f"✅ 모델이 교체되었습니다: <code>{os.path.basename(full_path)}</code>"
-        else:
-            if not os.path.exists(full_path):
-                return f"❌ 모델 교체 실패: <code>{arg}</code>와 일치하는 모델을 찾을 수 없습니다."
-            last_error = llm.get_last_error()
-            if last_error:
-                return f"❌ 모델 교체 실패: <code>{os.path.basename(full_path)}</code> 로드 오류 ({last_error})"
-            return f"❌ 모델 교체 실패: <code>{os.path.basename(full_path)}</code> 로드에 실패했습니다."
-            
-    return "ℹ️ 사용법: /model 목록 또는 /model 교체 {별칭|파일명}"
-
-
-async def handle_spam_command(cmd: str, arg: str, db: Session) -> str:
-    """
-    /add, /del, /list, /on, /off 명령어 처리
-    """
-    if cmd == "add" and arg:
-        # 콤마로 구분하여 여러 개 동시 등록 지원 (예: /add 문피아, 이벤트)
-        patterns = [p.strip() for p in arg.split(",") if p.strip()]
-        added_ids = []
-        for p in patterns:
-            new_rule = SpamRule(
-                rule_type="contains",
-                pattern=p,
-                category="general",
-                note="텔레그램 추가",
-                is_enabled=True,
-                created_at=datetime.utcnow()
-            )
-            db.add(new_rule)
-            db.commit()
-            added_ids.append(f"#{new_rule.id}")
-        
-        patterns_str = ", ".join([f"<code>{p}</code>" for p in patterns])
-        return f"✅ 스팸 규칙 {len(patterns)}개 추가됨: {patterns_str} ({', '.join(added_ids)})"
+    # 명령어별 처리
+    response_text = ""
     
-    elif cmd == "del" and arg:
-        try:
-            rule_id = int(arg)
-        except ValueError:
-            return "❌ ID는 숫자여야 합니다 (예: /del 15)"
-        
-        rule = db.query(SpamRule).filter(SpamRule.id == rule_id).first()
-        if not rule:
-            return f"❌ 규칙 #{rule_id}를 찾을 수 없습니다"
-        
-        pattern = rule.pattern
-        db.delete(rule)
-        db.commit()
-        return f"🗑️ 규칙 #{rule_id} 삭제됨: <code>{pattern}</code>"
+    if cmd == "report":
+        from ..services.reporting.template import build_telegram_steam_trend_message
+        response_text = build_telegram_steam_trend_message(arg)
+        await send_telegram_message(response_text)
+        return
     
-    elif cmd == "list":
-        # 현재는 모든 규칙을 보여주되 상태 표시
-        rules = db.query(SpamRule).order_by(SpamRule.id.desc()).limit(30).all()
-        if not rules:
-            return "📋 등록된 스팸 규칙이 없습니다"
-        
-        lines = ["<b>📋 스팸 규칙 목록 (최신 30개)</b>"]
-        for r in rules:
-            status_icon = "🟢" if r.is_enabled else "🔴"
-            # 긴 패턴은 자르기
-            disp_pattern = (r.pattern[:20] + "..") if len(r.pattern) > 20 else r.pattern
-            lines.append(f"{status_icon} #{r.id} [<code>{disp_pattern}</code>]")
-        
-        lines.append("\n💡 <code>/off ID</code>로 끄고 <code>/del ID</code>로 삭제")
-        return "\n".join(lines)
-    
-    elif cmd == "off" and arg:
-        try:
-            rule_id = int(arg)
-        except ValueError:
-            return "❌ ID는 숫자여야 합니다"
-        
-        rule = db.query(SpamRule).filter(SpamRule.id == rule_id).first()
-        if not rule:
-            return f"❌ 규칙 #{rule_id}를 찾을 수 없습니다"
-        
-        rule.is_enabled = False
-        db.commit()
-        return f"⏸️ 규칙 #{rule_id} 비활성화됨"
-    
-    elif cmd == "on" and arg:
-        try:
-            rule_id = int(arg)
-        except ValueError:
-            return "❌ ID는 숫자여야 합니다"
-        
-        rule = db.query(SpamRule).filter(SpamRule.id == rule_id).first()
-        if not rule:
-            return f"❌ 규칙 #{rule_id}를 찾을 수 없습니다"
-        
-        rule.is_enabled = True
-        db.commit()
-        return f"▶️ 규칙 #{rule_id} 활성화됨"
-    
+    if cmd == "model":
+        model_parts = arg.split(maxsplit=1)
+        response_text = await handle_model_command(model_parts)
+    elif cmd == "reset":
+        reset_session(chat_id)
+        response_text = "✅ 대화 내용이 초기화되었습니다."
     else:
-        return """<b>ℹ️ 봇 명령어 도움말</b>
-/help - 봇 명령어 도움말
-/reset - 대화 내용(컨텍스트) 초기화
-/model 목록 - 사용 가능한 LLM 모델 목록
-/model 교체 {별칭|파일명} - 실시간 모델 교체
-
-<b>스팸 규칙 관리</b>
-/add {키워드} - 새 키워드 추가 (콤마 구분 가능)
-/del {ID} - 규칙 완전 삭제
-/list - 전체 목록 및 상태 보기
-/on {ID} - 특정 규칙 활성화
-/off {ID} - 특정 규칙 비활성화"""
+        db = SessionLocal()
+        try:
+            response_text = await handle_spam_command(cmd, arg, db)
+            
+            # 규칙 변경 시 AI 모델 재학습 트리거
+            if cmd in ["add", "del", "on", "off"] and any(icon in response_text for icon in ["✅", "🗑️", "⏸️", "▶️"]):
+                from ..services.spam_trainer import train_spam_model
+                if train_spam_model():
+                    response_text += "\n� <i>AI 모델이 최신 규칙으로 재학습되었습니다.</i>"
+        finally:
+            db.close()
+    
+    if response_text:
+        await send_telegram_message(response_text)
