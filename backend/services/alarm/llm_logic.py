@@ -75,9 +75,26 @@ async def summarize_with_llm(items: List[dict]) -> str:
         ]
         
         logger.info("No alarms to process. Asking LLM for random wisdom...")
-        result = llm_service.generate_chat(messages, max_tokens=128, temperature=0.9)
+        result = llm_service.generate_chat(
+            messages, 
+            max_tokens=128, 
+            temperature=0.8,
+            stop=["Okay", "let me", "Let me", "I'll", "아하", "음,", "사용자가", "지시사항을"]
+        )
         result = clean_exaone_tokens(result)
         logger.info(f"LLM Random Response: {result}")
+        
+        # 결과 검증 (영어가 너무 많거나 비어있으면 skip)
+        if not result or len(result.strip()) < 10:
+            logger.warning("Generated message too short, skipping.")
+            return None
+            
+        import re
+        korean_chars = len(re.findall(r'[가-힣]', result))
+        if korean_chars / len(result) < 0.3:
+            logger.warning(f"Low Korean ratio ({korean_chars/len(result):.2f}), skipping.")
+            return None
+            
         return result
 
     
