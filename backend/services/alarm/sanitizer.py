@@ -64,6 +64,28 @@ def clean_exaone_tokens(text: str) -> str:
     if not text:
         return ""
     
+    # 0. 한글/영문 COT 시작 패턴 제거
+    # 문장 시작 부분의 사고과정 패턴을 regex로 잘라냄
+    cot_start_patterns = [
+        # 한글 패턴
+        r'^아하[,.]?\s*',
+        r'^음[,.]?\s*',
+        r'^흠[,.]?\s*',
+        r'^사용자가\s+[가-힣]+\s+대로[^.]*[.]\s*',  # "사용자가 요구한 대로~." 패턴
+        r'^[가-힣]+해야겠[어다네][.!]?\s*',  # "~해야겠어." 패턴
+        r'^[가-힣]+할게[.!]?\s*',  # "~할게." 패턴
+        r'^이런\s*식으로[^.]*[.]\s*',  # "이런 식으로~." 패턴
+        r'^[가-힣]+말이지[.!]?\s*',  # "~말이지." 패턴
+        # 영문 패턴 (LLM이 영어로 CoT 시작하는 경우)
+        r'^Okay[,.]?\s+let\s+me\s+[^\n]{0,100}[.\n]\s*',  # "Okay, let me approach this..." 
+        r'^Let\s+me\s+[^\n]{0,80}[.\n]\s*',  # "Let me think about..."
+        r"^I'll\s+[^\n]{0,80}[.\n]\s*",  # "I'll analyze this..."
+        r'^Here\s+is\s+[^\n]{0,50}:\s*',  # "Here is the result:"
+        r'^Sure[,!]?\s*[^\n]{0,80}[.\n]\s*',  # "Sure, here's..."
+    ]
+    for pattern in cot_start_patterns:
+        text = re.sub(pattern, '', text, flags=re.MULTILINE | re.IGNORECASE)
+    
     # 1. COT 태그 제거 (완전한 쌍)
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
     text = re.sub(r'<reasoning>.*?</reasoning>', '', text, flags=re.DOTALL | re.IGNORECASE)

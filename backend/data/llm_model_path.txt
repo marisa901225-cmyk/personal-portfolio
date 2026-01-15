@@ -1,1 +1,1 @@
-/data/gemma-3-4b-it-q4_k_m.gguf
+EXAONE-4.0-1.2B-BF16.gguf

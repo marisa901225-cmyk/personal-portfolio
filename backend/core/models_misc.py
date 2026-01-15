@@ -167,3 +167,26 @@ class SpamNews(Base):
         onupdate=datetime.utcnow,
         nullable=False,
     )
+
+class SchedulerState(Base):
+    """스케줄러 작업 실행 상태 및 이력 기록"""
+
+    __tablename__ = "scheduler_states"
+
+    job_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    status: Mapped[str] = mapped_column(
+        String(20), default="idle"
+    )  # idle, running, success, failure
+
+    last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_success_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_failure_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
