@@ -51,16 +51,19 @@ def calculate_summary(assets: List[Asset], external_cashflows: List[ExternalCash
     index_map: dict[str, float] = {}
 
     for asset in assets:
+        # 실현손익은 삭제 여부와 상관없이 항상 합산 (누적 손익 추적용)
+        realized = asset.realized_profit or 0.0
+        realized_profit_total += realized
+
+        # 현재 보유 중인 자산에 대해서만 가치와 투자금 계산
         if asset.deleted_at is not None:
             continue
 
         value = asset.amount * asset.current_price
         invested = asset.amount * (asset.purchase_price or asset.current_price)
-        realized = asset.realized_profit or 0.0
 
         total_value += value
         total_invested += invested
-        realized_profit_total += realized
 
         category_map[asset.category] = category_map.get(asset.category, 0.0) + value
 

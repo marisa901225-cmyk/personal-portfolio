@@ -71,7 +71,13 @@ async def check_upcoming_matches(db: Session, catchphrases_file: str, window_min
     lines = [f"🎮 <b>[경기 시작 알림]</b>\n{selected_phrase}\n"]
     for match in matches_to_notify:
         title = match.title.replace("[Esports Schedule] ", "")
-        _, match_name = title.split(" - ", 1) if " - " in title else ("", title)
+        # LoL - DNS vs DK 형태에서 팀명 추출
+        if " - " in title:
+            _, match_part = title.split(" - ", 1)
+            match_name = match_part
+        else:
+            match_name = title
+            
         event_time_str = match.event_time.strftime("%H:%M") if match.event_time else "시간 미정"
         lines.append(f"🏆 <b>{match.league_tag}</b> | {event_time_str}\n   {match_name}\n")
         match.category_tag = f"{match.category_tag or ''},notified".strip(",")

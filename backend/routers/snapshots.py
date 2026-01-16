@@ -26,7 +26,7 @@ def create_portfolio_snapshot(db: Session = Depends(get_db)) -> PortfolioSnapsho
     user = get_or_create_single_user(db)
     assets = (
         db.query(Asset)
-        .filter(Asset.user_id == user.id, Asset.deleted_at.is_(None))
+        .filter(Asset.user_id == user.id)
         .all()
     )
     external_cashflows = (
