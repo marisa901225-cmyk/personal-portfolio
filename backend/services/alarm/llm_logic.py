@@ -16,6 +16,9 @@ logger = logging.getLogger(__name__)
 # 2차 정제용 경량 LLM 서버 URL
 LLM_LIGHT_BASE_URL = os.getenv("LLM_LIGHT_BASE_URL", "http://llama-server-light:8080")
 
+# 랜덤 메시지 카테고리 중복 방지용 (마지막 선택 카테고리)
+_last_category = None
+
 
 def _clean_meta_headers(text: str) -> str:
     """
@@ -120,7 +123,12 @@ async def summarize_with_llm(items: List[dict]) -> str:
             "TMI형으로 시작해라 (예: '갑자기 생각난 건데...')",
         ]
         
-        forced_category = random.choice(categories)
+        # 이전 카테고리와 중복되지 않도록 선택
+        global _last_category
+        available_categories = [c for c in categories if c != _last_category]
+        forced_category = random.choice(available_categories)
+        _last_category = forced_category  # 다음 호출시 중복 방지
+        
         forced_format = random.choice(formats)
         
         # 외부 프롬프트 파일에서 로드 (핫 리로드 지원)
