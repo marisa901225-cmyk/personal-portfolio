@@ -168,12 +168,12 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
                     </div>
                     <div className={`px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider ${isPositive ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
                         }`}>
-                        {isPositive ? 'PROFIT' : 'LOSS'}
+                        {isPositive ? '수익' : '손실'}
                     </div>
                 </div>
 
                 <div className="mt-4">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Total P&L</p>
+                    <p className="text-[10px] font-bold text-slate-400 tracking-widest">총 손익</p>
                     <h3 className={`text-2xl font-bold mt-1 tabular-nums tracking-tight ${isPositive ? 'text-slate-900' : 'text-rose-600'
                         }`}>
                         {isPositive ? '+' : ''}{formatCurrency(totalProfit)}
@@ -203,13 +203,13 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
                         <DollarSign size={24} className="text-emerald-600" />
                     </div>
                     <div className="text-right">
-                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">YTD</p>
+                        <p className="text-[10px] text-slate-400 font-bold tracking-widest">올해</p>
                         <p className="text-xs font-bold text-emerald-600">+{formatCurrency(dividendInfo.currentYearTotal)}</p>
                     </div>
                 </div>
 
                 <div className="mt-4">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Dividends</p>
+                    <p className="text-[10px] font-bold text-slate-400 tracking-widest">배당금</p>
                     <h3 className="text-2xl font-bold text-slate-900 mt-1 tabular-nums tracking-tight">
                         {dividendInfo.hasData ? `+${formatCurrency(dividendInfo.totalAllTime)}` : '₩0'}
                     </h3>
@@ -224,7 +224,7 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
                         </ResponsiveContainer>
                     ) : (
                         <div className="h-full flex items-center justify-center text-[10px] text-slate-300 bg-slate-50/50 rounded-lg italic font-medium">
-                            No Dividends
+                            배당 내역 없음
                         </div>
                     )}
                 </div>
@@ -236,8 +236,8 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
                     <div className="p-2.5 bg-blue-50 rounded-2xl group-hover:bg-blue-100 transition-colors">
                         <Building2 size={24} className="text-blue-500" />
                     </div>
-                    <div className="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-full text-[10px] font-bold tracking-widest uppercase">
-                        Realty
+                    <div className="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-full text-[10px] font-bold tracking-widest">
+                        부동산
                     </div>
                 </div>
 
@@ -265,7 +265,7 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
                 ) : (
                     <div className="mt-4 flex flex-col items-center justify-center h-full gap-2 py-4">
                         <Building2 size={32} className="opacity-10" />
-                        <span className="text-[10px] text-slate-300 font-bold uppercase tracking-widest leading-none">Not Added</span>
+                        <span className="text-[10px] text-slate-300 font-bold tracking-widest leading-none">등록된 자산 없음</span>
                     </div>
                 )}
             </div>
@@ -308,7 +308,7 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
                                     </div>
                                 ))
                             ) : (
-                                <div className="col-span-full py-4 text-center text-[10px] text-slate-300 italic">No Index Data</div>
+                                <div className="col-span-full py-4 text-center text-[10px] text-slate-300 italic">지수 데이터 없음</div>
                             )}
                         </div>
                     </div>
