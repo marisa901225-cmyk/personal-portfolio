@@ -54,7 +54,7 @@ class AlarmLLMSafetyTests(unittest.TestCase):
                 "text": "이*후님: 내일 영화 보러 갈래?",
             }
         ]
-        stub = _StubLLMService("- [배달앱] 오늘 12시에 신제품 김치 배달이 예정되어 있습니다.")
+        stub = _StubLLMService("- [카카오톡] 이*후님이 영화 보러 가자고 하네요.")
         with patch("backend.services.alarm.llm_logic.LLMService.get_instance", return_value=stub):
             result = asyncio.run(summarize_with_llm(items))
         self.assertIn("카카오톡", result)

@@ -220,12 +220,12 @@ async def main():
     # Explicitly use Asia/Seoul timezone for scheduler
     scheduler = AsyncIOScheduler(timezone=KST)
     
-    # 1. KR Market Close: Mon-Fri 15:35 KST
+    # 1. KR Market Close: Mon-Fri 15:33 KST (5분 단위 알람 처리와 겹침 방지)
     scheduler.add_job(
         run_sync_script,
-        CronTrigger(day_of_week='mon-fri', hour=15, minute=35, timezone=KST),
+        CronTrigger(day_of_week='mon-fri', hour=15, minute=33, timezone=KST),
         id="kr_market_close",
-        name="KR Market Close Sync (15:35 KST)",
+        name="KR Market Close Sync (15:33 KST)",
         kwargs={"job_id": "kr_market_close"}
     )
 

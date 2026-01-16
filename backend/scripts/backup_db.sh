@@ -98,10 +98,14 @@ if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]] && [[ -n "${TELEGRAM_CHAT_ID:-}" ]]; then
     # LLM으로 창의적인 메시지 생성 (별도 스크립트 호출)
     # bc 대신 Python 사용 (Docker 컨테이너 호환성)
     file_size_mb=$(python3 -c "print(f'{$file_size / 1024 / 1024:.2f}')")
-    echo "INFO: LLM 메시지 생성 중... (파일 크기: ${file_size_mb}MB)"
+    # LLM 로딩 메시지(stderr)는 터미널에 출력하고, 실제 메시지(stdout)만 변수에 담음
+    # 만약 실패하거나 비어있으면 기본 메시지 사용
+    # 참고: 이 스크립트는 Docker 컨테이너 내부에서 실행되므로 직접 python3 호출
+    backup_msg=$(python3 "${SCRIPT_DIR}/generate_backup_msg.py" "${file_size_mb}" "${backup_time}" 2>/dev/null || echo "")
     
-    # LLM 로딩 메시지(stderr)는 무시하되, 실제 메시지(stdout)는 받음
-    backup_msg=$(docker exec myasset-sync-prices python3 /app/backend/scripts/generate_backup_msg.py "${file_size_mb}" "${backup_time}" 2>&1 | grep -v "llama_" | grep -v "ggml_" || echo "📦 DB 백업 완료 (${file_size_mb}MB)")
+    if [[ -z "$backup_msg" ]]; then
+      backup_msg="📦 DB 백업 완료 (${file_size_mb}MB)"
+    fi
     
     echo "INFO: 생성된 메시지: ${backup_msg:0:50}..."
     echo "INFO: 텔레그램으로 파일 전송 중..."

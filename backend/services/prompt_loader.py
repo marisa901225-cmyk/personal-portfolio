@@ -52,9 +52,15 @@ def load_prompt(prompt_name: str, **kwargs) -> str:
     
     # 변수 치환
     try:
-        return template.format(**kwargs)
-    except KeyError as e:
-        logger.warning(f"Missing template variable in {prompt_name}: {e}")
+        # EXAONE 특수 토큰 [|system|] 등에서 발생하는 중괄호 문제를 피하기 위해 
+        # format() 대신 필요한 변수만 명시적으로 replace 하거나, 
+        # 안전한 string.Template 방식 또는 예외 처리를 강화합니다.
+        result = template
+        for key, value in kwargs.items():
+            result = result.replace("{" + key + "}", str(value))
+        return result
+    except Exception as e:
+        logger.warning(f"Error during template substitution in {prompt_name}: {e}")
         return template
 
 

@@ -8,5 +8,9 @@
         "dev:backend": "cd backend && source .venv/bin/activate && uvicorn main:app --reload --port 8000",
         "test:frontend": "npm run test --prefix frontend",
         "test:backend": "cd backend && source .venv/bin/activate && python -m unittest discover tests"
+    },
+    "dependencies": {
+        "react-markdown": "^10.1.0",
+        "remark-gfm": "^4.0.1"
     }
 }
