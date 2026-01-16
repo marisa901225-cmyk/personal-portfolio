@@ -12,6 +12,21 @@ SPAM_MODEL_PATH = os.path.join(DATA_DIR, "spam_model.joblib")
 
 _spam_model_instance = None
 
+# 성능 최적화: 민감정보 마스킹 정규식을 모듈 전역에서 컴파일
+SENSITIVE_PATTERNS = [
+    (re.compile(r"\[(?:인증번호|OTP|확인번호)\]\s*\d{4,6}", re.IGNORECASE), "[인증번호]"),
+    (re.compile(r"(?:인증번호|OTP|확인번호)는?\s*\[?\d{4,6}\]?", re.IGNORECASE), "[인증번호]"),
+    (re.compile(r"(?<=:)\s*\d{6}(?=\s)", re.IGNORECASE), "[인증번호]"),
+    (re.compile(r"\b\d{3,6}-\d{2,6}-\d{3,}(?:\*+|)\b", re.IGNORECASE), "[계좌번호]"),
+    (re.compile(r"\b\d{4}-\d{4}-\d{4}-\d{4}\b", re.IGNORECASE), "[카드번호]"),
+    (re.compile(r"\b\d{4}-\*{4,}-\d{4}\b", re.IGNORECASE), "[카드번호]"),
+    (re.compile(r"\b\d{4,}\*+\d{4,}\b", re.IGNORECASE), "[카드번호/계좌]"),
+    (re.compile(r"\b010[- ]?\d{3,4}[- ]?\d{4}\b", re.IGNORECASE), "[전화번호]"),
+    (re.compile(r"\b02[- ]?\d{1,4}[- ]?\d{3,4}[- ]?\d{4}\b", re.IGNORECASE), "[전화번호]"),
+    (re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", re.IGNORECASE), "[이메일]"),
+    (re.compile(r"\b\d{11,}\b", re.IGNORECASE), "[식별번호]"),
+]
+
 
 def get_spam_model():
     """
@@ -33,32 +48,11 @@ def get_spam_model():
 def mask_sensitive_info(text: str) -> str:
     """
     인증번호, 계좌번호, 전화번호, 이메일 등 민감 정보를 마스킹한다.
+    성능 최적화: 전역 컴파일된 정규식 사용
     """
-    patterns = [
-        # 1. OTP/인증번호
-        (r"\[(?:인증번호|OTP|확인번호)\]\s*\d{4,6}", "[인증번호]"),
-        (r"(?:인증번호|OTP|확인번호)는?\s*\[?\d{4,6}\]?", "[인증번호]"),
-        (r"(?<=:)\s*\d{6}(?=\s)", "[인증번호]"),
-        # 2. 계좌번호 (3~6자리 - 2~6자리 - 3~자리)
-        # 예: 1002-556-011***, 68694229-01
-        (r"\b\d{3,6}-\d{2,6}-\d{3,}(?:\*+|)\b", "[계좌번호]"),
-        # 3. 카드번호 (4자리-4자리-4자리-4자리 또는 마스킹 포함)
-        (r"\b\d{4}-\d{4}-\d{4}-\d{4}\b", "[카드번호]"),
-        (r"\b\d{4}-\*{4,}-\d{4}\b", "[카드번호]"),
-        (r"\b\d{4,}\*+\d{4,}\b", "[카드번호/계좌]"),
-        # 4. 전화번호
-        (r"\b010[- ]?\d{3,4}[- ]?\d{4}\b", "[전화번호]"),
-        (r"\b02[- ]?\d{1,4}[- ]?\d{3,4}[- ]?\d{4}\b", "[전화번호]"),
-        # 5. 이메일
-        (r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", "[이메일]"),
-        # 6. 기타 긴 식별 번호 (11자리 이상 연속 숫자, 고객번호/송장번호 등)
-        (r"\b\d{11,}\b", "[식별번호]"),
-    ]
-
     masked_text = text
-    for pattern, replacement in patterns:
-        masked_text = re.sub(pattern, replacement, masked_text, flags=re.IGNORECASE)
-
+    for compiled_rx, replacement in SENSITIVE_PATTERNS:
+        masked_text = compiled_rx.sub(replacement, masked_text)
     return masked_text
 
 
@@ -71,7 +65,7 @@ def is_spam(text: str, db: Session) -> tuple[bool, str]:
 
     rules = (
         db.query(SpamRule)
-        .filter(SpamRule.is_enabled == True, SpamRule.rule_type.in_(["contains", "regex"]))
+        .filter(SpamRule.is_enabled.is_(True), SpamRule.rule_type.in_(["contains", "regex"]))
         .all()
     )
 
@@ -122,7 +116,7 @@ def is_review_spam(text: str) -> bool:
         r"득템",
         r"찬스.*놓치지",
         r"마감.*임박",
-        r"\\d+연참",
+        r"\d+연참",  # 버그 수정: \\d+ -> \d+
         r"뽑기.*오픈",
         r"가챠",
         r"아래로.*드래그",
@@ -135,7 +129,8 @@ def is_review_spam(text: str) -> bool:
 
     for pattern in all_patterns:
         if re.search(pattern, text):
-            logger.info(f"Review/Event spam filtered: {pattern} in {text[:50]}...")
+            # 보안: 로그에 민감정보 노출 방지
+            logger.info(f"Review/Event spam filtered: {pattern} in {mask_sensitive_info(text)[:50]}...")
             return True
 
     return False
@@ -181,10 +176,19 @@ def is_spam_llm(text: str) -> tuple[bool, str]:
 """,
         }
     ]
-    result = llm.generate_chat(messages, max_tokens=10, temperature=0.1, enable_thinking=True).lower()
+    # 성능 개선: 분류용이므로 enable_thinking=False
+    result = llm.generate_chat(
+        messages, 
+        max_tokens=10, 
+        temperature=0.1, 
+        enable_thinking=False
+    ).strip().lower()
 
-    if "spam" in result:
-        logger.info(f"LLM classified as SPAM: {text[:50]}...")
+    # 결과 파싱 강화: 첫 토큰만 추출
+    token = result.split()[0] if result else ""
+    if token == "spam":
+        # 보안: 로그에 민감정보 노출 방지
+        logger.info(f"LLM classified as SPAM: {mask_sensitive_info(text)[:50]}...")
         return True, "llm_spam"
 
     return False, "llm_ham"
@@ -196,7 +200,7 @@ def is_promo_spam(text: str, db: Session) -> bool:
     """
     from ...core.models import SpamRule
 
-    rules = db.query(SpamRule).filter(SpamRule.is_enabled == True, SpamRule.rule_type == "promo_combo").all()
+    rules = db.query(SpamRule).filter(SpamRule.is_enabled.is_(True), SpamRule.rule_type == "promo_combo").all()
 
     t = text.replace("\n", " ")
 

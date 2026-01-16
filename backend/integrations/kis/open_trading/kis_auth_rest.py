@@ -172,7 +172,22 @@ def auth(svr="prod", product=state._cfg["my_prod"], url=None, force=False):
                 return my_token
 
         # 새 토큰 발급
-        logger.warning("[KIS Auth] 새 토큰 발급 시도 (force=%s)", force)
+        import os
+        import sys
+        import traceback
+
+        pid = os.getpid()
+        cmd_line = " ".join(sys.argv)
+        # 스택 트레이스 요약
+        stack_summary = "".join(traceback.format_stack()[-5:])
+
+        logger.warning(
+            "🚨 [KIS Auth] 새 토큰 발급 시도 감지! 🚨\n"
+            "pid=%s, cmd=%s\nforce=%s\n"
+            "Call Stack:\n%s",
+            pid, cmd_line, force, stack_summary
+        )
+
         if not url:
             url = f"{state._cfg[svr]}/oauth2/tokenP"
         res = requests.post(url, data=json.dumps(p), headers=_getBaseHeader())

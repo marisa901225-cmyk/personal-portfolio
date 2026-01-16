@@ -30,16 +30,8 @@ def load_prompt(prompt_name: str, **kwargs) -> str:
     if not os.path.exists(filepath):
         logger.warning(f"Prompt file not found: {filepath}")
         return ""
-    
-    # 파일 수정 시간 체크 (정각에만 갱신 반영)
-    from datetime import datetime
-    current_minute = datetime.now().minute
-    
-    # 캐시가 있고, 정각이 아니라면 파일 시스템 체크 없이 즉시 반환 (성능 최적화)
-    if filepath in _prompt_cache and current_minute != 0:
-        return _prompt_cache[filepath].format(**kwargs)
-    
-    # 정각이거나 캐시가 없는 경우에만 파일 시스템에서 로드/수정시간 체크
+
+    # 캐시 + mtime 기반으로 변경 여부를 판단해 필요할 때만 재로드한다.
     mtime = os.path.getmtime(filepath)
     if filepath in _prompt_cache and _prompt_mtime.get(filepath) == mtime:
         template = _prompt_cache[filepath]
@@ -48,7 +40,7 @@ def load_prompt(prompt_name: str, **kwargs) -> str:
             template = f.read()
         _prompt_cache[filepath] = template
         _prompt_mtime[filepath] = mtime
-        logger.info(f"Prompt loaded/reloaded (Hourly Sync): {prompt_name}")
+        logger.info(f"Prompt loaded/reloaded: {prompt_name}")
     
     # 변수 치환
     try:

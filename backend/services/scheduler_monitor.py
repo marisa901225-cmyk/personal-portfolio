@@ -32,7 +32,8 @@ def monitor_job(job_id: str, db: Session):
         state.last_failure_at = datetime.utcnow()
         state.message = str(e)
         db.commit()
-        raise e
+        logger.exception("Scheduler job failed: %s", job_id)
+        raise
 
 
 @asynccontextmanager
@@ -60,4 +61,5 @@ async def monitor_job_async(job_id: str, db: Session):
         state.last_failure_at = datetime.utcnow()
         state.message = str(e)
         db.commit()
-        raise e
+        logger.exception("Scheduler job failed: %s", job_id)
+        raise

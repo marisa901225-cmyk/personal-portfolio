@@ -29,17 +29,52 @@ logger = logging.getLogger(__name__)
 # NB 모델 경로
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "../../data/expense_model.joblib")
 
+# NB 모델 싱글톤 캐싱
+_nb_pipeline = None
+
+
+def _get_nb_pipeline():
+    """지출 분류 NB 모델을 싱글톤으로 로드한다."""
+    global _nb_pipeline
+    if _nb_pipeline is None and os.path.exists(MODEL_PATH):
+        try:
+            _nb_pipeline = joblib.load(MODEL_PATH)
+            logger.info("NB expense classifier loaded")
+        except Exception as e:
+            logger.warning(f"Failed to load NB model: {e}")
+    return _nb_pipeline
+
 
 async def process_pending_alarms(db: Session):
     """
     수신된 알림들을 5분 배차로 처리한다.
     알람이 없을 때는 LLM이 랜덤으로 재미있는 말을 한다.
+    안정성: 배치 처리 (200개 제한) + 선점(processing 상태)
     """
-    pending = db.query(IncomingAlarm).filter(IncomingAlarm.status == "pending").all()
+    # 안정성: 배치 단위로 끊고, 순서 보장, 처리 전 선점
+    pending = (
+        db.query(IncomingAlarm)
+        .filter(IncomingAlarm.status == "pending")
+        .order_by(IncomingAlarm.id.asc())
+        .limit(200)
+        .all()
+    )
+    
+    # 선점: 중복 실행 방지 (processing으로 먼저 마킹)
+    for alarm in pending:
+        alarm.status = "processing"
+    if pending:
+        db.commit()
     
     # 경기 시작 알림 체크 (별도 try/except로 감싸서 실패해도 메인 처리 계속)
     try:
-        catchphrases_file = os.path.join(os.path.dirname(__file__), "../../data/esports_catchphrases.json")
+        # 보안: v2 우선, v1 폴백
+        data_dir = os.path.join(os.path.dirname(__file__), "../../data")
+        catchphrases_candidates = [
+            os.path.join(data_dir, "esports_catchphrases_v2.json"),
+            os.path.join(data_dir, "esports_catchphrases.json"),
+        ]
+        catchphrases_file = next((p for p in catchphrases_candidates if os.path.exists(p)), catchphrases_candidates[0])
         await check_upcoming_matches(db, catchphrases_file)
     except Exception as e:
         logger.warning(f"Match notification check failed: {e}")
@@ -58,13 +93,8 @@ async def process_pending_alarms(db: Session):
     filtered_count = 0
     filtered_reasons = {"광고/프로모션": 0, "OTP/보안": 0, "플레이스홀더": 0}
     
-    # NB 모델 로드 (캐싱 가능)
-    nb_pipeline = None
-    if os.path.exists(MODEL_PATH):
-        try:
-            nb_pipeline = joblib.load(MODEL_PATH)
-        except Exception as e:
-            logger.warning(f"Failed to load NB model: {e}")
+    # NB 모델 로드 (싱글톤 캐싱)
+    nb_pipeline = _get_nb_pipeline()
 
     # 기본 사용자 정보 가져오기
     from ...services.users import get_or_create_single_user
@@ -114,7 +144,9 @@ async def process_pending_alarms(db: Session):
 
         # 1.5 화이트리스트 및 스팸 체크 (본문 + 발신자 + 제목 합쳐서 검사)
         # 발신자나 제목에만 (광고)가 적혀 있는 경우를 잡기 위함
+        # 보안: 룰/AI 텝터는 원문, LLM 필터는 masked
         full_check_text = f"[{alarm.sender or ''}] {alarm.app_title or ''} {original_text}"
+        full_check_text_llm = f"[{mask_sensitive_info(alarm.sender or '')}] {mask_sensitive_info(alarm.app_title or '')} {masked_text}"
         
         if not is_whitelisted(full_check_text):
             # 리뷰 요청 / 게임 이벤트 필터링 추가
@@ -162,7 +194,8 @@ async def process_pending_alarms(db: Session):
                 continue
             
             # 1.6 LLM 기반 스팸 필터링 (실험적 단계 - 화이트리스트가 아닐 때만)
-            is_spam_llm_result, classification = is_spam_llm(full_check_text)
+            # 보안: LLM에는 masked 텍스트만 전달 (민감정보 노출 방지)
+            is_spam_llm_result, classification = is_spam_llm(full_check_text_llm)
             if is_spam_llm_result:
                 alarm.status = "discarded"
                 alarm.classification = classification
@@ -285,6 +318,16 @@ async def process_pending_alarms(db: Session):
                 header += f"🗑️ <i>필터링됨: {', '.join(filter_details)}</i>\n\n"
         
         summary_text = header + "\n".join(summaries)
+        
+        # 유료 백엔드 폴백 사용 시 💰 표시 (파이프라인 오염 방지를 위해 전송 직전에만)
+        try:
+            from ..llm.service import LLMService
+            if LLMService._instance and LLMService._instance.last_used_paid():
+                summary_text = f"💰 {summary_text}"
+                logger.info("LLM fallback to paid backend detected, adding 💰 prefix")
+        except Exception:
+            pass
+        
         await send_telegram_message(summary_text)
 
     # 24시간 지난 데이터 삭제 (TTL) 로직은 별도 스케줄러에서 수행 권장
