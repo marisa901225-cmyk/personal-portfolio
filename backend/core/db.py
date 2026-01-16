@@ -23,7 +23,8 @@ DATABASE_URL = os.getenv("DATABASE_URL", _build_default_sqlite_url())
 connect_args = {}
 if DATABASE_URL.startswith("sqlite"):
     # SQLite 특성상 동일 스레드 제한을 끄고 사용
-    connect_args = {"check_same_thread": False}
+    # timeout: DB 잠겨있을 때 대기 시간 (초) - 기본값보다 넉넉하게 설정하여 busy 에러 방지
+    connect_args = {"check_same_thread": False, "timeout": 15}
 
 engine = create_engine(
     DATABASE_URL,

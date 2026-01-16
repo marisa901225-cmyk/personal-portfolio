@@ -5,9 +5,9 @@
     "description": "MyAsset Portfolio Project (Frontend + Backend)",
     "scripts": {
         "dev:frontend": "npm run dev --prefix frontend",
-        "dev:backend": "cd backend && source .venv/bin/activate && uvicorn main:app --reload --port 8000",
+        "dev:backend": "cd backend && . .venv/bin/activate && uvicorn main:app --reload --port 8000",
         "test:frontend": "npm run test --prefix frontend",
-        "test:backend": "cd backend && source .venv/bin/activate && python -m unittest discover tests"
+        "test:backend": "cd backend && . .venv/bin/activate && PYTHONPATH=.. python3 -m unittest discover tests"
     },
     "dependencies": {
         "react-markdown": "^10.1.0",

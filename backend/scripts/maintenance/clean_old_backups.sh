@@ -28,8 +28,8 @@ echo "Step 1: Deleting backups older than $KEEP_DAYS days..."
 find "$BACKUP_DIR" -type f \( -name "*.zip" -o -name "*.gz" -o -name "*.db" \) -mtime +$KEEP_DAYS -print -delete
 
 # 2. Ensure we don't exceed $KEEP_COUNT files (safety cap)
-# Get list of files sorted by modification time (oldest first)
-FILES=$(ls -tr "$BACKUP_DIR"/*.zip "$BACKUP_DIR"/*.gz "$BACKUP_DIR"/*.db 2>/dev/null)
+# Get list of files sorted by modification time (oldest first) using find
+FILES=$(find "$BACKUP_DIR" -type f \( -name "*.zip" -o -name "*.gz" -o -name "*.db" \) -printf '%T@ %p\n' | sort -n | cut -d' ' -f2-)
 count=$(echo "$FILES" | grep -v '^$' | wc -l)
 
 if [ "$count" -gt "$KEEP_COUNT" ]; then

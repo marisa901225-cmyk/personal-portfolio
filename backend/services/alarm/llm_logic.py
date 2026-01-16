@@ -16,8 +16,71 @@ logger = logging.getLogger(__name__)
 # 2차 정제용 경량 LLM 서버 URL
 LLM_LIGHT_BASE_URL = os.getenv("LLM_LIGHT_BASE_URL", "http://llama-server-light:8080")
 
+# LLM 초안 디버그 로깅 (환경변수로 제어)
+DEBUG_LLM_DRAFT = os.getenv("DEBUG_LLM_DRAFT", "0") == "1"
+LLM_DRAFT_LOG_PATH = os.getenv(
+    "LLM_DRAFT_LOG_PATH",
+    os.path.join(os.path.dirname(__file__), "../../data/llm_drafts.jsonl")
+)
+LLM_DRAFT_LOG_MAX_MB = int(os.getenv("LLM_DRAFT_LOG_MAX_MB", "10"))  # 10MB 기본
+
 # 랜덤 메시지 카테고리 중복 방지용 (마지막 선택 카테고리)
 _last_category = None
+
+# Light LLM 클라이언트 재사용 (성능 개선)
+_light_client = None
+_light_model_id_cache = None
+
+# LLM stop 토큰 (중복 방지)
+STOP_TOKENS = ["Okay", "let me", "Let me", "I'll", "아하", "음,", "사용자가", "지시사항을", "지문을", "지시를", "알겠습니다", "확인했습니다"]
+
+
+
+def _dump_llm_draft(tag: str, draft: str):
+    """
+    프롬프트/원문은 저장하지 않고, LLM 1차 출력(draft)만 파일로 남긴다.
+    보안: 민감정보 노출 방지, 성능: 로테이션 지원
+    """
+    if not DEBUG_LLM_DRAFT:
+        return
+    if not draft:
+        return
+
+    try:
+        from pathlib import Path
+        import json
+        
+        p = Path(LLM_DRAFT_LOG_PATH).resolve()
+        p.parent.mkdir(parents=True, exist_ok=True)
+
+        # 간단 로테이션: 파일이 너무 커지면 .1로 밀고 새로 시작
+        if p.exists():
+            size_mb = p.stat().st_size / (1024 * 1024)
+            if size_mb >= LLM_DRAFT_LOG_MAX_MB:
+                rotated = p.with_suffix(p.suffix + ".1")
+                if rotated.exists():
+                    rotated.unlink()
+                p.rename(rotated)
+
+        record = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "tag": tag,
+            "len": len(draft),
+            "draft": draft,
+        }
+
+        # jsonl (한 줄에 한 건)
+        with p.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+        # 파일 권한(리눅스): 600 권장
+        try:
+            os.chmod(str(p), 0o600)
+        except Exception:
+            pass
+
+    except Exception as e:
+        logger.warning(f"Failed to dump llm draft: {e}")
 
 
 def _clean_meta_headers(text: str) -> str:
@@ -43,26 +106,80 @@ def _clean_meta_headers(text: str) -> str:
     return result.strip()
 
 
+def _get_light_client():
+    """Light LLM httpx 클라이언트를 재사용한다 (성능 개선)."""
+    global _light_client
+    if _light_client is None:
+        import httpx
+        _light_client = httpx.Client(timeout=30)
+    return _light_client
+
+
+def _get_light_model_id() -> str:
+    """Light LLM 서버의 모델 ID를 가져온다 (env 우선, /v1/models 조회 fallback)."""
+    global _light_model_id_cache
+    
+    # 1. 환경변수 우선
+    env_model = os.getenv("LLM_LIGHT_MODEL_ID")
+    if env_model:
+        return env_model
+    
+    # 2. 캐시 확인
+    if _light_model_id_cache:
+        return _light_model_id_cache
+    
+    # 3. /v1/models API 조회
+    try:
+        client = _get_light_client()
+        url = f"{LLM_LIGHT_BASE_URL.rstrip('/')}/v1/models"
+        response = client.get(url)
+        response.raise_for_status()
+        data = response.json()
+        items = data.get("data") or []
+        if items and isinstance(items[0], dict):
+            model_id = items[0].get("id", "Qwen3-0.6B")
+            _light_model_id_cache = model_id
+            logger.info(f"Light LLM model ID detected: {model_id}")
+            return model_id
+    except Exception as e:
+        logger.warning(f"Failed to get light model id: {e}")
+    
+    # 4. 최종 폴백
+    return "Qwen3-0.6B"
+
+
+def _get_korean_ratio(text: str) -> float:
+    """텍스트의 한국어 비율을 계산한다."""
+    if not text:
+        return 0
+    import re
+    korean_chars = len(re.findall(r'[가-힣]', text))
+    meaningful_chars = len(re.findall(r'[가-힣a-zA-Z0-9]', text))
+    if meaningful_chars == 0:
+        return 0
+    return korean_chars / meaningful_chars
+
+
 def _generate_with_light_llm(messages: List[dict], max_tokens: int = 256, temperature: float = 0.3) -> str:
     """
     경량 LLM 서버 (Qwen3-0.6B)를 사용하여 텍스트를 생성한다.
     주로 2차 정제(refine) 용도로 사용한다.
+    성능: httpx.Client 재사용, enable_thinking을 chat_template_kwargs로 전달
     """
     try:
-        import httpx
+        client = _get_light_client()
         url = f"{LLM_LIGHT_BASE_URL.rstrip('/')}/v1/chat/completions"
         payload = {
-            "model": "Qwen3-0.6B",
+            "model": _get_light_model_id(),
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": temperature,
-            "enable_thinking": False,  # 추론 모드 비활성화 (속도 향상)
+            "chat_template_kwargs": {"enable_thinking": False},  # llama.cpp 서버 공식 방식
         }
-        with httpx.Client(timeout=30) as client:
-            response = client.post(url, json=payload)
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"].strip()
+        response = client.post(url, json=payload)
+        response.raise_for_status()
+        data = response.json()
+        return data["choices"][0]["message"]["content"].strip()
     except Exception as e:
         logger.warning(f"Light LLM call failed, falling back to main LLM: {e}")
         # 폴백: 메인 LLM 서비스 사용
@@ -71,11 +188,12 @@ def _generate_with_light_llm(messages: List[dict], max_tokens: int = 256, temper
             return llm_service.generate_chat(messages, max_tokens=max_tokens, temperature=temperature)
         return ""
 
-async def summarize_with_llm(items: List[dict]) -> str:
+async def summarize_with_llm(items: List[dict]) -> Optional[str]:
     """
-    3단계: Local LLM (llama-cpp-python)을 사용하여 여러 알림을 요약한다.
+    원격 LLM을 사용하여 여러 알림을 요약한다.
     items: [{"text": "...", "sender": "..."}, ...]
     알람이 없을 때는 LLM이 랜덤으로 재미있는 말을 한다.
+    Returns: 요약 메시지, 또는 None (전송 스킵)
     """
     llm_service = LLMService.get_instance()
     
@@ -89,7 +207,7 @@ async def summarize_with_llm(items: List[dict]) -> str:
         current_minute = datetime.now().minute
         # 10분 간격이 아니면 조용히 스킵 (:00, :10, :20, :30, :40, :50만 전송)
         if current_minute % 10 != 0:
-            logger.info(f"No alarms, but skipping random message (minute={current_minute}, not 10-min interval)")
+            logger.info("No alarms; skip random message (not 10-min interval)")
             return None  # 메시지 안 보냄
         
         # 매 시간 정각(:00)에 LLM 세션 리셋 (주제 집착 방지)
@@ -150,25 +268,18 @@ async def summarize_with_llm(items: List[dict]) -> str:
                 messages, 
                 max_tokens=256, 
                 temperature=0.8,
-                stop=["Okay", "let me", "Let me", "I'll", "아하", "음,", "사용자가", "지시사항을", "지문을", "지시를", "알겠습니다", "확인했습니다"]
+                stop=STOP_TOKENS
             )
             result = clean_exaone_tokens(result)
-            logger.info(f"🔍 [Random Wisdom Draft] Attempt {attempt+1} Original Output: \n{result}")
+            # 보안: 초안만 파일로 저장 (환경변수 켜진 경우만), 로그에는 길이만
+            _dump_llm_draft("random_wisdom_draft", result)
+            logger.info(f"🔍 [Random Wisdom Draft] Attempt {attempt+1} generated (len={len(result)})")
             
             if not result or len(result.strip()) < 10:
                 logger.warning(f"Attempt {attempt+1}: Generated message too short.")
                 continue
                 
-            import re
-            def get_korean_ratio(text):
-                if not text: return 0
-                korean_chars = len(re.findall(r'[가-힣]', text))
-                # 공백과 특수문자를 제외한 의미 있는 문자들 중 한국어 비율 계산
-                meaningful_chars = len(re.findall(r'[가-힣a-zA-Z0-9]', text))
-                if meaningful_chars == 0: return 0
-                return korean_chars / meaningful_chars
-            
-            korean_ratio = get_korean_ratio(result)
+            korean_ratio = _get_korean_ratio(result)
             
             # 한국어 비율이 낮거나 메타 문구가 포함되어 있으면 2차 정제 시도
             meta_patterns = ["아하", "음,", "사용자가", "let me", "I'll", "Okay", "알겠습니다", "지정된 주제", "시작하는 말"]
@@ -187,7 +298,7 @@ async def summarize_with_llm(items: List[dict]) -> str:
                         final_result = refined_result
             
             # 최종 한국어 비율 검증 (0.5 이상이어야 통과)
-            final_ratio = get_korean_ratio(final_result)
+            final_ratio = _get_korean_ratio(final_result)
             if final_ratio >= 0.5:
                 # 마지막 안전망: 메타 헤더 정규표현식으로 제거
                 final_result = _clean_meta_headers(final_result)
@@ -200,17 +311,25 @@ async def summarize_with_llm(items: List[dict]) -> str:
         return None
 
     
-    # 알림 목록 구성 (발신자 포함)
+    # 알림 목록 구성 (발신자 포함, 중복 제거 로직 강화)
     notification_list = []
+    seen_notifications = set()  # (source, text) 중복 체크용
+    
     for item in items:
         source = infer_source(item)
         title = item.get('app_title') or ""
         conv = item.get('conversation') or ""
-        text = item.get('text') or ""
+        text = (item.get('text') or "").strip()
         
         # Tasker 변수가 치환 안 된 경우 제외
         if title.startswith('%'): title = ""
         if conv.startswith('%'): conv = ""
+        
+        # 중복 체크 키 (출처와 본문이 같으면 중복으로 간주)
+        identifier = (source, text)
+        if identifier in seen_notifications:
+            continue
+        seen_notifications.add(identifier)
         
         context = f"[앱: {source}]"
         if title: context += f" 제목: {title}"
@@ -233,11 +352,13 @@ async def summarize_with_llm(items: List[dict]) -> str:
         }
     ]
     
-    logger.info(f"LLM Chat Messages: {messages}")
+    # 보안: 프롬프트는 로그에 찍지 않음 (민감정보 노출 방지)
     total_prompt_len = sum(len(m['content']) for m in messages)
     logger.info(f"LLM Prompt total length: {total_prompt_len} characters")
     result = llm_service.generate_chat(messages, max_tokens=512)
-    logger.info(f"LLM Response (Draft): {result}")
+    # 보안: 초안만 파일로 저장 (환경변수 켜진 경우만), 로그에는 길이만
+    _dump_llm_draft("alarm_summary_draft", result)
+    logger.info(f"LLM draft generated (len={len(result or '')})")
     
     # 1단계: 환각 제거 및 특수 토큰 제거
     result = sanitize_llm_output(items, result)
@@ -250,7 +371,9 @@ async def summarize_with_llm(items: List[dict]) -> str:
             refine_messages = [{"role": "user", "content": refine_prompt}]
             refined_result = _generate_with_light_llm(refine_messages, max_tokens=256, temperature=0.3)
             refined_result = clean_exaone_tokens(refined_result)
-            logger.info(f"LLM Response (Refined by Light LLM): {refined_result}")
+            # 보안: 정제 결과 파일로 저장
+            _dump_llm_draft("alarm_summary_refined", refined_result)
+            logger.info(f"LLM refined by Light LLM (len={len(refined_result)})")
             if refined_result and refined_result.strip():
                 result = refined_result
     

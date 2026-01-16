@@ -6,9 +6,9 @@ Expense Service
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional
 
 from fastapi import HTTPException
 from sqlalchemy import extract, func
@@ -33,13 +33,14 @@ _REVIEW_CONFIDENCE_THRESHOLD = 0.65
 _EXPENSE_MODEL_PATH = Path(__file__).resolve().parents[1] / "data" / "expense_model.joblib"
 _EXPENSE_MODEL_CACHE: Any | None = None
 _EXPENSE_MODEL_MTIME: float | None = None
+_EXPENSE_MODEL_LOAD_ERR_ONCE = False
 
 
 # --- Helper Methods ---
 
 def _load_expense_model() -> Any | None:
-    global _EXPENSE_MODEL_CACHE, _EXPENSE_MODEL_MTIME
-
+    global _EXPENSE_MODEL_CACHE, _EXPENSE_MODEL_MTIME, _EXPENSE_MODEL_LOAD_ERR_ONCE
+    
     if not _EXPENSE_MODEL_PATH.exists():
         _EXPENSE_MODEL_CACHE = None
         _EXPENSE_MODEL_MTIME = None
@@ -53,8 +54,13 @@ def _load_expense_model() -> Any | None:
         import joblib
         _EXPENSE_MODEL_CACHE = joblib.load(_EXPENSE_MODEL_PATH)
         _EXPENSE_MODEL_MTIME = mtime
+        _EXPENSE_MODEL_LOAD_ERR_ONCE = False
         return _EXPENSE_MODEL_CACHE
-    except Exception:
+    except Exception as e:
+        if not _EXPENSE_MODEL_LOAD_ERR_ONCE:
+            _EXPENSE_MODEL_LOAD_ERR_ONCE = True
+            import logging
+            logging.getLogger(__name__).warning("Expense model load failed: %s", e)
         _EXPENSE_MODEL_CACHE = None
         _EXPENSE_MODEL_MTIME = None
         return None
@@ -162,15 +168,9 @@ def get_expenses_with_review(
 
     results: list[dict] = []
     # Note: We return dicts here to allow the router to easily validate against ExpenseRead
-    # while adding the extra review fields.
-    from ..core.schemas import ExpenseRead # Imported locally to avoid circulars if any, though likely fine at top
+    from ..core.schemas import ExpenseRead # Moved outside the loop
     
     for expense in expenses:
-        # Pydantic model conversion happens here to get a dict, or we can just pass the ORM object 
-        # but custom logical fields need to be handled.
-        # Ideally service returns domain objects or Pydantic models.
-        # Let's return the Pydantic model dump with extra fields injected.
-        
         payload = ExpenseRead.model_validate(expense).model_dump()
         review_info = _build_review_info(expense, learned_patterns, model)
         if review_info:
@@ -283,14 +283,16 @@ def update_expense(db: Session, expense_id: int, payload: ExpenseUpdate) -> Expe
     data = payload.model_dump(exclude_unset=True)
     for field, value in data.items():
         setattr(expense, field, value)
-    expense.updated_at = datetime.utcnow()
+    expense.updated_at = datetime.now(timezone.utc)
 
     try:
-        # 카테고리가 변경되었다면 학습 패턴 업데이트
+        # 카테고리가 변경되었다면 학습 패턴 업데이트 (가맹점명 정규화 추가)
         if payload.category and expense.merchant:
+            merchant = expense.merchant.strip()
+            expense.merchant = merchant # DB 값도 정규화
             pattern = (
                 db.query(MerchantPattern)
-                .filter(MerchantPattern.user_id == user.id, MerchantPattern.merchant == expense.merchant)
+                .filter(MerchantPattern.user_id == user.id, MerchantPattern.merchant == merchant)
                 .first()
             )
             if pattern:
@@ -298,7 +300,7 @@ def update_expense(db: Session, expense_id: int, payload: ExpenseUpdate) -> Expe
             else:
                 pattern = MerchantPattern(
                     user_id=user.id,
-                    merchant=expense.merchant,
+                    merchant=merchant,
                     category=payload.category
                 )
                 db.add(pattern)
@@ -324,8 +326,8 @@ def delete_expense(db: Session, expense_id: int) -> dict:
         raise HTTPException(status_code=404, detail="expense not found")
 
     if expense.deleted_at is None:
-        expense.deleted_at = datetime.utcnow()
-        expense.updated_at = datetime.utcnow()
+        expense.deleted_at = datetime.now(timezone.utc)
+        expense.updated_at = datetime.now(timezone.utc)
     try:
         db.commit()
     except Exception:
@@ -347,7 +349,7 @@ def restore_expense(db: Session, expense_id: int) -> Expense:
         raise HTTPException(status_code=404, detail="expense not found")
 
     expense.deleted_at = None
-    expense.updated_at = datetime.utcnow()
+    expense.updated_at = datetime.now(timezone.utc)
     try:
         db.commit()
     except Exception:
@@ -367,7 +369,7 @@ def learn_patterns_from_history(db: Session) -> dict:
         .filter(
             Expense.user_id == user.id,
             Expense.amount < 0,
-            Expense.merchant != None,
+            Expense.merchant.isnot(None),
             Expense.merchant != '',
             Expense.deleted_at.is_(None),
         )
@@ -375,14 +377,15 @@ def learn_patterns_from_history(db: Session) -> dict:
         .all()
     )
     
-    # 가맹점마다 가장 많이 쓰인 카테고리 추출
-    merchant_top_cat = {}
-    merchant_counts = {} # (merchant, category) -> count
+    # 가맹점마다 가장 많이 쓰인 카테고리 추출 (로직 단순화)
+    merchant_top_cat: dict[str, str] = {}
+    merchant_top_count: dict[str, int] = {}
     
     for merchant, category, count in stats:
-        if merchant not in merchant_top_cat or count > merchant_counts.get((merchant, merchant_top_cat.get(merchant, "")), 0):
-            merchant_top_cat[merchant] = category
-            merchant_counts[(merchant, category)] = count
+        m_stripped = merchant.strip()
+        if count > merchant_top_count.get(m_stripped, 0):
+            merchant_top_count[m_stripped] = count
+            merchant_top_cat[m_stripped] = category
 
     # MerchantPattern 테이블 업데이트
     added = 0

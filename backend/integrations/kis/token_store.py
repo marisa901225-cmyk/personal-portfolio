@@ -73,45 +73,62 @@ def _get_or_create_setting(db: Session) -> Setting:
 
 def read_kis_token(db: Optional[Session] = None) -> Optional[str]:
     """
-    DB에서 KIS 토큰을 읽어온다.
+    DB에서 KIS 토큰을 읽어온다. (재시도 로직 포함)
     
     - 토큰이 없거나 복호화 실패 시 None 반환
     - 만료 시간이 설정되어 있고, 현재 시간 + 1시간 > 만료 시간이면 None 반환 (재발급 필요)
-    - 만료 시간이 None이면 토큰이 존재하는 한 반환 (24시간 만료 가정)
+    - DB 락 등으로 조회 실패 시 최대 10번 재시도 (현실적 타협).
     """
-    owned_session = db is None
-    if owned_session:
-        db = SessionLocal()
-    try:
-        setting = _get_or_create_setting(db)
-        if not setting.kis_token_encrypted:
-            logger.info("[KIS Token] 저장된 토큰 없음")
-            return None
+    import time
+    from sqlalchemy.exc import OperationalError
+
+    max_retries = 10
+    retry_delay = 0.2  # seconds (짧게 여러 번 시도)
+
+    for attempt in range(max_retries):
+        owned_session = db is None
+        session = db or SessionLocal()
         
-        # 만료 시간 검사 - 1시간 여유를 두고 확인
-        if setting.kis_token_expires_at:
-            expires_at = setting.kis_token_expires_at
-            now = (
-                datetime.now(expires_at.tzinfo)
-                if expires_at.tzinfo is not None
-                else datetime.now()
-            )
-            # 만료 1시간 전까지는 기존 토큰 사용
-            from datetime import timedelta
-            if expires_at <= now + timedelta(hours=1):
-                logger.info("[KIS Token] 토큰 만료됨 또는 곧 만료 (expires_at=%s, now=%s)", expires_at, now)
+        try:
+            setting = _get_or_create_setting(session)
+            if not setting.kis_token_encrypted:
+                logger.info("[KIS Token] 저장된 토큰 없음")
                 return None
-            logger.debug("[KIS Token] 토큰 유효 (만료까지 %s 남음)", expires_at - now)
-        else:
-            logger.debug("[KIS Token] 만료 시간 미설정, 기존 토큰 사용")
-        
-        return _decrypt_token(setting.kis_token_encrypted)
-    except Exception as exc:
-        logger.warning("Failed to read KIS token from DB: %s", exc)
-        return None
-    finally:
-        if owned_session and db is not None:
-            db.close()
+            
+            # 만료 시간 검사
+            if setting.kis_token_expires_at:
+                expires_at = setting.kis_token_expires_at
+                now = (
+                    datetime.now(expires_at.tzinfo)
+                    if expires_at.tzinfo is not None
+                    else datetime.now()
+                )
+                from datetime import timedelta
+                if expires_at <= now + timedelta(hours=1):
+                    logger.info("[KIS Token] 토큰 만료됨 (expires_at=%s, now=%s)", expires_at, now)
+                    return None
+                logger.debug("[KIS Token] 토큰 유효 (만료까지 %s 남음)", expires_at - now)
+            else:
+                logger.debug("[KIS Token] 만료 시간 미설정, 기존 토큰 사용")
+            
+            return _decrypt_token(setting.kis_token_encrypted)
+
+        except OperationalError as exc:
+            if "locked" in str(exc).lower():
+                logger.warning("[KIS Token] DB Locked! Retrying (%d/%d)...", attempt + 1, max_retries)
+                time.sleep(retry_delay)
+                continue
+            logger.error("[KIS Token] DB OperationalError: %s", exc)
+            return None
+        except Exception as exc:
+            logger.warning("Failed to read KIS token from DB: %s", exc)
+            return None
+        finally:
+            if owned_session:
+                session.close()
+    
+    logger.error("[KIS Token] Failed to read token after %d retries.", max_retries)
+    return None
 
 
 def save_kis_token(

@@ -6,6 +6,13 @@ from typing import List
 
 logger = logging.getLogger(__name__)
 
+# 정규식 패턴 상수
+URL_PATTERN = re.compile(r'https?://[^\s\)\]<>"]+')
+TOKEN_PATTERN = re.compile(r'[가-힣A-Za-z0-9_*]+')
+LABEL_PATTERN = re.compile(r'^[-•*]\s*\[?([^\]]+)\]?\s*:')
+MAX_DROP_REASONS = 10
+SUMMARY_KEYWORDS = ['결제', '배달', '송금', '입금', '출금', '알림', '메시지', '카톡', '문자']
+
 # URL 정규화용 구두점
 _TRAILING_PUNCT = '.,;:!?)]}>"\''
 
@@ -27,7 +34,7 @@ def _strip_after_last_closing_think_tag(text: str) -> str:
 
     if last_pos != -1 and last_tag is not None:
         cut = last_pos + len(last_tag)
-        logger.info(f"[COT REMOVAL] Found closing tag {last_tag}, removed {cut} chars before it")
+        logger.debug("[COT REMOVAL] Found closing tag %s, removed %d chars before it", last_tag, cut)
         return text[cut:].strip()
 
     return text
@@ -85,8 +92,11 @@ def clean_exaone_tokens(text: str) -> str:
         r'^Here\s+is\s+[^\n]{0,50}:\s*',  # "Here is the result:"
         r'^Sure[,!]?\s*[^\n]{0,80}[.\n]\s*',  # "Sure, here's..."
     ]
+    # 오탐 방지: MULTILINE 제거 (텍스트 맨 앞에서만 1회 제거)
     for pattern in cot_start_patterns:
-        text = re.sub(pattern, '', text, flags=re.MULTILINE | re.IGNORECASE)
+        text_new = re.sub(pattern, '', text, count=1, flags=re.IGNORECASE)
+        if text_new != text:
+            text = text_new
     
     # 1. COT 태그 제거 (완전한 쌍)
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
@@ -124,7 +134,7 @@ def clean_exaone_tokens(text: str) -> str:
         thinking_keywords = ['생각', '분석', 'hmm', 'let me', '확인', '보면', '같아', '같네', '것 같', '추측', '판단', '음...', '사용자가']
         if any(kw in potential_cot for kw in thinking_keywords):
             text = '\n'.join(lines[content_start_idx:])
-            logger.info(f"[COT REMOVAL] Removed {content_start_idx} lines of suspected thinking process")
+            logger.debug("[COT REMOVAL] Removed %d lines of suspected thinking process", content_start_idx)
     
     # 7. 연속된 빈 줄 정리
     text = re.sub(r'\n{3,}', '\n\n', text)
@@ -163,10 +173,9 @@ def escape_html_preserve_urls(text: str) -> str:
     """
     URL도 최소 escape 처리하여 안전하게 HTML 출력.
     """
-    url_pattern = r'https?://[^\s\)\]<>"]+'
     parts = []
     last = 0
-    for m in re.finditer(url_pattern, text):
+    for m in URL_PATTERN.finditer(text):
         s, e = m.span()
         parts.append(html.escape(text[last:s], quote=True))
         parts.append(html.escape(text[s:e], quote=True))  # URL도 escape
@@ -242,11 +251,11 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
     def _extract_strong_tokens(text: str) -> set[str]:
         """
         입력 알림 본문에서만 뽑은 '근거 토큰' (환각 방지용).
-        - 길이>=4 또는 숫자/* 포함 토큰만 사용 (너무 흔한 단어로 인한 오탐 감소)
+        - 길이>=3 또는 숫자/* 포함 토큰만 사용 (오탐 감소, 4->3 완화)
         """
         tokens = set()
-        for tok in re.findall(r'[가-힣A-Za-z0-9_*]{2,}', text or ""):
-            if len(tok) >= 4 or any(ch.isdigit() for ch in tok) or "*" in tok:
+        for tok in TOKEN_PATTERN.findall(text or ""):
+            if len(tok) >= 3 or any(ch.isdigit() for ch in tok) or "*" in tok:
                 tokens.add(tok)
         return tokens
 
@@ -261,7 +270,7 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
         if not line.strip():
             continue
             
-        line_urls = re.findall(url_pattern, line)
+        line_urls = URL_PATTERN.findall(line)
         bad_domain = False
         for u in line_urls:
             try:
@@ -272,7 +281,8 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
             except:
                 pass
         if bad_domain:
-            dropped_reasons.append(f"drop(bad domain): {line[:50]}...")
+            if len(dropped_reasons) < MAX_DROP_REASONS:
+                dropped_reasons.append(f"drop(bad domain): {line[:50]}...")
             continue
 
         # 의심 서비스명 제거
@@ -280,7 +290,8 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
         has_suspicious = any(tok in line for tok in suspicious_service_tokens)
         if has_suspicious:
             if not any("크레도" in a or "credo" in a.lower() for a in original_apps):
-                dropped_reasons.append(f"drop(hallucinated service): {line[:50]}...")
+                if len(dropped_reasons) < MAX_DROP_REASONS:
+                    dropped_reasons.append(f"drop(hallucinated service): {line[:50]}...")
                 continue
 
         # 발신자 이름 환각 검증 (예: "홍길동님이" 패턴)
@@ -299,21 +310,24 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
             continue
 
         # bullet/번호 뒤에 붙는 "[서비스]" 라벨이 원본에 없으면 제거
-        label_match = re.match(r'^\s*(?:[-•*]|\d+\.)\s*(?:\d+\.\s*)?\[([^\]]{1,30})\]', line.strip())
+        label_match = LABEL_PATTERN.match(line.strip())
         if label_match:
             label = label_match.group(1).strip()
             if label and (label not in original_apps) and (label not in original_senders):
-                dropped_reasons.append(f"drop(hallucinated app label '{label}'): {line[:50]}...")
+                if len(dropped_reasons) < MAX_DROP_REASONS:
+                    dropped_reasons.append(f"drop(hallucinated app label '{label}'): {line[:50]}...")
                 continue
 
-        # 본문 기반 '근거 토큰'이 전혀 없으면 환각으로 간주 (단, 원본 발신자/URL 포함 시 예외)
+        # 본문 기반 '근거 토큰'이 전혀 없으면 환각으로 간주 (단, 원본 발신자/URL/요약 키워드 포함 시 예외)
         if original_strong_tokens:
             has_sender = any(s and s in line for s in original_senders)
-            has_original_url = any(normalize_url(u) in original_urls_norm for u in re.findall(url_pattern, line))
-            if not has_sender and not has_original_url:
+            has_original_url = any(normalize_url(u) in original_urls_norm for u in URL_PATTERN.findall(line))
+            has_summary_keyword = any(k in line for k in SUMMARY_KEYWORDS)
+            if not has_sender and not has_original_url and not has_summary_keyword:
                 line_tokens = _extract_strong_tokens(line)
                 if not (line_tokens & original_strong_tokens):
-                    dropped_reasons.append(f"drop(ungrounded): {line[:50]}...")
+                    if len(dropped_reasons) < MAX_DROP_REASONS:
+                        dropped_reasons.append(f"drop(ungrounded): {line[:50]}...")
                     continue
 
         # "왜냐하면/비커즈/because" - 드랍 대신 치환으로 변경
@@ -329,22 +343,24 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
             r'요약하자면', r'알려드립니다', r'포함시켰습니다', r'해당합니다'
         ]
         if any(re.search(p, line_cleaned, re.I) for p in meta_patterns):
-            dropped_reasons.append(f"drop(meta/explanation): {line_cleaned[:50]}...")
+            if len(dropped_reasons) < MAX_DROP_REASONS:
+                dropped_reasons.append(f"drop(meta/explanation): {line_cleaned[:50]}...")
             continue
 
         # 한글 비중 검사 (URL 제외하고 한글이 너무 적으면 메타 설명일 확률 높음)
-        text_only = re.sub(url_pattern, '', line_cleaned)
+        text_only = URL_PATTERN.sub('', line_cleaned)
         text_only = re.sub(r'[^\w\s]', '', text_only) # 특수문자 제거
         if text_only.strip():
             korean_chars = len(re.findall(r'[가-힣]', text_only))
             total_chars = len(text_only.strip())
             # 한글이 20% 미만이고 영어가 주인 경우 (요약문이 아닐 확률이 높음)
             if korean_chars / total_chars < 0.2 and any(c.isalpha() for c in text_only):
-                dropped_reasons.append(f"drop(too much english/meta): {line_cleaned[:50]}...")
+                if len(dropped_reasons) < MAX_DROP_REASONS:
+                    dropped_reasons.append(f"drop(too much english/meta): {line_cleaned[:50]}...")
                 continue
 
         # URL 개별 제거 (정규화 기반 비교)
-        line_output_urls = re.findall(url_pattern, line_cleaned)
+        line_output_urls = URL_PATTERN.findall(line_cleaned)
         for url in line_output_urls:
             if normalize_url(url) not in original_urls_norm:
                 line_cleaned = line_cleaned.replace(url, "")

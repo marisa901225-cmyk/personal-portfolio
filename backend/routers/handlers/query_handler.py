@@ -177,9 +177,24 @@ async def _handle_report(text: str):
 async def _handle_esports(text: str):
     """E스포츠 일정"""
     from ...services.news_collector import NewsCollector
-    from ...services.llm_service import LLMService
     
     context_text = NewsCollector.refine_schedules_with_duckdb(text)
+
+    no_data_markers = {
+        "검색된 관련 일정이 없습니다.",
+        "뉴스 정제 중 오류가 발생했습니다.",
+    }
+    if not context_text or context_text.strip() in no_data_markers:
+        await send_telegram_message(
+            _format_for_telegram(
+                "DB에서 조건에 맞는 e스포츠 일정이 없습니다.\n"
+                "- 스케줄 수집(PandaScore) / 태그(LCK 등) / event_time 타임존을 먼저 확인해 주세요.\n"
+                "- 데이터가 들어온 뒤 다시 물어보면 DB 기준으로만 답변할게요."
+            )
+        )
+        return
+
+    from ...services.llm_service import LLMService
     prompt = load_prompt("esports", text=text, context=context_text)
     
     llm = LLMService.get_instance()
