@@ -1,6 +1,8 @@
 
 import React from 'react';
 import { Loader2, BarChart2 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface ReportViewProps {
     displayReport: any;
@@ -48,8 +50,8 @@ export const ReportView: React.FC<ReportViewProps> = ({
                         <button
                             onClick={() => setShowGeneral(!showGeneral)}
                             className={`p-2 rounded-xl transition-colors ${showGeneral
-                                    ? 'bg-indigo-100 text-indigo-600'
-                                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                ? 'bg-indigo-100 text-indigo-600'
+                                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                                 }`}
                             title={showGeneral ? '일반 리포트 숨기기' : '일반 리포트 함께 보기'}
                         >
@@ -86,8 +88,14 @@ export const ReportView: React.FC<ReportViewProps> = ({
                         </div>
                     )}
                     {displayReport?.report && (
-                        <div className="whitespace-pre-wrap text-sm text-slate-700 leading-relaxed">
-                            {displayReport.report}
+                        <div className="prose prose-sm prose-slate max-w-none 
+                            prose-table:w-full prose-table:border-collapse
+                            prose-th:border prose-th:border-slate-200 prose-th:bg-slate-50 prose-th:px-3 prose-th:py-2 prose-th:text-left prose-th:text-xs prose-th:font-semibold
+                            prose-td:border prose-td:border-slate-200 prose-td:px-3 prose-td:py-2 prose-td:text-sm
+                            prose-hr:my-4 prose-hr:border-slate-200">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {displayReport.report}
+                            </ReactMarkdown>
                         </div>
                     )}
                 </div>

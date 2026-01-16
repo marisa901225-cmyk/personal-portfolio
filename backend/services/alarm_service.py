@@ -33,3 +33,9 @@ class AlarmService:
     async def process_pending_alarms(cls, db: Session):
         """대기 중인 알람 처리 (필터링, 요약, 텔레그램 전송)"""
         return await process_pending_alarms(db)
+
+    @classmethod
+    async def generate_daily_catchphrases(cls):
+        """매일 또는 주기적으로 e스포츠 전용 캐치프레이즈를 미리 생성한다."""
+        from .alarm.llm_logic import generate_daily_catchphrases as gen_fn
+        return await gen_fn()

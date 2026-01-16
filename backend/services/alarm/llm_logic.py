@@ -1,6 +1,9 @@
 # backend/services/alarm/llm_logic.py
 # 420줄 alarm_service.py에서 추출한 LLM 로직
 import logging
+import os
+import random
+import re
 from datetime import datetime
 from typing import List, Optional
 
@@ -10,6 +13,60 @@ from ..llm_service import LLMService
 
 logger = logging.getLogger(__name__)
 
+# 2차 정제용 경량 LLM 서버 URL
+LLM_LIGHT_BASE_URL = os.getenv("LLM_LIGHT_BASE_URL", "http://llama-server-light:8080")
+
+
+def _clean_meta_headers(text: str) -> str:
+    """
+    LLM 출력에서 '주제:', '출력 예:', '출력:', 'Draft:' 같은 메타 헤더를 제거한다.
+    경량 LLM이 정제에 실패했을 때의 안전망 역할.
+    """
+    if not text:
+        return text
+    
+    # 제거할 패턴들 (대소문자 무시, 줄 시작에 위치)
+    meta_patterns = [
+        r'^\s*(주제|Topic|테마)[:\s]+.*?\n',  # 주제: 우주 -> 제거
+        r'^\s*(출력\s*예?|Example\s*Output?|Output)[:\s]+.*?\n',  # 출력 예: -> 제거
+        r'^\s*\[?Draft\]?[:\s]*',  # [Draft] or Draft: -> 제거
+        r'^\s*---+\s*\n',  # 구분선 제거
+    ]
+    
+    result = text
+    for pattern in meta_patterns:
+        result = re.sub(pattern, '', result, flags=re.IGNORECASE | re.MULTILINE)
+    
+    return result.strip()
+
+
+def _generate_with_light_llm(messages: List[dict], max_tokens: int = 256, temperature: float = 0.3) -> str:
+    """
+    경량 LLM 서버 (Qwen3-0.6B)를 사용하여 텍스트를 생성한다.
+    주로 2차 정제(refine) 용도로 사용한다.
+    """
+    try:
+        import httpx
+        url = f"{LLM_LIGHT_BASE_URL.rstrip('/')}/v1/chat/completions"
+        payload = {
+            "model": "Qwen3-0.6B",
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "enable_thinking": False,  # 추론 모드 비활성화 (속도 향상)
+        }
+        with httpx.Client(timeout=30) as client:
+            response = client.post(url, json=payload)
+            response.raise_for_status()
+            data = response.json()
+            return data["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        logger.warning(f"Light LLM call failed, falling back to main LLM: {e}")
+        # 폴백: 메인 LLM 서비스 사용
+        llm_service = LLMService.get_instance()
+        if llm_service.is_loaded():
+            return llm_service.generate_chat(messages, max_tokens=max_tokens, temperature=temperature)
+        return ""
 
 async def summarize_with_llm(items: List[dict]) -> str:
     """
@@ -37,29 +94,34 @@ async def summarize_with_llm(items: List[dict]) -> str:
             llm_service.reset_context()
             logger.info("Hourly LLM context reset performed.")
         
-        # 현재 시간의 분(minute)을 기반으로 카테고리 & 형식 강제 선택 (다양성 확보)
-        category_index = (current_minute // 10) % 5  # 0~4 범위
-        format_index = (datetime.now().hour + category_index) % 5  # 시간 + 카테고리로 형식도 분산
-        
+        # 카테고리와 형식을 완전 랜덤으로 선택 (다양성 확보)
         categories = [
-            "지식/과학 (우주, 물리학, 생물학, 기술사, 수학 퍼즐)",
-            "역사/문화 (고대문명, 이상한 역사, 폐기된 발명품, 기묘한 법률)",
-            "엔터/취미 (게임 트리비아, e스포츠, 마이너 스포츠, 영화/드라마 비하인드)",
-            "언어유희/드립 (말장난, 아재개그, 논리 역설, 수수께끼)",
-            "철학/심리 (사고실험, 심리학 실험, 인지 편향, 재미있는 통계)"
+            "우주/천문학 (행성, 블랙홀, 외계 생명체, 우주 탐사)",
+            "물리학/화학 (양자역학, 상대성이론, 원소, 신기한 물질)",
+            "생물학/자연 (동물, 식물, 미생물, 인체의 신비)",
+            "역사/문화 (고대문명, 이상한 역사, 기묘한 법률, 잊혀진 발명품)",
+            "기술/엔지니어링 (AI, 로봇, 미래기술, 발명 히스토리)",
+            "수학/논리 (수학 퍼즐, 역설, 확률, 기하학)",
+            "심리학/뇌과학 (인지편향, 심리실험, 착시, 기억)",
+            "게임/e스포츠 (게임 트리비아, 프로게이머, 게임 역사)",
+            "영화/드라마/음악 (비하인드, 이스터에그, 뮤지션 일화)",
+            "언어유희/드립 (말장난, 아재개그, 수수께끼)",
+            "음식/요리 (음식 역사, 이상한 음식, 요리 과학)",
+            "지리/여행 (신기한 장소, 세계 기록, 자연 경관)",
         ]
         
-        # 문장 시작 형식도 강제 (반복 방지)
+        # 문장 시작 형식도 랜덤
         formats = [
             "질문형으로 시작해라 (예: '혹시 알아?' / '이거 들어봤어?')",
             "팩트 단언형으로 시작해라 (예: '사실...' / '진짜 신기한 건...')",
             "감탄형으로 시작해라 (예: '와!' / '헐!' / '대박!')",
             "수수께끼/퀴즈형으로 시작해라 (예: 'OO는 왜 OO일까?')",
-            "선택형으로 시작해라 (예: 'A vs B 중 뭐가 나을까?')"
+            "뉴스속보형으로 시작해라 (예: '[속보]...')",
+            "TMI형으로 시작해라 (예: '갑자기 생각난 건데...')",
         ]
         
-        forced_category = categories[category_index]
-        forced_format = formats[format_index]
+        forced_category = random.choice(categories)
+        forced_format = random.choice(formats)
         
         # 외부 프롬프트 파일에서 로드 (핫 리로드 지원)
         prompt_content = load_prompt("random_topic", category=forced_category, format=forced_format)
@@ -74,28 +136,60 @@ async def summarize_with_llm(items: List[dict]) -> str:
             }
         ]
         
-        logger.info("No alarms to process. Asking LLM for random wisdom...")
-        result = llm_service.generate_chat(
-            messages, 
-            max_tokens=128, 
-            temperature=0.8,
-            stop=["Okay", "let me", "Let me", "I'll", "아하", "음,", "사용자가", "지시사항을"]
-        )
-        result = clean_exaone_tokens(result)
-        logger.info(f"LLM Random Response: {result}")
-        
-        # 결과 검증 (영어가 너무 많거나 비어있으면 skip)
-        if not result or len(result.strip()) < 10:
-            logger.warning("Generated message too short, skipping.")
-            return None
+        for attempt in range(3):
+            logger.info(f"Generating random wisdom (Attempt {attempt + 1}/3)...")
+            result = llm_service.generate_chat(
+                messages, 
+                max_tokens=256, 
+                temperature=0.8,
+                stop=["Okay", "let me", "Let me", "I'll", "아하", "음,", "사용자가", "지시사항을", "지문을", "지시를", "알겠습니다", "확인했습니다"]
+            )
+            result = clean_exaone_tokens(result)
+            logger.info(f"🔍 [Random Wisdom Draft] Attempt {attempt+1} Original Output: \n{result}")
             
-        import re
-        korean_chars = len(re.findall(r'[가-힣]', result))
-        if korean_chars / len(result) < 0.3:
-            logger.warning(f"Low Korean ratio ({korean_chars/len(result):.2f}), skipping.")
-            return None
+            if not result or len(result.strip()) < 10:
+                logger.warning(f"Attempt {attempt+1}: Generated message too short.")
+                continue
+                
+            import re
+            def get_korean_ratio(text):
+                if not text: return 0
+                korean_chars = len(re.findall(r'[가-힣]', text))
+                # 공백과 특수문자를 제외한 의미 있는 문자들 중 한국어 비율 계산
+                meaningful_chars = len(re.findall(r'[가-힣a-zA-Z0-9]', text))
+                if meaningful_chars == 0: return 0
+                return korean_chars / meaningful_chars
             
-        return result
+            korean_ratio = get_korean_ratio(result)
+            
+            # 한국어 비율이 낮거나 메타 문구가 포함되어 있으면 2차 정제 시도
+            meta_patterns = ["아하", "음,", "사용자가", "let me", "I'll", "Okay", "알겠습니다", "지정된 주제", "시작하는 말"]
+            needs_refine = korean_ratio < 0.6 or any(p.lower() in result.lower() for p in meta_patterns)
+            
+            final_result = result
+            if needs_refine:
+                refine_prompt = load_prompt("refine_random_wisdom", draft=result)
+                if refine_prompt:
+                    refine_messages = [{"role": "user", "content": refine_prompt}]
+                    logger.info(f"✂️ Attempt {attempt+1}: Refining with Low-Temp (0.0)...")
+                    refined_result = _generate_with_light_llm(refine_messages, max_tokens=256, temperature=0.0)
+                    refined_result = clean_exaone_tokens(refined_result)
+                    logger.info(f"✨ Attempt {attempt+1}: Refined Output: {refined_result}")
+                    if refined_result and len(refined_result.strip()) > 10:
+                        final_result = refined_result
+            
+            # 최종 한국어 비율 검증 (0.5 이상이어야 통과)
+            final_ratio = get_korean_ratio(final_result)
+            if final_ratio >= 0.5:
+                # 마지막 안전망: 메타 헤더 정규표현식으로 제거
+                final_result = _clean_meta_headers(final_result)
+                logger.info(f"✅ Attempt {attempt+1} Success! Korean Ratio: {final_ratio:.2f}")
+                return final_result
+            else:
+                logger.warning(f"❌ Attempt {attempt+1} Failed. Korean Ratio: {final_ratio:.2f}. Retrying...")
+
+        logger.error("All 3 attempts to generate clean random wisdom failed.")
+        return None
 
     
     # 알림 목록 구성 (발신자 포함)
@@ -135,11 +229,23 @@ async def summarize_with_llm(items: List[dict]) -> str:
     total_prompt_len = sum(len(m['content']) for m in messages)
     logger.info(f"LLM Prompt total length: {total_prompt_len} characters")
     result = llm_service.generate_chat(messages, max_tokens=512)
-    logger.info(f"LLM Response: {result}")
+    logger.info(f"LLM Response (Draft): {result}")
     
-    # 환각 제거 및 특수 토큰 제거 후 반환
+    # 1단계: 환각 제거 및 특수 토큰 제거
     result = sanitize_llm_output(items, result)
     result = clean_exaone_tokens(result)
+    
+    # 2단계: 경량 LLM으로 사고과정/메타 설명 정제 (Qwen3-0.6B)
+    if result and result.strip():
+        refine_prompt = load_prompt("refine_alarm_summary", draft=result)
+        if refine_prompt:
+            refine_messages = [{"role": "user", "content": refine_prompt}]
+            refined_result = _generate_with_light_llm(refine_messages, max_tokens=256, temperature=0.3)
+            refined_result = clean_exaone_tokens(refined_result)
+            logger.info(f"LLM Response (Refined by Light LLM): {refined_result}")
+            if refined_result and refined_result.strip():
+                result = refined_result
+    
     return result
 
 
@@ -166,5 +272,49 @@ Start directly with the result without any introductory phrases or greetings.
 [Payments]
 {chr(10).join(expense_list)}"""}
     ]
-    result = llm_service.generate_chat(messages, max_tokens=128)
+    result = llm_service.generate_chat(messages, max_tokens=256)
     return clean_exaone_tokens(result)
+
+
+async def generate_daily_catchphrases() -> bool:
+    """
+    매일 또는 주기적으로 e스포츠 전용 캐치프레이즈를 생성하여 파일로 저장한다.
+    """
+    import json
+    import os
+    
+    llm_service = LLMService.get_instance()
+    if not llm_service.is_loaded():
+        logger.warning("LLM model NOT loaded. Cannot generate catchphrases.")
+        return False
+
+    games = ["리그 오브 레전드", "발로란트"]
+    results = {"LoL": [], "Valorant": []}
+    
+    for game in games:
+        prompt = load_prompt("generate_catchphrases", game=game)
+        if not prompt:
+            continue
+            
+        messages = [{"role": "user", "content": prompt}]
+        raw_result = llm_service.generate_chat(messages, max_tokens=256, temperature=0.8)
+        raw_result = clean_exaone_tokens(raw_result)
+        
+        # 줄 단위로 분리하여 유효한 멘트만 추출
+        lines = [line.strip().lstrip("-*•123456789. ").strip() for line in raw_result.split("\n") if line.strip()]
+        
+        # 종목 매칭
+        key = "LoL" if "리그" in game else "Valorant"
+        results[key] = lines[:10] # 최대 10개 유지
+        
+    # 파일 저장 (V2 버전으로 저장하여 기존 match_notifier와 호환성 유지 또는 전환)
+    save_path = os.path.join(os.path.dirname(__file__), "../../data/esports_catchphrases_v2.json")
+    try:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        with open(save_path, "w", encoding="utf-8") as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
+        logger.info(f"Daily catchphrases generated and saved to {save_path}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save generated catchphrases: {e}")
+        return False

@@ -35,16 +35,39 @@ async def check_upcoming_matches(db: Session, catchphrases_file: str, window_min
     # 우선순위에 따라 정렬 (정의되지 않은 태그는 99로 처리)
     matches_to_notify.sort(key=lambda x: priority_map.get(x.league_tag, 99))
     
-    catchphrases = ["야, 놓치지 마! 🔥", "지금 바로 입장! 🏃‍♂️", "치킨 준비됐나? 🍗", "이번 세트 대박! 🎮"]
-    if os.path.exists(catchphrases_file):
+    # 캐치프레이즈 도출 (V2 우선, 없으면 레거시)
+    default_phrase = "야, 놓치지 마! 🔥"
+    default_list = [default_phrase, "지금 바로 입장! 🏃‍♂️", "치킨 준비됐나? 🍗", "이번 세트 대박! 🎮"]
+    
+    catchphrases_v2_file = catchphrases_file.replace(".json", "_v2.json")
+    selected_phrases = []
+    
+    # 경기들의 종목 확인 (알림창 상단 멘트 결정을 위함)
+    games_involved = set(m.game_tag for m in matches_to_notify)
+    
+    if os.path.exists(catchphrases_v2_file):
+        try:
+            with open(catchphrases_v2_file, 'r', encoding='utf-8') as f:
+                saved_v2 = json.load(f)
+                # 혼합 경기의 경우 섞어서 선택하거나 혹은 주력 종목 선택
+                for game in games_involved:
+                    if game in saved_v2 and saved_v2[game]:
+                        selected_phrases.extend(saved_v2[game])
+        except Exception as e:
+            logger.warning(f"Failed to load catchphrases_v2: {e}")
+            
+    if not selected_phrases and os.path.exists(catchphrases_file):
         try:
             with open(catchphrases_file, 'r', encoding='utf-8') as f:
                 saved = json.load(f)
-                if saved and isinstance(saved, list): catchphrases = saved
+                if saved and isinstance(saved, list): selected_phrases = saved
         except Exception as e:
             logger.warning(f"Failed to load catchphrases: {e}")
+            
+    if not selected_phrases:
+        selected_phrases = default_list
     
-    selected_phrase = random.choice(catchphrases)
+    selected_phrase = random.choice(selected_phrases)
     lines = [f"🎮 <b>[경기 시작 알림]</b>\n{selected_phrase}\n"]
     for match in matches_to_notify:
         title = match.title.replace("[Esports Schedule] ", "")

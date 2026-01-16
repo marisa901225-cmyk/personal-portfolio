@@ -11,6 +11,7 @@ from datetime import datetime
 sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 
 from backend.services.llm_service import LLMService
+from backend.services.alarm.sanitizer import clean_exaone_tokens
 
 def generate_backup_message(file_size_mb: float, backup_time: str) -> str:
     """
@@ -41,7 +42,14 @@ DB 백업 완료! 용량: {file_size_mb:.2f}MB. 사용자한테 알려줄 짧은
     ]
     
     try:
-        creative_text = llm.generate_chat(messages, max_tokens=128, temperature=0.8)
+        creative_text = llm.generate_chat(
+            messages, 
+            max_tokens=128, 
+            temperature=0.8,
+            stop=["아이디어 완료", "Ok,", "사용자가", "지시사항을"]
+        )
+        creative_text = clean_exaone_tokens(creative_text)
+        creative_text = creative_text.replace("아이디어 완료!", "").replace("아이디어 완료", "").strip()
         
         # 파일 크기가 환각으로 바뀌었을 경우를 방지하기 위해 재검증
         if f"{file_size_mb:.2f}" not in creative_text and f"{file_size_mb:.1f}" not in creative_text:

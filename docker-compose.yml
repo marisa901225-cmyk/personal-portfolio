@@ -19,6 +19,22 @@ services:
       timeout: 10s
       retries: 3
 
+  llama-server-light:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: myasset-llm-light
+    restart: always
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./backend/data:/data:ro
+    command: >
+      --model /data/Qwen3-0.6B-Q8_0.gguf --host 0.0.0.0 --port 8080 --ctx-size 2048 --n-gpu-layers 0 --threads 2
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   backend-api:
     build:
       context: ./backend
