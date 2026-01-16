@@ -147,6 +147,10 @@ async def search_news(
         for kw in market_keywords:
             filters.append(GameNews.title.ilike(f"%{kw}%"))
             
+        # e스포츠 리그 태그 매칭 (LCK 등)
+        if cleaned_query.upper() in ["LCK", "LPL", "LEC", "LCS", "VCT", "MSI", "WORLDS"]:
+            filters.append(GameNews.league_tag == cleaned_query.upper())
+
         # 정제된 이름 매칭
         if cleaned_query and len(cleaned_query) >= 2:
             filters.append(GameNews.title.ilike(f"%{cleaned_query}%"))
@@ -162,7 +166,11 @@ async def search_news(
             query_obj = query_obj.filter(GameNews.source_name != "Steam")
             query_obj = query_obj.filter(GameNews.game_tag == "Economy")
             
-        return query_obj.order_by(GameNews.published_at.desc(), GameNews.created_at.desc()).limit(30).all()
+        return query_obj.order_by(
+            GameNews.event_time.desc().nulls_last(), # 일정 데이터는 이벤트 시간 우선
+            GameNews.published_at.desc(), 
+            GameNews.created_at.desc()
+        ).limit(30).all()
 
     # 2. DB 검색 (신규 수집된 데이터 포함)
     articles = perform_search()

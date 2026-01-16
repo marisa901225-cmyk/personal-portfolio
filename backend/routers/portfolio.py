@@ -20,7 +20,7 @@ def get_portfolio(db: Session = Depends(get_db)) -> PortfolioResponse:
     user = get_or_create_single_user(db)
     assets = (
         db.query(Asset)
-        .filter(Asset.user_id == user.id, Asset.deleted_at.is_(None))
+        .filter(Asset.user_id == user.id)
         .order_by(Asset.id.asc())
         .all()
     )
