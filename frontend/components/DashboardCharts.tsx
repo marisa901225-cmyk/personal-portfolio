@@ -170,7 +170,7 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
                             </div>
 
                             <div className="flex flex-col items-center">
-                                <span className="text-[10px] text-slate-400 font-bold tracking-widest uppercase">Net Worth</span>
+                                <span className="text-[10px] text-slate-400 font-bold tracking-widest">순자산</span>
                                 <span className="text-2xl font-bold text-slate-900 tabular-nums tracking-tighter">
                                     {formatCurrency(summary.totalValue)}
                                 </span>
@@ -285,7 +285,7 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
                         ) : (
                             <div className="flex flex-col items-center justify-center h-full text-slate-300 gap-2">
                                 <TrendingUp size={32} className="opacity-20" />
-                                <span className="text-xs italic">Not Enough History Data</span>
+                                <span className="text-xs italic">히스토리 데이터 부족</span>
                             </div>
                         )}
                     </div>
@@ -295,7 +295,7 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-4">
                                     <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100/50">
-                                        <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1">Total Variation</div>
+                                        <div className="text-[10px] tracking-wider text-slate-500 font-bold mb-1">총 변동</div>
                                         <div className={`text-xl font-bold tabular-nums ${historyStats.change >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                                             {historyStats.change > 0 ? '+' : ''}{formatCurrency(historyStats.change)}
                                         </div>
@@ -307,30 +307,30 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
                                     {benchmarkDiff !== null ? (
                                         <div className="p-4 bg-indigo-50/40 rounded-2xl border border-indigo-100/30">
                                             <div className="text-[10px] uppercase tracking-wider text-indigo-500 font-bold mb-1 truncate" title={benchmarkLabel}>
-                                                Vs Benchmark
+                                                시장 대비
                                             </div>
                                             <div className={`text-xl font-bold tabular-nums ${benchmarkDiff >= 0 ? 'text-indigo-600' : 'text-blue-600'}`}>
                                                 {benchmarkDiff > 0 ? '+' : ''}{benchmarkDiff.toFixed(2)}%p
                                             </div>
                                             <div className="text-[11px] font-medium text-indigo-400">
-                                                Market: {benchmarkReturn?.toFixed(1)}%
+                                                시장: {benchmarkReturn?.toFixed(1)}%
                                             </div>
                                         </div>
                                     ) : (
                                         <div className="p-4 bg-slate-50/30 rounded-2xl border border-dashed border-slate-200 flex flex-col justify-center min-h-[85px]">
-                                            <span className="text-[10px] text-slate-400 font-semibold text-center italic">No Benchmark Set</span>
+                                            <span className="text-[10px] text-slate-400 font-semibold text-center italic">벤치마크 미설정</span>
                                         </div>
                                     )}
                                 </div>
 
                                 <div className="space-y-3">
-                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Key Statistics</p>
+                                    <p className="text-[10px] font-bold text-slate-400 tracking-wider pl-1">핵심 통계</p>
                                     <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-colors">
                                         <div className="flex items-center gap-2">
                                             <div className="p-1.5 bg-emerald-100/50 rounded-lg text-emerald-600">
                                                 <ArrowUp size={14} />
                                             </div>
-                                            <span className="text-xs font-semibold text-slate-500">Period High</span>
+                                            <span className="text-xs font-semibold text-slate-500">기간 최고</span>
                                         </div>
                                         <span className="text-xs font-bold text-slate-800 tabular-nums">{formatCurrency(historyStats.max)}</span>
                                     </div>
@@ -339,7 +339,7 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
                                             <div className="p-1.5 bg-rose-100/50 rounded-lg text-rose-500">
                                                 <ArrowDown size={14} />
                                             </div>
-                                            <span className="text-xs font-semibold text-slate-500">Period Low</span>
+                                            <span className="text-xs font-semibold text-slate-500">기간 최저</span>
                                         </div>
                                         <span className="text-xs font-bold text-slate-800 tabular-nums">{formatCurrency(historyStats.min)}</span>
                                     </div>
@@ -348,7 +348,7 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
                                             <div className="p-1.5 bg-indigo-100/50 rounded-lg text-indigo-500">
                                                 <TrendingUp size={14} />
                                             </div>
-                                            <span className="text-xs font-semibold text-slate-500">Ending Balance</span>
+                                            <span className="text-xs font-semibold text-slate-500">현재 잔고</span>
                                         </div>
                                         <span className="text-xs font-bold text-slate-800 tabular-nums">{formatCurrency(historyStats.end)}</span>
                                     </div>
