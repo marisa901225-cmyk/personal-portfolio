@@ -6,6 +6,7 @@ import {
     XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Legend
 } from 'recharts';
 import { TrendingUp, TrendingDown, AlertTriangle, PieChart as PieIcon, LineChart as LineIcon, BarChart3, ArrowUp, ArrowDown, Wallet } from 'lucide-react';
+import { usePortfolioCalculations } from '../src/hooks/usePortfolioCalculations';
 
 interface DashboardChartsProps {
     summary: PortfolioSummary;
@@ -30,49 +31,16 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
     benchmarkReturn,
     actualInvested,
 }) => {
-    // 수익률 및 총 손익 계산 (차트 센터 표시용)
-    const { totalProfit, profitRate, isPositive } = useMemo(() => {
-        const invested = actualInvested ?? summary.totalInvested;
-        const profit = summary.totalValue - invested;
-        const rate = invested > 0 ? (profit / invested) * 100 : 0;
-        return {
-            totalProfit: profit,
-            profitRate: rate,
-            isPositive: profit >= 0
-        };
-    }, [summary, actualInvested]);
-
-    const historyStats = useMemo(() => {
-        if (!summary.historyData || summary.historyData.length === 0) return null;
-        const data = summary.historyData;
-        const getValue = (item: typeof data[number]) =>
-            typeof item.stockValue === 'number' ? item.stockValue + (item.realEstateValue ?? 0) : item.value;
-        const start = getValue(data[0]);
-        const end = getValue(data[data.length - 1]);
-        const values = data.map(d => getValue(d));
-        const max = Math.max(...values);
-        const min = Math.min(...values);
-        const change = end - start;
-        const changeRate = start !== 0 ? (change / start) * 100 : 0;
-
-        return { start, end, max, min, change, changeRate };
-    }, [summary.historyData]);
-
-    const benchmarkDiff = useMemo(() => {
-        if (!historyStats) return null;
-        if (benchmarkReturn === undefined || !Number.isFinite(benchmarkReturn)) return null;
-
-        const baseReturn = (summary.xirr_rate !== undefined && summary.xirr_rate !== null)
-            ? summary.xirr_rate * 100
-            : historyStats.changeRate;
-
-        return baseReturn - benchmarkReturn;
-    }, [historyStats, benchmarkReturn, summary.xirr_rate]);
-
-    const showRealEstate = useMemo(
-        () => summary.historyData.some(item => (item.realEstateValue ?? 0) > 0),
-        [summary.historyData],
-    );
+    const {
+        profitStats: { totalProfit, profitRate, isPositive },
+        historyStats,
+        benchmarkDiff,
+        showRealEstate
+    } = usePortfolioCalculations({
+        summary,
+        actualInvested,
+        benchmarkReturn
+    });
 
     const benchmarkLabel = useMemo(() => {
         const base = benchmarkName?.trim()

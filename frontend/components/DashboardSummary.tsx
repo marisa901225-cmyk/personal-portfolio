@@ -12,6 +12,7 @@ import {
     PiggyBank,
     Layers
 } from 'lucide-react';
+import { usePortfolioCalculations } from '../src/hooks/usePortfolioCalculations';
 
 interface DashboardSummaryProps {
     summary: PortfolioSummary;
@@ -53,28 +54,11 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
     realEstateSummary,
     actualInvested,
 }) => {
-    // 비중 계산 로직 개선
-    const distributionData = useMemo(() => {
-        // 1. 전체 순자산 (부동산 포함)
-        const grandTotal = summary.totalValue;
-
-        // 2. 주식 등 투자 자산 총액 (부동산 제외) - 지수 비중 계산용
-        const realEstateValue = realEstateSummary?.totalValue ?? 0;
-        const investableTotal = grandTotal - realEstateValue;
-
-        // 카테고리 데이터 보정: 부동산이 있다면 지분 가치로 표시
-        const categories = summary.categoryDistribution.map(item => {
-            if (item.name === '부동산' && realEstateSummary) {
-                return { ...item, value: realEstateSummary.totalValue };
-            }
-            return item;
-        });
-
-        // 지수 데이터
-        const indices = summary.indexDistribution || [];
-
-        return { categories, indices, grandTotal, investableTotal };
-    }, [summary, realEstateSummary]);
+    const { distributionDetails: distributionData } = usePortfolioCalculations({
+        summary,
+        actualInvested,
+        realEstateSummary
+    });
 
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 items-stretch">
