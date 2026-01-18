@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryProvider } from './QueryProvider';
 import { SettingsProvider } from '@hooks/useSettings';
+import { ToastProvider } from '../../contexts/ToastContext';
 
 interface AppProvidersProps {
     children: React.ReactNode;
@@ -15,12 +16,14 @@ interface AppProvidersProps {
  */
 export const AppProviders: React.FC<AppProvidersProps> = ({ children }) => {
     return (
-        <SettingsProvider>
-            <QueryProvider>
-                <BrowserRouter>
-                    {children}
-                </BrowserRouter>
-            </QueryProvider>
-        </SettingsProvider>
+        <ToastProvider>
+            <SettingsProvider>
+                <QueryProvider>
+                    <BrowserRouter>
+                        {children}
+                    </BrowserRouter>
+                </QueryProvider>
+            </SettingsProvider>
+        </ToastProvider>
     );
 };
