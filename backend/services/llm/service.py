@@ -39,19 +39,32 @@ class LLMService:
         self,
         prompt: str,
         max_tokens: int = 512,
-        temperature: float = 0.7,
+        temperature: float = 0.6,
+        top_p: float = 0.8,
+        top_k: int = 20,
         stop: Optional[list] = None,
         seed: Optional[int] = None,
         **kwargs,
     ) -> str:
         messages = [{"role": "user", "content": prompt}]
-        return self.generate_chat(messages, max_tokens=max_tokens, temperature=temperature, stop=stop, seed=seed, **kwargs)
+        return self.generate_chat(
+            messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            stop=stop,
+            seed=seed,
+            **kwargs
+        )
 
     def generate_chat(
         self,
         messages: List[dict],
         max_tokens: int = 512,
-        temperature: float = 0.7,
+        temperature: float = 0.6,
+        top_p: float = 0.8,
+        top_k: int = 20,
         stop: Optional[list] = None,
         seed: Optional[int] = None,
         **kwargs,
@@ -60,9 +73,21 @@ class LLMService:
         self._last_used_paid = False
         self._last_route = None
 
+        paid_kwargs = dict(kwargs)
+        paid_kwargs.pop("model", None)  # model은 명시 인자로만 전달
+
         # 1) 원격 백엔드 우선
         if self.settings.is_remote_configured():
-            out = self.backend.chat(messages, max_tokens=max_tokens, temperature=temperature, stop=stop, seed=seed, **kwargs)
+            out = self.backend.chat(
+                messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                stop=stop,
+                seed=seed,
+                **kwargs
+            )
             if out:
                 self._last_error = None
                 self._last_route = "remote"
@@ -73,8 +98,18 @@ class LLMService:
 
             # 2) 원격 실패 시 유료 백엔드 폴백 (가장 저렴한 모델 사용)
             if self.settings.is_paid_configured():
-                fallback_model = "gpt-5-nano"  # 폴백용 최저가 모델
-                out_paid = self.paid_backend.chat(messages, max_tokens=max_tokens, temperature=temperature, model=fallback_model)
+                fallback_model = self.settings.ai_report_fallback_model  # 폴백용 (기본: gpt-5-nano)
+                out_paid = self.paid_backend.chat(
+                    messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    model=fallback_model,
+                    stop=stop,
+                    seed=seed,
+                    **paid_kwargs,
+                )
                 if out_paid:
                     self._last_error = None
                     self._last_used_paid = True
@@ -90,7 +125,16 @@ class LLMService:
 
         # 원격 미구성: 유료 백엔드만 사용
         if self.settings.is_paid_configured():
-            out_paid = self.paid_backend.chat(messages, max_tokens=max_tokens, temperature=temperature, model=kwargs.get("model"))
+            paid_model = kwargs.get("model")
+            out_paid = self.paid_backend.chat(
+                messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                model=paid_model,
+                stop=stop,
+                seed=seed,
+                **paid_kwargs,
+            )
             if out_paid:
                 self._last_error = None
                 self._last_used_paid = True
@@ -107,11 +151,30 @@ class LLMService:
         messages: List[dict],
         max_tokens: int = 1024,
         temperature: float = 0.5,
+        top_p: float = 0.8,
+        top_k: int = 20,
         model: Optional[str] = None,
+        stop: Optional[list] = None,
+        seed: Optional[int] = None,
+        **kwargs,
     ) -> str:
-        out = self.paid_backend.chat(messages, max_tokens=max_tokens, temperature=temperature, model=model)
+        # 호출 시작 시 라우팅 상태 초기화
+        self._last_used_paid = False
+        self._last_route = None
+
+        out = self.paid_backend.chat(
+            messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            model=model,
+            stop=stop,
+            seed=seed,
+            **kwargs,
+        )
         if out:
             self._last_error = None
+            self._last_used_paid = True
+            self._last_route = "paid"
             return out
         self._last_error = getattr(self.paid_backend, "_last_error", None) or "Paid LLM failed"
         return ""

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import DateTime, Integer, String, Text, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -84,6 +84,10 @@ class SpamRule(Base):
 class GameNews(Base):
     """게임 뉴스 및 일정 데이터 (RAG 지식 베이스)"""
     __tablename__ = "game_news"
+    __table_args__ = (
+        Index("idx_game_news_src_notified_time", "source_type", "source_name", "notified_at", "event_time"),
+        Index("idx_game_news_news_game_published", "source_type", "game_tag", "published_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
 
@@ -111,6 +115,7 @@ class GameNews(Base):
     summary: Mapped[Optional[Text]] = mapped_column(Text, nullable=True)
 
     published_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    notified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True) # 알림 전송 시각 기록 (LO 추천 💖)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, nullable=False

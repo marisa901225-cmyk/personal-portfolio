@@ -25,6 +25,7 @@ from starlette.requests import Request
 
 from .core.db_migrations import ensure_schema
 from .core import auth, db
+from .services.alarm.llm_refiner import close_light_client
 from .routers.assets import router as assets_router
 from .routers.exchanges import router as exchanges_router
 from .routers.portfolio import router as portfolio_router
@@ -39,6 +40,7 @@ from .routers.market_data import router as market_data_router
 from .routers.spam_rules import router as spam_rules_router
 from .routers.news import router as news_router
 from .routers.telegram_webhook import router as telegram_webhook_router
+from .routers.memories import router as memories_router
 
 app = FastAPI(title="MyAsset Portfolio Backend")
 
@@ -94,6 +96,12 @@ def log_startup_info() -> None:
     logger.info("Working Dir: %s", os.getcwd())
 
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    logger.info("MyAsset Backend 종료 중...")
+    await close_light_client()
+
+
 # ============================================
 # Router Registration
 # ============================================
@@ -112,6 +120,7 @@ app.include_router(market_data_router)
 app.include_router(spam_rules_router)
 app.include_router(news_router)
 app.include_router(telegram_webhook_router)
+app.include_router(memories_router)
 
 
 # ============================================

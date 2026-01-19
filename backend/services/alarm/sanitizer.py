@@ -9,9 +9,9 @@ logger = logging.getLogger(__name__)
 # 정규식 패턴 상수
 URL_PATTERN = re.compile(r'https?://[^\s\)\]<>"]+')
 TOKEN_PATTERN = re.compile(r'[가-힣A-Za-z0-9_*]+')
-LABEL_PATTERN = re.compile(r'^[-•*]\s*\[?([^\]]+)\]?\s*:')
+LABEL_PATTERN = re.compile(r'^[-•*]\s*\[?([^\]]+)\]?:?')
 MAX_DROP_REASONS = 10
-SUMMARY_KEYWORDS = ['결제', '배달', '송금', '입금', '출금', '알림', '메시지', '카톡', '문자']
+SUMMARY_KEYWORDS = ['결제', '송금', '입금', '출금', '알림', '메시지', '카톡', '문자']
 
 # URL 정규화용 구두점
 _TRAILING_PUNCT = '.,;:!?)]}>"\''
@@ -248,14 +248,19 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
             for name in name_matches:
                 original_senders.add(name)
 
+    COMMON_PREFIXES = ('배달', '완료', '알림', '메시지', '확인', '오늘', '내일', '어제', '전송')
     def _extract_strong_tokens(text: str) -> set[str]:
         """
         입력 알림 본문에서만 뽑은 '근거 토큰' (환각 방지용).
         - 길이>=3 또는 숫자/* 포함 토큰만 사용 (오탐 감소, 4->3 완화)
+        - 흔한 단어(배달 등)는 근거에서 제외
         """
         tokens = set()
         for tok in TOKEN_PATTERN.findall(text or ""):
-            if len(tok) >= 3 or any(ch.isdigit() for ch in tok) or "*" in tok:
+            if tok.startswith(COMMON_PREFIXES):
+                continue
+            # 한글은 2자 이상, 영문/숫자는 3자 이상이면 근거로 인정
+            if (re.search(r'[가-힣]', tok) and len(tok) >= 2) or len(tok) >= 3 or any(ch.isdigit() for ch in tok) or "*" in tok:
                 tokens.add(tok)
         return tokens
 
@@ -325,6 +330,8 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
             has_summary_keyword = any(k in line for k in SUMMARY_KEYWORDS)
             if not has_sender and not has_original_url and not has_summary_keyword:
                 line_tokens = _extract_strong_tokens(line)
+                # 오탐 방지를 위해 합집합이 1개라도 있으면 유지하나, 
+                # 흔한 단어(SUMMARY_KEYWORDS)만 있는 경우는 근거로 부족할 수 있음
                 if not (line_tokens & original_strong_tokens):
                     if len(dropped_reasons) < MAX_DROP_REASONS:
                         dropped_reasons.append(f"drop(ungrounded): {line[:50]}...")
@@ -340,7 +347,10 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
         # 메타 문장/설명 제거 (예: "The ... notification fits under ...")
         meta_patterns = [
             r'fits under', r'belongs to', r'classified as', r'notification type', 
-            r'요약하자면', r'알려드립니다', r'포함시켰습니다', r'해당합니다'
+            r'요약하자면', r'알려드립니다', r'포함시켰습니다', r'해당합니다',
+            # LLM 사고과정 패턴 (출력에 사고과정 포함된 경우)
+            r'요약\s*가능', r'같은\s*이벤트니까', r'처리했다는\s*건',
+            r'통합하여', r'하나로\s*묶', r'정리하면', r'분석하면',
         ]
         if any(re.search(p, line_cleaned, re.I) for p in meta_patterns):
             if len(dropped_reasons) < MAX_DROP_REASONS:

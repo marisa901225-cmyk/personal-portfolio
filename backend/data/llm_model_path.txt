@@ -1,1 +1,1 @@
-EXAONE-4.0-1.2B-BF16.gguf
+/data/EXAONE-4.0-1.2B-Q8_0.gguf

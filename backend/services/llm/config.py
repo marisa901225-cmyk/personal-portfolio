@@ -20,7 +20,7 @@ REMOTE_MODEL_PATH_FILE = os.getenv(
     os.path.join(DATA_DIR_ABS, "llm_model_path.txt"),
 )
 REMOTE_MODEL_DIR = os.getenv("LLM_REMOTE_MODEL_DIR", "/data")
-DEFAULT_MODEL_FILENAME = os.getenv("LLM_REMOTE_DEFAULT_MODEL", "EXAONE-4.0-1.2B-BF16.gguf")
+DEFAULT_MODEL_FILENAME = os.getenv("LLM_REMOTE_DEFAULT_MODEL", "EXAONE-4.0-1.2B-Q8_0.gguf")
 
 
 class Settings:
@@ -37,6 +37,8 @@ class Settings:
         self.ai_report_base_url = os.getenv("AI_REPORT_BASE_URL", "https://api.openai.com/v1").rstrip("/")
         self.ai_report_api_key = (os.getenv("AI_REPORT_API_KEY") or "").strip() or None
         self.ai_report_model = (os.getenv("AI_REPORT_MODEL", "gpt-5.2") or "gpt-5.2").strip()
+        self.ai_report_fallback_model = (os.getenv("AI_REPORT_FALLBACK_MODEL") or "gpt-5-nano").strip() or "gpt-5-nano"
+        self.ai_report_timeout_sec = float(os.getenv("AI_REPORT_TIMEOUT_SEC", "900"))
 
         self.backend_dir_abs = BACKEND_DIR_ABS
         self.data_dir_abs = DATA_DIR_ABS
@@ -63,12 +65,14 @@ class Settings:
 
     def read_remote_model_path_raw(self) -> Optional[str]:
         """llm_model_path.txt에서 실제 원격 경로를 읽어온다."""
-        if not os.path.exists(REMOTE_MODEL_PATH_FILE):
+        model_path_file = self.remote_model_path_file
+        if not os.path.exists(model_path_file):
             return None
         try:
-            with open(REMOTE_MODEL_PATH_FILE, "r") as f:
+            with open(model_path_file, "r", encoding="utf-8") as f:
                 raw = f.read().strip()
-                if not raw: return None
+                if not raw:
+                    return None
                 
                 # 경로 정규화 (원격 llama-server 기준)
                 if raw.startswith(("backend/data/", "/app/backend/data/")):
@@ -84,8 +88,9 @@ class Settings:
     def write_remote_model_path(self, remote_path: str) -> bool:
         """원격 모델 경로를 파일에 저장하여 llama-server가 감지할 수 있게 한다."""
         try:
-            os.makedirs(os.path.dirname(REMOTE_MODEL_PATH_FILE), exist_ok=True)
-            with open(REMOTE_MODEL_PATH_FILE, "w") as f:
+            model_path_file = self.remote_model_path_file
+            os.makedirs(os.path.dirname(model_path_file), exist_ok=True)
+            with open(model_path_file, "w", encoding="utf-8") as f:
                 f.write(remote_path)
             return True
         except Exception as e:

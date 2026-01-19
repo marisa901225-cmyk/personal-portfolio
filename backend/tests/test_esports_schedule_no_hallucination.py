@@ -13,6 +13,10 @@ from backend.routers.handlers.query_handler import _handle_esports  # noqa: E402
 
 
 class EsportsScheduleNoHallucinationTests(unittest.IsolatedAsyncioTestCase):
+    def tearDown(self):
+        from backend.services.llm.service import LLMService
+        LLMService._instance = None
+
     async def test_no_schedule_short_circuits_without_llm(self) -> None:
         with patch(
             "backend.services.news_collector.NewsCollector.refine_schedules_with_duckdb",
