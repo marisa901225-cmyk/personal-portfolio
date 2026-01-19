@@ -13,12 +13,9 @@ DB_DIR = BASE_DIR / "storage" / "db"
 DB_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _build_default_sqlite_url() -> str:
-    db_path = DB_DIR / "portfolio.db"
-    return f"sqlite:///{db_path.as_posix()}"
+from .config import settings
 
-
-DATABASE_URL = os.getenv("DATABASE_URL", _build_default_sqlite_url())
+DATABASE_URL = settings.database_url
 
 connect_args = {}
 if DATABASE_URL.startswith("sqlite"):

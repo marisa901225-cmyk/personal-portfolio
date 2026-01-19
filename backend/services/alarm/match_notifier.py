@@ -19,6 +19,7 @@ except Exception:  # pragma: no cover
 
 try:
     from ...core.models import GameNews  # type: ignore
+    from ...core.time_utils import utcnow  # type: ignore
 except Exception:  # pragma: no cover
     class _Expr:
         def __init__(self, name: str):
@@ -53,8 +54,13 @@ except Exception:  # pragma: no cover
         notified_at = _Expr("GameNews.notified_at")  # ✅ 테스트 환경 대비 추가
 
     GameNews = _GameNewsDummy()  # type: ignore
+    from ...core.time_utils import utcnow  # type: ignore
 from .catchphrase_selector import choose_phrase
-from .catchphrase_fallbacks import build_fallback_lines
+from .catchphrase_fallbacks import (
+    build_fallback_lines,
+    LOL_CATCHPHRASES,
+    VALORANT_CATCHPHRASES,
+)
 from .sanitizer import clean_exaone_tokens
 
 logger = logging.getLogger(__name__)
@@ -168,6 +174,15 @@ def _extract_teams(match_name: str) -> tuple[str, str]:
 
     return ("팀A", "팀B")
 
+def _is_tbd_team_name(name: str) -> bool:
+    n = (name or "").strip().casefold()
+    return n in {"tbd", "tba"} or "tbd" in n or "tba" in n
+
+
+def _is_tbd_match_title(match_name: str) -> bool:
+    team_a, team_b = _extract_teams(match_name)
+    return _is_tbd_team_name(team_a) or _is_tbd_team_name(team_b)
+
 
 def _fallback_phrases_for_matches(matches) -> list[str]:
     # 경기 알림 단계의 폴백은 "짧은 기본 문구"가 아니라,
@@ -243,6 +258,7 @@ async def check_upcoming_matches(db: Session, catchphrases_file: str, window_min
     ]
 
     clean_matches = []
+    ignored_tbd_matches = []
     for m in upcoming:
         # 서브 리그 필터링 (발로란트 등)
         league_lower = (m.league_tag or "").lower()
@@ -268,11 +284,27 @@ async def check_upcoming_matches(db: Session, catchphrases_file: str, window_min
                     break
             if is_noise:
                 continue
+
+        title_clean = (m.title or "").replace("[Esports Schedule] ", "")
+        if " - " in title_clean:
+            _, match_name = title_clean.split(" - ", 1)
+        else:
+            match_name = title_clean
+        if _is_tbd_match_title(match_name):
+            # 브라켓이 확정되기 전(TBD vs TBD)에는 알림을 보내지 않되,
+            # 추후 동일 윈도우에서 반복 알림이 발생하지 않도록 notified_at만 기록한다.
+            m.notified_at = utcnow()
+            ignored_tbd_matches.append(m)
+            continue
                 
         clean_matches.append(m)
 
     matches_to_notify = clean_matches
-    if not matches_to_notify: return False
+    if not matches_to_notify:
+        if ignored_tbd_matches:
+            db.commit()
+            logger.info(f"Ignored {len(ignored_tbd_matches)} TBD matches (not notifying).")
+        return False
 
     # 우선순위 정의 (숫자가 낮을수록 높음)
     priority_map = {
@@ -291,47 +323,57 @@ async def check_upcoming_matches(db: Session, catchphrases_file: str, window_min
     # 우선순위에 따라 정렬
     matches_to_notify.sort(key=get_priority)
     
-    # 캐치프레이즈 도출 (V2 우선, 없으면 레거시)
-    default_phrase = "야, 놓치지 마! 🔥"
-    default_list = [default_phrase, "지금 바로 입장! 🏃‍♂️", "치킨 준비됐나? 🍗", "이번 세트 대박! 🎮"]
-    
-    # catchphrases_file이 이미 *_v2.json일 수 있어, v2_v2.json로 꼬이지 않도록 정규화
-    is_v2_path = catchphrases_file.endswith("_v2.json")
-    catchphrases_v2_file = catchphrases_file if is_v2_path else catchphrases_file.replace(".json", "_v2.json")
-    catchphrases_v1_file = catchphrases_file.replace("_v2.json", ".json") if is_v2_path else catchphrases_file
-    selected_phrases = []
-    
-    # 경기들의 종목 확인 (None 방어 로직 추가)
+    # 경기들의 종목 확인
     games_involved = {
         (m.game_tag or "").strip()
         for m in matches_to_notify
         if (m.game_tag or "").strip()
     }
+
+    # 캐치프레이즈 도출 (Constants 우선)
+    selected_phrases = []
     
-    if os.path.exists(catchphrases_v2_file):
-        try:
-            with open(catchphrases_v2_file, 'r', encoding='utf-8') as f:
-                saved_v2 = json.load(f)
-                # 혼합 경기의 경우 섞어서 선택하거나 혹은 주력 종목 선택
-                for game in games_involved:
-                    if game in saved_v2 and saved_v2[game]:
-                        selected_phrases.extend(saved_v2[game])
-        except Exception as e:
-            logger.warning(f"Failed to load catchphrases_v2: {e}")
-            
-    if not selected_phrases and os.path.exists(catchphrases_v1_file):
-        try:
-            with open(catchphrases_v1_file, 'r', encoding='utf-8') as f:
-                saved = json.load(f)
-                if saved and isinstance(saved, list): selected_phrases = saved
-        except Exception as e:
-            logger.warning(f"Failed to load catchphrases: {e}")
+    # 1. catchphrase_fallbacks.py의 상수 리스트 사용 (가장 고퀄리티/안정적)
+    for game in games_involved:
+        if game == "LoL":
+            selected_phrases.extend(LOL_CATCHPHRASES)
+        elif game == "Valorant":
+            selected_phrases.extend(VALORANT_CATCHPHRASES)
+
+    # 2. JSON 파일 로드 (보조용 또는 동적 업데이트용)
+    if not selected_phrases:
+        is_v2_path = catchphrases_file.endswith("_v2.json")
+        catchphrases_v2_file = catchphrases_file if is_v2_path else catchphrases_file.replace(".json", "_v2.json")
+        catchphrases_v1_file = catchphrases_file.replace("_v2.json", ".json") if is_v2_path else catchphrases_file
+        
+        if os.path.exists(catchphrases_v2_file):
+            try:
+                with open(catchphrases_v2_file, 'r', encoding='utf-8') as f:
+                    saved_v2 = json.load(f)
+                    for game in games_involved:
+                        if game in saved_v2 and saved_v2[game]:
+                            selected_phrases.extend(saved_v2[game])
+            except Exception as e:
+                logger.warning(f"Failed to load catchphrases_v2: {e}")
+                
+        if not selected_phrases and os.path.exists(catchphrases_v1_file):
+            try:
+                with open(catchphrases_v1_file, 'r', encoding='utf-8') as f:
+                    saved = json.load(f)
+                    if saved and isinstance(saved, list): selected_phrases = saved
+            except Exception as e:
+                logger.warning(f"Failed to load catchphrases: {e}")
             
     selected_phrases = _filter_catchphrases(selected_phrases)
     if not selected_phrases:
-        selected_phrases = _fallback_phrases_for_matches(matches_to_notify) or default_list
+        selected_phrases = _fallback_phrases_for_matches(matches_to_notify) or [
+            "야, 놓치지 마! 🔥", "지금 바로 입장! 🏃‍♂️", "치킨 준비됐나? 🍗", "이번 세트 대박! 🎮"
+        ]
 
-    state_path = os.path.join(os.path.dirname(__file__), "../../data/catchphrase_rotation_state.json")
+    # 상태 파일 경로 (backend/data 폴더로 고정, PathLib 사용)
+    current_dir = Path(__file__).resolve().parent
+    state_path = current_dir.parent.parent / "data" / "catchphrase_rotation_state.json"
+    
     rotation_key = (
         "catchphrases:" + "|".join(sorted(games_involved))
         if games_involved
@@ -360,7 +402,7 @@ async def check_upcoming_matches(db: Session, catchphrases_file: str, window_min
         lines.append(f"🏆 <b>{match.league_tag}</b> | {event_time_str}\n   {match_name}\n")
         
         # 알림 완료 기록 (UTC 통일!)
-        match.notified_at = datetime.utcnow()
+        match.notified_at = utcnow()
     
     msg = "\n".join(lines)
     try:

@@ -36,6 +36,8 @@ backend/__pycache__/
 backend/crontab.bak
 backend/backups/
 backend/storage/backups/
+data_backup_reference/*
+!data_backup_reference/README.md
 *.db
 *.db-shm
 *.db-wal

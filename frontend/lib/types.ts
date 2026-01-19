@@ -11,6 +11,10 @@ export enum AssetCategory {
     STOCK_KR = '국내주식',
     STOCK_US = '해외주식',
     REAL_ESTATE = '부동산',
+    CRYPTO = '가상자산',
+    PENSION = '연금/IRP',
+    GOLD = '금/원자재',
+    LOAN = '부채',
     OTHER = '기타'
 }
 
@@ -32,6 +36,7 @@ export interface Asset {
     indexGroup?: string;
     /** 발행어음/CMA 세후 이자 자동 계산 설정 (선택) */
     cmaConfig?: CmaConfig;
+    tags?: string;
 }
 
 // --- Trade & FX ---

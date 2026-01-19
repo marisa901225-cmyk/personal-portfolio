@@ -4,16 +4,32 @@ import { Loader2, BarChart2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
+import { BackendReportResponse, BackendAiReportTextResponse } from '@/shared/api/client/types';
+
+interface DisplayReport {
+    isNew?: boolean;
+    periodLabel: string;
+    generatedAt?: string;
+    model?: string | null;
+    report: string;
+}
+
 interface ReportViewProps {
-    displayReport: any;
+    displayReport: DisplayReport | null;
     isLoading: boolean;
     isGeneralLoading: boolean;
-    generalReport: any;
-    generalPeriod: any;
+    generalReport: BackendReportResponse | null;
+    generalPeriod: BackendAiReportTextResponse['period'] | null;
     generalError: string | null;
 }
 
-const formatPeriodLabel = (report: any) => {
+const formatPeriodLabel = (report: {
+    period_year?: number;
+    period_month?: number | null;
+    period_quarter?: number | null;
+    period_half?: number | null;
+    period?: { year: number; month?: number | null; quarter?: number | null; half?: number | null }
+}) => {
     const year = report.period_year ?? report.period?.year;
     const month = report.period_month ?? report.period?.month;
     const quarter = report.period_quarter ?? report.period?.quarter;

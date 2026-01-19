@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..core.auth import verify_api_token
 from ..core.db import get_db
 from ..core.models import SpamRule
+from ..core.time_utils import utcnow
 
 router = APIRouter(
     prefix="/api/spam-rules",
@@ -54,7 +55,7 @@ def create_spam_rule(rule: SpamRuleCreate, db: Session = Depends(get_db)):
         category=rule.category,
         note=rule.note,
         is_enabled=True,
-        created_at=datetime.utcnow()
+        created_at=utcnow()
     )
     db.add(new_rule)
     db.commit()

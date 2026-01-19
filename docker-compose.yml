@@ -48,7 +48,7 @@ services:
       - ./backend/data:/app/backend/data
       - ./backend/logs:/app/backend/logs
       - ./backend/.env:/app/backend/.env
-      - /home/dlckdgn/KIS/config:/root/KIS/config
+      - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
     environment:
       - PYTHONUNBUFFERED=1
@@ -73,7 +73,7 @@ services:
       - ./backend/data:/app/backend/data
       - ./backend/logs:/app/backend/logs
       - ./backend/.env:/app/backend/.env
-      - /home/dlckdgn/KIS/config:/root/KIS/config
+      - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
     command: uvicorn backend.alarm_collector:app --host 0.0.0.0 --port 8001
     environment:
       - PYTHONUNBUFFERED=1
@@ -94,9 +94,10 @@ services:
       - ./backend/data:/app/backend/data
       - ./backend/logs:/app/backend/logs
       - ./backend/.env:/app/backend/.env
-      - /home/dlckdgn/KIS/config:/root/KIS/config
-    command: python backend/scripts/run_news_scheduler.py
+      - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
+    command: python -m backend.scripts.runners.run_tasks --task news
     environment:
+      - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
       - LLM_BASE_URL=http://llama-server:8080
       - LLM_REMOTE_DEFAULT_MODEL=EXAONE-4.0-1.2B-Q8_0.gguf
@@ -115,9 +116,10 @@ services:
       - ./backend/data:/app/backend/data
       - ./backend/logs:/app/backend/logs
       - ./backend/.env:/app/backend/.env
-      - /home/dlckdgn/KIS/config:/root/KIS/config
-    command: python backend/scripts/run_sync_prices_scheduler.py
+      - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
+    command: python -m backend.scripts.runners.run_sync_prices_scheduler
     environment:
+      - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
       - BACKEND_URL=http://backend-api:8000
       - LLM_BASE_URL=http://llama-server:8080
@@ -125,5 +127,7 @@ services:
       - AI_REPORT_TIMEOUT_SEC=900
       - LLM_REMOTE_DEFAULT_MODEL=EXAONE-4.0-1.2B-Q8_0.gguf
       - TZ=Asia/Seoul
+    env_file:
+      - ./backend/.env
     depends_on:
       - llama-server

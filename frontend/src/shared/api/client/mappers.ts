@@ -5,7 +5,7 @@
 import type { Asset, TradeRecord, FxTransactionRecord } from '@lib/types';
 import type { BackendAsset, BackendTrade, BackendFxTransaction } from './types';
 
-const safeNum = (val: any) => {
+const safeNum = (val: unknown): number => {
     const n = Number(val);
     return Number.isFinite(n) ? n : 0;
 };
@@ -30,6 +30,7 @@ export const mapBackendAssetToFrontend = (backend: BackendAsset): Asset => ({
             startDate: backend.cma_config.start_date,
         }
         : undefined,
+    tags: backend.tags ?? undefined,
 });
 
 export const mapBackendTradesToFrontend = (

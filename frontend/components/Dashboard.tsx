@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Asset, AssetCategory, PortfolioSummary, TargetIndexAllocation, DividendEntry } from '../lib/types';
-import { COLORS, REAL_ESTATE_SHARE_RATIO } from '@/shared/portfolio';
+import { COLORS, REAL_ESTATE_SHARE_RATIO, getCategoryLabel } from '@/shared/portfolio';
 import { DashboardSummary } from './DashboardSummary';
 import { DashboardCharts } from './DashboardCharts';
 import { BrokerageSync } from './BrokerageSync';
@@ -95,7 +95,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const invUnrealizedProfitTotal = invTotalValue - invTotalInvested;
 
     const invCategoryDistribution = Array.from(invCatMap.entries()).map(([name, value], index) => ({
-      name,
+      name: getCategoryLabel(name),
       value,
       color: COLORS[index % COLORS.length]
     })).sort((a, b) => b.value - a.value);
@@ -135,7 +135,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     if (backendSummary) {
       const categoryDistribution = backendSummary.category_distribution
         .map((item, index) => ({
-          name: item.name,
+          name: getCategoryLabel(item.name),
           value: item.value,
           color: COLORS[index % COLORS.length],
         }))
@@ -212,7 +212,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const unrealizedProfitTotal = totalValue - totalInvested;
 
       const categoryDistribution = Array.from(catMap.entries()).map(([name, value], index) => ({
-        name,
+        name: getCategoryLabel(name),
         value,
         color: COLORS[index % COLORS.length],
       })).sort((a, b) => b.value - a.value);

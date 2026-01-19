@@ -1,6 +1,6 @@
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
-import { ApiClient, BackendAiReportTextResponse, BackendSavedAiReport, BackendReportResponse } from '@/shared/api/client';
+import { ApiClient, BackendAiReportTextResponse, BackendSavedAiReport, BackendReportResponse, AiReportMeta } from '@/shared/api/client';
 import { getUserErrorMessage } from '@/shared/errors';
 
 interface UseAiReportProps {
@@ -92,7 +92,7 @@ export const useAiReport = ({ serverUrl, apiToken }: UseAiReportProps) => {
 
         try {
             let fullText = '';
-            let meta: any = null;
+            let meta: AiReportMeta | null = null;
 
             await apiClient.fetchAiReportTextStream(
                 { query, maxTokens },
@@ -116,7 +116,7 @@ export const useAiReport = ({ serverUrl, apiToken }: UseAiReportProps) => {
 
             if (!meta) throw new Error('AI 리포트 메타데이터를 받지 못했습니다.');
 
-            const result: BackendAiReportTextResponse = { ...meta, report: fullText };
+            const result: BackendAiReportTextResponse = { ...(meta as AiReportMeta), report: fullText };
             setCurrentResult(result);
             setStreamedReport('');
             setStreamMeta(null);

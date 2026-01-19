@@ -34,6 +34,7 @@ class AssetBase(BaseModel):
     realized_profit: float = 0.0
     index_group: Optional[str] = None
     cma_config: Optional[CmaConfig] = None
+    tags: Optional[str] = None
 
 
 class AssetCreate(AssetBase):
@@ -51,6 +52,7 @@ class AssetUpdate(BaseModel):
     realized_profit: Optional[float] = None
     index_group: Optional[str] = None
     cma_config: Optional[CmaConfig] = None
+    tags: Optional[str] = None
 
 
 class AssetCalibration(BaseModel):
@@ -411,3 +413,16 @@ class ExpenseRead(ExpenseBase):
     deleted_at: Optional[datetime] = None
     review_reason: Optional[str] = None
     review_suggested_category: Optional[str] = None
+
+# ========== Scheduler (스케줄러 상태) ==========
+
+class SchedulerStateRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    job_id: str
+    status: str
+    last_run_at: Optional[datetime] = None
+    last_success_at: Optional[datetime] = None
+    last_failure_at: Optional[datetime] = None
+    message: Optional[str] = None
+    updated_at: datetime

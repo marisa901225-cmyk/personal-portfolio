@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,6 +9,7 @@ from ..core.auth import verify_api_token
 from ..core.db import get_db
 from ..core.models import Trade, Asset
 from ..core.schemas import TradeRead, TradeCreate, TradeUpdate
+from ..core.time_utils import utcnow
 from ..services.portfolio import to_trade_read
 from ..services.users import get_or_create_single_user
 
@@ -71,7 +71,7 @@ def create_trade(item: TradeCreate, db: Session = Depends(get_db)):
         type=item.type,
         quantity=item.quantity,
         price=item.price,
-        timestamp=item.timestamp or datetime.utcnow(),
+        timestamp=item.timestamp or utcnow(),
         note=item.note
     )
     db.add(db_item)

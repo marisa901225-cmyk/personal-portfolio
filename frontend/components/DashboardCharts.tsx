@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { PortfolioSummary } from '../lib/types';
+import { ChartTooltipProps, ChartPayloadEntry } from '@/shared/api/client/types';
 import { formatCurrency } from '@/shared/portfolio';
 import {
     PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area,
@@ -7,6 +8,7 @@ import {
 } from 'recharts';
 import { TrendingUp, TrendingDown, AlertTriangle, PieChart as PieIcon, LineChart as LineIcon, BarChart3, ArrowUp, ArrowDown, Wallet } from 'lucide-react';
 import { usePortfolioCalculations } from '../src/hooks/usePortfolioCalculations';
+import { getCategoryLabel } from '@/shared/portfolio';
 
 interface DashboardChartsProps {
     summary: PortfolioSummary;
@@ -32,7 +34,7 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
     actualInvested,
 }) => {
     const {
-        profitStats: { totalProfit, profitRate, isPositive },
+        profitStats: { profitRate, isPositive },
         historyStats,
         benchmarkDiff,
         showRealEstate
@@ -44,23 +46,23 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
 
     const benchmarkLabel = useMemo(() => {
         const base = benchmarkName?.trim()
-            ? `시장 (${benchmarkName.trim()}) 대비`
+            ? `시장(${benchmarkName.trim()}) 대비`
             : '시장 대비';
         return (summary.xirr_rate !== undefined && summary.xirr_rate !== null)
             ? `${base} (XIRR)`
             : base;
     }, [benchmarkName, summary.xirr_rate]);
 
-    const CustomTooltip = ({ active, payload, label }: any) => {
+    const CustomTooltip = ({ active, payload, label }: ChartTooltipProps) => {
         if (active && payload && payload.length) {
             return (
                 <div className="bg-slate-900/90 backdrop-blur-md p-3 rounded-xl border border-white/10 shadow-xl text-xs text-white z-50">
                     <p className="font-semibold mb-2 text-slate-300">{label}</p>
-                    {payload.map((entry: any, index: number) => (
+                    {payload.map((entry: ChartPayloadEntry, index: number) => (
                         <div key={index} className="flex items-center gap-3 mb-1 justify-between min-w-[120px]">
                             <div className="flex items-center gap-1.5">
                                 <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: entry.color }} />
-                                <span className="opacity-80">{entry.name}</span>
+                                <span className="opacity-80">{getCategoryLabel(entry.name)}</span>
                             </div>
                             <span className="font-bold font-mono">
                                 {formatCurrency(entry.value)}
@@ -138,7 +140,7 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
                             </div>
 
                             <div className="flex flex-col items-center">
-                                <span className="text-[10px] text-slate-400 font-bold tracking-widest">순자산</span>
+                                <span className="text-[10px] text-slate-400 font-bold tracking-widest">총 자산</span>
                                 <span className="text-2xl font-bold text-slate-900 tabular-nums tracking-tighter">
                                     {formatCurrency(summary.totalValue)}
                                 </span>

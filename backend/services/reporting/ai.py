@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ...core.models import Asset, ExternalCashflow
 from ...core.schemas import ReportAiResponse, ReportAiTextResponse, ReportPeriod, TopAssetSummary
+from ...core.time_utils import utcnow
 from ...services.portfolio import calculate_summary
 from .core import aggregate_activity, build_monthly_summaries, get_user
 from .expenses import merge_expense_summaries
@@ -21,35 +22,32 @@ AI_REPORT_SYSTEM_PROMPT = load_prompt("ai_report")
 
 
 
+from ...core.config import settings
+
 def get_ai_config(
     period: ReportPeriod,
     model: str | None = None,
     max_tokens: int | None = None,
 ) -> tuple[str, str, str, int, float]:
     """
-    AI API 설정을 환경변수에서 가져온다.
-
-    Returns:
-        (base_url, api_key, model, max_tokens, temperature)
-
-    Raises:
-        ValueError: API 키가 설정되지 않은 경우
+    AI API 설정을 중앙 settings에서 가져온다.
     """
-    base_url = os.getenv("AI_REPORT_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-    api_key = os.getenv("AI_REPORT_API_KEY")
-    default_model = os.getenv("AI_REPORT_MODEL", "gpt-5.2")
-    yearly_model = os.getenv("AI_REPORT_MODEL_YEARLY", "gpt-5.2-pro")
-    temperature = float(os.getenv("AI_REPORT_TEMPERATURE", "0.3"))
-    default_tokens = int(os.getenv("AI_REPORT_MAX_TOKENS", "8000"))
-
-    if not api_key:
+    if not settings.ai_report_api_key:
         raise ValueError("AI_REPORT_API_KEY is not configured")
 
     selected_model = model or (
-        yearly_model if period.month is None and period.quarter is None and period.half is None else default_model
+        settings.ai_report_model_yearly if period.month is None and period.quarter is None and period.half is None 
+        else settings.ai_report_model
     )
-    selected_tokens = max_tokens or default_tokens
-    return base_url, api_key, selected_model, selected_tokens, temperature
+    selected_tokens = max_tokens or settings.ai_report_max_tokens
+    
+    return (
+        settings.ai_report_base_url, 
+        settings.ai_report_api_key, 
+        selected_model, 
+        selected_tokens, 
+        settings.ai_report_temperature
+    )
 
 
 def format_sse(event: str, data: str) -> str:
@@ -176,7 +174,7 @@ async def generate_ai_report_text(
     report_text = data["choices"][0]["message"]["content"].strip()
 
     return ReportAiTextResponse(
-        generated_at=datetime.utcnow(),
+        generated_at=utcnow(),
         period=period,
         report=report_text,
         model=selected_model,
@@ -191,7 +189,7 @@ async def generate_ai_report_stream(
 ) -> AsyncGenerator[str, None]:
     """AI API 호출 (Streaming)."""
     base_url, api_key, selected_model, selected_tokens, temperature = get_ai_config(period, model, max_tokens)
-    generated_at = datetime.utcnow()
+    generated_at = utcnow()
 
     # Meta 정보 먼저 전달
     meta_payload = json.dumps(
@@ -279,7 +277,7 @@ def get_ai_report_metrics(
     if not user:
         summary = calculate_summary([], [])
         return ReportAiResponse(
-            generated_at=datetime.utcnow(),
+            generated_at=utcnow(),
             period=period,
             summary=summary,
             activity=activity,
@@ -346,7 +344,7 @@ def get_ai_report_metrics(
     top_assets.sort(key=lambda item: item.value, reverse=True)
 
     return ReportAiResponse(
-        generated_at=datetime.utcnow(),
+        generated_at=utcnow(),
         period=period,
         summary=summary,
         activity=activity,

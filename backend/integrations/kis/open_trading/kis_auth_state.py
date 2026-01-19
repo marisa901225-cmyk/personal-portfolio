@@ -8,6 +8,8 @@ from datetime import datetime
 
 import yaml
 
+from backend.core.config import settings
+
 try:
     import fcntl
 except Exception:
@@ -21,9 +23,6 @@ token_tmp = os.path.join(config_root, f"KIS{datetime.today().strftime('%Y%m%d')}
 token_lock = os.path.join(config_root, "KIS.token.lock")
 
 os.makedirs(config_root, exist_ok=True)
-if not os.path.exists(token_tmp):
-    with open(token_tmp, "w+", encoding="utf-8"):
-        pass
 
 
 @contextmanager
@@ -39,30 +38,6 @@ def _token_file_lock():
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
-_ENV_MAP = {
-    "my_app": "KIS_MY_APP",
-    "my_sec": "KIS_MY_SEC",
-    "my_acct_stock": "KIS_MY_ACCT_STOCK",
-    "my_prod": "KIS_MY_PROD",
-    "my_htsid": "KIS_MY_HTSID",
-    "prod": "KIS_PROD",
-    "ops": "KIS_OPS",
-    "vps": "KIS_VPS",
-    "vops": "KIS_VOPS",
-    "my_agent": "KIS_MY_AGENT",
-    "my_token": "KIS_MY_TOKEN",
-}
-
-
-def _load_cfg_from_env() -> dict:
-    cfg = {}
-    for key, env_key in _ENV_MAP.items():
-        value = os.getenv(env_key)
-        if value is not None and str(value).strip() != "":
-            cfg[key] = value.strip()
-    return cfg
-
-
 def _load_cfg_from_file() -> dict:
     path = os.path.join(config_root, "kis_user.yaml")
     if not os.path.exists(path):
@@ -72,10 +47,43 @@ def _load_cfg_from_file() -> dict:
 
 
 def _load_cfg() -> dict:
+    # 1. Start with file config (if exists)
     cfg = _load_cfg_from_file()
-    env_cfg = _load_cfg_from_env()
+    
+    # 2. Overwrite with Settings (centered environment variables)
+    # Using getattr to be safe, but settings object should have these
+    settings_cfg = {
+        "my_app": settings.kis_my_app,
+        "my_sec": settings.kis_my_sec,
+        "my_acct_stock": settings.kis_my_acct_stock,
+        "my_prod": settings.kis_my_prod,
+        "my_htsid": settings.kis_my_htsid,
+        "prod": settings.kis_prod,
+        "ops": settings.kis_ops,
+        "vps": settings.kis_vps,
+        "vops": settings.kis_vops,
+        "my_agent": settings.kis_my_agent,
+        "my_token": settings.kis_my_token,
+    }
+    
+    # Filter out None and empty strings
+    env_cfg = {k: v for k, v in settings_cfg.items() if v is not None and str(v).strip() != ""}
+    
     if env_cfg:
         cfg.update(env_cfg)
+
+    # Ensure mandatory keys have at least default values to avoid KeyErrors
+    defaults = {
+        "my_prod": "01",
+        "prod": "https://openapi.koreainvestment.com:9443",
+        "vps": "https://openapivts.koreainvestment.com:29443",
+        "ops": "ws://ops.koreainvestment.com:21000",
+        "vops": "ws://ops.koreainvestment.com:31000",
+    }
+    for k, v in defaults.items():
+        if k not in cfg:
+            cfg[k] = v
+            
     return cfg
 
 

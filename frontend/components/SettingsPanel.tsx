@@ -15,18 +15,16 @@ interface SettingsPanelProps {
 }
 
 interface TabButtonProps {
-  tab: SettingsTab;
-  icon: any;
+  icon: React.ComponentType<{ size?: number | string }>;
   label: string;
   isActive: boolean;
   onClick: () => void;
 }
 
-const TabButton: React.FC<TabButtonProps> = ({ tab, icon: Icon, label, isActive, onClick }) => (
+const TabButton: React.FC<TabButtonProps> = ({ icon: Icon, label, isActive, onClick }) => (
   <button
     type="button"
     onClick={onClick}
-    data-tab={tab}
     className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium rounded-xl transition-all ${isActive
       ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200'
       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -229,14 +227,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       {/* 탭 버튼 */}
       <div className="flex gap-2 mb-6">
         <TabButton
-          tab="server"
           icon={Server}
           label="서버 연결"
           isActive={activeTab === 'server'}
           onClick={() => setActiveTab('server')}
         />
         <TabButton
-          tab="portfolio"
           icon={Sliders}
           label="포트폴리오 & 외관"
           isActive={activeTab === 'portfolio'}

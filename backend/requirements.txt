@@ -11,8 +11,11 @@ pandas
 SQLAlchemy>=2.0
 duckdb>=1.0.0
 joblib
+pydantic==2.10.4
+pydantic-settings==2.7.0
 python-multipart
 APScheduler==3.10.4
 simhash==2.1.2
 beautifulsoup4==4.12.2
 feedparser==6.0.10
+tenacity==9.0.0

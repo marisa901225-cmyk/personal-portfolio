@@ -6,7 +6,7 @@ import { CmaConfig, calculateCmaBalance } from '@/shared/portfolio';
 interface UseAssetEditFormProps {
     asset: Asset | null;
     isOpen: boolean;
-    onUpdateAsset: (id: string, updates: any) => void;
+    onUpdateAsset: (id: string, updates: Partial<Asset>) => void | Promise<void>;
     onUpdateCash: (id: string, newBalance: number, cmaConfig?: CmaConfig | null) => void | Promise<void>;
     onClose: () => void;
 }
@@ -92,7 +92,7 @@ export const useAssetEditForm = ({
         return null;
     })();
 
-    const handleSave = () => {
+    const handleSave = async () => {
         if (!asset) return;
         const trimmedName = assetName.trim();
         if (!trimmedName) {
@@ -104,89 +104,94 @@ export const useAssetEditForm = ({
         const isCash = asset.category === AssetCategory.CASH;
         const isRealEstate = asset.category === AssetCategory.REAL_ESTATE;
 
-        if (isCash || isRealEstate) {
-            const trimmed = inputValue.replace(/,/g, '').trim();
-            const value = Number(trimmed);
-            if (!Number.isFinite(value) || value < 0) {
-                alert('올바른 금액을 입력해주세요.');
-                return;
-            }
-
-            let nextCmaConfig: CmaConfig | null = null;
-            if (isCash && isCmaEnabled && value > 0) {
-                const rate = Number(annualRate || '0');
-                const tax = Number(taxRate || '0');
-                if (!Number.isFinite(rate) || rate <= 0) {
-                    alert('연 이자율(%)을 올바르게 입력해주세요.');
+        try {
+            if (isCash || isRealEstate) {
+                const trimmed = inputValue.replace(/,/g, '').trim();
+                const value = Number(trimmed);
+                if (!Number.isFinite(value) || value < 0) {
+                    alert('올바른 금액을 입력해주세요.');
                     return;
                 }
-                const start = startDate || formatDate(new Date());
-                nextCmaConfig = {
-                    principal: value,
-                    annualRate: rate,
-                    taxRate: Number.isFinite(tax) && tax >= 0 ? tax : 15.4,
-                    startDate: start,
-                };
-            }
 
-            onUpdateCash(asset.id, value, nextCmaConfig);
-            if (nameChanged) {
-                onUpdateAsset(asset.id, { name: trimmedName });
-            }
-        } else {
-            const trimmed = inputValue.trim();
-            const updates: any = {};
+                let nextCmaConfig: CmaConfig | null = null;
+                if (isCash && isCmaEnabled && value > 0) {
+                    const rate = Number(annualRate || '0');
+                    const tax = Number(taxRate || '0');
+                    if (!Number.isFinite(rate) || rate <= 0) {
+                        alert('연 이자율(%)을 올바르게 입력해주세요.');
+                        return;
+                    }
+                    const start = startDate || formatDate(new Date());
+                    nextCmaConfig = {
+                        principal: value,
+                        annualRate: rate,
+                        taxRate: Number.isFinite(tax) && tax >= 0 ? tax : 15.4,
+                        startDate: start,
+                    };
+                }
 
-            if (nameChanged) updates.name = trimmedName;
-            if (trimmed !== (asset.ticker || '')) updates.ticker = trimmed || undefined;
-            if (indexGroup !== (asset.indexGroup || '')) updates.indexGroup = indexGroup || undefined;
-            if (category !== asset.category) updates.category = category;
+                await onUpdateCash(asset.id, value, nextCmaConfig);
+                if (nameChanged) {
+                    await onUpdateAsset(asset.id, { name: trimmedName });
+                }
+            } else {
+                const trimmed = inputValue.trim();
+                const updates: Partial<Asset> = {};
 
-            const amountTrimmed = amountInput.trim();
-            if (!amountTrimmed) {
-                alert('보유 수량을 입력해주세요.');
-                return;
-            }
-            const amountValue = Number(amountTrimmed);
-            if (!Number.isFinite(amountValue) || amountValue < 0) {
-                alert('보유 수량을 올바르게 입력해주세요.');
-                return;
-            }
-            if (amountValue !== asset.amount) updates.amount = amountValue;
+                if (nameChanged) updates.name = trimmedName;
+                if (trimmed !== (asset.ticker || '')) updates.ticker = trimmed || undefined;
+                if (indexGroup !== (asset.indexGroup || '')) updates.indexGroup = indexGroup || undefined;
+                if (category !== asset.category) updates.category = category;
 
-            const purchaseTrimmed = purchasePriceInput.trim();
-            if (purchaseTrimmed !== '') {
-                const purchaseValue = Number(purchaseTrimmed);
-                if (!Number.isFinite(purchaseValue) || purchaseValue < 0) {
-                    alert('매수 평균가를 올바르게 입력해주세요.');
+                const amountTrimmed = amountInput.trim();
+                if (!amountTrimmed) {
+                    alert('보유 수량을 입력해주세요.');
                     return;
                 }
-                if ((asset.purchasePrice ?? undefined) !== purchaseValue) {
-                    updates.purchasePrice = purchaseValue;
-                }
-            }
-
-            if (category === AssetCategory.OTHER) {
-                const currentTrimmed = currentPriceInput.trim();
-                if (currentTrimmed === '') {
-                    alert('현재 단가를 입력해주세요.');
+                const amountValue = Number(amountTrimmed);
+                if (!Number.isFinite(amountValue) || amountValue < 0) {
+                    alert('보유 수량을 올바르게 입력해주세요.');
                     return;
                 }
-                const currentValue = Number(currentTrimmed);
-                if (!Number.isFinite(currentValue) || currentValue < 0) {
-                    alert('현재 단가를 올바르게 입력해주세요.');
-                    return;
-                }
-                if (currentValue !== asset.currentPrice) {
-                    updates.currentPrice = currentValue;
-                }
-            }
+                if (amountValue !== asset.amount) updates.amount = amountValue;
 
-            if (Object.keys(updates).length > 0) {
-                onUpdateAsset(asset.id, updates);
+                const purchaseTrimmed = purchasePriceInput.trim();
+                if (purchaseTrimmed !== '') {
+                    const purchaseValue = Number(purchaseTrimmed);
+                    if (!Number.isFinite(purchaseValue) || purchaseValue < 0) {
+                        alert('매수 평균가를 올바르게 입력해주세요.');
+                        return;
+                    }
+                    if ((asset.purchasePrice ?? undefined) !== purchaseValue) {
+                        updates.purchasePrice = purchaseValue;
+                    }
+                }
+
+                if (category === AssetCategory.OTHER) {
+                    const currentTrimmed = currentPriceInput.trim();
+                    if (currentTrimmed === '') {
+                        alert('현재 단가를 입력해주세요.');
+                        return;
+                    }
+                    const currentValue = Number(currentTrimmed);
+                    if (!Number.isFinite(currentValue) || currentValue < 0) {
+                        alert('현재 단가를 올바르게 입력해주세요.');
+                        return;
+                    }
+                    if (currentValue !== asset.currentPrice) {
+                        updates.currentPrice = currentValue;
+                    }
+                }
+
+                if (Object.keys(updates).length > 0) {
+                    await onUpdateAsset(asset.id, updates);
+                }
             }
+            onClose();
+        } catch (err: unknown) {
+            console.error('Save asset failed:', err);
+            alert('자산 저장 중 오류가 발생했습니다: ' + (err instanceof Error ? err.message : String(err)));
         }
-        onClose();
     };
 
     return {

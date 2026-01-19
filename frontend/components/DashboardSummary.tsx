@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { PortfolioSummary, DividendEntry } from '../lib/types';
 import { formatCurrency } from '@/shared/portfolio';
 import { BarChart, Bar, ResponsiveContainer } from 'recharts';
@@ -303,7 +303,7 @@ export const DashboardSummary: React.FC<DashboardSummaryProps> = ({
                             {distributionData.categories.map((item, idx) => (
                                 <div key={idx} className="flex items-center justify-between p-1.5 hover:bg-slate-50 rounded-lg transition-colors">
                                     <div className="flex items-center gap-2 min-w-0">
-                                        <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: (item as any).color || '#cbd5e1' }} />
+                                        <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: item.color || '#cbd5e1' }} />
                                         <span className="text-[11px] font-bold text-slate-500 truncate">{item.name}</span>
                                     </div>
                                     <span className="text-[11px] font-bold text-slate-800 tabular-nums">

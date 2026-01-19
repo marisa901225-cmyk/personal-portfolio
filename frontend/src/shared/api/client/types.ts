@@ -39,8 +39,103 @@ export interface BackendAsset {
     realized_profit: number;
     index_group?: string | null;
     cma_config?: BackendCmaConfig | null;
+    tags?: string | null;
     created_at: string;
     updated_at: string;
+}
+
+export interface AssetCreate {
+    name: string;
+    ticker?: string | null;
+    category: string;
+    currency: 'KRW' | 'USD';
+    amount?: number;
+    current_price?: number;
+    purchase_price?: number | null;
+    realized_profit?: number;
+    index_group?: string | null;
+}
+
+export interface AssetUpdate {
+    name?: string;
+    ticker?: string | null;
+    category?: string;
+    currency?: 'KRW' | 'USD';
+    amount?: number;
+    current_price?: number;
+    purchase_price?: number | null;
+    realized_profit?: number;
+    index_group?: string | null;
+}
+
+export interface AssetCalibration {
+    actual_amount: number;
+    actual_avg_price: number;
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Memories
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export type MemoryCategory = 'profile' | 'preference' | 'project' | 'fact' | 'general';
+
+export interface MemoryCreate {
+    content: string;
+    category?: MemoryCategory;
+    key?: string | null;
+    importance?: number;
+    ttl_days?: number;
+}
+
+export interface MemoryUpdate {
+    content?: string;
+    category?: MemoryCategory;
+    key?: string | null;
+    importance?: number;
+    ttl_days?: number;
+}
+
+export interface MemoryResponse {
+    id: number;
+    content: string;
+    category: MemoryCategory;
+    key: string | null;
+    importance: number;
+    expires_at: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface MemorySearchRequest {
+    query?: string;
+    category?: MemoryCategory;
+    min_importance?: number;
+    limit?: number;
+}
+
+export interface BackendAssetUpdatePayload {
+    name?: string;
+    ticker?: string | null;
+    category?: string;
+    amount?: number;
+    purchase_price?: number | null;
+    current_price?: number;
+    realized_profit?: number;
+    index_group?: string | null;
+    cma_config?: BackendCmaConfig | null;
+}
+
+export interface BackendAssetCreatePayload {
+    name: string;
+    ticker?: string | null;
+    category: string;
+    currency: 'KRW' | 'USD';
+    amount: number;
+    current_price: number;
+    purchase_price?: number | null;
+    realized_profit?: number;
+    index_group?: string | null;
+    cma_config?: BackendCmaConfig | null;
 }
 
 export interface BackendRestoreAsset {
@@ -284,4 +379,34 @@ export interface BackendNewsSearchResponse {
     query: string;
     count: number;
     articles: BackendNewsArticle[];
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// UI & Charts
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+export interface ChartPayloadEntry {
+    name: string;
+    value: number;
+    payload: any; // Recharts internal, usually okay to leave any or use Record
+    color?: string;
+}
+
+export interface ChartTooltipProps {
+    active?: boolean;
+    payload?: ChartPayloadEntry[];
+    label?: string;
+}
+
+export interface AiReportMeta {
+    generated_at: string;
+    period: {
+        year: number;
+        month?: number | null;
+        quarter?: number | null;
+        half?: number | null;
+        start_date: string;
+        end_date: string;
+    };
+    model?: string | null;
 }

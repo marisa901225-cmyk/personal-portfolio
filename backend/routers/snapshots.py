@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import List
 
 from fastapi import APIRouter, Depends, Query
@@ -10,6 +10,7 @@ from ..core.auth import verify_api_token
 from ..core.db import get_db
 from ..core.models import Asset, ExternalCashflow, PortfolioSnapshot
 from ..core.schemas import PortfolioSnapshotRead
+from ..core.time_utils import utcnow
 from ..services.portfolio import calculate_summary, to_snapshot_read
 from ..services.users import get_or_create_single_user
 
@@ -35,7 +36,7 @@ def create_portfolio_snapshot(db: Session = Depends(get_db)) -> PortfolioSnapsho
         .all()
     )
     summary = calculate_summary(assets, external_cashflows)
-    now = datetime.utcnow()
+    now = utcnow()
 
     snapshot = PortfolioSnapshot(
         user_id=user.id,
@@ -68,7 +69,7 @@ def get_portfolio_snapshots(
     - 프론트 히스토리 차트에서 사용.
     """
     user = get_or_create_single_user(db)
-    since = datetime.utcnow() - timedelta(days=days)
+    since = utcnow() - timedelta(days=days)
 
     snapshots = (
         db.query(PortfolioSnapshot)

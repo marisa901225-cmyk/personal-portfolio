@@ -116,7 +116,6 @@ export const ExchangeHistory: React.FC<ExchangeHistoryProps> = ({
   useEffect(() => {
     if (!isRemoteEnabled) return;
     void handleRefresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isRemoteEnabled, filter]);
 
   const availableYears = useMemo(() => {

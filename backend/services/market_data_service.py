@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
 from typing import Dict, List, Optional
+from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log, retry_if_not_exception_type
 
 from sqlalchemy.orm import Session
 
 from ..integrations.kis import kis_client
 from ..core.models import Asset
+from ..core.time_utils import utcnow
 from ..services.users import get_or_create_single_user
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,12 @@ class EmptyResultError(MarketDataError):
     pass
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_not_exception_type((KisConfigurationError, RuntimeError)),
+    before_sleep=before_sleep_log(logger, logging.WARNING)
+)
 async def get_kis_prices_krw(
     tickers: List[str],
     db: Session,
@@ -112,7 +119,7 @@ def _sync_prices_to_assets(db: Session, prices: Dict[str, float]) -> None:
             .all()
         )
 
-        now = datetime.utcnow()
+        now = utcnow()
         for asset in assets:
             if asset.ticker and asset.ticker in prices:
                 asset.current_price = prices[asset.ticker]
@@ -147,6 +154,12 @@ async def search_tickers_by_name(query: str, limit: int = 5) -> List[Dict[str, O
         raise KisApiError(f"KIS ticker search failed: {exc}") from exc
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_not_exception_type((KisConfigurationError, RuntimeError)),
+    before_sleep=before_sleep_log(logger, logging.WARNING)
+)
 async def get_usdkrw_rate() -> float:
     """
     KIS API를 통해 USD/KRW 환율을 조회한다.

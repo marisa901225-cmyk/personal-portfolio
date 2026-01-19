@@ -6,7 +6,7 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ApiClient } from '@/shared/api/client';
-import { queryKeys } from '../queryKeys';
+
 
 /**
  * 스냅샷 생성 Mutation

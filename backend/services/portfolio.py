@@ -152,3 +152,26 @@ def calculate_summary(assets: List[Asset], external_cashflows: List[ExternalCash
         index_distribution=index_distribution,
         xirr_rate=xirr_rate,
     )
+
+
+class PortfolioService:
+    @staticmethod
+    def create_snapshot(db: Session) -> PortfolioSnapshot:
+        """
+        현재 전체 자산의 가치를 합산하여 PortfolioSnapshot을 생성합니다.
+        """
+        assets = db.query(Asset).all()
+        external_cashflows = db.query(ExternalCashflow).all()
+        summary = calculate_summary(assets, external_cashflows)
+
+        snapshot = PortfolioSnapshot(
+            total_value=summary.total_value,
+            total_invested=summary.total_invested,
+            realized_profit=summary.realized_profit_total,
+            unrealized_profit=summary.unrealized_profit_total,
+            timestamp=datetime.now()
+        )
+        db.add(snapshot)
+        db.commit()
+        db.refresh(snapshot)
+        return snapshot

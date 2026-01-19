@@ -1,8 +1,8 @@
 import logging
-from datetime import datetime
 from contextlib import contextmanager, asynccontextmanager
 from sqlalchemy.orm import Session
 from ..core.models import SchedulerState
+from ..core.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -18,18 +18,18 @@ def monitor_job(job_id: str, db: Session):
         db.add(state)
 
     state.status = "running"
-    state.last_run_at = datetime.utcnow()
+    state.last_run_at = utcnow()
     state.message = None
     db.commit()
 
     try:
         yield
         state.status = "success"
-        state.last_success_at = datetime.utcnow()
+        state.last_success_at = utcnow()
         db.commit()
     except Exception as e:
         state.status = "failure"
-        state.last_failure_at = datetime.utcnow()
+        state.last_failure_at = utcnow()
         state.message = str(e)
         db.commit()
         logger.exception("Scheduler job failed: %s", job_id)
@@ -47,18 +47,18 @@ async def monitor_job_async(job_id: str, db: Session):
         db.add(state)
 
     state.status = "running"
-    state.last_run_at = datetime.utcnow()
+    state.last_run_at = utcnow()
     state.message = None
     db.commit()
 
     try:
         yield
         state.status = "success"
-        state.last_success_at = datetime.utcnow()
+        state.last_success_at = utcnow()
         db.commit()
     except Exception as e:
         state.status = "failure"
-        state.last_failure_at = datetime.utcnow()
+        state.last_failure_at = utcnow()
         state.message = str(e)
         db.commit()
         logger.exception("Scheduler job failed: %s", job_id)

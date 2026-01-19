@@ -14,13 +14,12 @@ BACKEND_DIR_ABS = _resolve_backend_dir_abs()
 DATA_DIR_ABS = os.path.join(BACKEND_DIR_ABS, "data")
 DATA_DIR_REL = os.path.join("backend", "data")
 
+from ...core.config import settings
+
 # 경로 상수 (원격 모드 전용)
-REMOTE_MODEL_PATH_FILE = os.getenv(
-    "LLM_REMOTE_MODEL_PATH_FILE",
-    os.path.join(DATA_DIR_ABS, "llm_model_path.txt"),
-)
-REMOTE_MODEL_DIR = os.getenv("LLM_REMOTE_MODEL_DIR", "/data")
-DEFAULT_MODEL_FILENAME = os.getenv("LLM_REMOTE_DEFAULT_MODEL", "EXAONE-4.0-1.2B-Q8_0.gguf")
+REMOTE_MODEL_PATH_FILE = settings.llm_remote_model_path_file or os.path.join(DATA_DIR_ABS, "llm_model_path.txt")
+REMOTE_MODEL_DIR = settings.llm_remote_model_dir
+DEFAULT_MODEL_FILENAME = settings.llm_remote_default_model
 
 
 class Settings:
@@ -29,16 +28,16 @@ class Settings:
     """
 
     def __init__(self):
-        self.llm_base_url = (os.getenv("LLM_BASE_URL") or "").strip() or None
-        self.llm_api_key = (os.getenv("LLM_API_KEY") or "").strip() or None
-        self.llm_timeout = float(os.getenv("LLM_TIMEOUT", "120"))
+        self.llm_base_url = settings.llm_base_url
+        self.llm_api_key = settings.llm_api_key
+        self.llm_timeout = settings.llm_timeout
 
         # 유료 모델용
-        self.ai_report_base_url = os.getenv("AI_REPORT_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-        self.ai_report_api_key = (os.getenv("AI_REPORT_API_KEY") or "").strip() or None
-        self.ai_report_model = (os.getenv("AI_REPORT_MODEL", "gpt-5.2") or "gpt-5.2").strip()
-        self.ai_report_fallback_model = (os.getenv("AI_REPORT_FALLBACK_MODEL") or "gpt-5-nano").strip() or "gpt-5-nano"
-        self.ai_report_timeout_sec = float(os.getenv("AI_REPORT_TIMEOUT_SEC", "900"))
+        self.ai_report_base_url = settings.ai_report_base_url
+        self.ai_report_api_key = settings.ai_report_api_key
+        self.ai_report_model = settings.ai_report_model
+        self.ai_report_fallback_model = settings.ai_report_fallback_model
+        self.ai_report_timeout_sec = settings.ai_report_timeout_sec
 
         self.backend_dir_abs = BACKEND_DIR_ABS
         self.data_dir_abs = DATA_DIR_ABS
