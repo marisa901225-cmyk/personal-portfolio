@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 import logging
 
 from fastapi import APIRouter, Depends
@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from ..core.auth import verify_api_token
 from ..core.db import get_db
 from ..core.models import Setting
+from ..core.time_utils import utcnow
 from ..core.schemas import (
     DividendRecord,
     SettingsRead,
@@ -38,7 +39,7 @@ def _should_refresh_benchmark(setting: Setting) -> bool:
         return True
     if setting.benchmark_updated_at is None:
         return True
-    return setting.benchmark_updated_at.date() != datetime.utcnow().date()
+    return setting.benchmark_updated_at.date() != utcnow().date()
 
 
 def _refresh_benchmark_if_needed(setting: Setting, db: Session) -> None:
@@ -48,11 +49,15 @@ def _refresh_benchmark_if_needed(setting: Setting, db: Session) -> None:
         label, benchmark_return, _ = compute_calendar_year_total_return()
     except Exception as exc:
         logger.warning("Benchmark update failed: %s", exc)
-        return
+        benchmark_return = None
+        label = None
 
-    setting.benchmark_name = label
-    setting.benchmark_return = benchmark_return
-    setting.benchmark_updated_at = datetime.utcnow()
+    # 성공/실패 상관없이 updated_at 갱신 (오늘은 더 이상 시도 안 함)
+    setting.benchmark_updated_at = utcnow()
+    if label:
+        setting.benchmark_name = label
+    if benchmark_return is not None:
+        setting.benchmark_return = benchmark_return
     db.commit()
     db.refresh(setting)
 
@@ -129,9 +134,9 @@ def update_settings(
         "benchmark_name" in payload.model_fields_set
         or "benchmark_return" in payload.model_fields_set
     ):
-        setting.benchmark_updated_at = datetime.utcnow()
+        setting.benchmark_updated_at = utcnow()
 
-    setting.updated_at = datetime.utcnow()
+    setting.updated_at = utcnow()
     db.commit()
     db.refresh(setting)
 
