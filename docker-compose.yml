@@ -74,8 +74,9 @@ services:
       - ./backend/logs:/app/backend/logs
       - ./backend/.env:/app/backend/.env
       - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
-    command: uvicorn backend.alarm_collector:app --host 0.0.0.0 --port 8001
+    command: python -m backend.scripts.manage run-collector --host 0.0.0.0 --port 8001
     environment:
+      - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
       - LLM_BASE_URL=http://llama-server:8080
       - LLM_REMOTE_DEFAULT_MODEL=EXAONE-4.0-1.2B-Q8_0.gguf
@@ -95,7 +96,7 @@ services:
       - ./backend/logs:/app/backend/logs
       - ./backend/.env:/app/backend/.env
       - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
-    command: python -m backend.scripts.runners.run_tasks --task news
+    command: python -m backend.scripts.manage run-scheduler
     environment:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
@@ -117,7 +118,7 @@ services:
       - ./backend/logs:/app/backend/logs
       - ./backend/.env:/app/backend/.env
       - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
-    command: python -m backend.scripts.runners.run_sync_prices_scheduler
+    command: python -m backend.scripts.manage run-scheduler
     environment:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1

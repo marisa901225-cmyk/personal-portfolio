@@ -71,6 +71,55 @@ def _get_or_create_setting(db: Session) -> Setting:
     return setting
 
 
+import asyncio
+import threading
+
+# 비동기 갱신 작업 추적 (Stampede 방지용)
+_background_refresh_lock = threading.Lock()
+_refresh_in_progress = False
+
+
+def trigger_async_refresh() -> None:
+    """
+    백그라운드에서 KIS 토큰 갱신을 트리거한다.
+    이미 진행 중인 경우 중복 실행하지 않는다.
+    """
+    global _refresh_in_progress
+    
+    with _background_refresh_lock:
+        if _refresh_in_progress:
+            logger.debug("[KIS Token] 이미 백그라운드 갱신 진행 중")
+            return
+        _refresh_in_progress = True
+
+    def _do_refresh():
+        global _refresh_in_progress
+        try:
+            logger.info("[KIS Token] 🔄 백그라운드 토큰 갱신 시작...")
+            # KIS 인증 모듈 임포트 (Circular Import 방지)
+            from .open_trading.kis_auth_rest import auth
+            # 강제 재발급(force=True) 수행
+            auth(force=True)
+            logger.info("[KIS Token] ✅ 백그라운드 토큰 갱신 완료")
+        except Exception as exc:
+            logger.exception("[KIS Token] ❌ 백그라운드 토큰 갱신 실패: %s", exc)
+        finally:
+            with _background_refresh_lock:
+                _refresh_in_progress = False
+
+    # asyncio 루프가 있는 경우와 없는 경우 모두 대응
+    try:
+        loop = asyncio.get_running_loop()
+        # await을 하지 않고 백그라운드 태스크로 실행
+        loop.run_in_executor(None, _do_refresh)
+        logger.debug("[KIS Token] Asyncio executor를 통한 갱신 트리거")
+    except RuntimeError:
+        # 루프가 없는 경우 별도 스레드로 실행
+        thread = threading.Thread(target=_do_refresh, daemon=True)
+        thread.start()
+        logger.debug("[KIS Token] 스레드를 통한 갱신 트리거")
+
+
 def read_kis_token(db: Optional[Session] = None) -> Optional[str]:
     """
     DB에서 KIS 토큰을 읽어온다. (재시도 로직 포함)
@@ -119,13 +168,13 @@ def read_kis_token(db: Optional[Session] = None) -> Optional[str]:
                     )
                     return None
                 
-                # 갱신 필요 (2시간 미만) - 토큰은 반환하되 로그 남김
+                # 갱신 필요 (2시간 미만) - 토큰은 반환하되 백그라운드 갱신 트리거
                 if time_until_expiry <= timedelta(hours=REFRESH_WINDOW_HOURS):
                     logger.info(
-                        "[KIS Token] 🔄 갱신 권장 (expires_at=%s, 남은시간=%s)",
+                        "[KIS Token] 🔄 갱신 윈도우 진입 (expires_at=%s, 남은시간=%s). 백그라운드 갱신을 시도합니다.",
                         expires_at, time_until_expiry
                     )
-                    # TODO: 여기서 비동기 갱신 트리거 가능
+                    trigger_async_refresh()
                 
                 logger.debug("[KIS Token] 토큰 유효 (만료까지 %s 남음)", time_until_expiry)
             else:

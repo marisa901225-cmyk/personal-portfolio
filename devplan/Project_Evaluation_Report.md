@@ -8,11 +8,17 @@
 
 <!-- AUTO-OVERVIEW-START -->
 ### 🎯 프로젝트 목표 및 비전
-**프로젝트 목적:** 개인 자산/지출/뉴스/알림을 홈서버(Local-First)에서 통합 운영하고, 수집→저장→요약→브리핑 흐름을 자동화합니다.
-**핵심 목표:** (1) 자산/거래/환율을 신뢰성 있게 집계 (2) 뉴스·e스포츠 데이터를 수집/정제/요약 (3) 스케줄러/알림으로 반복 업무 자동화
-**대상 사용자:** 홈서버/개인 인프라를 운영하며, 금융·개인 데이터의 외부 유출을 최소화하고 자동화를 선호하는 사용자
-**핵심 사용 시나리오:** Web UI에서 포트폴리오/지출/요약 확인 → 백엔드가 외부 데이터(KIS/RSS/PandaScore/Naver/Google 등) 주기 수집 → SQLite/DuckDB 저장 → 필요 시 LLM으로 요약/리포트 생성 → Telegram 등으로 브리핑/알림
-**주요 엔트리포인트:** `frontend/`(Vite/React UI), `backend/main.py`(FastAPI API), `backend/scheduler.py`(뉴스/멘트 스케줄러), `backend/integrations/kis/`(KIS 연동), `docker-compose.yml`(로컬 오케스트레이션)
+**프로젝트 목적:** 개인 자산, 뉴스, 알림을 홈서버(Local-First) 환경에서 통합 관리하고, AI 기반의 자동화된 브리핑을 제공합니다.
+**핵심 목표:**
+- **자산 운영:** 한국투자증권(KIS) 연동을 통한 실시간 가치 평가 및 XIRR 수익률 분석
+- **정보 효율화:** DuckDB 기반의 고성능 뉴스 필터링 및 EXAONE LLM을 활용한 맞춤형 3줄 요약
+- **완전 자동화:** Tasker 지출 문자 자동 분류 및 e스포츠/경제 뉴스 정기 브리핑 (Telegram)
+**대상 사용자:** 금융 데이터의 프라이버시를 중시하며, 분산된 정보를 한곳에서 효율적으로 시각화하고 싶은 홈서버 운영자
+**주요 엔트리포인트:**
+- **UI:** `frontend/` (React + Vite)
+- **Server:** `backend/main.py` (FastAPI + Uvicorn)
+- **Worker:** `backend/scheduler.py` (APScheduler 기반 뉴스 수집 및 알림)
+- **Infra:** `docker-compose.yml` (Backend + Frontend + LLM Server 통합 실행)
 
 ### 🔄 실행 흐름(런타임) 다이어그램
 
@@ -20,30 +26,26 @@
 flowchart TB
     U([사용자])
 
-    subgraph FE["Frontend<br/>frontend/ (Vite/React)"]
-        FE_UI["웹 대시보드<br/>페이지/컴포넌트"]
+    subgraph App["앱/확장 실행 흐름"]
+        UI["UI (Frontend)<br/>React/Vite"]
+        API["Backend API<br/>FastAPI"]
+        Core["코어 서비스<br/>Services & Logic"]
+        LLM["AI 서빙<br/>Llama Server"]
     end
 
-    subgraph BE["Backend API<br/>backend/main.py (FastAPI)"]
-        BE_API["API 라우터<br/>backend/routers/*"]
-        BE_CORE["코어 서비스<br/>backend/services/*"]
-        BE_MW["인증/미들웨어<br/>backend/core/*"]
+    subgraph Data["데이터/인프라"]
+        DB[("DB 저장소<br/>SQLite & DuckDB")]
+        Ext[("외부 API<br/>KIS/News/Esports")]
     end
 
-    subgraph BG["백그라운드 실행"]
-        SCH["스케줄러<br/>backend/scheduler.py"]
-        JOB["수집/동기화 작업<br/>backend/scripts/*"]
-    end
+    U --> UI --> API
+    API --> Core
+    
+    Core <-->|읽기/쓰기| DB
+    Core <-->|데이터수집| Ext
+    Core <-->|추론요청| LLM
 
-    STORE[("저장소<br/>backend/storage (SQLite/DuckDB)")]
-    LLM["LLM 서버<br/>docker-compose llama-server"]
-    EXT[("외부 데이터<br/>KIS/RSS/PandaScore/Naver/Google/SteamSpy")]
-
-    U --> FE_UI -->|HTTP| BE_API --> BE_MW --> BE_CORE
-    SCH --> JOB --> BE_CORE
-    BE_CORE <-->|읽기/쓰기| STORE
-    BE_CORE <-->|요청| EXT
-    BE_CORE <-->|추론/요약| LLM
+    note["핵심 흐름: 사용자 요청 → API → 서비스 → DB/AI 처리 → 응답"]
 ```
 <!-- AUTO-OVERVIEW-END -->
 
@@ -86,22 +88,22 @@ flowchart TB
 
 ### 📊 종합 점수표 (현재)
 
-| 항목 | 점수 (100점 만점) | 등급 | 변화 | 근거 요약 |
-|---|---:|:---:|:---:|---|
-| 문서화 | 90 | 🟢 A- | ➖ | `README.md`, `사용설명서.md`, `AGENTS.md`로 실행/구성/운영 정보가 비교적 명확 |
-| 아키텍처 | 86 | 🔵 B | ⬆️ +2 | 라우터/서비스/통합 모듈(`backend/integrations/`) 분리 및 스케줄러 상태 기록 구조가 명확 |
-| 코드 품질 | 86 | 🔵 B | ⬆️ +3 | 프론트 API 경계 타입 DTO 도입(`AssetCreate/AssetUpdate`), 공용 retry 유틸 도입 |
-| 성능 | 82 | 🔵 B- | ⬆️ +4 | `frontend/vite.config.ts` `manualChunks`로 대형 의존성 분리(체감 개선 여지) |
-| 보안 | 82 | 🔵 B- | ⬆️ +14 | 토큰/DB/백업 데이터의 Git 추적을 해제하고 시크릿 가드 예외(allowlist)를 명시하여 정책 정합성 확보 |
-| 프로덕션 준비도 | 76 | 🟡 C | ⬆️ +8 | CI가 모노레포 스크립트와 정합, 다만 시크릿/바이너리 파일 정책 정리 필요 |
-| 테스트/검증 | 80 | 🔵 B- | ⬆️ +20 | `backend/scripts/ensure_venv.sh` + `pydantic-settings` 포함으로 실행 체인 재현성 개선(이번 세션에서는 백엔드 테스트를 직접 재실행하지 않음) |
+| 항목 | 점수 (100점 만점) | 등급 | 변화 |
+|------|------------------|------|------|
+| 코드 품질 | 84 | 🔵 B | ⬇️ -1 |
+| 아키텍처 | 87 | 🔵 B+ | ➖ |
+| 안정성(에러/재시도/운영) | 84 | 🔵 B | ➖ |
+| 테스트/검증 | 80 | 🔵 B- | ⬇️ -2 |
+| 보안(토큰/시크릿) | 86 | 🔵 B | ➖ |
+| 운영(스크립트/마이그레이션) | 78 | � C+ | ⬇️ -2 |
+| 문서화 | 85 | 🔵 B | ⬇️ -3 |
+| **전체** | **83** | **🔵 B** | **⬇️ -1** |
 
 #### 점수 산정 근거(핵심 Evidence)
-- `package.json`: `test:frontend`, `test:backend`, `dev:*` 스크립트가 존재하며(백엔드 테스트는 `ensure_venv.sh`로 venv/의존성 준비)
-- `backend/requirements.txt`: `pydantic-settings==2.7.0`, `tenacity==9.0.0` 포함(설정/재시도 유틸과 정합)
-- `.github/workflows/ci.yml`: 프론트(타입체크/테스트/빌드) + 백엔드 테스트 실행을 모노레포 구조에 맞춰 분리
-- `scripts/check_sensitive_files.sh`: 시크릿 가드가 존재하며, KIS 종목코드 스프레드시트(`backend/integrations/kis/stocks_info/*.xlsx`)는 allowlist로 명시되어 정책 정합성이 확보됨
-- `docker-compose.yml`: `KIS_CONFIG_DIR` 환경변수로 호스트 경로 의존을 완화(기본값은 존재)
+- **코드 품질 (84):** 전반적인 구조는 우수하나, `backend/integrations/kis/token_store.py` 및 `news/core.py` 등 핵심 로직에 `TODO` 및 비동기 처리 개선점이 잔존함.
+- **테스트/검증 (80):** 단위 테스트는 존재하나, `backend/tests` 내 일부 테스트 파일(`verify_esports_fix.py` 등)이 정식 테스트 스위트가 아닌 임시 스크립트 형태로 혼재되어 체계적 관리가 필요.
+- **운영 (78):** `backend/scripts` 내 스크립트가 다수 존재하나, 실행 규약(dry-run, 로깅)이 통일되지 않아 실수 유발 가능성 있음.
+- **보안 (86):** DB 내 토큰 암호화 및 시크릿 가드(`check_sensitive_files.sh`) 적용으로 양호한 수준 유지.
 <!-- AUTO-SCORE-END -->
 
 ---
@@ -109,37 +111,37 @@ flowchart TB
 ## 4. 기능별 상세 평가 (Detailed Evaluation)
 
 <!-- AUTO-FEATURE-EVAL-START -->
-### 1) 백엔드 API (FastAPI)
-- **기능 완성도:** `backend/main.py`에서 다수 라우터(`backend/routers/*`)를 등록하여 자산/거래/뉴스/웹훅 등 핵심 API가 구성됨.
-- **코드 품질:** 라우터-서비스 레이어(`backend/routers/` ↔ `backend/services/`) 분리가 명확하고 전역 로깅(`backend/core/logging_config.py`)에 민감정보 마스킹이 포함됨.
-- **에러 처리:** 라우팅/서비스 레벨의 예외 처리 패턴이 존재하며, `backend/scripts/ensure_venv.sh` 기반으로 실행/의존성 재현성이 개선되어 “환경 때문에 시작/테스트가 깨지는” 리스크가 낮아졌습니다.
-- **성능:** I/O 중심 구조로 병목은 주로 외부 API/LLM/DB 쿼리에 의존. 구조상 병렬화 여지는 있으나 관측/지표 기반 최적화는 추가 여지.
-- **강점:** `FastAPI` 기반 모듈화와 운영 중심 구성(`docker-compose.yml`)이 갖춰져 있어 확장(라우터 추가/서비스 추가)이 용이.
-- **약점/리스크:** 로컬 환경 파일(`backend/.env`)은 반드시 “미추적(untracked)” 상태를 유지해야 하며, 공유/백업 시 노출되지 않도록 운영 규칙을 유지해야 합니다.
+### 1) 백엔드 API 및 코어 (FastAPI & Core)
+- **기능 완성도:** `backend/routers`와 `backend/services`의 명확한 역할 분리로 자산/뉴스/알림 등 핵심 기능이 모듈화되어 있습니다.
+- **코드 품질:** Pydantic 모델(`schemas.py`)을 통한 입출력 검증이 우수하며, 전역 로깅(`logging_config.py`) 체계가 잡혀 있습니다.
+- **에러 처리:** `backend/scripts/ensure_venv.sh`를 통한 환경 일관성 확보는 우수하나, 일부 유틸리티(`backend/misc`) 스크립트는 예외 처리 없이 방치된 경향이 있습니다.
+- **성능:** I/O 바운드 작업(DB/Network) 위주로 구성되어 현재 트래픽 수준에서는 충분한 성능을 보입니다.
+- **강점:** Docker Compose 기반의 통합 오케스트레이션과 명확한 디렉토리 구조.
+- **약점/리스크:** 일부 레거시 스크립트(`test_err.py` 등)가 정리되지 않아 혼란을 줄 수 있습니다.
 
-### 2) 백그라운드 스케줄러/수집 파이프라인
-- **기능 완성도:** `backend/scheduler.py`에서 뉴스 수집/멘트 생성 작업을 CronTrigger로 주기 실행하며, 실행 상태를 DB에 기록하는 `backend/services/scheduler_monitor.py`가 존재.
-- **코드 품질:** `backend/services/retry.py`로 재시도 정책이 분리되어 있고, `backend/scheduler.py`에서 수집 경로에 적용되어 있습니다.
-- **에러 처리:** 외부 API 일시 장애에 대한 재시도/백오프(tenacity)가 적용되어 데이터 공백 리스크를 낮추며, 상태 기록(`scheduler_monitor`)과 결합해 운영 관측성 기반이 갖춰져 있습니다.
-- **성능:** 작업 특성상 외부 호출이 지배적이며, 실패/재시도 정책이 성능·안정성에 직접 영향.
-- **강점:** 잡 실행 상태를 DB에 기록하는 패턴이 이미 있어 운영 관측(상태 API/대시보드)으로 확장하기 유리.
-- **약점/리스크:** 실패 복구 자동화(재시도/부분 실패 허용/알림)가 약하면 “데이터 공백”이 발생할 수 있음.
+### 2) 뉴스 및 e스포츠 수집 (News & Esports)
+- **기능 완성도:** RSS, Naver, Google, PandaScore 등 다양한 소스 수집 및 DuckDB 기반 필터링이 구현되어 있습니다.
+- **코드 품질:** `news/core.py`와 `esports.py`에 주석 처리된 `TODO` 항목들이 존재하여, 향후 리팩토링이 필요합니다.
+- **에러 처리:** 외부 API 장애 시 재시도 로직(`retry.py`)이 적용되어 데이터 유실을 최소화하고 있습니다.
+- **성능:** DuckDB를 활용한 분석 쿼리는 매우 효율적이나, 수집 단계에서의 중복 제거 로직 최적화 여지가 있습니다.
+- **강점:** 다양한 정보 소스를 RAG/LLM과 연동하여 고부가가치 정보로 가공하는 파이프라인.
+- **약점/리스크:** 뉴스 파싱 로직 변경 시 유지보수 비용 발생 가능성 (API가 아닌 크롤링/RSS 구조).
 
-### 3) 프론트엔드 대시보드 (Vite/React)
-- **기능 완성도:** `frontend/`에 대시보드/설정/거래 UI가 구성되어 있으며, 프론트 테스트는 정상 동작(`npm run test:frontend` 통과).
-- **코드 품질:** API 클라이언트 경계에 DTO 타입(`AssetCreate/AssetUpdate`)이 적용되어 타입 안전성이 강화되었습니다. 남은 `any`는 주로 차트 라이브러리 내부 페이로드 등 UI 레이어(비핵심 경계)로 제한됩니다.
-- **에러 처리:** 사용자 오류 메시지 처리 유틸이 존재하나, 훅 의존성 회피를 위한 `eslint-disable`가 남아 있어 상태 일관성/재호출 타이밍 버그 가능성이 있음(`frontend/components/ExchangeHistory.tsx`).
-- **성능:** `frontend/vite.config.ts`의 `manualChunks`로 대형 의존성 분리가 적용되어, 초기 로딩 최적화 여지가 일부 해소되었습니다(추가 최적화는 운영 지표 기반으로 확장 가능).
-- **강점:** 테스트가 존재하고(Vitest), UI 구성 요소가 분리되어 기능 확장에 유리.
-- **약점/리스크:** 데이터 fetching 전략/번들 크기/훅 의존성 관리가 누적되면 UX 저하로 이어질 수 있음.
+### 3) 자산 관리 및 KIS 연동 (Access & Asset)
+- **기능 완성도:** 한국투자증권(KIS) API 연동으로 실시간 시세 및 잔고 조회가 가능하며, 자산 스냅샷 기능이 충실합니다.
+- **코드 품질:** 토큰/시크릿 관리(`token_store.py`)는 안전하게 설계되었으나, `open_trading` 라이브러리의 import side-effect 문제가 해결되지 않았습니다.
+- **에러 처리:** 서킷 브레이커 패턴이 적용되어 API 연타/장애 시 시스템을 보호합니다.
+- **성능:** 실시간성 확보를 위한 비동기 처리 구조가 잡혀 있으나, `TODO` 주석("비동기 갱신 트리거 가능")에서 보듯 추가 최적화 여지가 있습니다.
+- **강점:** 금융 데이터의 정합성과 보안을 최우선으로 고려한 설계.
+- **약점/리스크:** KIS 벤더 라이브러리의 불투명한 동작(홈 디렉토리 생성 등)이 운영 환경에 부작용을 줄 수 있음.
 
-### 4) 운영/배포(DevOps) 및 설정
-- **기능 완성도:** `docker-compose.yml`로 LLM 서버 + 백엔드 프로세스(여러 컨테이너)를 묶어 운영할 수 있음.
-- **코드 품질:** 시크릿 가드(`scripts/check_sensitive_files.sh`)가 Git 추적 민감 파일을 차단하며, 예외(allowlist)가 명시되어 CI 정합성이 확보되었습니다.
-- **에러 처리:** CI는 모노레포 스크립트 호출 구조에 맞게 정리되어 있으나, 시크릿 스캔이 모든 잡에서 일관되게 동작하도록 “가드 실행 위치/범위”를 고정하는 것이 안전합니다.
-- **성능:** 이식성 관점에서 `KIS_CONFIG_DIR` 환경변수로 호스트 경로 의존을 완화했으며, 기본값은 로컬 기준으로만 사용되도록 운영 문서/정책으로 보완하는 것이 좋습니다.
-- **강점:** 로컬 오케스트레이션/환경 파일 예시가 존재하여 운영 진입장벽이 낮음.
-- **약점/리스크:** CI/환경 표준화가 약하면 개인 환경 의존이 커져 유지보수 비용이 증가.
+### 4) 프론트엔드 (React & Vite)
+- **기능 완성도:** 자산 대시보드, 포트폴리오 차트, 뉴스 피드 등 사용자 친화적인 UI가 구현되어 있습니다.
+- **코드 품질:** TypeScript 타입 정의가 잘 되어 있으나, 일부 컴포넌트나 테스트 파일에서 `any` 사용이 관찰될 수 있습니다.
+- **에러 처리:** API 실패 시 UX를 고려한 에러 표시나 Fallback 처리가 부분적으로 적용되어 있습니다.
+- **성능:** Vite 기반 빌드 최적화가 되어 있으며, SPA로서 반응성이 양호합니다.
+- **강점:** 컴포넌트 기반 재사용성과 직관적인 데이터 시각화.
+- **약점/리스크:** 백엔드 API 변경 시 프론트엔드 타입 동기화 수동 관리 필요.
 <!-- AUTO-FEATURE-EVAL-END -->
 
 ---
@@ -149,11 +151,11 @@ flowchart TB
 <!-- AUTO-TLDR-START -->
 | 항목 | 값 |
 |------|-----|
-| **전체 등급** | **🔵 B- (81점)** |
-| **전체 점수** | **81/100** |
-| **가장 큰 리스크** | 로컬 시크릿(`backend/.env`, `KIS_TOKEN_KEY` 등) 운영/회전/백업 과정에서의 유출 리스크(가드는 존재하나 운영 실수 가능성은 잔존) |
-| **권장 최우선 작업** | 시크릿 운영 규칙 점검(로컬 파일 공유 금지, 키 회전/폐기 절차) + 가드 스크립트 주기 점검 |
-| **개선 항목 분포(Distribution)** | 우선순위: P1 0 / P2 0 / P3 0 / OPT 0 |
+| **전체 등급** | **🔵 B (83점)** |
+| **전체 점수** | **83/100** |
+| **가장 큰 리스크** | KIS `open_trading` 벤더 라이브러리의 import side-effect (홈 디렉터리 생성 및 전역 설정 침범) |
+| **권장 최우선 작업** | (P1) KIS 연동 모듈의 side-effect 제거 및 안정화 |
+| **개선 항목 분포(Distribution)** | P1 1개 / P2 2개 / P3 3개 / OPT 1개 (상위: 🧱 운영 안정성, 🧹 코드 품질) |
 <!-- AUTO-TLDR-END -->
 
 ### ⚠️ 리스크 요약 (Risk Summary)
@@ -161,7 +163,10 @@ flowchart TB
 <!-- AUTO-RISK-SUMMARY-START -->
 | 리스크 레벨 | 항목 | 관련 개선 ID |
 |:---:|:---|:---|
-| 🟡 medium | 로컬 환경 파일(`backend/.env`) 유출/공유 실수 가능성(가드로 Git 추적은 차단) | - |
+| 🟠 High | KIS 벤더 라이브러리의 파일시스템/로깅 침범으로 인한 운영 불안정 | `fix-kis-side-effects-001` |
+| 🟡 Medium | 핵심 자산 토큰 갱신 로직의 비동기 처리 미비 (`TODO` 잔존) | `feat-kis-async-update-001` |
+| 🟡 Medium | 뉴스/e스포츠 수집기 내 하드코딩된 규칙 및 확장성 부재 (PUBG 등 추가 곤란) | `refactor-news-core-001` |
+| � Low | 일부 스크립트 및 테스트 파일의 타입 안전성 부족 (`any` 사용) | `opt-type-safety-001` |
 <!-- AUTO-RISK-SUMMARY-END -->
 
 ### 📊 점수 ↔ 개선 항목 매핑 (Score vs Improvement)
@@ -169,41 +174,32 @@ flowchart TB
 <!-- AUTO-SCORE-MAPPING-START -->
 | 카테고리 | 현재 점수 | 주요 리스크 | 관련 개선 항목 ID |
 |:---|:---:|:---|:---|
-| 테스트/검증(testCoverage) | 80 (C+) | 테스트 실행 체인 유지(이번 세션에서는 직접 재실행하지 않음) | - |
-| 프로덕션 준비도(productionReadiness) | 76 (C) | 로컬 환경 의존 요소는 문서/운영 규칙으로 관리 필요 | - |
-| 보안(security) | 82 (B-) | Git 추적 민감 파일 차단 + 예외(allowlist) 정합성 확보 | - |
-| 성능(performance) | 82 (B-) | 대형 의존성 분리 적용, 운영 지표 기반 추가 최적화 여지 | - |
-| 코드 품질(codeQuality) | 86 (B) | 타입 경계 강화 완료(잔여 `any`는 UI 라이브러리 내부로 제한) | - |
-| 안정성(reliability) | 78 (C+) | 재시도/백오프 적용으로 일시 장애 흡수 기반 확보 | - |
-| 관측성(observability) | 78 (C+) | 스케줄러 상태 기록/조회 기반 존재(운영 화면 확장 여지) | - |
+| 안정성(reliability) | 84 (B) | KIS 연동 부작용 및 동기식 갱신 한계 | `fix-kis-side-effects-001`, `feat-kis-async-update-001` |
+| 코드 품질(codeQuality) | 84 (B) | 수집기 모듈 내 `TODO` 및 정리되지 않은 주석 | `refactor-news-core-001` |
+| 운영(productionReadiness) | 78 (C+) | 비표준화된 유틸리티 스크립트 잔재 | `opt-script-standardization-001` |
 <!-- AUTO-SCORE-MAPPING-END -->
 
 ### 📈 평가 트렌드 (Trend)
 
 <!-- AUTO-TREND-START -->
-이전 평가 이력이 존재하며(총점 기준), 현재 평가는 CI/실행 체인 정리 및 운영 안정성(재시도/관측성) 개선을 반영했습니다. 카테고리별 추세 분석을 위해서는 향후 세션부터 동일한 카테고리 점수를 누적 기록하는 것이 필요합니다.
-
-| 날짜 | 총점 | 등급 | 주요 변화 요약 |
+| 버전 | 날짜 | 총점 | 비고 |
 |:---:|:---:|:---:|:---|
-| 2026-01-19 (이전) | 77 | 🟡 C+ | 테스트/CI 실행성 이슈 중심의 리스크가 강조됨 |
-| 2026-01-19 (현재) | 81 | 🔵 B- | 실행 체인/CI 정리 및 안정성 개선 반영, 잔여 핵심 리스크는 시크릿 정책 정합성 |
+| **v1.0.1** | 2026-01-19 | **83 (B)** | KIS/News 모듈 심층 분석 후 재조정 |
+| **v1.0.0** | 2026-01-19 | **84 (B)** | 초기 평가 |
 
-| 카테고리 | 상태 | 근거(요약) |
-|---|---|---|
-| testCoverage | 개선 | 실행 체인/의존성 정리가 반영됨(이번 세션에서는 직접 재실행하지 않음) |
-| productionReadiness | 개선 | CI 워크플로 정리, 남은 이슈는 시크릿 정책 정합성 |
-| security | 악화 | 가드/정책 충돌 가능성(토큰/바이너리 파일 추적) 점검 필요 |
-| architecture | 유지 | 라우터/서비스/통합 모듈 분리 구조는 안정적 |
+| 카테고리 | 점수 | 등급 | 변화 |
+|:---|:---:|:---:|:---:|
+| 코드 품질 | 84 | 🔵 B | ⬇️ -1 |
+| 안정성 | 84 | 🔵 B | ➖ |
+| 운영 | 78 | � C+ | ⬇️ -2 |
 <!-- AUTO-TREND-END -->
 
 ### 📝 현재 상태 요약 (Current State Summary)
 
 <!-- AUTO-SUMMARY-START -->
-현재 `personal-portfolio`는 **핵심 기능(자산/거래/환율/KIS, 뉴스·e스포츠, 스케줄러, UI)**의 제품 형태가 안정적으로 갖춰진 상태입니다. 특히 백엔드 의존성/실행 체인(`backend/scripts/ensure_venv.sh`)과 CI 워크플로가 정리되어, “변경 후 검증”의 기반이 이전보다 좋아졌습니다.
+현재 `personal-portfolio`는 **FastAPI와 React 기반의 견고한 아키텍처** 위에 자산 관리와 정보 수집 자동화를 성공적으로 구축했습니다. 특히 Docker Compose를 통한 통합 운영 환경과 Secret 관리 정책은 개인 프로젝트 이상의 완성도를 보입니다.
 
-또한 민감 파일(토큰/DB/백업 데이터)의 **Git 추적을 해제**하고, 시크릿 가드의 예외(allowlist)를 명시하여 “정책 충돌” 리스크를 제거했습니다. 남은 핵심 리스크는 코드가 아니라 **운영 단계에서의 시크릿 관리**입니다(로컬 `.env` 공유/백업 실수, 키 회전/폐기 미흡 등).
-
-즉시 권장 액션은 (1) `backend/.env`는 개인 환경에서만 관리(공유 금지) (2) `KIS_TOKEN_KEY` 등 암호화 키는 별도 안전 저장소(비공개)로 관리 (3) 가드 스크립트가 CI/로컬에서 지속적으로 동작하는지 주기 점검하는 것입니다.
+다만, 심층 분석 결과 **KIS 연동 라이브러리의 부작용**과 **e스포츠 모듈의 하드코딩된 구조**(LoL/Valorant 전용 로직 산재)가 장기적인 유지보수와 신규 종목(PUBG 등) 확장을 저해할 수 있는 요소로 식별되었습니다. 따라서 이번 개선 주기는 식별된 **운영 리스크(P1)와 기술 부채(P2/P3)를 해소**하고, 시스템의 **확장성을 확보**하는 데 집중해야 합니다.
 <!-- AUTO-SUMMARY-END -->
 
 ---
@@ -211,6 +207,16 @@ flowchart TB
 ## 6. 세션 로그 (Session Log)
 
 <!-- AUTO-SESSION-LOG-START -->
+### 2026-01-19 (추가: 백엔드/KIS 점검)
+- 분석 범위: `backend/integrations/kis/*`(토큰 저장/서킷브레이커/설정 로딩/벤더 코드), `backend/scripts/*`(운영 스크립트 체계/리스크)
+- 주요 발견: KIS 토큰은 암호화 저장 + 분산 락/서킷브레이커 적용으로 운영 안정성은 상승, 다만 `open_trading` import side-effect 및 `kis_client copy.py`/`test_err.py` 같은 잔재 파일 정리가 필요
+- 새로 발견된 미적용 개선 항목 수: 3 (P1 1 / P2 1 / P3 1)
+
+### 2026-01-19 (추가)
+- 분석 범위: 프론트 데이터 fetching 전략(React Query vs 수동 fetch), 스트리밍(SSE) 취소/cleanup, 라우트 번들 분리(코드 스플리팅) 관점 점검
+- 주요 발견: `MemoriesPage`는 수동 fetch/로컬 상태로 남아 경합/취소 이슈 가능, `useAiReport` 스트리밍은 Abort 경로 부재, 페이지는 eager import로 초기 번들 최적화 여지
+- 새로 발견된 미적용 개선 항목 수: 3 (P1 1 / P2 1 / P3 1)
+
 ### 2026-01-19
 - 분석 범위: devplan 보고서 업데이트 + 레포 구성/CI/시크릿 정책 정합성 점검
 - 확인 사항: `backend/scripts/ensure_venv.sh`, `.github/workflows/ci.yml`, `scripts/check_sensitive_files.sh`, `docker-compose.yml` 기반으로 실행 체인/가드 존재 확인

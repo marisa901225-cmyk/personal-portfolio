@@ -63,12 +63,67 @@ SOURCE_WEIGHT = {
 
 logger = logging.getLogger(__name__)
 
+def _normalize_text(text: str) -> str:
+    """텍스트 정규화: HTML 태그 제거, 공백 단일화, 소문자 변환, 특수문자 제거."""
+    import re
+    import html
+    # HTML 엔티티 디코딩 및 태그 제거
+    text = html.unescape(text or "")
+    text = re.sub(r'<[^>]+>', '', text)
+    # 소문자 변환 및 특수문자 제거 (한글/영문/숫자 제외)
+    text = text.lower()
+    text = re.sub(r'[^a-z0-9가-힣\s]', '', text)
+    # 모든 공백(개행 포함)을 단일 공백으로 치환
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
 def calculate_simhash(text: str) -> str:
     """
-    텍스트의 Simhash 값을 계산하여 문자열로 반환
-    짧은 텍스트의 경우 본문 일부 또는 추가 키를 섞어 안정화하는 것을 권장
+    강화된 정규화를 거쳐 Simhash 값을 계산.
+    짧은 텍스트는 반복을 통해 해시의 안정성을 높임.
     """
-    return str(Simhash(text or "").value)
+    normalized_text = _normalize_text(text)
+    if not normalized_text:
+        return "0"
+    
+    # Simhash는 입력이 너무 짧으면 변별력이 떨어질 수 있으므로 보정
+    if len(normalized_text) < 20:
+        normalized_text = (normalized_text + " ") * 5
+        
+    return str(Simhash(normalized_text).value)
+
+def get_jaccard_similarity(str1: str, str2: str) -> float:
+    """두 문자열 간의 자카드 유사도 계산."""
+    s1 = set(_normalize_text(str1).split())
+    s2 = set(_normalize_text(str2).split())
+    if not s1 or not s2:
+        return 0.0
+    return len(s1 & s2) / len(s1 | s2)
+
+def is_duplicate_complex(
+    new_title: str, 
+    new_hash: str, 
+    existing_news_list: list, 
+    simhash_threshold: int = 3, 
+    jaccard_threshold: float = 0.8
+) -> bool:
+    """
+    Simhash 거리와 자카드 유사도를 결합한 하이브리드 중복 판별.
+    existing_news_list는 GameNews 객체들의 리스트여야 함.
+    """
+    new_h = int(new_hash)
+    for old in existing_news_list:
+        # 1. Simhash Hamming Distance 검사
+        old_h = int(old.content_hash or 0)
+        distance = Simhash(new_h).distance(Simhash(old_h))
+        if distance <= simhash_threshold:
+            return True
+        
+        # 2. 제목 자카드 유사도 검사 (Simhash가 멀어도 제목이 거의 같으면 중복)
+        if get_jaccard_similarity(new_title, old.title) >= jaccard_threshold:
+            return True
+            
+    return False
 
 def calculate_importance_score(
     title: str, 

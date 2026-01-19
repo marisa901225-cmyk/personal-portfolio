@@ -10,18 +10,22 @@ export default defineConfig(() => {
     },
     plugins: [react()],
     build: {
+      target: 'esnext',
+      cssMinify: true,
+      reportCompressedSize: true,
+      chunkSizeWarningLimit: 1000,
       rollupOptions: {
         output: {
           manualChunks: {
             // React 관련
             'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-            // 차트 라이브러리
+            // 차트 라이브러리 (대용량)
             'vendor-charts': ['recharts'],
             // 데이터 쿼리
             'vendor-query': ['@tanstack/react-query'],
-            // 마크다운 (AiReport 등에서 사용)
+            // 마크다운 및 유틸
             'vendor-markdown': ['react-markdown', 'remark-gfm'],
-            // 아이콘
+            // 아이콘 및 기타
             'vendor-icons': ['lucide-react'],
           },
         },

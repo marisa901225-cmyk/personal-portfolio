@@ -1,26 +1,25 @@
 #!/usr/bin/env python3
 import argparse
-import sys
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 
-from backend.scripts.common import setup_logging, session_scope
+from backend.scripts.common import confirm_action, session_scope, setup_logging
+
 
 def check_alarms(args):
     """Check incoming and spam alarms in DB."""
-    # Lazy import to avoid SQLALchemy init cost if not needed
     try:
         import pandas as pd
         from backend.core.models import IncomingAlarm, SpamAlarm
-        from sqlalchemy import text
     except ImportError as e:
         print(f"Error importing dependencies: {e}")
         return
 
     start_time = args.start or datetime.now().strftime("%Y-%m-%d 00:00:00")
     end_time = args.end or datetime.now().strftime("%Y-%m-%d 23:59:59")
-    
+
     with session_scope() as session:
         print(f"--- Incoming Alarms ({start_time} ~ {end_time}) ---")
         q_inc = session.query(IncomingAlarm).filter(IncomingAlarm.received_at.between(start_time, end_time))
@@ -38,50 +37,53 @@ def check_alarms(args):
         else:
             print("No spam alarms found.")
 
+
 def import_fx(args):
     """Import FX CSV data."""
     try:
         from backend.scripts.importers.fx import import_fx_csv
     except ImportError as e:
-        logging.error(f"Failed to import FX module: {e}")
+        logging.error("Failed to import FX module: %s", e)
         return
 
     csv_path = Path(args.csv)
     with session_scope() as session:
         import_fx_csv(session, csv_path, dry_run=args.dry_run)
 
+
 def import_trades(args):
     """Import Trades XLSX data."""
     try:
         from backend.scripts.importers.trades import import_trades_xlsx
     except ImportError as e:
-        logging.error(f"Failed to import Trades module: {e}")
+        logging.error("Failed to import Trades module: %s", e)
         return
 
     xlsx_path = Path(args.xlsx)
     with session_scope() as session:
         import_trades_xlsx(session, xlsx_path, sheet_name=args.sheet, dry_run=args.dry_run)
 
+
 def sync_prices(args):
     """Sync asset prices from KIS and take a snapshot."""
     try:
         from backend.services.market_data import MarketDataService
     except ImportError as e:
-        logging.error(f"Failed to import MarketDataService: {e}")
+        logging.error("Failed to import MarketDataService: %s", e)
+        return
+
+    if not args.yes and not confirm_action("This will update asset prices and may write snapshots. Continue?"):
+        print("Cancelled.")
         return
 
     with session_scope() as session:
-        if args.dry_run:
-            print("[Dry-Run] Syncing prices (no DB write)...")
-            # In MarketDataService, we would need to pass dry_run if we want to support it fully
-            # For now, let's keep it simple or implement dry_run in the service
-        
         updated = MarketDataService.sync_all_prices(session)
         print(f"Updated {updated} assets.")
-        
+
         if not args.no_snapshot:
             MarketDataService.take_portfolio_snapshot(session)
             print("Snapshot captured.")
+
 
 def backup_db(args):
     """Backup SQLite database, compress, and notify."""
@@ -91,35 +93,36 @@ def backup_db(args):
         from backend.scripts.utils.generate_backup_msg import generate_backup_message
         from backend.core.config import settings
     except ImportError as e:
-        logging.error(f"Failed to import backup dependencies: {e}")
+        logging.error("Failed to import backup dependencies: %s", e)
+        return
+
+    if not args.yes and not confirm_action("This will create and upload a DB backup. Continue?"):
+        print("Cancelled.")
         return
 
     db_path = Path(settings.database_url.replace("sqlite:///", ""))
     if not db_path.is_absolute():
         db_path = Path(os.getcwd()) / db_path
-    
+
     backup_dir = db_path.parent.parent / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
-    
+
     timestamp = datetime.now().strftime("%Y-%m-%d")
     backup_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     base_name = f"portfolio_{timestamp}"
-    
-    # 1. Hot Backup
+
     raw_backup = backup_dir / f"{base_name}.db"
     BackupService.create_hot_backup(db_path, raw_backup)
-    
-    # 2. Compress
+
     zip_ext = ".zip" if os.getenv("BACKUP_ZIP_PASSWORD") else ".gz"
     archive_path = backup_dir / f"{base_name}.db{zip_ext}"
     BackupService.compress_with_password(raw_backup, archive_path, os.getenv("BACKUP_ZIP_PASSWORD"))
-    if raw_backup.exists(): raw_backup.unlink() # 원본 삭제
+    if raw_backup.exists():
+        raw_backup.unlink()
 
-    # 3. Notification Message (LLM)
     file_size_mb = archive_path.stat().st_size / 1024 / 1024
     msg = generate_backup_message(file_size_mb, backup_time_str)
 
-    # 4. Telegram Upload
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     if bot_token and chat_id:
@@ -129,11 +132,16 @@ def backup_db(args):
             caption = msg if idx == 0 else f"(Part {idx+1})"
             url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
             with open(part, "rb") as f:
-                requests.post(url, data={"chat_id": chat_id, "caption": caption}, files={"document": f}, timeout=60)
-            if part != archive_path: part.unlink() # 조각 삭제
+                requests.post(
+                    url,
+                    data={"chat_id": chat_id, "caption": caption},
+                    files={"document": f},
+                    timeout=60,
+                )
+            if part != archive_path:
+                part.unlink()
         print("Telegram backup notification sent.")
 
-    # 5. Dropbox Upload
     app_key = os.getenv("DROPBOX_APP_KEY")
     app_secret = os.getenv("DROPBOX_APP_SECRET")
     refresh_token = os.getenv("DROPBOX_REFRESH_TOKEN")
@@ -143,62 +151,148 @@ def backup_db(args):
             DropboxService.upload_file(str(archive_path), f"/portfolio-backups/{archive_path.name}", access_token)
             print("Dropbox backup upload completed.")
 
-    # 6. Retention
     BackupService.cleanup_old_backups(backup_dir)
     print("Backup process finished.")
 
+
+def run_scheduler(args):
+    """Run the news and target prize scheduler."""
+    import asyncio
+    from backend.services.scheduler.core import start_scheduler, shutdown_scheduler
+    
+    logging.info("Starting scheduler service...")
+    start_scheduler()
+    try:
+        # Keep the script running in a way that respects asyncio
+        async def _keep_alive():
+            while True:
+                await asyncio.sleep(3600)
+        asyncio.run(_keep_alive())
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("Interrupted, shutting down scheduler...")
+    finally:
+        shutdown_scheduler()
+
+
+def run_collector(args):
+    """Run the alarm collector FastAPI service."""
+    import uvicorn
+    # Import app lazily to avoid immediate side effects
+    from backend.alarm_collector import app
+    
+    logging.info("Starting alarm collector on %s:%d", args.host, args.port)
+    uvicorn.run(app, host=args.host, port=args.port)
+
+
+def register_telegram(args):
+    """Register telegram bot commands."""
+    import asyncio
+    
+    async def _do_register():
+        import httpx
+        token = os.getenv("ALARM_TELEGRAM_BOT_TOKEN")
+        if not token:
+            logging.error("ALARM_TELEGRAM_BOT_TOKEN not found in environment")
+            return
+
+        commands = [
+            {"command": "report", "description": "리포트 생성 (예: /report 이번달, /report 스팀)"},
+            {"command": "list", "description": "스팸 필터 규칙 목록 보기"},
+            {"command": "add", "description": "스팸 필터 키워드 추가 (예: /add 키워드)"},
+            {"command": "del", "description": "스팸 필터 규칙 삭제 (예: /del ID)"},
+            {"command": "help", "description": "도움말 보기"}
+        ]
+        url = f"https://api.telegram.org/bot{token}/setMyCommands"
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, json={"commands": commands})
+            if resp.json().get("ok"):
+                logging.info("Telegram commands registered successfully!")
+            else:
+                logging.error("Failed to register commands: %s", resp.text)
+
+    asyncio.run(_do_register())
+
+
+async def _process_alarms_async():
+    from backend.core.db import SessionLocal
+    from backend.services.alarm_service import AlarmService
+    
+    logging.info("Processing pending alarms...")
+    db = SessionLocal()
+    try:
+        await AlarmService.process_pending_alarms(db)
+        logging.info("Alarm processing finished.")
+    finally:
+        db.close()
+
+
+def process_alarms_cmd(args):
+    """Manually process pending alarms."""
+    import asyncio
+    asyncio.run(_process_alarms_async())
+
+
 def verify_snapshots(args):
     """Verify asset snapshots."""
-    # TODO: Migrate verify_snapshots.py logic here
     print("Verifying snapshots... (Not implemented yet)")
+
 
 def main():
     parser = argparse.ArgumentParser(description="MyAsset Backend Manager CLI")
     parser.add_argument("--log-level", default="INFO", help="Logging level (DEBUG, INFO, WARNING)")
-    
+
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # Check Alarms
     p_alarms = subparsers.add_parser("check-alarms", help="Check alarm tables")
     p_alarms.add_argument("--start", help="Start time (YYYY-MM-DD HH:MM:SS)")
     p_alarms.add_argument("--end", help="End time (YYYY-MM-DD HH:MM:SS)")
     p_alarms.set_defaults(func=check_alarms)
 
-    # Import FX
     p_fx = subparsers.add_parser("import-fx", help="Import FX CSV")
     p_fx.add_argument("--csv", required=True, help="Path to CSV file")
     p_fx.add_argument("--dry-run", action="store_true", help="Dry run mode")
     p_fx.set_defaults(func=import_fx)
 
-    # Import Trades
     p_trades = subparsers.add_parser("import-trades", help="Import Trades XLSX")
     p_trades.add_argument("--xlsx", required=True, help="Path to XLSX file")
     p_trades.add_argument("--sheet", default="All_Normalized", help="Target sheet name")
     p_trades.add_argument("--dry-run", action="store_true", help="Dry run mode")
     p_trades.set_defaults(func=import_trades)
 
-    # Verify Snapshots
     p_verify = subparsers.add_parser("verify-snapshots", help="Verify asset snapshots")
     p_verify.set_defaults(func=verify_snapshots)
 
-    # Sync Prices
     p_sync = subparsers.add_parser("sync-prices", help="Sync all prices and take snapshot")
-    p_sync.add_argument("--dry-run", action="store_true", help="Dry run mode")
     p_sync.add_argument("--no-snapshot", action="store_true", help="Skip taking snapshot")
+    p_sync.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     p_sync.set_defaults(func=sync_prices)
 
-    # Backup DB
     p_backup = subparsers.add_parser("backup-db", help="Full DB backup process")
+    p_backup.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
     p_backup.set_defaults(func=backup_db)
 
+    # New standardized commands
+    p_sched = subparsers.add_parser("run-scheduler", help="Run the asynchronous scheduler (news, etc.)")
+    p_sched.set_defaults(func=run_scheduler)
+
+    p_coll = subparsers.add_parser("run-collector", help="Run the alarm collector FastAPI service")
+    p_coll.add_argument("--host", default="0.0.0.0", help="Host to bind to")
+    p_coll.add_argument("--port", type=int, default=8001, help="Port to bind to")
+    p_coll.set_defaults(func=run_collector)
+
+    p_tel = subparsers.add_parser("register-telegram", help="Register/Update Telegram bot commands")
+    p_tel.set_defaults(func=register_telegram)
+
+    p_proc = subparsers.add_parser("process-alarms", help="Manually process pending alarms")
+    p_proc.set_defaults(func=process_alarms_cmd)
+
     args = parser.parse_args()
-    
-    # Global Setup
+
     level = getattr(logging, args.log_level.upper(), logging.INFO)
     setup_logging(level)
 
-    # Execute
     args.func(args)
+
 
 if __name__ == "__main__":
     main()

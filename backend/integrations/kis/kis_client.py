@@ -105,6 +105,13 @@ def _ensure_kis_modules_loaded() -> None:
         return
 
     try:
+        from .open_trading import kis_auth_state as state
+        if not state._is_config_ready():
+            _KIS_AVAILABLE = False
+            _KIS_MODULES_LOADED = True
+            logger.info("KIS configuration is not ready. Skipping module load.")
+            return
+
         _setup_kis_path()
         import kis_auth as _ka  # type: ignore
         from domestic_stock.inquire_price.inquire_price import (  # type: ignore

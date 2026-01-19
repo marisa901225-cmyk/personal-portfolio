@@ -84,10 +84,16 @@ async def collect_naver_news(db: Session, query: str, category: str = "esports")
             except Exception:
                 published_at = datetime.now(timezone.utc)
             
-            # 중복 체크 (SimHash)
+            # 중복 체크 (강화된 하이브리드 방식)
             content_hash = calculate_simhash(clean_title + clean_desc)
-            existing = db.query(GameNews).filter(GameNews.content_hash == content_hash).first()
-            if existing:
+            
+            # 최근 48시간 내의 뉴스들과 비교하여 중복 판별
+            from datetime import timedelta
+            recent_limit = datetime.now(timezone.utc) - timedelta(hours=48)
+            recent_news = db.query(GameNews).filter(GameNews.published_at >= recent_limit).all()
+            
+            from .core import is_duplicate_complex
+            if is_duplicate_complex(clean_title, content_hash, recent_news):
                 continue
             
             # game_tag 및 category_tag 결정 (검색어 기반)

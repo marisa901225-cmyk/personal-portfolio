@@ -26,10 +26,16 @@ def collect_rss(db: Session, feed_url: str, source_name: str):
             # HTML 태그 제거
             clean_desc = re.sub('<[^<]+?>', '', description)
             
-            # 중복 체크 (SimHash)
+            # 중복 체크 (강화된 하이브리드 방식)
             content_hash = calculate_simhash(title + clean_desc)
-            existing = db.query(GameNews).filter(GameNews.content_hash == content_hash).first()
-            if existing:
+            
+            # 최근 48시간 내의 뉴스들과 비교
+            from datetime import timedelta
+            recent_limit = datetime.now(timezone.utc) - timedelta(hours=48)
+            recent_news = db.query(GameNews).filter(GameNews.published_at >= recent_limit).all()
+            
+            from .core import is_duplicate_complex
+            if is_duplicate_complex(title, content_hash, recent_news):
                 continue
             
             # 메타데이터 추출 (간단한 예시)
@@ -105,10 +111,16 @@ async def collect_google_news(db: Session, query: str, region: str = "US"):
             except Exception:
                 published_at = datetime.now(timezone.utc)
             
-            # 중복 체크 (SimHash)
-            content_hash = calculate_simhash(title)
-            existing = db.query(GameNews).filter(GameNews.content_hash == content_hash).first()
-            if existing:
+            # 중복 체크 (강화된 하이브리드 방식)
+            content_hash = calculate_simhash(title + clean_desc)
+            
+            # 최근 48시간 내의 뉴스들과 비교
+            from datetime import timedelta
+            recent_limit = datetime.now(timezone.utc) - timedelta(hours=48)
+            recent_news = db.query(GameNews).filter(GameNews.published_at >= recent_limit).all()
+            
+            from .core import is_duplicate_complex
+            if is_duplicate_complex(title, content_hash, recent_news):
                 continue
             
             # game_tag 설정
