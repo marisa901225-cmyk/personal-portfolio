@@ -5,6 +5,9 @@ from fastapi import HTTPException
 
 from ..core.models import Trade, Asset
 from ..core.schemas import TradeCreate
+from ..core.time_utils import utcnow
+
+ZERO_TOLERANCE = 1e-9
 
 
 def create_trade_with_sync(
@@ -23,7 +26,7 @@ def create_trade_with_sync(
     if item.type not in {"BUY", "SELL"}:
         raise HTTPException(status_code=400, detail="invalid trade type")
 
-    now = datetime.utcnow()
+    now = utcnow()
     timestamp = item.timestamp or now
 
     # 1. 자산 조회 with row lock
@@ -78,6 +81,7 @@ def _apply_trade_to_asset(asset: Asset, trade_type: str, quantity: float, price:
         asset.amount = new_qty
         asset.current_price = price  # 최근 거래가로 현재가 갱신
         asset.updated_at = now
+        asset.tags = "present"
         return None
 
     if trade_type == "SELL":
@@ -93,8 +97,11 @@ def _apply_trade_to_asset(asset: Asset, trade_type: str, quantity: float, price:
         asset.amount = new_qty
         asset.current_price = price
         asset.updated_at = now
-        if new_qty <= 0:
-            asset.deleted_at = now
+        if new_qty < ZERO_TOLERANCE:
+            asset.tags = "past"
+            # asset.deleted_at = now  <-- 태그로 관리하므로 소프트 삭제 해제
+        else:
+            asset.tags = "present"
         return realized_delta
 
     raise HTTPException(status_code=400, detail="invalid trade type")

@@ -76,11 +76,17 @@ def read_kis_token(db: Optional[Session] = None) -> Optional[str]:
     DB에서 KIS 토큰을 읽어온다. (재시도 로직 포함)
     
     - 토큰이 없거나 복호화 실패 시 None 반환
-    - 만료 시간이 설정되어 있고, 현재 시간 + 1시간 > 만료 시간이면 None 반환 (재발급 필요)
-    - DB 락 등으로 조회 실패 시 최대 10번 재시도 (현실적 타협).
+    - Refresh Window: 만료 2시간 전부터 갱신 필요 플래그 세팅
+    - Hard Expiry: 만료 30분 전부터 None 반환 (재발급 필수)
+    - DB 락 등으로 조회 실패 시 최대 10번 재시도
     """
     import time
+    from datetime import timedelta
     from sqlalchemy.exc import OperationalError
+    
+    # 리프레시 윈도우 설정
+    REFRESH_WINDOW_HOURS = 2
+    HARD_EXPIRY_BUFFER_HOURS = 0.5
 
     max_retries = 10
     retry_delay = 0.2  # seconds (짧게 여러 번 시도)
@@ -103,11 +109,25 @@ def read_kis_token(db: Optional[Session] = None) -> Optional[str]:
                     if expires_at.tzinfo is not None
                     else datetime.now()
                 )
-                from datetime import timedelta
-                if expires_at <= now + timedelta(hours=1):
-                    logger.info("[KIS Token] 토큰 만료됨 (expires_at=%s, now=%s)", expires_at, now)
+                time_until_expiry = expires_at - now
+                
+                # 완전 만료 (30분 미만) - 반드시 재발급 필요
+                if time_until_expiry <= timedelta(hours=HARD_EXPIRY_BUFFER_HOURS):
+                    logger.warning(
+                        "[KIS Token] ⚠️ 토큰 만료 임박! (expires_at=%s, 남은시간=%s)",
+                        expires_at, time_until_expiry
+                    )
                     return None
-                logger.debug("[KIS Token] 토큰 유효 (만료까지 %s 남음)", expires_at - now)
+                
+                # 갱신 필요 (2시간 미만) - 토큰은 반환하되 로그 남김
+                if time_until_expiry <= timedelta(hours=REFRESH_WINDOW_HOURS):
+                    logger.info(
+                        "[KIS Token] 🔄 갱신 권장 (expires_at=%s, 남은시간=%s)",
+                        expires_at, time_until_expiry
+                    )
+                    # TODO: 여기서 비동기 갱신 트리거 가능
+                
+                logger.debug("[KIS Token] 토큰 유효 (만료까지 %s 남음)", time_until_expiry)
             else:
                 logger.debug("[KIS Token] 만료 시간 미설정, 기존 토큰 사용")
             

@@ -43,6 +43,7 @@ export const AssetList: React.FC<AssetListProps> = ({
 }) => {
   const [filter, setFilter] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [showClosed, setShowClosed] = useState(false);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
 
   // Sorting State
@@ -71,9 +72,10 @@ export const AssetList: React.FC<AssetListProps> = ({
       const matchesCategory = filter === 'ALL' || asset.category === filter;
       const matchesSearch = asset.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (asset.ticker || '').toLowerCase().includes(searchTerm.toLowerCase());
-      return matchesCategory && matchesSearch;
+      const matchesVisibility = showClosed || asset.tags !== 'past';
+      return matchesCategory && matchesSearch && matchesVisibility;
     });
-  }, [assets, filter, searchTerm]);
+  }, [assets, filter, searchTerm, showClosed]);
 
   const sortedAssets = useMemo(() => {
     return [...filteredAssets].sort((a, b) => {
@@ -212,6 +214,18 @@ export const AssetList: React.FC<AssetListProps> = ({
             ))}
           </div>
         </div>
+      </div>
+
+      <div className="px-6 pb-2 flex items-center justify-end">
+        <label className="flex items-center space-x-2 text-sm text-slate-500 cursor-pointer hover:text-slate-700">
+          <input
+            type="checkbox"
+            checked={showClosed}
+            onChange={(e) => setShowClosed(e.target.checked)}
+            className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+          />
+          <span>종료된 자산 보기 (잔고 0원)</span>
+        </label>
       </div>
 
       <div className="overflow-auto flex-1">

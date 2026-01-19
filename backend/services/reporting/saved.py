@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from ...core.models import AiReport
+from ...core.time_utils import utcnow
 from .core import get_user
 
 
@@ -53,13 +54,13 @@ def save_report(db: Session, payload: dict) -> dict:
         try:
             generated_at = datetime.fromisoformat(generated_at_str.replace("Z", "+00:00"))
         except ValueError:
-            generated_at = datetime.utcnow()
+            generated_at = utcnow()
     else:
-        generated_at = datetime.utcnow()
+        generated_at = utcnow()
 
     report = AiReport(
         user_id=user.id,
-        period_year=payload.get("period_year", datetime.utcnow().year),
+        period_year=payload.get("period_year", utcnow().year),
         period_month=payload.get("period_month"),
         period_quarter=payload.get("period_quarter"),
         period_half=payload.get("period_half"),

@@ -22,6 +22,7 @@ from ...core.schemas import (
     ReportActivitySummary,
     ReportResponse,
 )
+from ...core.time_utils import utcnow
 from ...services.portfolio import (
     calculate_summary,
     to_asset_read,
@@ -196,7 +197,7 @@ def build_report(
     if not user:
         summary = calculate_summary([], [])
         return ReportResponse(
-            generated_at=datetime.utcnow(),
+            generated_at=utcnow(),
             portfolio=PortfolioResponse(assets=[], trades=[], summary=summary),
             snapshots=[],
             fx_transactions=[],
@@ -265,7 +266,7 @@ def build_report(
     summary = calculate_summary(assets, external_cashflows)
 
     return ReportResponse(
-        generated_at=datetime.utcnow(),
+        generated_at=utcnow(),
         portfolio=PortfolioResponse(
             assets=[to_asset_read(a) for a in assets],
             trades=[to_trade_read(t) for t in trades],

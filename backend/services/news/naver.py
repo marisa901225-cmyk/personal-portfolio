@@ -4,7 +4,9 @@ import os
 import re
 import asyncio
 from datetime import datetime, timezone
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
 from sqlalchemy.orm import Session
+from ...core.config import settings
 from ...core.models import GameNews, SpamNews
 from .core import calculate_simhash, NAVER_NEWS_URL, NAVER_ESPORTS_QUERIES, NAVER_ECONOMY_QUERIES
 
@@ -20,12 +22,18 @@ def _is_ad(title: str) -> str:
             return kw
     return None
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.TimeoutException, httpx.NetworkError)),
+    before_sleep=before_sleep_log(logger, logging.WARNING)
+)
 async def collect_naver_news(db: Session, query: str, category: str = "esports"):
     """
     네이버 뉴스 검색 API를 사용하여 뉴스를 수집한다.
     """
-    client_id = os.getenv("NAVER_CLIENT_ID")
-    client_secret = os.getenv("NAVER_CLIENT_SECRET")
+    client_id = settings.naver_client_id
+    client_secret = settings.naver_client_secret
     
     if not client_id or not client_secret:
         logger.warning("NAVER_CLIENT_ID or NAVER_CLIENT_SECRET not set. Skipping Naver news collection.")

@@ -85,54 +85,29 @@ async def generate_creative_msg(ticker_count: int):
 
 async def run_sync_script(job_id: str = "market_sync"):
     """
-    Executes the existing sync_prices.sh bash script asynchronously.
+    Directly calls MarketDataService for syncing prices and taking snapshots.
     """
+    from backend.services.market_data import MarketDataService
+    
     db = SessionLocal()
     async with monitor_job_async(job_id, db):
-        script_path = os.path.join(PROJECT_ROOT, "backend/scripts/sync_prices.sh")
         logger.info(f"--- Starting Sync Job [{job_id}] at {datetime.now(KST)} ---")
         
         try:
-            env = os.environ.copy()
-            env["SKIP_TELEGRAM_NOTIFY"] = "true"
-            # PYTHONPATH를 ROOT로 설정하여 스크립트 내부에서 backend 모듈 호출 원활하게 함
-            env["PYTHONPATH"] = PROJECT_ROOT
+            # 1. Sync All Prices
+            ticker_count = MarketDataService.sync_all_prices(db)
+            logger.info(f"Market prices synced successfully. Tickers: {ticker_count}")
             
-            process = await asyncio.create_subprocess_exec(
-                "bash", script_path,
-                env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            # 2. Take Portfolio Snapshot
+            MarketDataService.take_portfolio_snapshot(db)
+            logger.info("Portfolio snapshot captured successfully.")
             
-            stdout, stderr = await process.communicate()
+            # 3. Creative Notification
+            msg = await generate_creative_msg(ticker_count)
+            send_telegram_sync(msg)
             
-            ticker_count = 0
-            if stdout:
-                lines = stdout.decode('utf-8', errors='ignore').strip().split('\n')
-                for line in lines:
-                    logger.info(f"[Script STDOUT] {line}")
-                    if "TICKER_COUNT=" in line:
-                        try:
-                            ticker_count = int(line.split("=")[1])
-                        except:
-                            pass
-
-            if stderr:
-                lines = stderr.decode('utf-8', errors='ignore').strip().split('\n')
-                for line in lines:
-                    logger.error(f"[Script STDERR] {line}")
-
-            if process.returncode == 0:
-                logger.info(f"Sync script executed successfully. Tickers: {ticker_count}")
-                msg = await generate_creative_msg(ticker_count)
-                send_telegram_sync(msg)
-            else:
-                logger.error(f"Sync script failed with return code {process.returncode}")
-                raise Exception(f"Sync script failed with return code {process.returncode}")
-                        
         except Exception as e:
-            logger.error(f"Error during sync script execution: {e}")
+            logger.error(f"Error during sync execution: {e}")
             raise e
         finally:
             db.close()
@@ -157,32 +132,19 @@ async def run_alarm_processing():
 
 async def run_backup_job():
     """
-    Executes the database backup script.
+    Executes the database backup logic.
     """
+    from backend.scripts.manage import backup_db
+    from unittest.mock import MagicMock
+    
     db = SessionLocal()
     async with monitor_job_async("daily_backup", db):
-        script_path = os.path.join(PROJECT_ROOT, "backend/scripts/backup_db.sh")
         logger.info("--- Starting DB Backup Job ---")
         try:
-            process = await asyncio.create_subprocess_exec(
-                "bash", script_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
-            
-            if stdout:
-                for line in stdout.decode().strip().split('\n'):
-                    logger.info(f"[Backup STDOUT] {line}")
-            if stderr:
-                for line in stderr.decode().strip().split('\n'):
-                    logger.error(f"[Backup STDERR] {line}")
-                    
-            if process.returncode == 0:
-                logger.info("DB Backup completed successfully.")
-            else:
-                logger.error(f"DB Backup failed with return code {process.returncode}")
-                raise Exception(f"Backup failed with return code {process.returncode}")
+            # manage.py의 backup_db는 argparse args를 기대하므로 mock으로 감쌉니다.
+            args = MagicMock()
+            backup_db(args)
+            logger.info("DB Backup completed successfully via Python service.")
         except Exception as e:
             logger.error(f"DB Backup job failed: {e}")
             raise e

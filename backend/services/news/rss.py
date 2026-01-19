@@ -3,9 +3,11 @@ import feedparser
 import re
 import asyncio
 from datetime import datetime, timezone
+from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 from sqlalchemy.orm import Session
 from urllib.parse import quote
 from ...core.models import GameNews
+from ...core.time_utils import utcnow
 from .core import calculate_simhash, GOOGLE_NEWS_MACRO_QUERIES
 
 logger = logging.getLogger(__name__)
@@ -45,7 +47,7 @@ def collect_rss(db: Session, feed_url: str, source_name: str):
                 title=title,
                 url=link,
                 full_content=clean_desc,
-                published_at=datetime.utcnow() # 실제로는 entry.published_parsed 파싱 필요
+                published_at=utcnow() # 실제로는 entry.published_parsed 파싱 필요
             )
             db.add(news)
             db.commit() # ID 생성을 위해 즉시 커밋
@@ -65,6 +67,11 @@ def collect_rss(db: Session, feed_url: str, source_name: str):
     except Exception as e:
         logger.error(f"Failed to collect RSS from {source_name}: {e}")
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    before_sleep=before_sleep_log(logger, logging.WARNING)
+)
 async def collect_google_news(db: Session, query: str, region: str = "US"):
     """
     구글 뉴스 RSS로 해외 뉴스 수집 (영문)

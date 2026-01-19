@@ -1,6 +1,6 @@
 import pandas as pd
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 
 EXCEL_PATH = "combined_statements_valuation.xlsx"
@@ -30,7 +30,7 @@ def import_cashflows_with_paths(excel_p, db_p):
     cursor.execute("DELETE FROM external_cashflows")
     
     count = 0
-    now = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
     user_id = 1
     
     for _, row in df.iterrows():

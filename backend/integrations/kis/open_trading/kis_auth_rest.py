@@ -143,9 +143,32 @@ def auth(svr="prod", product=state._cfg["my_prod"], url=None, force=False):
         product: 상품 타입
         url: 토큰 발급 URL (기본값: None)
         force: True면 캐시된 토큰 무시하고 강제 재발급 (기본값: False)
+    
+    Returns:
+        발급된 토큰 또는 캐시된 토큰. 실패 시 None.
+    
+    Features:
+        - 분산 락으로 스탬피드 방지
+        - 서킷브레이커로 연속 실패 시 발급 차단
+        - 지수 백오프로 재시도 간격 조절
     """
     import logging
+    import time
     logger = logging.getLogger(__name__)
+    
+    # 서킷브레이커 임포트 (lazy)
+    try:
+        from backend.integrations.kis.kis_circuit_breaker import (
+            get_circuit_state,
+            acquire_token_refresh_lock,
+            release_token_refresh_lock,
+            record_auth_failure,
+            record_auth_success,
+        )
+        circuit_enabled = True
+    except ImportError:
+        circuit_enabled = False
+        logger.warning("[KIS Auth] 서킷브레이커 모듈 로드 실패, 기본 동작으로 진행")
 
     p = {"grant_type": "client_credentials"}
     if svr == "prod":
@@ -171,42 +194,107 @@ def auth(svr="prod", product=state._cfg["my_prod"], url=None, force=False):
                 logger.debug("[KIS Auth] 캐시된 토큰 사용 (만료 전)")
                 return my_token
 
-        # 새 토큰 발급
-        import os
-        import sys
-        import traceback
+        # ========================================
+        # 서킷브레이커 체크
+        # ========================================
+        if circuit_enabled:
+            circuit_state = get_circuit_state()
+            if not circuit_state.can_attempt:
+                logger.error(
+                    "[KIS Auth] 🔴 서킷 오픈 상태! 발급 시도 차단됨 (open_until=%s)",
+                    circuit_state.circuit_open_until
+                )
+                return None
+            
+            # 백오프 대기
+            if circuit_state.backoff_seconds > 0:
+                logger.info(
+                    "[KIS Auth] 백오프 대기 중... (%.1f초, failure_count=%d)",
+                    circuit_state.backoff_seconds, circuit_state.failure_count
+                )
+                time.sleep(circuit_state.backoff_seconds)
+        
+        # ========================================
+        # 분산 락 획득
+        # ========================================
+        lock_session = None
+        if circuit_enabled:
+            lock_acquired, lock_session = acquire_token_refresh_lock()
+            if not lock_acquired:
+                logger.info("[KIS Auth] 다른 프로세스가 토큰 갱신 중, 대기 후 재시도...")
+                time.sleep(2)
+                # 다시 토큰 확인 (다른 프로세스가 갱신했을 수 있음)
+                my_token = read_token()
+                if my_token:
+                    changeTREnv(my_token, svr, product)
+                    state._base_headers["authorization"] = f"Bearer {my_token}"
+                    state._base_headers["appkey"] = state._TRENV.my_app
+                    state._base_headers["appsecret"] = state._TRENV.my_sec
+                    state._last_auth_time = datetime.now()
+                    logger.debug("[KIS Auth] 다른 프로세스가 갱신한 토큰 사용")
+                    return my_token
+                return None
 
-        pid = os.getpid()
-        cmd_line = " ".join(sys.argv)
-        # 스택 트레이스 요약
-        stack_summary = "".join(traceback.format_stack()[-5:])
+        try:
+            # ========================================
+            # 새 토큰 발급
+            # ========================================
+            import os
+            import sys
+            import traceback
 
-        logger.warning(
-            "🚨 [KIS Auth] 새 토큰 발급 시도 감지! 🚨\n"
-            "pid=%s, cmd=%s\nforce=%s\n"
-            "Call Stack:\n%s",
-            pid, cmd_line, force, stack_summary
-        )
+            pid = os.getpid()
+            cmd_line = " ".join(sys.argv)
+            stack_summary = "".join(traceback.format_stack()[-5:])
 
-        if not url:
-            url = f"{state._cfg[svr]}/oauth2/tokenP"
-        res = requests.post(url, data=json.dumps(p), headers=_getBaseHeader())
-        rescode = res.status_code
-        if rescode == 200:
-            my_token = _getResultObject(res.json()).access_token
-            my_expired = _getResultObject(res.json()).access_token_token_expired
-            logger.warning("[KIS Auth] 토큰 발급 성공! 만료시간: %s", my_expired)
-            save_token(my_token, my_expired)
-        else:
-            logger.error("[KIS Auth] 토큰 발급 실패: %s", res.text)
-            print("Get Auth Token Fail. (Check your AppKey, AppSecret)")
-            return
+            logger.warning(
+                "🚨 [KIS Auth] 새 토큰 발급 시도 감지! 🚨\n"
+                "pid=%s, cmd=%s\nforce=%s\n"
+                "Call Stack:\n%s",
+                pid, cmd_line, force, stack_summary
+            )
 
-        changeTREnv(my_token, svr, product)
+            if not url:
+                url = f"{state._cfg[svr]}/oauth2/tokenP"
+            res = requests.post(url, data=json.dumps(p), headers=_getBaseHeader())
+            rescode = res.status_code
+            
+            if rescode == 200:
+                my_token = _getResultObject(res.json()).access_token
+                my_expired = _getResultObject(res.json()).access_token_token_expired
+                logger.warning("[KIS Auth] ✅ 토큰 발급 성공! 만료시간: %s", my_expired)
+                save_token(my_token, my_expired)
+                
+                # 서킷브레이커 성공 기록
+                if circuit_enabled:
+                    record_auth_success()
+            else:
+                logger.error("[KIS Auth] ❌ 토큰 발급 실패: %s", res.text)
+                
+                # 서킷브레이커 실패 기록
+                if circuit_enabled:
+                    circuit_state = record_auth_failure()
+                    logger.warning(
+                        "[KIS Auth] 실패 기록 (failure_count=%d, circuit_open=%s)",
+                        circuit_state.failure_count, circuit_state.circuit_open
+                    )
+                
+                print("Get Auth Token Fail. (Check your AppKey, AppSecret)")
+                return None
 
-        state._base_headers["authorization"] = f"Bearer {my_token}"
-        state._base_headers["appkey"] = state._TRENV.my_app
-        state._base_headers["appsecret"] = state._TRENV.my_sec
+            changeTREnv(my_token, svr, product)
+
+            state._base_headers["authorization"] = f"Bearer {my_token}"
+            state._base_headers["appkey"] = state._TRENV.my_app
+            state._base_headers["appsecret"] = state._TRENV.my_sec
+            
+        finally:
+            # ========================================
+            # 분산 락 해제
+            # ========================================
+            if circuit_enabled and lock_session:
+                release_token_refresh_lock(lock_session)
+                lock_session.close()
 
     state._last_auth_time = datetime.now()
 

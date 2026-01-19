@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,6 +10,7 @@ from ..core.auth import verify_api_token
 from ..core.db import get_db
 from ..core.models import FxTransaction
 from ..core.schemas import FxTransactionCreate, FxTransactionRead, FxTransactionUpdate
+from ..core.time_utils import utcnow
 from ..services.portfolio import to_fx_transaction_read
 from ..services.users import get_or_create_single_user
 
@@ -94,7 +95,7 @@ def update_fx_transaction(
     data = payload.model_dump(exclude_unset=True)
     for field, value in data.items():
         setattr(record, field, value)
-    record.updated_at = datetime.utcnow()
+    record.updated_at = utcnow()
 
     try:
         db.commit()

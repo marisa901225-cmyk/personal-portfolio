@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.db import get_db
 from ..core.models import UserMemory
+from ..core.time_utils import utcnow
 
 router = APIRouter(prefix="/memories", tags=["Memories"])
 
@@ -82,7 +83,7 @@ async def list_memories(
     
     if not include_expired:
         stmt = stmt.where(
-            (UserMemory.expires_at == None) | (UserMemory.expires_at > datetime.utcnow())
+            (UserMemory.expires_at == None) | (UserMemory.expires_at > utcnow())
         )
     
     stmt = stmt.order_by(UserMemory.importance.desc(), UserMemory.updated_at.desc())
@@ -135,10 +136,10 @@ async def create_memory(
             existing.content = data.content
             existing.category = data.category
             existing.importance = data.importance
-            existing.updated_at = datetime.utcnow()
+            existing.updated_at = utcnow()
             
             if data.ttl_days > 0:
-                existing.expires_at = datetime.utcnow() + timedelta(days=data.ttl_days)
+                existing.expires_at = utcnow() + timedelta(days=data.ttl_days)
             else:
                 existing.expires_at = None
             
@@ -149,7 +150,7 @@ async def create_memory(
     # 새 메모리 생성
     expires_at = None
     if data.ttl_days > 0:
-        expires_at = datetime.utcnow() + timedelta(days=data.ttl_days)
+        expires_at = utcnow() + timedelta(days=data.ttl_days)
     
     memory = UserMemory(
         user_id=user_id,
@@ -158,8 +159,8 @@ async def create_memory(
         key=data.key,
         importance=data.importance,
         expires_at=expires_at,
-        created_at=datetime.utcnow(),
-        updated_at=datetime.utcnow(),
+        created_at=utcnow(),
+        updated_at=utcnow(),
     )
     
     db.add(memory)
@@ -198,11 +199,11 @@ async def update_memory(
         memory.importance = data.importance
     if data.ttl_days is not None:
         if data.ttl_days > 0:
-            memory.expires_at = datetime.utcnow() + timedelta(days=data.ttl_days)
+            memory.expires_at = utcnow() + timedelta(days=data.ttl_days)
         else:
             memory.expires_at = None
     
-    memory.updated_at = datetime.utcnow()
+    memory.updated_at = utcnow()
     
     await db.commit()
     await db.refresh(memory)
@@ -243,7 +244,7 @@ async def search_memories(
     stmt = select(UserMemory).where(
         UserMemory.user_id == user_id,
         UserMemory.importance >= req.min_importance,
-        (UserMemory.expires_at == None) | (UserMemory.expires_at > datetime.utcnow())
+        (UserMemory.expires_at == None) | (UserMemory.expires_at > utcnow())
     )
     
     if req.category:
@@ -270,7 +271,7 @@ async def cleanup_expired(
     stmt = delete(UserMemory).where(
         UserMemory.user_id == user_id,
         UserMemory.expires_at != None,
-        UserMemory.expires_at < datetime.utcnow()
+        UserMemory.expires_at < utcnow()
     )
     
     await db.execute(stmt)

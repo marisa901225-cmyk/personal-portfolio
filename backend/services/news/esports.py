@@ -1,11 +1,12 @@
-import logging
 import httpx
-import asyncio
-import os
-from datetime import datetime, timezone, timedelta
+import logging
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
 from sqlalchemy.orm import Session
+from ...core.config import settings
 from ...core.models import GameNews
+from ...core.time_utils import utcnow
 from .core import calculate_simhash, PANDASCORE_URL
 
 logger = logging.getLogger(__name__)
@@ -60,30 +61,21 @@ def is_noise(m: dict) -> bool:
         
     return False
 
-async def fetch_with_retry(client: httpx.AsyncClient, url: str, headers: dict, params: dict, max_retries: int = 3) -> httpx.Response:
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=4, max=10),
+    retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.TimeoutException, httpx.NetworkError)),
+    before_sleep=before_sleep_log(logger, logging.WARNING)
+)
+async def fetch_with_retry(client: httpx.AsyncClient, url: str, headers: dict, params: dict) -> httpx.Response:
     """
-    429 rate limit 대응을 포함한 재시도 로직
+    tenacity를 사용한 재시도 로직 (429 Rate Limit 및 서버 에러 대응)
     """
-    for attempt in range(max_retries):
-        try:
-            response = await client.get(url, headers=headers, params=params, timeout=20.0)
-            
-            if response.status_code == 429:
-                retry_after = int(response.headers.get("Retry-After", "60"))
-                logger.warning(f"Rate limited (429), waiting {retry_after}s... (attempt {attempt + 1}/{max_retries})")
-                await asyncio.sleep(retry_after)
-                continue
-            
-            response.raise_for_status()
-            return response
-            
-        except httpx.HTTPStatusError as e:
-            if attempt == max_retries - 1:
-                raise
-            logger.warning(f"HTTP error {e.response.status_code}, retrying... (attempt {attempt + 1}/{max_retries})")
-            await asyncio.sleep(2 ** attempt)  # exponential backoff
-            
-    raise Exception(f"Max retries ({max_retries}) exceeded")
+    response = await client.get(url, headers=headers, params=params, timeout=20.0)
+    
+    # 429 에러는 raise_for_status()에서 잡히므로 별도 처리 없이 예외 발생시킴
+    response.raise_for_status()
+    return response
 
 async def cleanup_old_schedules(db: Session):
     """
@@ -111,7 +103,7 @@ async def collect_pandascore_schedules(db: Session):
     """
     await cleanup_old_schedules(db)
     
-    api_key = os.getenv("PANDASCORE_API_KEY")
+    api_key = settings.pandascore_api_key
     if not api_key:
         logger.warning("PANDASCORE_API_KEY not set. Skipping PandaScore collection.")
         return
@@ -252,7 +244,7 @@ async def collect_pandascore_schedules(db: Session):
                 event_time=begin_at_utc.replace(tzinfo=None),
                 title=title,
                 full_content=content,
-                published_at=datetime.utcnow()
+                published_at=utcnow()
             )
             db.add(news)
             count += 1
@@ -271,7 +263,7 @@ async def collect_pandascore_results(db: Session):
     """
     최근 종료된 경기 결과를 수집하고, LCK 챌린저스 비중계일(수,목,금)인 경우 알림을 보낸다.
     """
-    api_key = os.getenv("PANDASCORE_API_KEY")
+    api_key = settings.pandascore_api_key
     if not api_key:
         logger.warning("PANDASCORE_API_KEY not set for results collection.")
         return
@@ -342,8 +334,8 @@ async def collect_pandascore_results(db: Session):
                 event_time=r["time_kst"].replace(tzinfo=None),
                 title=f"Result: {r['name']}",
                 full_content=f"Winner: {r['winner']} ({r['score']})",
-                notified_at=datetime.utcnow(), # 알림 전송 시각 저장 (LO의 추천 💖)
-                published_at=datetime.utcnow()
+                notified_at=utcnow(), # 알림 전송 시각 저장 (LO의 추천 💖)
+                published_at=utcnow()
             )
             db.add(news)
         
@@ -361,6 +353,6 @@ async def collect_pandascore_results(db: Session):
         await send_telegram_message("\n".join(lines))
         logger.info(f"Sent {len(results_to_notify)} LCK-CL result notifications.")
         
-    except Exception as e:
-        logger.error(f"Error in collect_pandascore_results: {e}")
+    except Exception:
+        logger.exception("Error in collect_pandascore_results")
         db.rollback()

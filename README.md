@@ -76,6 +76,9 @@ Docker Compose를 사용하여 백엔드, 프론트엔드, LLM 서버를 한 번
 # Security
 API_TOKEN=your_secure_token_hash
 
+# KIS Config Directory (Required for stock price sync)
+KIS_CONFIG_DIR=/path/to/your/KIS/config
+
 # Database
 DATABASE_URL=sqlite:///backend/storage/db/portfolio.db
 

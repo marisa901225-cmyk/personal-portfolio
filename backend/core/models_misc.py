@@ -7,6 +7,7 @@ from sqlalchemy import DateTime, Integer, String, Text, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
+from .time_utils import utcnow
 
 
 class IncomingAlarm(Base):
@@ -30,7 +31,7 @@ class IncomingAlarm(Base):
     # rule, nb, llm
     classification: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
-    received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class SpamAlarm(Base):
@@ -60,8 +61,8 @@ class SpamAlarm(Base):
     restored_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     restored_reason: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 
-    received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class SpamRule(Base):
@@ -78,7 +79,7 @@ class SpamRule(Base):
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_enabled: Mapped[bool] = mapped_column(Integer, default=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class GameNews(Base):
@@ -114,16 +115,16 @@ class GameNews(Base):
     # 영문 뉴스의 경우 LLM으로 생성한 한국어 요약 (원문은 full_content에 유지)
     summary: Mapped[Optional[Text]] = mapped_column(Text, nullable=True)
 
-    published_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    published_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     notified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True) # 알림 전송 시각 기록 (LO 추천 💖)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
         nullable=False,
     )
 
@@ -152,7 +153,7 @@ class SpamNews(Base):
     full_content: Mapped[Text] = mapped_column(Text, nullable=False)
     summary: Mapped[Optional[Text]] = mapped_column(Text, nullable=True)
 
-    published_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    published_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     
     # 왜 스팸으로 분류되었는지 기록 (패턴 매칭 결과 등)
     spam_reason: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -164,12 +165,12 @@ class SpamNews(Base):
     restored_reason: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
         nullable=False,
     )
 
@@ -191,7 +192,7 @@ class SchedulerState(Base):
 
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
         nullable=False,
     )

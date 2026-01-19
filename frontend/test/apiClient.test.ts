@@ -1,3 +1,4 @@
+/* eslint-disable no-undef */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiClient, ApiError, type BackendHealthResponse, type BackendPortfolioResponse } from '@/shared/api/client';
 

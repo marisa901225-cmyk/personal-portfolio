@@ -3,11 +3,11 @@
 /add, /del, /list, /on, /off
 """
 import logging
-from datetime import datetime
 
 from sqlalchemy.orm import Session
 
 from ...core.models import SpamRule
+from ...core.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ def _handle_add(arg: str, db: Session) -> str:
             category="general",
             note="텔레그램 추가",
             is_enabled=True,
-            created_at=datetime.utcnow()
+            created_at=utcnow()
         )
         db.add(new_rule)
         db.commit()

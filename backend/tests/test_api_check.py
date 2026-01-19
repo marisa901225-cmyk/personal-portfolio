@@ -1,7 +1,7 @@
 import os
 import httpx
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 async def check_lck_schedules():
     api_key = os.getenv("PANDASCORE_API_KEY")
@@ -13,7 +13,7 @@ async def check_lck_schedules():
     headers = {"Authorization": f"Bearer {api_key}"}
     
     # 필터 최소화: 오늘부터 향후 30일간 모든 경기
-    start_utc = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+    start_utc = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
     
     params = {
         "filter[videogame]": "league-of-legends",

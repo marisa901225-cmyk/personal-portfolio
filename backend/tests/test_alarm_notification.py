@@ -5,13 +5,13 @@
 """
 import sys
 import os
-from datetime import datetime
 
 # 경로 설정
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from core.db import SessionLocal
 from core.models import IncomingAlarm
+from core.time_utils import utcnow
 
 def create_test_alarms():
     """테스트용 알람들을 생성"""
@@ -53,7 +53,7 @@ def create_test_alarms():
             sender=alarm_data["sender"],
             app_name=alarm_data["app_name"],
             status="pending",
-            received_at=datetime.utcnow()
+            received_at=utcnow()
         )
         db.add(alarm)
         print(f"✅ {alarm_data['app_name']} - {alarm_data['sender']}: {alarm_data['raw_text'][:30]}...")

@@ -16,7 +16,7 @@ import { restorePortfolioFromBackup } from '@/features/portfolio';
 import type { ImportedAssetSnapshot } from '@/shared/portfolio';
 import { useSettings } from '@hooks/useSettings';
 import type { CmaConfig } from '@/shared/portfolio';
-import { Asset, AssetCategory, TradeRecord } from '@lib/types';
+import { AssetCategory } from '@lib/types';
 import { Loader2 } from 'lucide-react';
 
 export const AssetsPage: React.FC = () => {
@@ -145,8 +145,8 @@ export const AssetsPage: React.FC = () => {
             snapshot,
             isRemoteEnabled: enabled,
             apiClient,
-            setAssets: (_next: React.SetStateAction<Asset[]>) => { },
-            setTradeHistory: (_next: React.SetStateAction<TradeRecord[]>) => { },
+            setAssets: () => { },
+            setTradeHistory: () => { },
             loadPortfolioFromServer: async () => {
                 await queryClient.refetchQueries({ queryKey: queryKeys.portfolio });
                 await queryClient.refetchQueries({ queryKey: queryKeys.trades });

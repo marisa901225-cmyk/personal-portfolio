@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { PortfolioSummary, AssetCategory } from '../../lib/types';
+import { PortfolioSummary } from '../../lib/types';
 
 interface UsePortfolioCalculationsProps {
     summary: PortfolioSummary;

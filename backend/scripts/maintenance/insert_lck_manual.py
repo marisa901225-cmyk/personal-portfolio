@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from backend.core.db import SessionLocal
 from backend.core.models import GameNews
 from backend.services.news.core import calculate_simhash
@@ -39,7 +39,7 @@ def insert_manual_lck_schedules():
                     event_time=event_time,
                     title=sch["title"],
                     full_content=content,
-                    published_at=datetime.utcnow()
+                    published_at=datetime.now(timezone.utc).replace(tzinfo=None)
                 )
                 db.add(news)
                 count += 1

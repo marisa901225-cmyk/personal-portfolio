@@ -6,18 +6,18 @@ import { BackendSavedAiReport } from '@/shared/api/client';
 interface SavedReportListProps {
     savedReports: BackendSavedAiReport[];
     selectedReportId: number | null;
-    currentResult: any;
+    currentResult: boolean;
     handleSelectSaved: (id: number) => void;
     handleDelete: (id: number) => void;
     isSavedLoading: boolean;
     deletingId: number | null;
 }
 
-const formatPeriodLabel = (report: any) => {
-    const year = report.period_year ?? report.period?.year;
-    const month = report.period_month ?? report.period?.month;
-    const quarter = report.period_quarter ?? report.period?.quarter;
-    const half = report.period_half ?? report.period?.half;
+const formatPeriodLabel = (report: BackendSavedAiReport) => {
+    const year = report.period_year;
+    const month = report.period_month;
+    const quarter = report.period_quarter;
+    const half = report.period_half;
 
     if (month) return `${year}-${String(month).padStart(2, '0')}`;
     if (quarter) return `${year} Q${quarter}`;

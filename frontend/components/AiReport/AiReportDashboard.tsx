@@ -11,7 +11,13 @@ interface AiReportDashboardProps {
     apiToken?: string;
 }
 
-const formatPeriodLabel = (report: any) => {
+const formatPeriodLabel = (report: {
+    period_year?: number;
+    period_month?: number | null;
+    period_quarter?: number | null;
+    period_half?: number | null;
+    period?: { year: number; month?: number | null; quarter?: number | null; half?: number | null }
+}) => {
     const year = report.period_year ?? report.period?.year;
     const month = report.period_month ?? report.period?.month;
     const quarter = report.period_quarter ?? report.period?.quarter;
@@ -80,7 +86,7 @@ export const AiReportDashboard: React.FC<AiReportDashboardProps> = ({ serverUrl,
             <SavedReportList
                 savedReports={state.savedReports}
                 selectedReportId={state.selectedReportId}
-                currentResult={state.currentResult}
+                currentResult={Boolean(state.currentResult)}
                 handleSelectSaved={handlers.handleSelectSaved}
                 handleDelete={handlers.handleDelete}
                 isSavedLoading={state.isSavedLoading}
@@ -92,7 +98,11 @@ export const AiReportDashboard: React.FC<AiReportDashboardProps> = ({ serverUrl,
                 isLoading={state.isLoading}
                 isGeneralLoading={state.isGeneralLoading}
                 generalReport={state.generalReport}
-                generalPeriod={state.generalPeriod}
+                generalPeriod={state.generalPeriod ? {
+                    ...state.generalPeriod,
+                    start_date: '',
+                    end_date: ''
+                } : null}
                 generalError={state.generalError}
             />
         </section>

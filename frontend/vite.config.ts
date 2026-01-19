@@ -14,9 +14,13 @@ export default defineConfig(() => {
         output: {
           manualChunks: {
             // React 관련
-            'vendor-react': ['react', 'react-dom'],
+            'vendor-react': ['react', 'react-dom', 'react-router-dom'],
             // 차트 라이브러리
             'vendor-charts': ['recharts'],
+            // 데이터 쿼리
+            'vendor-query': ['@tanstack/react-query'],
+            // 마크다운 (AiReport 등에서 사용)
+            'vendor-markdown': ['react-markdown', 'remark-gfm'],
             // 아이콘
             'vendor-icons': ['lucide-react'],
           },

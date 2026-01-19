@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from ...core.models import User, UserMemory
 from ...core.db import SessionLocal
+from ...core.time_utils import utcnow
 from ...integrations.telegram import send_telegram_message
 from ...services.prompt_loader import load_prompt
 
@@ -111,7 +112,7 @@ async def _handle_memory_store(text: str):
         key = mem_data.get("key")
         importance = mem_data.get("importance", 1)
         ttl_days = mem_data.get("ttl_days", 0)
-        expires_at = datetime.utcnow() + timedelta(days=ttl_days) if ttl_days > 0 else None
+        expires_at = utcnow() + timedelta(days=ttl_days) if ttl_days > 0 else None
 
         existing = db.query(UserMemory).filter(UserMemory.user_id == user.id, UserMemory.key == key).first() if key else None
         
@@ -120,7 +121,7 @@ async def _handle_memory_store(text: str):
             existing.category = category
             existing.importance = importance
             existing.expires_at = expires_at
-            existing.updated_at = datetime.utcnow()
+            existing.updated_at = utcnow()
             db.commit()
             await send_telegram_message(f"🔄 기존 기억을 업데이트했습니다: \"{content}\" (키: {key})")
         else:
@@ -240,7 +241,7 @@ async def _handle_general_chat(text: str, chat_id: str):
     try:
         user = db.query(User).first()
         if user:
-            now = datetime.utcnow()
+            now = utcnow()
             memories = db.query(UserMemory).filter(
                 UserMemory.user_id == user.id,
                 (UserMemory.expires_at == None) | (UserMemory.expires_at > now)

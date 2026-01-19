@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React from 'react';
 import { AlertCircle, CheckCircle2, Loader2, Upload } from 'lucide-react';
 import type { BackendExpenseUploadResult } from '@/shared/api/client';
 

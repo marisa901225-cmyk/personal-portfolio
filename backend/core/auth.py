@@ -1,22 +1,17 @@
 from __future__ import annotations
+from fastapi import Header, HTTPException
+from .config import settings
 
 import os
 
-from fastapi import Header, HTTPException
-
-_API_TOKEN_FROM_ENV = os.getenv("API_TOKEN")
-API_TOKEN = _API_TOKEN_FROM_ENV
+API_TOKEN = settings.api_token
 
 
 def resolve_api_token() -> str | None:
     """
-    API_TOKEN이 수동으로 변경되지 않았다면 환경변수 값을 반영한다.
-    테스트에서 API_TOKEN을 직접 변경하는 케이스를 보장하기 위한 헬퍼다.
+    API_TOKEN이 수동으로 변경되지 않았다면 설정된 값을 반환한다.
     """
-    env_token = os.getenv("API_TOKEN")
-    if API_TOKEN != _API_TOKEN_FROM_ENV:
-        return API_TOKEN
-    return env_token
+    return API_TOKEN
 
 
 async def verify_api_token(x_api_token: str | None = Header(default=None)) -> None:

@@ -1,11 +1,10 @@
-from __future__ import annotations
-
 import logging
-import os
 import re
 import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
+
+from backend.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +27,7 @@ def _kis_enabled_mode() -> str:
     - truthy(1/true/yes/on): 강제 활성화 (없으면 요청 시 RuntimeError)
     - falsy(0/false/no/off): 강제 비활성화
     """
-    raw = os.getenv(_KIS_ENABLED_ENV, "auto")
-    if raw is None:
-        return "auto"
-    v = raw.strip().lower()
+    v = settings.kis_enabled.strip().lower()
     if v in {"auto", ""}:
         return "auto"
     if _env_truthy(v):

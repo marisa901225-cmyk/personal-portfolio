@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -9,6 +7,7 @@ from ..core.auth import verify_api_token
 from ..core.db import get_db
 from ..core.models import Asset, Trade, ExternalCashflow
 from ..core.schemas import PortfolioResponse, PortfolioRestoreRequest, PortfolioRestoreResponse
+from ..core.time_utils import utcnow
 from ..services.portfolio import calculate_summary, to_asset_read, to_trade_read
 from ..services.users import get_or_create_single_user
 
@@ -51,7 +50,7 @@ def restore_portfolio(
     payload: PortfolioRestoreRequest, db: Session = Depends(get_db)
 ) -> PortfolioRestoreResponse:
     user = get_or_create_single_user(db)
-    now = datetime.utcnow()
+    now = utcnow()
 
     existing_assets = (
         db.query(Asset)

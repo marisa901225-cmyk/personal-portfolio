@@ -9,6 +9,8 @@ import os
 import requests
 import yaml
 
+from backend.core.config import settings
+
 from ..integrations.kis.token_store import read_kis_token
 
 logger = logging.getLogger(__name__)
@@ -59,29 +61,21 @@ def _parse_datetime(value) -> datetime | None:
     return None
 
 
-_ENV_MAP = {
-    "my_app": "KIS_MY_APP",
-    "my_sec": "KIS_MY_SEC",
-    "my_acct_stock": "KIS_MY_ACCT_STOCK",
-    "my_prod": "KIS_MY_PROD",
-    "my_htsid": "KIS_MY_HTSID",
-    "prod": "KIS_PROD",
-}
-
 def _load_kis_config() -> dict | None:
-    """Load KIS config from file or environment variables."""
-    # 1. Try environment variables first
-    env_cfg = {}
-    for key, env_key in _ENV_MAP.items():
-        value = os.getenv(env_key)
-        if value is not None and value.strip():
-            env_cfg[key] = value.strip()
-    
-    # If we have essential config from env, use it
-    if env_cfg.get("my_app") and env_cfg.get("my_sec") and env_cfg.get("prod"):
-        return env_cfg
+    """Load KIS config from centralized settings."""
+    # Check if essential config exists in settings
+    if settings.kis_my_app and settings.kis_my_sec and settings.kis_prod:
+        return {
+            "my_app": settings.kis_my_app,
+            "my_sec": settings.kis_my_sec,
+            "my_acct_stock": settings.kis_my_acct_stock,
+            "my_prod": settings.kis_my_prod,
+            "my_htsid": settings.kis_my_htsid,
+            "prod": settings.kis_prod,
+        }
 
-    # 2. Fallback to file
+    # Fallback to file (legacy support, or if user prefers file but envs are missing)
+    # But user specifically asked to use env from config, allowing fallback is still safe.
     try:
         cfg_path = Path.home() / "KIS" / "config" / "kis_user.yaml"
         if cfg_path.exists():
@@ -89,7 +83,7 @@ def _load_kis_config() -> dict | None:
     except Exception as e:
         logger.warning(f"Failed to load KIS config from file: {e}")
 
-    logger.warning("KIS config not found in env (KIS_MY_APP...) or file (~/KIS/config/kis_user.yaml)")
+    logger.warning("KIS config not found in settings (KIS_MY_APP...) or file (~/KIS/config/kis_user.yaml)")
     return None
 
 
