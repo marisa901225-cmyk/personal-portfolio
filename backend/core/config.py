@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     llm_remote_model_path_file: Optional[str] = Field(default=None, validation_alias="LLM_REMOTE_MODEL_PATH_FILE")
 
     # KIS (한국투자증권) 설정
+    kis_config_dir: Optional[str] = Field(default=None, validation_alias="KIS_CONFIG_DIR")
     kis_enabled: str = Field(default="auto", validation_alias="KIS_ENABLED")
     kis_my_app: Optional[str] = Field(default=None, validation_alias="KIS_MY_APP")
     kis_my_sec: Optional[str] = Field(default=None, validation_alias="KIS_MY_SEC")

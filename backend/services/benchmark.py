@@ -10,6 +10,7 @@ import requests
 import yaml
 
 from backend.core.config import settings
+from backend.integrations.kis.config_paths import get_kis_user_config_path
 
 from ..integrations.kis.token_store import read_kis_token
 
@@ -77,7 +78,9 @@ def _load_kis_config() -> dict | None:
     # Fallback to file (legacy support, or if user prefers file but envs are missing)
     # But user specifically asked to use env from config, allowing fallback is still safe.
     try:
-        cfg_path = Path.home() / "KIS" / "config" / "kis_user.yaml"
+        if not (os.getenv("KIS_CONFIG_DIR") or getattr(settings, "kis_config_dir", None)):
+            raise FileNotFoundError("KIS_CONFIG_DIR not configured (file config disabled)")
+        cfg_path = get_kis_user_config_path()
         if cfg_path.exists():
             return yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     except Exception as e:

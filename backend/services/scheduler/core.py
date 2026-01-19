@@ -4,10 +4,10 @@ from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
-from .core.db import SessionLocal
-from .services.news_collector import NewsCollector
-from .services.scheduler_monitor import monitor_job_async
-from .services.retry import sync_retry, async_retry
+from backend.core.db import SessionLocal
+from backend.services.news_collector import NewsCollector
+from backend.services.scheduler_monitor import monitor_job_async
+from backend.services.retry import sync_retry, async_retry
 
 
 logger = logging.getLogger(__name__)

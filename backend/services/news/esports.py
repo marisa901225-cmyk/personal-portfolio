@@ -23,24 +23,30 @@ def to_kst(dt_utc: datetime) -> datetime:
     """UTC datetime을 KST로 변환"""
     return dt_utc.astimezone(KST)
 
-def get_display_league_tag(m: dict) -> str:
-    """
-    발로란트 대회의 경우 구체적인 시리즈/토너먼트 이름을 반환한다.
-    우선순위: Tournament Name > Serie Name > League Name
-    """
-    league = (m.get("league") or {}).get("name")
-    serie = (m.get("serie") or {}).get("full_name") or (m.get("serie") or {}).get("name")
-    tour = (m.get("tournament") or {}).get("name")
-    
-    # 너무 긴 이름은 적당히 잘라내거나 조정할 수 있음, 여기서는 serie나 tour 우선 사용
-    # 보통 VCT 2026: EMEA Kickoff 형태가 serie full_name에 들어옴.
-    if serie:
-        return serie
-    if tour:
-        return tour
-    return league or "Valorant"
+from ...core.esports_config import GAME_REGISTRY, get_game_config
 
-def is_noise(m: dict) -> bool:
+logger = logging.getLogger(__name__)
+
+# 시간대 상수
+KST = ZoneInfo("Asia/Seoul")
+
+# Datetime 유틸리티
+def parse_ps_datetime_utc(iso_z: str) -> datetime:
+    """PandaScore ISO 문자열(Z)을 UTC aware datetime으로 변환"""
+    return datetime.fromisoformat(iso_z.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+def to_kst(dt_utc: datetime) -> datetime:
+    """UTC datetime을 KST로 변환"""
+    return dt_utc.astimezone(KST)
+
+def get_display_league_tag(m: dict, game_config: dict) -> str:
+    """레지스트리 설정된 태거를 사용하여 리그 태그를 가져온다."""
+    tagger = game_config.get("tagger")
+    if tagger:
+        return tagger(m)
+    return (m.get("league") or {}).get("name") or "Unknown"
+
+def is_noise(m: dict, game_config: dict) -> bool:
     """
     원치 않는 하위 리그나 이벤트성 매치를 필터링한다 (True면 노이즈)
     """
@@ -50,12 +56,7 @@ def is_noise(m: dict) -> bool:
         str((m.get("tournament") or {}).get("name") or ""),
     ]).lower()
     
-    # 제외 키워드 목록
-    noise_keywords = [
-        "game changers", "gc ", "gc-", "monthly", "qualifier", "showmatch", 
-        "challengers", "division", "open", "premier", "ascension", "trials"
-    ]
-    
+    noise_keywords = game_config.get("noise_keywords") or []
     if any(k in t for k in noise_keywords):
         return True
         
@@ -72,8 +73,6 @@ async def fetch_with_retry(client: httpx.AsyncClient, url: str, headers: dict, p
     tenacity를 사용한 재시도 로직 (429 Rate Limit 및 서버 에러 대응)
     """
     response = await client.get(url, headers=headers, params=params, timeout=20.0)
-    
-    # 429 에러는 raise_for_status()에서 잡히므로 별도 처리 없이 예외 발생시킴
     response.raise_for_status()
     return response
 
@@ -82,7 +81,6 @@ async def cleanup_old_schedules(db: Session):
     7일 이상 지난 과거 e스포츠 일정을 삭제한다.
     """
     try:
-        # event_time은 tzinfo 없이 KST 기준으로 저장되므로 KST 기준으로 threshold 계산
         threshold_kst = datetime.now(KST).replace(tzinfo=None) - timedelta(days=7)
         
         deleted = db.query(GameNews).filter(
@@ -134,93 +132,53 @@ async def collect_pandascore_schedules(db: Session):
                 if len(page_items) < per_page:
                     break
 
-        interest_keywords = [
-            "lck", "lpl", "lec", "lcs", "worlds", "msi", "월즈",
-            "challengers", "cl", "pacific", "vct", "masters", "champions",
-        ]
-        exclude_keywords = [".a", "academy", "youth", "secondary", "아카데미"]
-
         count = 0
         for match in matches:
-            name = match.get("name", "")
             game_info = match.get("videogame", {})
-            game_name = game_info.get("name", "").lower()
-            league = match.get("league", {}).get("name", "Unknown League")
+            game_slug = game_info.get("slug", "").lower()
+            
+            # 레지스트리에서 게임 설정 가져오기
+            game_config = get_game_config(game_slug)
+            if not game_config:
+                continue
+
             begin_at_str = match.get("begin_at")
             if not begin_at_str: 
                 continue
 
-            # 종목 필터링 (API에서 game_name이 'LoL' 또는 'League of Legends'로 올 수 있음)
-            is_lol = game_name in ("lol", "league of legends")
-            is_valorant = "valorant" == game_name
-            if not (is_lol or is_valorant):
-                continue
-            
-            # 노이즈 필터링 (Game Changers 등)
-            if is_valorant and is_noise(match):
-                # logger.debug(f"Skipping noise match: {name} ({match.get('league', {}).get('name')})")
+            # 노이즈 필터링
+            if is_noise(match, game_config):
                 continue
 
-            game_tag = "LoL" if is_lol else "Valorant"
+            display_game_name = game_config["display_name"]
             
-            # UTC aware datetime으로 파싱 및 저장
             begin_at_utc = parse_ps_datetime_utc(begin_at_str)
             begin_at_kst = to_kst(begin_at_utc)
 
-            # 리그 태깅
-            league_name = match.get("league", {}).get("name") or ""
-            league_tag = "기타"
+            # 리그 태깅 및 국제 대회 여부
+            league_tag = get_display_league_tag(match, game_config)
             is_international = False
-            
-            lower_league = league_name.lower()
-            
-            if is_valorant:
-                # 발로란트는 구체적인 대회명을 태그로 사용
-                league_tag = get_display_league_tag(match)
-                # 국제 대회 여부 판단 (키워드 기반)
-                if any(kw in league_tag.lower() for kw in ["champions", "masters", "kickoff", "ascension"]):
-                    is_international = True
-            elif "lck" in lower_league:
-                league_tag = "LCK"
-                if any(kw in lower_league for kw in ["challengers", "cl"]):
-                    league_tag = "LCK-CL"
-            elif "lpl" in lower_league:
-                league_tag = "LPL"
-            elif "lec" in lower_league:
-                league_tag = "LEC"
-            elif "lcs" in lower_league:
-                league_tag = "LCS"
-            elif any(kw in lower_league for kw in ["worlds", "msi", "mid-season invitational"]):
-                league_tag = "Worlds/MSI"
-                is_international = True
-            elif any(kw in lower_league for kw in ["champions", "masters", "vct"]):
-                league_tag = "VCT"
-                is_international = True
+            if "is_international" in game_config:
+                is_international = game_config["is_international"](league_tag)
 
-            # 관심 리그 필터링
-            # 발로란트는 필터링 통과 (이미 noise 체크 함), LoL은 기존 로직 유지
-            full_text = f"{name} {league}".lower()
+            # 관심 뉴스 여부 판단
+            name = match.get("name", "")
+            league_name = (match.get("league") or {}).get("name") or ""
+            full_text = f"{name} {league_name} {league_tag}".lower()
             
-            if is_valorant:
-                # 발로란트: VCT 메인 및 주요 대회(Champions, Masters, Kickoff)만 관심 경기로 인정
-                vct_main_keywords = ["vct", "champions", "masters", "kickoff"]
-                is_interesting = any(kw in league_tag.lower() for kw in vct_main_keywords)
-            else:
-                is_interesting = (league_tag != "기타") or any(kw in full_text for kw in interest_keywords)
+            interest_keywords = game_config.get("interest_keywords") or []
+            exclude_keywords = game_config.get("exclude_keywords") or []
             
-            is_lck_cl = any(kw in full_text for kw in ["lck", "challengers", "cl"])
-            is_academy = any(ex in full_text for ex in exclude_keywords)
+            is_interesting = any(kw in full_text for kw in interest_keywords)
+            is_excluded = any(ex in full_text for ex in exclude_keywords)
             
-            if not is_interesting:
-                continue
-            if is_academy and not is_lck_cl:
+            if not is_interesting or is_excluded:
                 continue
             
-            title = f"[Esports Schedule] {game_tag} - {name}"
-            # content에 KST 시간 포함 (사용자 가독성)
+            title = f"[Esports Schedule] {display_game_name} - {name}"
             content = (
                 f"Match: {name}\n"
-                f"League: {league}\n"
+                f"League: {league_name}\n"
                 f"Tournament: {match.get('tournament', {}).get('name')}\n"
                 f"Start Time (KST): {begin_at_kst.strftime('%Y-%m-%d %H:%M')}\n"
                 f"Start Time (UTC): {begin_at_utc.strftime('%Y-%m-%d %H:%M')}\n"
@@ -232,15 +190,13 @@ async def collect_pandascore_schedules(db: Session):
             if existing: 
                 continue
 
-            # DB에는 KST naive로 저장 (SQLite tz 처리 안정성)
             news = GameNews(
                 content_hash=content_hash,
-                game_tag=game_tag,
+                game_tag=display_game_name,
                 league_tag=league_tag,
                 is_international=is_international,
                 source_name="PandaScore",
                 source_type="schedule",
-                # SQLite에서 tz-aware datetime 저장/비교가 불안정하므로 UTC naive로 저장
                 event_time=begin_at_utc.replace(tzinfo=None),
                 title=title,
                 full_content=content,
@@ -252,7 +208,7 @@ async def collect_pandascore_schedules(db: Session):
         db.commit()
         logger.info(f"Collected {count} PandaScore match schedules.")
         
-        # 챌린저스 비중계 결과 수집
+        # 결과 수집 (현재는 LoL 챌린저스만 특화 처리됨)
         await collect_pandascore_results(db)
         
     except Exception as e:
@@ -262,6 +218,7 @@ async def collect_pandascore_schedules(db: Session):
 async def collect_pandascore_results(db: Session):
     """
     최근 종료된 경기 결과를 수집하고, LCK 챌린저스 비중계일(수,목,금)인 경우 알림을 보낸다.
+    (이 부분은 현재 LoL LCK-CL 전용 로직이므로 당분간 유지하거나 추후 더 일반화 가능)
     """
     api_key = settings.pandascore_api_key
     if not api_key:
@@ -273,7 +230,6 @@ async def collect_pandascore_results(db: Session):
     
     try:
         async with httpx.AsyncClient() as client:
-            # 429 대응 포함
             resp = await fetch_with_retry(
                 client, url, headers, 
                 {"per_page": 20, "sort": "-id", "filter[videogame]": "league-of-legends"}
@@ -282,7 +238,7 @@ async def collect_pandascore_results(db: Session):
             
         results_to_notify = []
         for m in matches:
-            league_name = m.get("league", {}).get("name") or ""
+            league_name = (m.get("league") or {}).get("name") or ""
             if "CHALLENGERS" not in league_name.upper(): 
                 continue
             if m.get("status") != "finished": 
@@ -323,7 +279,6 @@ async def collect_pandascore_results(db: Session):
         if not results_to_notify: 
             return
 
-        # 알림 재전송 방지: 먼저 DB 커밋 → 그 다음 텔레그램 전송
         for r in results_to_notify:
             news = GameNews(
                 content_hash=r["hash"],
@@ -334,15 +289,14 @@ async def collect_pandascore_results(db: Session):
                 event_time=r["time_kst"].replace(tzinfo=None),
                 title=f"Result: {r['name']}",
                 full_content=f"Winner: {r['winner']} ({r['score']})",
-                notified_at=utcnow(), # 알림 전송 시각 저장 (LO의 추천 💖)
+                notified_at=utcnow(),
                 published_at=utcnow()
             )
             db.add(news)
         
-        db.commit()  # 먼저 커밋
+        db.commit()
         logger.info(f"Committed {len(results_to_notify)} LCK-CL results to DB.")
         
-        # 커밋 후 텔레그램 전송 (실패해도 중복 방지됨)
         from ...integrations.telegram import send_telegram_message
         lines = ["🏆 <b>[LCK-CL 비중계 경기 결과]</b>\n중계 없는 날도 챙겨왔어! ❤️\n"]
         for r in results_to_notify:
