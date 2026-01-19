@@ -4,6 +4,7 @@ from bisect import bisect_right
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import logging
+import os
 
 import requests
 import yaml
@@ -58,17 +59,38 @@ def _parse_datetime(value) -> datetime | None:
     return None
 
 
+_ENV_MAP = {
+    "my_app": "KIS_MY_APP",
+    "my_sec": "KIS_MY_SEC",
+    "my_acct_stock": "KIS_MY_ACCT_STOCK",
+    "my_prod": "KIS_MY_PROD",
+    "my_htsid": "KIS_MY_HTSID",
+    "prod": "KIS_PROD",
+}
+
 def _load_kis_config() -> dict | None:
-    """Load KIS config, returning None on failure instead of raising."""
+    """Load KIS config from file or environment variables."""
+    # 1. Try environment variables first
+    env_cfg = {}
+    for key, env_key in _ENV_MAP.items():
+        value = os.getenv(env_key)
+        if value is not None and value.strip():
+            env_cfg[key] = value.strip()
+    
+    # If we have essential config from env, use it
+    if env_cfg.get("my_app") and env_cfg.get("my_sec") and env_cfg.get("prod"):
+        return env_cfg
+
+    # 2. Fallback to file
     try:
         cfg_path = Path.home() / "KIS" / "config" / "kis_user.yaml"
-        if not cfg_path.exists():
-            logger.warning("kis_user.yaml not found in ~/KIS/config")
-            return None
-        return yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        if cfg_path.exists():
+            return yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     except Exception as e:
-        logger.warning(f"Failed to load KIS config: {e}")
-        return None
+        logger.warning(f"Failed to load KIS config from file: {e}")
+
+    logger.warning("KIS config not found in env (KIS_MY_APP...) or file (~/KIS/config/kis_user.yaml)")
+    return None
 
 
 def _load_kis_token() -> str | None:
