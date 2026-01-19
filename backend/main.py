@@ -20,6 +20,7 @@ from .core.logging_config import setup_global_logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse
 from starlette.requests import Request
 
@@ -41,6 +42,8 @@ from .routers.spam_rules import router as spam_rules_router
 from .routers.news import router as news_router
 from .routers.telegram_webhook import router as telegram_webhook_router
 from .routers.memories import router as memories_router
+from .routers.scheduler_state import router as scheduler_state_router
+
 
 app = FastAPI(title="MyAsset Portfolio Backend")
 
@@ -70,6 +73,9 @@ async def api_prefix_fallback(request: Request, call_next):
     ):
         request.scope["path"] = f"/api{path}"
     return await call_next(request)
+
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 app.add_middleware(
@@ -121,6 +127,8 @@ app.include_router(spam_rules_router)
 app.include_router(news_router)
 app.include_router(telegram_webhook_router)
 app.include_router(memories_router)
+app.include_router(scheduler_state_router)
+
 
 
 # ============================================
