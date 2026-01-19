@@ -109,8 +109,12 @@ async def process_pending_alarms(db: Session):
         
         # 마스킹 및 스팸 필터링 (보안 및 1단계)
         
-        # 태스크어 변수가 아직 치환되지 않은 경우 필터링 (원문 기준 체크)
-        if "%antext" in original_text or "%evtprm" in original_text:
+        # 태스커 변수가 아직 치환되지 않은 경우 필터링 (원문 + sender 기준 체크)
+        # 주요 알림 관련 태스커 변수: %antext, %antitle, %ansubtext, %ansender, %evtprm 등
+        tasker_vars = ["%antext", "%antitle", "%ansubtext", "%ansender", "%evtprm", "%anapp"]
+        check_fields = [original_text, alarm.sender or "", alarm.app_title or ""]
+        has_placeholder = any(tv in field for tv in tasker_vars for field in check_fields)
+        if has_placeholder:
             alarm.status = "discarded"
             alarm.classification = "placeholder"
             # SpamAlarm에 저장

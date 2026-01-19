@@ -2,6 +2,7 @@ import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
+from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 from .core.db import SessionLocal
 from .services.news_collector import NewsCollector
@@ -9,7 +10,8 @@ from .services.scheduler_monitor import monitor_job_async
 
 logger = logging.getLogger(__name__)
 
-scheduler = AsyncIOScheduler()
+KST = ZoneInfo("Asia/Seoul")
+scheduler = AsyncIOScheduler(timezone=KST)
 
 async def job_collect_news():
     """
@@ -75,10 +77,10 @@ def start_scheduler():
             replace_existing=True
         )
         
-        # 3일에 한 번 밤 12시 1분에 e스포츠 멘트 생성
+        # 월, 목요일 밤 12시 1분에 e스포츠 멘트 생성 (주 2회)
         scheduler.add_job(
             job_generate_catchphrases,
-            CronTrigger(day='*/3', hour=0, minute=1),
+            CronTrigger(day_of_week='mon,thu', hour=0, minute=1),
             id="generate_esports_catchphrases",
             replace_existing=True
         )

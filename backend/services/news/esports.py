@@ -22,6 +22,44 @@ def to_kst(dt_utc: datetime) -> datetime:
     """UTC datetime을 KST로 변환"""
     return dt_utc.astimezone(KST)
 
+def get_display_league_tag(m: dict) -> str:
+    """
+    발로란트 대회의 경우 구체적인 시리즈/토너먼트 이름을 반환한다.
+    우선순위: Tournament Name > Serie Name > League Name
+    """
+    league = (m.get("league") or {}).get("name")
+    serie = (m.get("serie") or {}).get("full_name") or (m.get("serie") or {}).get("name")
+    tour = (m.get("tournament") or {}).get("name")
+    
+    # 너무 긴 이름은 적당히 잘라내거나 조정할 수 있음, 여기서는 serie나 tour 우선 사용
+    # 보통 VCT 2026: EMEA Kickoff 형태가 serie full_name에 들어옴.
+    if serie:
+        return serie
+    if tour:
+        return tour
+    return league or "Valorant"
+
+def is_noise(m: dict) -> bool:
+    """
+    원치 않는 하위 리그나 이벤트성 매치를 필터링한다 (True면 노이즈)
+    """
+    t = " ".join([
+        str((m.get("league") or {}).get("name") or ""),
+        str((m.get("serie") or {}).get("full_name") or (m.get("serie") or {}).get("name") or ""),
+        str((m.get("tournament") or {}).get("name") or ""),
+    ]).lower()
+    
+    # 제외 키워드 목록
+    noise_keywords = [
+        "game changers", "gc ", "gc-", "monthly", "qualifier", "showmatch", 
+        "challengers", "division", "open", "premier", "ascension", "trials"
+    ]
+    
+    if any(k in t for k in noise_keywords):
+        return True
+        
+    return False
+
 async def fetch_with_retry(client: httpx.AsyncClient, url: str, headers: dict, params: dict, max_retries: int = 3) -> httpx.Response:
     """
     429 rate limit 대응을 포함한 재시도 로직
@@ -52,17 +90,17 @@ async def cleanup_old_schedules(db: Session):
     7일 이상 지난 과거 e스포츠 일정을 삭제한다.
     """
     try:
-        # UTC aware datetime으로 threshold 계산
-        threshold_utc = datetime.now(timezone.utc) - timedelta(days=7)
+        # event_time은 tzinfo 없이 KST 기준으로 저장되므로 KST 기준으로 threshold 계산
+        threshold_kst = datetime.now(KST).replace(tzinfo=None) - timedelta(days=7)
         
         deleted = db.query(GameNews).filter(
             GameNews.source_type == "schedule",
-            GameNews.event_time < threshold_utc
+            GameNews.event_time < threshold_kst
         ).delete(synchronize_session=False)
         
         if deleted > 0:
             db.commit()
-            logger.info(f"Cleanup: Deleted {deleted} old esports schedules (older than {threshold_utc}).")
+            logger.info(f"Cleanup: Deleted {deleted} old esports schedules (older than {threshold_kst}).")
     except Exception as e:
         logger.error(f"Failed to cleanup old esports schedules: {e}")
         db.rollback()
@@ -120,12 +158,17 @@ async def collect_pandascore_schedules(db: Session):
             if not begin_at_str: 
                 continue
 
-            # 종목 필터링
-            is_lol = "league of legends" == game_name
+            # 종목 필터링 (API에서 game_name이 'LoL' 또는 'League of Legends'로 올 수 있음)
+            is_lol = game_name in ("lol", "league of legends")
             is_valorant = "valorant" == game_name
             if not (is_lol or is_valorant):
                 continue
             
+            # 노이즈 필터링 (Game Changers 등)
+            if is_valorant and is_noise(match):
+                # logger.debug(f"Skipping noise match: {name} ({match.get('league', {}).get('name')})")
+                continue
+
             game_tag = "LoL" if is_lol else "Valorant"
             
             # UTC aware datetime으로 파싱 및 저장
@@ -138,7 +181,14 @@ async def collect_pandascore_schedules(db: Session):
             is_international = False
             
             lower_league = league_name.lower()
-            if "lck" in lower_league:
+            
+            if is_valorant:
+                # 발로란트는 구체적인 대회명을 태그로 사용
+                league_tag = get_display_league_tag(match)
+                # 국제 대회 여부 판단 (키워드 기반)
+                if any(kw in league_tag.lower() for kw in ["champions", "masters", "kickoff", "ascension"]):
+                    is_international = True
+            elif "lck" in lower_league:
                 league_tag = "LCK"
                 if any(kw in lower_league for kw in ["challengers", "cl"]):
                     league_tag = "LCK-CL"
@@ -156,8 +206,15 @@ async def collect_pandascore_schedules(db: Session):
                 is_international = True
 
             # 관심 리그 필터링
+            # 발로란트는 필터링 통과 (이미 noise 체크 함), LoL은 기존 로직 유지
             full_text = f"{name} {league}".lower()
-            is_interesting = (league_tag != "기타") or any(kw in full_text for kw in interest_keywords)
+            
+            if is_valorant:
+                # 발로란트: VCT 메인 및 주요 대회(Champions, Masters, Kickoff)만 관심 경기로 인정
+                vct_main_keywords = ["vct", "champions", "masters", "kickoff"]
+                is_interesting = any(kw in league_tag.lower() for kw in vct_main_keywords)
+            else:
+                is_interesting = (league_tag != "기타") or any(kw in full_text for kw in interest_keywords)
             
             is_lck_cl = any(kw in full_text for kw in ["lck", "challengers", "cl"])
             is_academy = any(ex in full_text for ex in exclude_keywords)
@@ -183,7 +240,7 @@ async def collect_pandascore_schedules(db: Session):
             if existing: 
                 continue
 
-            # DB에는 UTC로 저장
+            # DB에는 KST naive로 저장 (SQLite tz 처리 안정성)
             news = GameNews(
                 content_hash=content_hash,
                 game_tag=game_tag,
@@ -191,10 +248,11 @@ async def collect_pandascore_schedules(db: Session):
                 is_international=is_international,
                 source_name="PandaScore",
                 source_type="schedule",
-                event_time=begin_at_utc,  # UTC 저장
+                # SQLite에서 tz-aware datetime 저장/비교가 불안정하므로 UTC naive로 저장
+                event_time=begin_at_utc.replace(tzinfo=None),
                 title=title,
                 full_content=content,
-                published_at=datetime.now(timezone.utc)
+                published_at=datetime.utcnow()
             )
             db.add(news)
             count += 1
@@ -281,11 +339,11 @@ async def collect_pandascore_results(db: Session):
                 league_tag="LCK-CL",
                 source_name="PandaScore",
                 source_type="result",
-                event_time=r["time_utc"],  # UTC 저장
+                event_time=r["time_kst"].replace(tzinfo=None),
                 title=f"Result: {r['name']}",
                 full_content=f"Winner: {r['winner']} ({r['score']})",
-                category_tag="notified",
-                published_at=datetime.now(timezone.utc)
+                notified_at=datetime.utcnow(), # 알림 전송 시각 저장 (LO의 추천 💖)
+                published_at=datetime.utcnow()
             )
             db.add(news)
         

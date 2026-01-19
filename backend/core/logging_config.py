@@ -44,7 +44,11 @@ def setup_global_logging(level=logging.INFO, log_file: str | None = None):
         log_dir = os.path.dirname(log_file)
         if log_dir and not os.path.exists(log_dir):
             os.makedirs(log_dir, exist_ok=True)
-        handlers.append(logging.FileHandler(log_file, encoding='utf-8'))
+        try:
+            handlers.append(logging.FileHandler(log_file, encoding='utf-8'))
+        except (PermissionError, OSError):
+            # 테스트 환경 등에서 권한이 없는 경우 무시하고 콘솔만 사용
+            pass
 
     root_logger = logging.getLogger()
     root_logger.setLevel(level)

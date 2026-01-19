@@ -36,6 +36,6 @@ class AlarmService:
 
     @classmethod
     async def generate_daily_catchphrases(cls):
-        """매일 또는 주기적으로 e스포츠 전용 캐치프레이즈를 미리 생성한다."""
-        from .alarm.llm_logic import generate_daily_catchphrases as gen_fn
+        """매일 또는 주기적으로 e스포츠 전용 캐치프레이즈를 생성한다 (폴백 기반)."""
+        from .alarm.catchphrases import generate_daily_catchphrases as gen_fn
         return await gen_fn()

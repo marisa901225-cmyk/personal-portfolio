@@ -26,11 +26,15 @@ class _StubLLMService:
     def is_loaded(self):
         return True
 
-    def generate_chat(self, messages, max_tokens=512, temperature=0.7, stop=None, seed=None, enable_thinking=False):
+    def generate_chat(self, messages, **kwargs):
         return self.response
 
 
 class AlarmLLMSafetyTests(unittest.TestCase):
+    def tearDown(self):
+        from backend.services.llm.service import LLMService
+        LLMService._instance = None
+
     def test_sanitize_drops_hallucinated_app_label(self) -> None:
         original_items = [
             {"app_name": "카카오톡", "sender": "이*후", "text": "이*후님: 내일 영화 보러 갈래?"}

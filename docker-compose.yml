@@ -9,7 +9,7 @@ services:
       - ./backend/data:/data:ro
       - ./backend/scripts/run_llm_server.sh:/run.sh:ro
     environment:
-      - LLM_MODEL_PATH=/data/EXAONE-4.0-1.2B-BF16.gguf
+      - LLM_MODEL_PATH=/data/EXAONE-4.0-1.2B-Q8_0.gguf
       - LLM_MODEL_PATH_FILE=/data/llm_model_path.txt
       - LLM_THREADS=4
     entrypoint: [ "/bin/bash", "/run.sh" ]
@@ -24,13 +24,13 @@ services:
     container_name: myasset-llm-light
     restart: always
     ports:
-      - "8081:8080"
+      - "8081:8081"
     volumes:
       - ./backend/data:/data:ro
     command: >
-      --model /data/Qwen3-0.6B-Q8_0.gguf --host 0.0.0.0 --port 8080 --ctx-size 2048 --n-gpu-layers 0 --threads 2
+      --model /data/Qwen3-0.6B-Q8_0.gguf --host 0.0.0.0 --port 8081 --ctx-size 2048 --n-gpu-layers 0 --threads 2
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
+      test: [ "CMD", "curl", "-f", "http://localhost:8081/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -53,7 +53,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - LLM_BASE_URL=http://llama-server:8080
-      - LLM_REMOTE_DEFAULT_MODEL=EXAONE-4.0-1.2B-BF16.gguf
+      - LLM_REMOTE_DEFAULT_MODEL=EXAONE-4.0-1.2B-Q8_0.gguf
       - TZ=Asia/Seoul
     env_file:
       - ./backend/.env
@@ -78,7 +78,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - LLM_BASE_URL=http://llama-server:8080
-      - LLM_REMOTE_DEFAULT_MODEL=EXAONE-4.0-1.2B-BF16.gguf
+      - LLM_REMOTE_DEFAULT_MODEL=EXAONE-4.0-1.2B-Q8_0.gguf
       - TZ=Asia/Seoul
     depends_on:
       - llama-server
@@ -99,7 +99,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - LLM_BASE_URL=http://llama-server:8080
-      - LLM_REMOTE_DEFAULT_MODEL=EXAONE-4.0-1.2B-BF16.gguf
+      - LLM_REMOTE_DEFAULT_MODEL=EXAONE-4.0-1.2B-Q8_0.gguf
       - TZ=Asia/Seoul
     depends_on:
       - llama-server
@@ -121,7 +121,9 @@ services:
       - PYTHONUNBUFFERED=1
       - BACKEND_URL=http://backend-api:8000
       - LLM_BASE_URL=http://llama-server:8080
-      - LLM_REMOTE_DEFAULT_MODEL=EXAONE-4.0-1.2B-BF16.gguf
+      - AI_REPORT_MODEL=gpt-5.1
+      - AI_REPORT_TIMEOUT_SEC=900
+      - LLM_REMOTE_DEFAULT_MODEL=EXAONE-4.0-1.2B-Q8_0.gguf
       - TZ=Asia/Seoul
     depends_on:
       - llama-server

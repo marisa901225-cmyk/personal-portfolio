@@ -1,7 +1,12 @@
 import logging
 from typing import List, Optional
 
-import httpx
+try:
+    import httpx  # type: ignore
+except Exception:  # pragma: no cover
+    httpx = None
+
+import requests
 
 from .base import LLMBackend
 from ..config import Settings
@@ -16,9 +21,23 @@ class RemoteLlamaBackend(LLMBackend):
 
     def __init__(self, settings: Settings):
         self.settings = settings
-        self._client = httpx.Client(timeout=settings.llm_timeout)
+        self._use_httpx = bool(httpx)
+        if self._use_httpx:
+            self._client = httpx.Client(timeout=settings.llm_timeout)  # type: ignore[union-attr]
+        else:
+            self._client = requests.Session()
         self._model_id_cache: Optional[str] = None
         self._last_error: Optional[str] = None
+
+    def _get(self, url: str, headers: dict):
+        if self._use_httpx:
+            return self._client.get(url, headers=headers)
+        return self._client.get(url, headers=headers, timeout=self.settings.llm_timeout)
+
+    def _post(self, url: str, payload: dict, headers: dict):
+        if self._use_httpx:
+            return self._client.post(url, json=payload, headers=headers)
+        return self._client.post(url, json=payload, headers=headers, timeout=self.settings.llm_timeout)
 
     def get_last_error(self) -> Optional[str]:
         return self._last_error
@@ -43,7 +62,7 @@ class RemoteLlamaBackend(LLMBackend):
             if self.settings.llm_api_key:
                 headers["Authorization"] = f"Bearer {self.settings.llm_api_key}"
 
-            r = self._client.get(url, headers=headers)
+            r = self._get(url, headers=headers)
             r.raise_for_status()
             data = r.json()
             items = data.get("data") or []
@@ -95,6 +114,8 @@ class RemoteLlamaBackend(LLMBackend):
                 "messages": messages,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
+                "top_p": kwargs.get("top_p", 0.8),
+                "top_k": kwargs.get("top_k", 20),
             }
             if stop:
                 payload["stop"] = stop
@@ -104,7 +125,7 @@ class RemoteLlamaBackend(LLMBackend):
             if enable_thinking is not None:
                 payload["chat_template_kwargs"] = {"enable_thinking": bool(enable_thinking)}
 
-            r = self._client.post(url, json=payload, headers=headers)
+            r = self._post(url, payload=payload, headers=headers)
             r.raise_for_status()
             self._last_error = None
             return r.json()["choices"][0]["message"]["content"].strip()
@@ -118,4 +139,3 @@ class RemoteLlamaBackend(LLMBackend):
 
     def reset(self) -> None:
         pass
-

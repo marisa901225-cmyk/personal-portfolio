@@ -10,10 +10,11 @@
 - `npm run dev --prefix frontend` or `npm run dev:frontend`: run the frontend dev server.
 - `npm run build --prefix frontend`: build the frontend for production (`frontend/dist/`).
 - `npm run test --prefix frontend` or `npm run test:frontend`: run frontend unit tests with Vitest.
-- `python -m venv backend/.venv && source backend/.venv/bin/activate`: create/activate backend venv.
+- `python3 -m venv venv && source venv/bin/activate`: create/activate backend venv.
 - `pip install -r backend/requirements.txt`: install backend dependencies.
 - `uvicorn backend.main:app --host 0.0.0.0 --port 8000`: run the API server locally.
-- `npm run test:backend`: run backend tests via `unittest` discovery.
+- `source venv/bin/activate && python3 backend/tests/smoke_test_flex.py`: run e-sports catchphrase smoke test (safe, uses temp file).
+- `python -m unittest discover backend/tests`: run backend unit tests.
 
 ## Coding Style & Naming Conventions
 - TypeScript/TSX uses 2-space indentation; Python uses 4-space indentation.

@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from backend.services.llm.service import LLMService
+from backend.services.llm.config import Settings
 from backend.services.llm.backends.remote import RemoteLlamaBackend
 from backend.services.llm.backends.paid import OpenAIPaidBackend
 
@@ -23,9 +24,24 @@ class TestLLMService(unittest.TestCase):
             with patch.object(RemoteLlamaBackend, "chat", side_effect=AssertionError("remote should not be used")):
                 with patch.object(OpenAIPaidBackend, "chat", return_value="paid-ok") as paid_chat:
                     llm = LLMService.get_instance()
-                    out = llm.generate_chat([{"role": "user", "content": "hi"}])
+                    response_format = {
+                        "type": "json_schema",
+                        "json_schema": {"name": "t", "strict": True, "schema": {"type": "object"}},
+                    }
+                    out = llm.generate_chat(
+                        [{"role": "user", "content": "hi"}],
+                        stop=["STOP"],
+                        seed=7,
+                        service_tier="flex",
+                        response_format=response_format,
+                    )
                     self.assertEqual(out, "paid-ok")
                     paid_chat.assert_called()
+                    _, called_kwargs = paid_chat.call_args
+                    self.assertEqual(called_kwargs.get("stop"), ["STOP"])
+                    self.assertEqual(called_kwargs.get("seed"), 7)
+                    self.assertEqual(called_kwargs.get("service_tier"), "flex")
+                    self.assertEqual(called_kwargs.get("response_format"), response_format)
 
     def test_generate_chat_prefers_remote_when_configured(self):
         env = {
@@ -56,11 +72,26 @@ class TestLLMService(unittest.TestCase):
 
         with patch.dict(os.environ, env, clear=True):
             with patch.object(RemoteLlamaBackend, "chat", new=_remote_fail):
-                with patch.object(OpenAIPaidBackend, "chat", return_value="paid-ok"):
+                with patch.object(OpenAIPaidBackend, "chat", return_value="paid-ok") as paid_chat:
                     llm = LLMService.get_instance()
-                    out = llm.generate_chat([{"role": "user", "content": "hi"}])
+                    response_format = {
+                        "type": "json_schema",
+                        "json_schema": {"name": "t2", "strict": True, "schema": {"type": "object"}},
+                    }
+                    out = llm.generate_chat(
+                        [{"role": "user", "content": "hi"}],
+                        stop=["STOP"],
+                        seed=9,
+                        service_tier="flex",
+                        response_format=response_format,
+                    )
                     self.assertEqual(out, "paid-ok")  # 순수 텍스트 (💰는 전송 단계에서만)
                     self.assertIsNone(llm.get_last_error())
+                    _, called_kwargs = paid_chat.call_args
+                    self.assertEqual(called_kwargs.get("stop"), ["STOP"])
+                    self.assertEqual(called_kwargs.get("seed"), 9)
+                    self.assertEqual(called_kwargs.get("service_tier"), "flex")
+                    self.assertEqual(called_kwargs.get("response_format"), response_format)
 
     def test_no_backend_configured_returns_empty_and_sets_error(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -68,6 +99,55 @@ class TestLLMService(unittest.TestCase):
             out = llm.generate_chat([{"role": "user", "content": "hi"}])
             self.assertEqual(out, "")
             self.assertIn("No LLM backend configured", llm.get_last_error())
+
+    def test_paid_backend_falls_back_to_responses_when_chat_completions_not_supported(self):
+        env = {
+            "AI_REPORT_API_KEY": "test-key",
+            "AI_REPORT_BASE_URL": "https://api.openai.com/v1",
+            "AI_REPORT_MODEL": "gpt-5.2",
+        }
+
+        class _Resp:
+            def __init__(self, status_code: int, json_data=None, text: str = ""):
+                self.status_code = status_code
+                self._json_data = json_data
+                self.text = text
+
+            def json(self):
+                if isinstance(self._json_data, Exception):
+                    raise self._json_data
+                return self._json_data
+
+        error_resp = _Resp(
+            400,
+            json_data={
+                "error": {
+                    "message": "This model does not support the v1/chat/completions endpoint. Use /responses instead."
+                }
+            },
+        )
+        ok_resp = _Resp(200, json_data={"output_text": "responses-ok"})
+
+        with patch.dict(os.environ, env, clear=True):
+            backend = OpenAIPaidBackend(Settings())
+            backend._post = unittest.mock.Mock(side_effect=[error_resp, ok_resp])
+
+            out = backend.chat(
+                [{"role": "user", "content": "hi"}],
+                model="gpt-5.2",
+                stop=["STOP"],
+                seed=123,
+            )
+            self.assertEqual(out, "responses-ok")
+            self.assertIsNone(backend.get_last_error())
+
+            # stop/seed가 양쪽 호출에 전달되는지 확인
+            first_payload = backend._post.call_args_list[0].kwargs["payload"]
+            second_payload = backend._post.call_args_list[1].kwargs["payload"]
+            self.assertEqual(first_payload.get("stop"), ["STOP"])
+            self.assertEqual(first_payload.get("seed"), 123)
+            self.assertEqual(second_payload.get("stop"), ["STOP"])
+            self.assertEqual(second_payload.get("seed"), 123)
 
 
 if __name__ == "__main__":
