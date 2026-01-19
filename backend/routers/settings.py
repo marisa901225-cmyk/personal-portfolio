@@ -33,13 +33,15 @@ def _is_default_benchmark_name(name: str) -> bool:
 
 
 def _should_refresh_benchmark(setting: Setting) -> bool:
+    """연간 벤치마크 갱신 필요 여부 판단 (연 1회만)"""
     if setting.benchmark_name and not _is_default_benchmark_name(setting.benchmark_name):
         return False
     if setting.benchmark_return is None:
         return True
     if setting.benchmark_updated_at is None:
         return True
-    return setting.benchmark_updated_at.date() != utcnow().date()
+    # 연도가 바뀌었을 때만 갱신 (연 1회)
+    return setting.benchmark_updated_at.year != utcnow().year
 
 
 def _refresh_benchmark_if_needed(setting: Setting, db: Session) -> None:
