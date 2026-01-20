@@ -11,7 +11,7 @@ from datetime import datetime
 from ..core.db import get_db
 from ..services import memory_service
 
-router = APIRouter(prefix="/memories", tags=["Memories"])
+router = APIRouter(prefix="/api/memories", tags=["Memories"])
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
