@@ -3,6 +3,7 @@ import os
 import json
 import random
 import re
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 try:
@@ -56,12 +57,11 @@ except Exception:  # pragma: no cover
     GameNews = _GameNewsDummy()  # type: ignore
     from ...core.time_utils import utcnow  # type: ignore
 from .catchphrase_selector import choose_phrase
-from .catchphrase_fallbacks import (
+from .catchphrase_constants import (
     build_fallback_lines,
     LOL_CATCHPHRASES,
     VALORANT_CATCHPHRASES,
 )
-from .sanitizer import clean_exaone_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -88,25 +88,26 @@ def _ci_contains(col, needle: str):
 
 
 def _filter_catchphrases(phrases: list[str]) -> list[str]:
+    """
+    캐치프레이즈 목록을 정제한다. 
+    LLM 생성이 아니므로 기본적인 검증(한글 포함 여부 등)만 수행한다.
+    """
     out: list[str] = []
     seen = set()
     for phrase in phrases or []:
-        p = clean_exaone_tokens((phrase or "").strip())
+        p = (phrase or "").strip()
         if not p:
             continue
         if p in seen:
             continue
         seen.add(p)
 
+        # 기본적인 노이즈 필터링 (특수기호 과다 등)
         if re.search(r"[<>\[\]{}\"]", p):
             continue
         if not re.search(r"[가-힣]", p):
             continue
-        if len(p) > 80:
-            continue
-
-        # LLM 서두 문구/설명 배제
-        if any(bad in p for bad in ["요구사항을 정리", "정확히 10줄", "출력은 ", "Think", "사고과정"]):
+        if len(p) > 100:
             continue
 
         out.append(p)
@@ -184,41 +185,6 @@ def _is_tbd_match_title(match_name: str) -> bool:
     return _is_tbd_team_name(team_a) or _is_tbd_team_name(team_b)
 
 
-def _fallback_phrases_for_matches(matches) -> list[str]:
-    # 경기 알림 단계의 폴백은 "짧은 기본 문구"가 아니라,
-    # 미리 준비한 고퀄 폴백 문구를 사용한다.
-    phrases: list[str] = []
-    seen_game_keys = set()
-    for m in matches or []:
-        game_key = getattr(m, "game_tag", None) or ""
-        if game_key in seen_game_keys:
-            continue
-        if game_key not in ("LoL", "Valorant"):
-            continue
-        seen_game_keys.add(game_key)
-        match_name = ""
-        try:
-            title = (getattr(m, "title", "") or "").replace("[Esports Schedule] ", "")
-            if " - " in title:
-                _, match_name = title.split(" - ", 1)
-            else:
-                match_name = title
-        except Exception:
-            match_name = ""
-
-        team_a, team_b = _extract_teams(match_name)
-        league = getattr(m, "league_tag", None) or (game_key + " 리그")
-        start_time = _format_match_time_kst(m)
-        phrases.extend(
-            build_fallback_lines(
-                game_key=game_key,
-                league=league,
-                team_a=team_a,
-                team_b=team_b,
-                start_time=start_time,
-            )
-        )
-    return _filter_catchphrases(phrases)
 
 
 async def check_upcoming_matches(db: Session, catchphrases_file: str, window_minutes: int = 5) -> bool:
@@ -228,8 +194,8 @@ async def check_upcoming_matches(db: Session, catchphrases_file: str, window_min
     from datetime import timezone
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
     upper_utc = now_utc + timedelta(minutes=window_minutes)
-    # 아래쪽 범위는 경기 시작 직전~직후를 잡기 위해 약간의 여유(5분)를 둔다.
-    lower_utc = now_utc - timedelta(minutes=window_minutes) if window_minutes > 5 else now_utc
+    # 스케줄러 지연이나 이전 실행 실패 시에도 경기 알림을 보낼 수 있도록 하한을 확장
+    lower_utc = now_utc - timedelta(minutes=window_minutes)
 
     # DB 조회 (UTC 기준)
     upcoming = db.query(GameNews).filter(
@@ -330,43 +296,34 @@ async def check_upcoming_matches(db: Session, catchphrases_file: str, window_min
         if (m.game_tag or "").strip()
     }
 
-    # 캐치프레이즈 도출 (Constants 우선)
+    # 캐치프레이즈 도출 (Constants 중심)
     selected_phrases = []
     
-    # 1. catchphrase_fallbacks.py의 상수 리스트 사용 (가장 고퀄리티/안정적)
+    # 1. catchphrase_constants.py의 상수 리스트 사용 (가장 고퀄리티/안정적)
     for game in games_involved:
         if game == "LoL":
             selected_phrases.extend(LOL_CATCHPHRASES)
         elif game == "Valorant":
             selected_phrases.extend(VALORANT_CATCHPHRASES)
 
-    # 2. JSON 파일 로드 (보조용 또는 동적 업데이트용)
+    # 2. JSON 파일 로드 (보조용/동적 업데이트용이나, 현재는 fallbacks가 주력)
     if not selected_phrases:
-        is_v2_path = catchphrases_file.endswith("_v2.json")
-        catchphrases_v2_file = catchphrases_file if is_v2_path else catchphrases_file.replace(".json", "_v2.json")
-        catchphrases_v1_file = catchphrases_file.replace("_v2.json", ".json") if is_v2_path else catchphrases_file
-        
-        if os.path.exists(catchphrases_v2_file):
+        if os.path.exists(catchphrases_file):
             try:
-                with open(catchphrases_v2_file, 'r', encoding='utf-8') as f:
-                    saved_v2 = json.load(f)
-                    for game in games_involved:
-                        if game in saved_v2 and saved_v2[game]:
-                            selected_phrases.extend(saved_v2[game])
-            except Exception as e:
-                logger.warning(f"Failed to load catchphrases_v2: {e}")
-                
-        if not selected_phrases and os.path.exists(catchphrases_v1_file):
-            try:
-                with open(catchphrases_v1_file, 'r', encoding='utf-8') as f:
+                with open(catchphrases_file, 'r', encoding='utf-8') as f:
                     saved = json.load(f)
-                    if saved and isinstance(saved, list): selected_phrases = saved
+                    if isinstance(saved, list):
+                        selected_phrases = saved
+                    elif isinstance(saved, dict):
+                        for game in games_involved:
+                            if game in saved and saved[game]:
+                                selected_phrases.extend(saved[game])
             except Exception as e:
                 logger.warning(f"Failed to load catchphrases: {e}")
             
     selected_phrases = _filter_catchphrases(selected_phrases)
     if not selected_phrases:
-        selected_phrases = _fallback_phrases_for_matches(matches_to_notify) or [
+        selected_phrases = [
             "야, 놓치지 마! 🔥", "지금 바로 입장! 🏃‍♂️", "치킨 준비됐나? 🍗", "이번 세트 대박! 🎮"
         ]
 

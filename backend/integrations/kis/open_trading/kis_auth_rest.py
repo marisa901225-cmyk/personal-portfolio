@@ -270,11 +270,12 @@ def auth(svr="prod", product=None, url=None, force=False):
                 if circuit_enabled:
                     record_auth_success()
             else:
-                logger.error("[KIS Auth] ❌ 토큰 발급 실패: %s", res.text)
+                error_detail = res.text
+                logger.error("[KIS Auth] ❌ 토큰 발급 실패: %s", error_detail)
                 
-                # 서킷브레이커 실패 기록
+                # 서킷브레이커 실패 기록 (상세 사유 전달 - 비키 제안 💖)
                 if circuit_enabled:
-                    circuit_state = record_auth_failure()
+                    circuit_state = record_auth_failure(reason=error_detail)
                     logger.warning(
                         "[KIS Auth] 실패 기록 (failure_count=%d, circuit_open=%s)",
                         circuit_state.failure_count, circuit_state.circuit_open

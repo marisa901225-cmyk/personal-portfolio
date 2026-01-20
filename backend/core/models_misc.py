@@ -88,6 +88,7 @@ class GameNews(Base):
     __table_args__ = (
         Index("idx_game_news_src_notified_time", "source_type", "source_name", "notified_at", "event_time"),
         Index("idx_game_news_news_game_published", "source_type", "game_tag", "published_at"),
+        Index("idx_game_news_title", "title"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -196,3 +197,43 @@ class SchedulerState(Base):
         onupdate=utcnow,
         nullable=False,
     )
+
+
+class EsportsMatch(Base):
+    """E-Sports 매치 상태 캐시 (스마트 폴링 로직용)"""
+    __tablename__ = "esports_matches"
+
+    match_id: Mapped[int] = mapped_column(Integer, primary_key=True)  # PandaScore match ID
+
+    # Match context
+    league_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    serie_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    tournament_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    videogame: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # lol, valorant, pubg
+    name: Mapped[Optional[str]] = mapped_column(String(300), nullable=True)
+
+    # Match Status (from PandaScore: not_started, running, finished, canceled, postponed)
+    status: Mapped[str] = mapped_column(String(20), default="not_started", nullable=False, index=True)
+    scheduled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    begin_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    end_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Smart Polling 상태
+    last_seen_running_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    missing_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # 알림 멱등성 (finished 알림 중복 방지)
+    finished_notified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # 다음 경기 연결 (선택적)
+    next_match_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow,
+        onupdate=utcnow,
+        nullable=False,
+    )
+

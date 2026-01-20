@@ -21,9 +21,10 @@ _TOKEN_TAG_SIZE = 16
 
 
 def _load_token_key() -> bytes:
-    raw = os.getenv("KIS_TOKEN_KEY")
+    from ...core.config import settings
+    raw = settings.kis_token_key
     if not raw:
-        raise RuntimeError("KIS_TOKEN_KEY is not set")
+        raise RuntimeError("KIS_TOKEN_KEY is not set in environment or .env")
     try:
         # Add padding if missing
         padding = len(raw) % 4

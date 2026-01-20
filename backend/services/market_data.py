@@ -37,19 +37,30 @@ def send_kis_alert_sync(message: str, level: str = "WARNING") -> None:
 
 class MarketDataService:
     @staticmethod
-    def sync_all_prices(db: Session) -> int:
+    def sync_all_prices(db: Session, mock: bool = False) -> int:
         """
         포트폴리오의 모든 자산 시세를 KIS를 통해 동기화합니다.
         (기존 sync_prices.sh의 로직을 파이썬으로 이식)
         """
         # 1. 활성 티커 목록 추출
         assets = db.query(Asset).filter(Asset.ticker.isnot(None)).all()
-        tickers = sorted({a.ticker for a in assets if a.ticker})
         
-        if not tickers:
-            logger.info("No tickers found to sync.")
+        if not assets:
+            logger.info("No assets found to sync.")
             return 0
             
+        if mock:
+            import random
+            logger.info(f"Mock syncing prices for {len(assets)} assets...")
+            for asset in assets:
+                # 0.95 ~ 1.05 사이의 랜덤 변동폭 적용
+                current = asset.current_price or 10000.0
+                asset.current_price = round(current * random.uniform(0.95, 1.05), 2)
+                asset.updated_at = datetime.now()
+            db.commit()
+            return len(assets)
+
+        tickers = sorted({a.ticker for a in assets if a.ticker})
         logger.info(f"Syncing prices for {len(tickers)} tickers...")
         
         # 2. KIS 시세 조회
@@ -63,9 +74,6 @@ class MarketDataService:
             for asset in assets:
                 if asset.ticker in prices:
                     new_price = prices[asset.ticker]
-                    # 해외 주식인 경우 환율 적용 고려가 필요할 수 있으나, 
-                    # fetch_kis_prices_krw 내부 로직에 따라 처리됨을 가정
-                    # (기존 /api/kis/prices 엔드포인트 로직과 동일하게 작동하도록 보완 필요)
                     asset.current_price = new_price
                     asset.updated_at = datetime.now()
                     updated_count += 1
@@ -80,22 +88,12 @@ class MarketDataService:
             raise e
 
     @staticmethod
-    def sync_all_prices_safe(db: Session) -> Dict[str, Any]:
+    def sync_all_prices_safe(db: Session, mock: bool = False) -> Dict[str, Any]:
         """
         Graceful Degradation 적용된 시세 동기화.
-        
-        실패 시 마지막 스냅샷 데이터를 반환하며 서비스 중단을 방지합니다.
-        
-        Returns:
-            {
-                "updated_count": int,
-                "stale": bool,
-                "last_updated_at": datetime | None,
-                "error": str | None
-            }
         """
         try:
-            updated_count = MarketDataService.sync_all_prices(db)
+            updated_count = MarketDataService.sync_all_prices(db, mock=mock)
             return {
                 "updated_count": updated_count,
                 "stale": False,
@@ -140,7 +138,7 @@ class MarketDataService:
             logger.error(f"Failed to take snapshot: {e}")
             raise e
     @staticmethod
-    async def generate_creative_msg(ticker_count: int) -> str:
+    async def generate_creative_msg(ticker_count: int, mock: bool = False) -> str:
         """
         LLM을 사용하여 창의적인 업데이트 메시지 생성
         """
@@ -150,17 +148,18 @@ class MarketDataService:
         from pytz import timezone
 
         KST = timezone("Asia/Seoul")
+        prefix = "[MOCK] " if mock else ""
         
         try:
             llm = LLMService.get_instance()
             if not llm.is_loaded():
-                return f"💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')} 기준"
+                return f"{prefix}💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')} 기준"
 
             # 외부 프롬프트 파일에서 로드 (핫 리로드 지원)
             prompt_content = load_prompt("sync_prices", ticker_count=ticker_count)
             if not prompt_content:
                 # 폴백: 파일이 없으면 기본 메시지
-                return f"💰 {ticker_count}개 종목 시세 업데이트 완료!"
+                return f"{prefix}💰 {ticker_count}개 종목 시세 업데이트 완료!"
             
             messages = [
                 {
@@ -168,25 +167,25 @@ class MarketDataService:
                     "content": prompt_content
                 }
             ]
-            creative_text = llm.generate_chat(messages, max_tokens=128, temperature=0.8)
+            creative_text = llm.generate_chat(messages, max_tokens=512, temperature=0.8)
             if str(ticker_count) not in creative_text:
                 creative_text += f"\n\n(참고: 총 {ticker_count}개 종목 업데이트 완료)"
             
             sync_time = datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
-            return f"{creative_text}\n\n🕒 {sync_time} 기준"
+            return f"{prefix}{creative_text}\n\n🕒 {sync_time} 기준"
         except Exception as e:
             logger.error(f"LLM generation failed: {e}")
-            return f"💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')} 기준"
+            return f"{prefix}💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')} 기준"
 
     @staticmethod
-    async def notify_sync_completion(ticker_count: int):
+    async def notify_sync_completion(ticker_count: int, mock: bool = False):
         """
         시세 동기화 완료 알림 전송
         """
         from backend.integrations.telegram import send_telegram_message
         
         try:
-            msg = await MarketDataService.generate_creative_msg(ticker_count)
+            msg = await MarketDataService.generate_creative_msg(ticker_count, mock=mock)
             # 봇 타입을 'main'으로 명시하여 DB 백업 봇으로 발송
             await send_telegram_message(msg, bot_type="main")
             logger.info("Price sync notification sent.")

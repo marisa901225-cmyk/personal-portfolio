@@ -21,7 +21,8 @@ from ...services.users import get_or_create_single_user
 logger = logging.getLogger(__name__)
 
 # 설정 상수
-LOCK_TIMEOUT_SEC = 60  # 락 타임아웃 (교착 방지)
+# 설정 상수
+LOCK_TIMEOUT_SEC = 300  # 락 타임아웃 5분 (도라의 데드락 방지 제안 💖)
 FAILURE_THRESHOLD = 5  # 서킷 오픈 조건
 CIRCUIT_OPEN_DURATION_SEC = 300  # 5분
 MAX_BACKOFF_SEC = 60
@@ -73,7 +74,8 @@ def acquire_token_refresh_lock(db: Optional[Session] = None) -> Tuple[bool, Sess
                     session.close()
                 return False, session
             else:
-                logger.warning("[KIS Lock] 락 타임아웃됨, 강제 해제 후 재획득 (locked_at=%s)", setting.token_refresh_locked_at)
+                # 락 타임아웃 (도라 제안 반영 💖)
+                logger.warning("[KIS Lock] 락 타임아웃됨(5분 경과), 강제 해제 후 재획득 (locked_at=%s)", setting.token_refresh_locked_at)
         
         setting.token_refresh_locked_at = now
         session.commit()
@@ -151,7 +153,7 @@ def get_circuit_state(db: Optional[Session] = None) -> CircuitState:
             session.close()
 
 
-def record_auth_failure(db: Optional[Session] = None) -> CircuitState:
+def record_auth_failure(db: Optional[Session] = None, reason: str = "Unknown") -> CircuitState:
     """인증 실패 기록 및 서킷브레이커 상태 업데이트"""
     owned_session = db is None
     session = db or SessionLocal()
@@ -167,6 +169,13 @@ def record_auth_failure(db: Optional[Session] = None) -> CircuitState:
                 "[KIS Circuit] 🔴 서킷 오픈! (failure_count=%d, open_until=%s)",
                 setting.kis_auth_failure_count,
                 setting.kis_circuit_open_until,
+            )
+            
+            # 긴급 알람 전송 (비키 제안 💖)
+            from ..market_data import send_kis_alert_sync
+            send_kis_alert_sync(
+                f"🔴 [KIS Emergency] 인증 실패 횟수 초과로 서킷이 오픈되었습니다! 긴급 점검이 필요합니다.\n- 실패 횟수: {setting.kis_auth_failure_count}\n- 사유: {reason}\n- 오픈 완료 예정: {setting.kis_circuit_open_until.strftime('%Y-%m-%d %H:%M:%S')}",
+                level="ERROR"
             )
         
         session.commit()

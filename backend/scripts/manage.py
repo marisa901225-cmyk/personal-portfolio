@@ -1,7 +1,8 @@
-#!/usr/bin/env python3
 import argparse
+import asyncio
 import logging
 import os
+import signal
 from datetime import datetime
 from pathlib import Path
 
@@ -15,6 +16,7 @@ def check_alarms(args):
         from backend.core.models import IncomingAlarm, SpamAlarm
     except ImportError as e:
         print(f"Error importing dependencies: {e}")
+        print("Please install required packages: pip install pandas")
         return
 
     start_time = args.start or datetime.now().strftime("%Y-%m-%d 00:00:00")
@@ -77,7 +79,7 @@ def sync_prices(args):
         return
 
     with session_scope() as session:
-        updated = MarketDataService.sync_all_prices(session)
+        updated = MarketDataService.sync_all_prices(session, mock=args.mock)
         print(f"Updated {updated} assets.")
 
         if not args.no_snapshot:
@@ -87,7 +89,7 @@ def sync_prices(args):
         # 창의적인 알림 전송 (동기 실행을 위해 asyncio.run 사용)
         import asyncio
         try:
-            asyncio.run(MarketDataService.notify_sync_completion(updated))
+            asyncio.run(MarketDataService.notify_sync_completion(updated, mock=args.mock))
             print("Notification sent.")
         except Exception as e:
             print(f"Failed to send notification: {e}")
@@ -134,52 +136,160 @@ def backup_db(args):
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     if bot_token and chat_id:
-        parts = BackupService.split_file(archive_path)
-        import requests
-        for idx, part in enumerate(parts):
-            caption = msg if idx == 0 else f"(Part {idx+1})"
-            url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
-            with open(part, "rb") as f:
-                requests.post(
-                    url,
-                    data={"chat_id": chat_id, "caption": caption},
-                    files={"document": f},
-                    timeout=60,
-                )
-            if part != archive_path:
-                part.unlink()
-        print("Telegram backup notification sent.")
+        try:
+            parts = BackupService.split_file(archive_path)
+            import requests
+            for idx, part in enumerate(parts):
+                caption = msg if idx == 0 else f"(Part {idx+1})"
+                url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
+                with open(part, "rb") as f:
+                    requests.post(
+                        url,
+                        data={"chat_id": chat_id, "caption": caption},
+                        files={"document": f},
+                        timeout=60,
+                    )
+                if part != archive_path:
+                    part.unlink()
+            print("Telegram backup notification sent.")
+        except Exception as e:
+            logging.error(f"Telegram backup failed: {e}")
 
     app_key = os.getenv("DROPBOX_APP_KEY")
     app_secret = os.getenv("DROPBOX_APP_SECRET")
     refresh_token = os.getenv("DROPBOX_REFRESH_TOKEN")
     if app_key and app_secret and refresh_token:
-        access_token = DropboxService.get_access_token(app_key, app_secret, refresh_token)
-        if access_token:
-            DropboxService.upload_file(str(archive_path), f"/portfolio-backups/{archive_path.name}", access_token)
-            print("Dropbox backup upload completed.")
+        try:
+            access_token = DropboxService.get_access_token(app_key, app_secret, refresh_token)
+            if access_token:
+                DropboxService.upload_file(str(archive_path), f"/portfolio-backups/{archive_path.name}", access_token)
+                print("Dropbox backup upload completed.")
+        except Exception as e:
+            logging.error(f"Dropbox backup failed: {e}")
 
-    BackupService.cleanup_old_backups(backup_dir)
+    try:
+        BackupService.cleanup_old_backups(backup_dir)
+        print("Backup cleanup finished.")
+    except Exception as e:
+        logging.error(f"Backup cleanup failed: {e}")
+
     print("Backup process finished.")
 
 
 def run_scheduler(args):
-    """Run the news and target prize scheduler."""
+    """Run the master service supervisor (Orchestrator/Policy Manager)"""
     import asyncio
     from backend.services.scheduler.core import start_scheduler, shutdown_scheduler
-    
-    logging.info("Starting scheduler service...")
-    start_scheduler()
-    try:
-        # Keep the script running in a way that respects asyncio
-        async def _keep_alive():
-            while True:
-                await asyncio.sleep(3600)
-        asyncio.run(_keep_alive())
-    except (KeyboardInterrupt, SystemExit):
-        logging.info("Interrupted, shutting down scheduler...")
-    finally:
+    from backend.services.news.esports_monitor import run_esports_monitor
+    from backend.core.db import SessionLocal
+    from backend.services.scheduler_monitor import (
+        run_with_monitoring, 
+        send_service_alert, 
+        update_scheduler_state
+    )
+
+    logging.info("Initializing Master Service Supervisor (Policy Manager)...")
+
+    async def _main():
+        shutdown_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+
+        def handle_signal():
+            logging.info("Shutdown signal received...")
+            shutdown_event.set()
+
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, handle_signal)
+
+        # Service definitions (The "What")
+        async def run_apscheduler():
+            start_scheduler()
+            await shutdown_event.wait()
+
+        services_config = [
+            {
+                "name": "esports_monitor",
+                "func": lambda: run_esports_monitor(dry_run=False),
+                "auto_restart": True,
+            },
+            {
+                "name": "apscheduler_core",
+                "func": run_apscheduler,
+                "auto_restart": False,
+            }
+        ]
+
+        active_tasks = {}
+        restart_counts = {}
+        max_restarts = 5
+
+        async def supervisor_loop(svc):
+            """정책 관리 루프 (The "Policy")"""
+            name = svc["name"]
+            func = svc["func"]
+            
+            while not shutdown_event.is_set():
+                restart_count = restart_counts.get(name, 0)
+                
+                # Execution & Recording (Delegated to Monitor Toolkit)
+                result = await run_with_monitoring(name, func, SessionLocal)
+                
+                if result is True:
+                    # Normal exit or finished
+                    if shutdown_event.is_set():
+                        break
+                    logging.warning(f"[{name}] Service exited unexpectedly")
+                else:
+                    # Result is an Exception (Failure)
+                    restart_counts[name] = restart_count + 1
+                    is_fatal = not svc.get("auto_restart", True) or restart_counts[name] >= max_restarts
+                    
+                    # Alert (Delegated to Monitor Toolkit)
+                    await send_service_alert(
+                        service_name=name,
+                        status="failure" if not is_fatal else "stopped",
+                        error=str(result),
+                        restart_count=restart_counts[name],
+                        max_restarts=max_restarts
+                    )
+
+                    if is_fatal:
+                        logging.critical(f"[{name}] Service stopped permanently")
+                        break
+                    
+                    # Backoff Policy
+                    wait_time = min(60, 2 ** restart_counts[name])
+                    logging.info(f"[{name}] Restart policy: Waiting {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+
+        # Start supervised tasks
+        for svc in services_config:
+            active_tasks[svc["name"]] = asyncio.create_task(supervisor_loop(svc))
+
+        await shutdown_event.wait()
+        
+        # Graceful Shutdown
+        logging.info("Initiating graceful shutdown...")
         shutdown_scheduler()
+        
+        for name, task in active_tasks.items():
+            if not task.done():
+                task.cancel()
+        
+        if active_tasks:
+            await asyncio.gather(*active_tasks.values(), return_exceptions=True)
+        
+        # Mark all as stopped in DB
+        with SessionLocal() as db:
+            for name in active_tasks:
+                update_scheduler_state(name, db, "stopped", "Graceful shutdown complete")
+        
+        logging.info("Supervisor shut down successfully.")
+
+    try:
+        asyncio.run(_main())
+    except (KeyboardInterrupt, SystemExit):
+        pass
 
 
 def run_collector(args):
@@ -240,6 +350,18 @@ def process_alarms_cmd(args):
     asyncio.run(_process_alarms_async())
 
 
+def listen_esports_cmd(args):
+    """Run the esports smart polling monitor."""
+    import asyncio
+    from backend.services.news.esports_monitor import run_esports_monitor
+    
+    logging.info("Starting esports smart polling monitor...")
+    try:
+        asyncio.run(run_esports_monitor(dry_run=args.dry_run))
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("Esports monitor interrupted, shutting down...")
+
+
 def verify_snapshots(args):
     """Verify asset snapshots."""
     print("Verifying snapshots... (Not implemented yet)")
@@ -273,6 +395,7 @@ def main():
     p_sync = subparsers.add_parser("sync-prices", help="Sync all prices and take snapshot")
     p_sync.add_argument("--no-snapshot", action="store_true", help="Skip taking snapshot")
     p_sync.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompt")
+    p_sync.add_argument("-m", "--mock", action="store_true", help="Use mock prices for testing")
     p_sync.set_defaults(func=sync_prices)
 
     p_backup = subparsers.add_parser("backup-db", help="Full DB backup process")
@@ -293,6 +416,10 @@ def main():
 
     p_proc = subparsers.add_parser("process-alarms", help="Manually process pending alarms")
     p_proc.set_defaults(func=process_alarms_cmd)
+
+    p_esports = subparsers.add_parser("listen-esports", help="Run the esports smart polling monitor")
+    p_esports.add_argument("--dry-run", action="store_true", help="Dry run mode (no notifications)")
+    p_esports.set_defaults(func=listen_esports_cmd)
 
     args = parser.parse_args()
 

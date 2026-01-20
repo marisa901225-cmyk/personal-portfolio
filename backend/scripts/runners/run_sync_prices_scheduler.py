@@ -25,7 +25,7 @@ from backend.core.logging_config import setup_global_logging
 # Set up logging (Sensitive Data Masking enabled)
 setup_global_logging(
     level=logging.INFO,
-    log_file=os.path.join(PROJECT_ROOT, "backend/logs/sync_prices_scheduler.log")
+    log_file=os.path.join(PROJECT_ROOT, "logs/sync_prices_scheduler.log")
 )
 logger = logging.getLogger("sync_prices_scheduler")
 KST = timezone("Asia/Seoul")
@@ -126,6 +126,29 @@ async def run_monthly_maintenance():
             db.close()
             logger.info("--- Monthly Maintenance Job Finished ---")
 
+async def run_spam_retraining():
+    """
+    주간 스팸 분류 모델 재학습 (매주 일요일 새벽)
+    """
+    from backend.services.spam_trainer import train_spam_model
+    
+    db = SessionLocal()
+    async with monitor_job_async("spam_retraining", db):
+        logger.info("--- Starting Weekly Spam Model Retraining ---")
+        try:
+            # 훈련 수행 (임계치 미달 시 알아서 skip됨)
+            success = train_spam_model()
+            if success:
+                logger.info("Spam model retrained and saved successfully.")
+            else:
+                logger.info("Spam model retraining skipped (not enough data or no changes).")
+        except Exception as e:
+            logger.error(f"Spam retraining job failed: {e}")
+            raise e
+        finally:
+            db.close()
+            logger.info("--- Weekly Spam Model Retraining Finished ---")
+
 async def main():
     logger.info(f"Current System Time: {datetime.now(KST)}")
     
@@ -174,6 +197,14 @@ async def main():
         CronTrigger(day=1, hour=9, minute=0, timezone=KST),
         id="monthly_maintenance",
         name="Monthly Spam Report & Cleanup (1st of Month)"
+    )
+    
+    # 6. Weekly Spam Retraining: Every Sunday at 04:00 KST (도라 제안 💖)
+    scheduler.add_job(
+        run_spam_retraining,
+        CronTrigger(day_of_week='sun', hour=4, minute=0, timezone=KST),
+        id="spam_retraining",
+        name="Weekly Spam Model Retraining (Sun 04:00 KST)"
     )
     
     logger.info("Starting Price Sync Scheduler...")

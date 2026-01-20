@@ -15,8 +15,14 @@ logger = logging.getLogger(__name__)
 
 def clean_asset_name(name: str) -> str:
     """종목명에서 불필요한 수식어나 브랜드명을 제거하여 검색 성능을 높인다."""
-    # ETF 관련 수식어 및 해외 기업 접미사 제거
-    name = re.sub(r'(ACE|KODEX|TIGER|RISE|SOL|HANARO|KBSTAR|PLUS|Ultra|ProShares|ETF|Plus|Ltd|Inc|Corp|Group|Holding)', '', name, flags=re.IGNORECASE)
+    # ETF 관련 수식어 및 해외 기업 접미사 제거 (단어 경계 \b 추가로 오탐 방지 - 도라 제안 💖)
+    noise_keywords = [
+        'ACE', 'KODEX', 'TIGER', 'RISE', 'SOL', 'HANARO', 'KBSTAR', 'PLUS', 
+        'Ultra', 'ProShares', 'ETF', 'Plus', 'Ltd', 'Inc', 'Corp', 'Group', 'Holding'
+    ]
+    pattern = r'\b(' + '|'.join(noise_keywords) + r')\b'
+    name = re.sub(pattern, '', name, flags=re.IGNORECASE)
+    
     # 괄호 및 특수문자 제거
     name = re.sub(r'[\(\)\[\]]', ' ', name)
     # 불필요한 공백 정리
@@ -33,17 +39,31 @@ def extract_market_keywords(name: str) -> List[str]:
             keywords.append(idx)
     return keywords
 
-def is_foreign_stock(ticker: str, query: str) -> bool:
+def is_foreign_stock(ticker: str, query: str, db: Optional[Session] = None) -> bool:
     """
-    해외 종목인지 판별한다.
-    - 영문 티커 (AAPL, NVDA 등)이면서
-    - 국내 ETF가 아닌 경우
+    해외 종목인지 판별한다. (도라 & 비키 제안 반영 💖)
+    1. DB의 market_type 정보 최우선 참조
+    2. 티커 패턴 및 거래소 접두사 분석
     """
+    if db and ticker:
+        from ..core.models import Asset
+        asset = db.query(Asset).filter(Asset.ticker == ticker).first()
+        if asset and asset.market_type:
+            if asset.market_type.upper() in ["KRX", "KOSPI", "KOSDAQ"]:
+                return False
+            if asset.market_type.upper() in ["NASDAQ", "NYSE", "AMEX", "GLOBAL"]:
+                return True
+
     if not ticker:
         return False
     
     # 티커에서 거래소 접두사 제거 (NAS:NVDA -> NVDA)
     clean_ticker = ticker.split(":")[-1] if ":" in ticker else ticker
+    exchange_prefix = ticker.split(":")[0].upper() if ":" in ticker else ""
+    
+    # 거래소 접두사로 직관적 판별
+    if exchange_prefix in ["NAS", "NASDAQ", "NYSE", "AMEX"]:
+        return True
     
     # 숫자 포함 티커는 국내 종목 (005930 등)
     if any(c.isdigit() for c in clean_ticker):
@@ -53,13 +73,13 @@ def is_foreign_stock(ticker: str, query: str) -> bool:
     if not clean_ticker.isalpha():
         return False
     
-    # 국내 ETF 브랜드 키워드 체크
+    # 국내 ETF 브랜드 키워드 체크 (부분 매칭 방지를 위해 정확한 브랜드 목록 사용)
     domestic_etf_brands = ["KODEX", "TIGER", "ACE", "RISE", "SOL", "HANARO", "KBSTAR", "PLUS"]
     query_upper = query.upper() if query else ""
     if any(brand in query_upper for brand in domestic_etf_brands):
         return False
     
-    # 2글자 이상의 영문 티커는 해외 종목으로 간주
+    # 영문 티커면서 길이 조건 만족 시 해외
     return len(clean_ticker) >= 2
 
 async def search_news_logic(
@@ -98,7 +118,7 @@ async def search_news_logic(
         combined_term = f"{cleaned_query} {clean_ticker}" if clean_ticker else cleaned_query
         realtime_search_terms.append(combined_term)
     
-    is_foreign = is_foreign_stock(ticker, query)
+    is_foreign = is_foreign_stock(ticker, query, db=db)
     
     # 1. 실시간 수집 수행
     try:
@@ -149,7 +169,7 @@ async def search_news_logic(
     ticker_volume_pattern = re.compile(f"{ticker}\\s*(주|건|매|원|달러|%|\\+|-)") if ticker and ticker.isdigit() else None
     product_noise_pattern = re.compile(r"(보수\s*전쟁|보수\s*인하|순자산\s*돌파|운용보수|총보수|배당금\s*지급|일정\s*변경|일반사무관리)")
     foreign_lang_pattern = re.compile(r"^[A-Za-zÀ-ÿ\s,.'\"!?¿¡-]+$")
-    unrelated_industry_pattern = re.compile(r"(Lunsumio|룬수미오|피하주사|경쟁서|로슈|Roche|Eli Lilly|FDA)", re.IGNORECASE)
+    unrelated_industry_pattern = re.compile(r"(Lunsumio|룬수미오|피하주사|경쟁서|로슈|Roche|Eli Lilly|FDA|임상\s*[1-3]상|신약\s*허가)", re.IGNORECASE)
     
     filtered_articles = []
     for art in articles:
