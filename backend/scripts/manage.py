@@ -84,6 +84,14 @@ def sync_prices(args):
             MarketDataService.take_portfolio_snapshot(session)
             print("Snapshot captured.")
 
+        # 창의적인 알림 전송 (동기 실행을 위해 asyncio.run 사용)
+        import asyncio
+        try:
+            asyncio.run(MarketDataService.notify_sync_completion(updated))
+            print("Notification sent.")
+        except Exception as e:
+            print(f"Failed to send notification: {e}")
+
 
 def backup_db(args):
     """Backup SQLite database, compress, and notify."""

@@ -19,6 +19,8 @@ from Crypto.Util.Padding import unpad
 import kis_auth_state as state
 from kis_auth_rest import _getBaseHeader, _getResultObject, changeTREnv, getTREnv, smart_sleep
 
+logger = logging.getLogger(__name__)
+
 open_map: dict = {}
 data_map: dict = {}
 
@@ -29,7 +31,9 @@ def _getBaseHeader_ws():
     return copy.deepcopy(state._base_headers_ws)
 
 
-def auth_ws(svr="prod", product=state._cfg["my_prod"]):
+def auth_ws(svr="prod", product=None):
+    if product is None:
+        product = state.get_cfg().get("my_prod", "01")
     p = {"grant_type": "client_credentials"}
     if svr == "prod":
         ak1 = "my_app"
@@ -41,10 +45,10 @@ def auth_ws(svr="prod", product=state._cfg["my_prod"]):
         ak1 = "my_app"
         ak2 = "my_sec"
 
-    p["appkey"] = state._cfg[ak1]
-    p["secretkey"] = state._cfg[ak2]
+    p["appkey"] = state.get_cfg()[ak1]
+    p["secretkey"] = state.get_cfg()[ak2]
 
-    url = f"{state._cfg[svr]}/oauth2/Approval"
+    url = f"{state.get_cfg()[svr]}/oauth2/Approval"
     res = requests.post(url, data=json.dumps(p), headers=_getBaseHeader())
     rescode = res.status_code
     if rescode == 200:
@@ -63,7 +67,9 @@ def auth_ws(svr="prod", product=state._cfg["my_prod"]):
         print(f"[{state._last_auth_time}] => get AUTH Key completed!")
 
 
-def reAuth_ws(svr="prod", product=state._cfg["my_prod"]):
+def reAuth_ws(svr="prod", product=None):
+    if product is None:
+        product = state.get_cfg().get("my_prod", "01")
     n2 = datetime.now()
     if (n2 - state._last_auth_time).seconds >= 86400:
         auth_ws(svr, product)
@@ -209,7 +215,7 @@ class KISWebSocket:
 
     async def __subscriber(self, ws: websockets.ClientConnection):
         async for raw in ws:
-            logging.info("received message >> %s", raw)
+            logger.info("received message >> %s", raw)
             show_result = False
 
             df = pd.DataFrame()
@@ -287,7 +293,7 @@ class KISWebSocket:
 
         add_data_map(tr_id=msg["body"]["input"]["tr_id"], columns=columns)
 
-        logging.info("send message >> %s", json.dumps(msg))
+        logger.info("send message >> %s", json.dumps(msg))
 
         await ws.send(json.dumps(msg))
         smart_sleep()

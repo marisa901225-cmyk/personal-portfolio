@@ -322,6 +322,14 @@ async def process_pending_alarms(db: Session):
                 header += f"🗑️ <i>필터링됨: {', '.join(filter_details)}</i>\n\n"
         
         summary_text = header + "\n".join(summaries)
+
+        logger.info(
+            "Sending telegram summary: title=%s alarms=%d expenses=%d filtered=%d",
+            title,
+            len(to_summarize_alarms),
+            len(to_analyze_expenses),
+            filtered_count,
+        )
         
         # 유료 백엔드 폴백 사용 시 💰 표시 (파이프라인 오염 방지를 위해 전송 직전에만)
         try:
@@ -333,5 +341,12 @@ async def process_pending_alarms(db: Session):
             pass
         
         await send_telegram_message(summary_text)
+    else:
+        logger.info(
+            "No telegram message to send: pending=%d alarms=%d expenses=%d (random skipped or empty)",
+            len(pending),
+            len(to_summarize_alarms),
+            len(to_analyze_expenses),
+        )
 
     # 24시간 지난 데이터 삭제 (TTL) 로직은 별도 스케줄러에서 수행 권장

@@ -388,7 +388,7 @@ export interface BackendNewsSearchResponse {
 export interface ChartPayloadEntry {
     name: string;
     value: number;
-    payload: any; // Recharts internal, usually okay to leave any or use Record
+    payload: Record<string, unknown>; // Recharts internal payload
     color?: string;
 }
 

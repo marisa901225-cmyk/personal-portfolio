@@ -6,10 +6,13 @@ import time
 from collections import namedtuple
 from datetime import datetime
 
+import logging
 import requests
 
 import kis_auth_state as state
 from backend.integrations.kis.token_store import read_kis_token, save_kis_token
+
+logger = logging.getLogger(__name__)
 
 
 def _throttle_rest() -> None:
@@ -29,8 +32,6 @@ def _throttle_rest() -> None:
 
 
 def save_token(my_token, my_expired):
-    import logging
-    logger = logging.getLogger(__name__)
     try:
         valid_date = datetime.strptime(my_expired, "%Y-%m-%d %H:%M:%S")
         logger.info("[KIS] save_token 호출 - 만료시간 raw: %s, parsed: %s", my_expired, valid_date)
@@ -41,8 +42,6 @@ def save_token(my_token, my_expired):
 
 
 def read_token():
-    import logging
-    logger = logging.getLogger(__name__)
     try:
         token = read_kis_token()
         if token:
@@ -83,7 +82,9 @@ def isPaperTrading():
     return state._isPaper
 
 
-def changeTREnv(token_key, svr="prod", product=state._cfg["my_prod"]):
+def changeTREnv(token_key, svr="prod", product=None):
+    if product is None:
+        product = state.get_cfg().get("my_prod", "01")
     cfg = dict()
 
     if svr == "prod":
@@ -100,31 +101,31 @@ def changeTREnv(token_key, svr="prod", product=state._cfg["my_prod"]):
         ak1 = "my_app"
         ak2 = "my_sec"
 
-    cfg["my_app"] = state._cfg[ak1]
-    cfg["my_sec"] = state._cfg[ak2]
+    cfg["my_app"] = state.get_cfg()[ak1]
+    cfg["my_sec"] = state.get_cfg()[ak2]
 
     if product == "01":
-        cfg["my_acct"] = state._cfg["my_acct_stock"]
+        cfg["my_acct"] = state.get_cfg()["my_acct_stock"]
     elif product == "03":
-        cfg["my_acct"] = state._cfg["my_acct_future"]
+        cfg["my_acct"] = state.get_cfg()["my_acct_future"]
     elif product == "08":
-        cfg["my_acct"] = state._cfg["my_acct_future"]
+        cfg["my_acct"] = state.get_cfg()["my_acct_future"]
     elif product == "01" and svr == "prod":
-        cfg["my_acct"] = state._cfg["my_acct_stock"]
+        cfg["my_acct"] = state.get_cfg()["my_acct_stock"]
     elif product == "01" and svr == "vps":
-        cfg["my_acct"] = state._cfg["my_paper_stock"]
+        cfg["my_acct"] = state.get_cfg()["my_paper_stock"]
     elif product == "03" and svr == "vps":
-        cfg["my_acct"] = state._cfg["my_paper_future"]
+        cfg["my_acct"] = state.get_cfg()["my_paper_future"]
 
-    cfg["my_htsid"] = state._cfg["my_htsid"]
-    cfg["my_url"] = state._cfg[svr]
-    cfg["my_url_ws"] = state._cfg["ops" if svr == "prod" else "vops"]
+    cfg["my_htsid"] = state.get_cfg()["my_htsid"]
+    cfg["my_url"] = state.get_cfg()[svr]
+    cfg["my_url_ws"] = state.get_cfg()["ops" if svr == "prod" else "vops"]
     cfg["my_prod"] = product
 
     if token_key is not None:
         cfg["my_token"] = token_key
     else:
-        cfg["my_token"] = state._cfg["my_token"]
+        cfg["my_token"] = state.get_cfg()["my_token"]
 
     _setTRENV(cfg)
 
@@ -134,7 +135,9 @@ def _getResultObject(json_data):
     return _tb_(**json_data)
 
 
-def auth(svr="prod", product=state._cfg["my_prod"], url=None, force=False):
+def auth(svr="prod", product=None, url=None, force=False):
+    if product is None:
+        product = state.get_cfg().get("my_prod", "01")
     """
     KIS 접근 토큰 발급/로딩.
 
@@ -152,9 +155,7 @@ def auth(svr="prod", product=state._cfg["my_prod"], url=None, force=False):
         - 서킷브레이커로 연속 실패 시 발급 차단
         - 지수 백오프로 재시도 간격 조절
     """
-    import logging
     import time
-    logger = logging.getLogger(__name__)
     
     # 서킷브레이커 임포트 (lazy)
     try:
@@ -178,8 +179,8 @@ def auth(svr="prod", product=state._cfg["my_prod"], url=None, force=False):
         ak1 = "paper_app"
         ak2 = "paper_sec"
 
-    p["appkey"] = state._cfg[ak1]
-    p["appsecret"] = state._cfg[ak2]
+    p["appkey"] = state.get_cfg()[ak1]
+    p["appsecret"] = state.get_cfg()[ak2]
 
     with state._token_file_lock():
         # 강제 재발급이 아니면 캐시된 토큰 확인
@@ -255,7 +256,7 @@ def auth(svr="prod", product=state._cfg["my_prod"], url=None, force=False):
             )
 
             if not url:
-                url = f"{state._cfg[svr]}/oauth2/tokenP"
+                url = f"{state.get_cfg()[svr]}/oauth2/tokenP"
             res = requests.post(url, data=json.dumps(p), headers=_getBaseHeader())
             rescode = res.status_code
             
@@ -304,14 +305,16 @@ def auth(svr="prod", product=state._cfg["my_prod"], url=None, force=False):
     return my_token
 
 
-def reAuth(svr="prod", product=state._cfg["my_prod"]):
+def reAuth(svr="prod", product=None):
+    if product is None:
+        product = state.get_cfg().get("my_prod", "01")
     n2 = datetime.now()
     if (n2 - state._last_auth_time).seconds >= 86400:
         auth(svr, product)
 
 
 def getEnv():
-    return state._cfg
+    return state.get_cfg()
 
 
 def smart_sleep():
@@ -322,6 +325,24 @@ def smart_sleep():
 
 
 def getTREnv():
+    if state._TRENV is None:
+        # Return a mock-like object with empty strings to prevent attribute errors during initialization
+        from collections import namedtuple
+
+        nt = namedtuple(
+            "KISEnv",
+            [
+                "my_url",
+                "my_url_ws",
+                "my_app",
+                "my_sec",
+                "my_acct",
+                "my_prod",
+                "my_htsid",
+                "my_token",
+            ],
+        )
+        return nt("", "", "", "", "", "", "", "")
     return state._TRENV
 
 

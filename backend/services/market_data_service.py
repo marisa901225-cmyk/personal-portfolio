@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from typing import Dict, List, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log, retry_if_not_exception_type
 
 from sqlalchemy.orm import Session
 
 from ..integrations.kis import kis_client
-from ..core.models import Asset
+from ..core.models import Asset, Setting
 from ..core.time_utils import utcnow
 from ..services.users import get_or_create_single_user
 
@@ -51,7 +52,8 @@ class EmptyResultError(MarketDataError):
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
     retry=retry_if_not_exception_type((KisConfigurationError, RuntimeError)),
-    before_sleep=before_sleep_log(logger, logging.WARNING)
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    reraise=True,
 )
 async def get_kis_prices_krw(
     tickers: List[str],
@@ -158,7 +160,8 @@ async def search_tickers_by_name(query: str, limit: int = 5) -> List[Dict[str, O
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=2, max=10),
     retry=retry_if_not_exception_type((KisConfigurationError, RuntimeError)),
-    before_sleep=before_sleep_log(logger, logging.WARNING)
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    reraise=True,
 )
 async def get_usdkrw_rate() -> float:
     """
@@ -183,3 +186,38 @@ async def get_usdkrw_rate() -> float:
         raise EmptyResultError("no FX rate found from KIS")
 
     return rate
+
+def get_cached_fx_rate(db: Session) -> float | None:
+    """DB에 캐시된 환율 정보를 조회한다."""
+    user = get_or_create_single_user(db)
+    setting = (
+        db.query(Setting)
+        .filter(Setting.user_id == user.id)
+        .order_by(Setting.id.asc())
+        .first()
+    )
+    if not setting or setting.usd_fx_now is None:
+        return None
+    if not isinstance(setting.usd_fx_now, (int, float)):
+        return None
+    if not math.isfinite(setting.usd_fx_now) or setting.usd_fx_now <= 0:
+        return None
+    return float(setting.usd_fx_now)
+
+
+def update_cached_fx_rate(db: Session, rate: float) -> None:
+    """DB의 환율 캐시 정보를 갱신한다."""
+    try:
+        user = get_or_create_single_user(db)
+        setting = (
+            db.query(Setting)
+            .filter(Setting.user_id == user.id)
+            .order_by(Setting.id.asc())
+            .first()
+        )
+        if setting:
+            setting.usd_fx_now = rate
+            db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.warning("failed to update cached fx rate: %s", exc)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import os
+import sys
 import threading
 from collections import deque
 from contextlib import contextmanager
@@ -32,6 +34,7 @@ _inprocess_token_lock = threading.Lock()
 config_root = ""
 token_tmp = ""
 token_lock = ""
+_cfg: dict | None = None
 
 
 def _resolve_config_root() -> str:
@@ -117,7 +120,7 @@ def _load_cfg() -> dict:
         "vops": "ws://ops.koreainvestment.com:31000",
     }
     for k, v in defaults.items():
-        if k not in cfg:
+        if not cfg.get(k):
             cfg[k] = v
             
     return cfg
@@ -145,7 +148,7 @@ def reload_config() -> None:
     get_cfg()
 
 
-_TRENV = tuple()
+_TRENV: Any | None = None
 _last_auth_time = datetime.now()
 _autoReAuth = False
 _DEBUG = False

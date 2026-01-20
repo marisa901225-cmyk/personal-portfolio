@@ -25,6 +25,10 @@ def _load_token_key() -> bytes:
     if not raw:
         raise RuntimeError("KIS_TOKEN_KEY is not set")
     try:
+        # Add padding if missing
+        padding = len(raw) % 4
+        if padding > 0:
+            raw += "=" * (4 - padding)
         key = base64.urlsafe_b64decode(raw)
     except Exception as exc:
         raise RuntimeError("KIS_TOKEN_KEY must be base64-encoded") from exc

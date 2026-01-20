@@ -65,3 +65,63 @@ class AlarmLLMSafetyTests(unittest.TestCase):
         self.assertIn("영화", result)
         self.assertNotIn("배달앱", result)
 
+    def test_summarize_with_llm_falls_back_when_llm_output_is_too_weak(self) -> None:
+        items = [
+            {
+                "app_name": "LPL",
+                "sender": "[LPL WBG vs TES] 크렘 vs 샤오후, 엘크",
+                "app_title": "[LPL WBG vs TES] 크렘 vs 샤오후, 엘크  #LPLCostream  #감컴, 포더엠",
+                "text": "지금 경기 시작!",
+            }
+        ]
+        stub = _StubLLMService("- 아니다")
+
+        async def _fake_to_thread(func, /, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        with (
+            patch("backend.services.alarm.llm_logic.LLMService.get_instance", return_value=stub),
+            patch("backend.services.alarm.llm_refiner.asyncio.to_thread", side_effect=_fake_to_thread),
+        ):
+            result = asyncio.run(summarize_with_llm(items))
+
+        self.assertIn("WBG", result)
+        self.assertNotIn("아니다", result)
+
+    def test_summarize_with_llm_falls_back_when_count_only_summary(self) -> None:
+        items = [
+            {
+                "app_name": "Gmail",
+                "sender": "Google",
+                "app_title": "영수증: 1월 정기결제 안내",
+                "conversation": "",
+                "text": "이번 달 결제 내역을 확인하세요.",
+            },
+            {
+                "app_name": "Gmail",
+                "sender": "Google",
+                "app_title": "보안 알림: 새 로그인 감지",
+                "conversation": "",
+                "text": "새 기기에서 로그인 시도가 있었습니다.",
+            },
+            {
+                "app_name": "Gmail",
+                "sender": "Google",
+                "app_title": "배송 안내: 주문이 발송되었습니다",
+                "conversation": "",
+                "text": "배송 상태를 확인하세요.",
+            },
+        ]
+        stub = _StubLLMService("- 메일 3건이 있었어요")
+
+        async def _fake_to_thread(func, /, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        with (
+            patch("backend.services.alarm.llm_logic.LLMService.get_instance", return_value=stub),
+            patch("backend.services.alarm.llm_refiner.asyncio.to_thread", side_effect=_fake_to_thread),
+        ):
+            result = asyncio.run(summarize_with_llm(items))
+
+        self.assertIn("정기결제", result)
+        self.assertNotIn("메일 3건", result)

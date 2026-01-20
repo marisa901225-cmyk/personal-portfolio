@@ -6,8 +6,8 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./backend/data:/data:ro
-      - ./backend/scripts/run_llm_server.sh:/run.sh:ro
+      - /home/dlckdgn/ai-models:/data:ro
+      - ./backend/scripts/shell/run_llm_server.sh:/run.sh:ro
     environment:
       - LLM_MODEL_PATH=/data/EXAONE-4.0-1.2B-Q8_0.gguf
       - LLM_MODEL_PATH_FILE=/data/llm_model_path.txt
@@ -26,7 +26,7 @@ services:
     ports:
       - "8081:8081"
     volumes:
-      - ./backend/data:/data:ro
+      - /home/dlckdgn/ai-models:/data:ro
     command: >
       --model /data/Qwen3-0.6B-Q8_0.gguf --host 0.0.0.0 --port 8081 --ctx-size 2048 --n-gpu-layers 0 --threads 2
     healthcheck:
@@ -118,7 +118,7 @@ services:
       - ./backend/logs:/app/backend/logs
       - ./backend/.env:/app/backend/.env
       - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
-    command: python -m backend.scripts.manage run-scheduler
+    command: python -m backend.scripts.runners.run_sync_prices_scheduler
     environment:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1

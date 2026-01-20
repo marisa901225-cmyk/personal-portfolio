@@ -3,14 +3,13 @@ from __future__ import annotations
 from datetime import date
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from ..core.auth import verify_api_token
 from ..core.db import get_db
-from ..core.models import FxTransaction
 from ..core.schemas import FxTransactionCreate, FxTransactionRead, FxTransactionUpdate
-from ..core.time_utils import utcnow
+from ..services import exchange_service
 from ..services.portfolio import to_fx_transaction_read
 from ..services.users import get_or_create_single_user
 
@@ -27,25 +26,8 @@ def get_fx_transactions(
     db: Session = Depends(get_db),
 ) -> List[FxTransactionRead]:
     user = get_or_create_single_user(db)
-    query = db.query(FxTransaction).filter(FxTransaction.user_id == user.id)
-
-    if kind is not None:
-        if kind not in {"BUY", "SELL", "SETTLEMENT"}:
-            raise HTTPException(status_code=400, detail="invalid fx type")
-        query = query.filter(FxTransaction.type == kind)
-
-    if start_date is not None:
-        query = query.filter(FxTransaction.trade_date >= start_date)
-    if end_date is not None:
-        query = query.filter(FxTransaction.trade_date <= end_date)
-
-    if before_id is not None:
-        query = query.filter(FxTransaction.id < before_id)
-
-    records = (
-        query.order_by(FxTransaction.trade_date.desc(), FxTransaction.id.desc())
-        .limit(limit)
-        .all()
+    records = exchange_service.get_fx_transactions(
+        db, user.id, limit, before_id, kind, start_date, end_date
     )
     return [to_fx_transaction_read(r) for r in records]
 
@@ -56,24 +38,7 @@ def create_fx_transaction(
     db: Session = Depends(get_db),
 ) -> FxTransactionRead:
     user = get_or_create_single_user(db)
-    record = FxTransaction(
-        user_id=user.id,
-        trade_date=payload.trade_date,
-        type=payload.type,
-        currency=payload.currency,
-        fx_amount=payload.fx_amount,
-        krw_amount=payload.krw_amount,
-        rate=payload.rate,
-        description=payload.description,
-        note=payload.note,
-    )
-    db.add(record)
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    db.refresh(record)
+    record = exchange_service.create_fx_transaction(db, user.id, payload)
     return to_fx_transaction_read(record)
 
 
@@ -84,25 +49,7 @@ def update_fx_transaction(
     db: Session = Depends(get_db),
 ) -> FxTransactionRead:
     user = get_or_create_single_user(db)
-    record = (
-        db.query(FxTransaction)
-        .filter(FxTransaction.id == record_id, FxTransaction.user_id == user.id)
-        .first()
-    )
-    if not record:
-        raise HTTPException(status_code=404, detail="fx transaction not found")
-
-    data = payload.model_dump(exclude_unset=True)
-    for field, value in data.items():
-        setattr(record, field, value)
-    record.updated_at = utcnow()
-
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    db.refresh(record)
+    record = exchange_service.update_fx_transaction(db, user.id, record_id, payload)
     return to_fx_transaction_read(record)
 
 
@@ -112,18 +59,5 @@ def delete_fx_transaction(
     db: Session = Depends(get_db),
 ) -> dict:
     user = get_or_create_single_user(db)
-    record = (
-        db.query(FxTransaction)
-        .filter(FxTransaction.id == record_id, FxTransaction.user_id == user.id)
-        .first()
-    )
-    if not record:
-        raise HTTPException(status_code=404, detail="fx transaction not found")
-
-    db.delete(record)
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
+    exchange_service.delete_fx_transaction(db, user.id, record_id)
     return {"status": "ok"}

@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 async def send_kis_alert(message: str, level: str = "WARNING") -> None:
     """KIS 관련 알림을 텔레그램으로 전송"""
     try:
-        from backend.services.telegram import send_telegram_message
+        from backend.integrations.telegram import send_telegram_message
         prefix = "🟡" if level == "WARNING" else "🔴" if level == "ERROR" else "ℹ️"
         await send_telegram_message(f"{prefix} [KIS Alert] {message}")
         logger.info("[KIS Alert] 텔레그램 알림 전송: %s", message)
@@ -131,11 +131,64 @@ class MarketDataService:
         현재 포트폴리오 상태의 스냅샷을 저장합니다.
         """
         from backend.services.portfolio import PortfolioService
+        from backend.services.users import get_or_create_single_user
         try:
-            # PortfolioService.take_snapshot 구현체 호출
-            # (기존 /api/portfolio/snapshots 엔드포인트 로직 호출)
-            PortfolioService.create_snapshot(db)
-            logger.info("Portfolio snapshot captured.")
+            user = get_or_create_single_user(db)
+            PortfolioService.create_snapshot(db, user.id)
+            logger.info(f"Portfolio snapshot captured for user_id={user.id}")
         except Exception as e:
             logger.error(f"Failed to take snapshot: {e}")
             raise e
+    @staticmethod
+    async def generate_creative_msg(ticker_count: int) -> str:
+        """
+        LLM을 사용하여 창의적인 업데이트 메시지 생성
+        """
+        from backend.services.llm_service import LLMService
+        from backend.services.prompt_loader import load_prompt
+        import os
+        from pytz import timezone
+
+        KST = timezone("Asia/Seoul")
+        
+        try:
+            llm = LLMService.get_instance()
+            if not llm.is_loaded():
+                return f"💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')} 기준"
+
+            # 외부 프롬프트 파일에서 로드 (핫 리로드 지원)
+            prompt_content = load_prompt("sync_prices", ticker_count=ticker_count)
+            if not prompt_content:
+                # 폴백: 파일이 없으면 기본 메시지
+                return f"💰 {ticker_count}개 종목 시세 업데이트 완료!"
+            
+            messages = [
+                {
+                    "role": "user",
+                    "content": prompt_content
+                }
+            ]
+            creative_text = llm.generate_chat(messages, max_tokens=128, temperature=0.8)
+            if str(ticker_count) not in creative_text:
+                creative_text += f"\n\n(참고: 총 {ticker_count}개 종목 업데이트 완료)"
+            
+            sync_time = datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
+            return f"{creative_text}\n\n🕒 {sync_time} 기준"
+        except Exception as e:
+            logger.error(f"LLM generation failed: {e}")
+            return f"💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')} 기준"
+
+    @staticmethod
+    async def notify_sync_completion(ticker_count: int):
+        """
+        시세 동기화 완료 알림 전송
+        """
+        from backend.integrations.telegram import send_telegram_message
+        
+        try:
+            msg = await MarketDataService.generate_creative_msg(ticker_count)
+            # 봇 타입을 'main'으로 명시하여 DB 백업 봇으로 발송
+            await send_telegram_message(msg, bot_type="main")
+            logger.info("Price sync notification sent.")
+        except Exception as e:
+            logger.error(f"Failed to send sync notification: {e}")

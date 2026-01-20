@@ -30,56 +30,7 @@ setup_global_logging(
 logger = logging.getLogger("sync_prices_scheduler")
 KST = timezone("Asia/Seoul")
 
-def send_telegram_sync(text: str):
-    """
-    시세 동기화 전용 텔레그램 전송 (기존 봇 토큰 사용 - DB 백업 봇)
-    """
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
-    if not bot_token or not chat_id:
-        logger.warning("TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set for sync notify")
-        return
-
-    import requests
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    try:
-        res = requests.post(url, json={"chat_id": chat_id, "text": text}, timeout=10)
-        res.raise_for_status()
-    except Exception as e:
-        logger.error(f"Failed to send telegram: {e}")
-
-async def generate_creative_msg(ticker_count: int):
-    """
-    LLM을 사용하여 창의적인 업데이트 메시지 생성
-    """
-    from backend.services.prompt_loader import load_prompt
-    
-    try:
-        llm = LLMService.get_instance()
-        if not llm.is_loaded():
-            return f"💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')} 기준"
-
-        # 외부 프롬프트 파일에서 로드 (핫 리로드 지원)
-        prompt_content = load_prompt("sync_prices", ticker_count=ticker_count)
-        if not prompt_content:
-            # 폴백: 파일이 없으면 기본 메시지
-            return f"💰 {ticker_count}개 종목 시세 업데이트 완료!"
-        
-        messages = [
-            {
-                "role": "user",
-                "content": prompt_content
-            }
-        ]
-        creative_text = llm.generate_chat(messages, max_tokens=128, temperature=0.8)
-        if str(ticker_count) not in creative_text:
-            creative_text += f"\n\n(참고: 총 {ticker_count}개 종목 업데이트 완료)"
-        
-        sync_time = datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
-        return f"{creative_text}\n\n🕒 {sync_time} 기준"
-    except Exception as e:
-        logger.error(f"LLM generation failed: {e}")
-        return f"💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')} 기준"
+# Redundant notification logic moved to MarketDataService
 
 
 
@@ -103,8 +54,7 @@ async def run_sync_script(job_id: str = "market_sync"):
             logger.info("Portfolio snapshot captured successfully.")
             
             # 3. Creative Notification
-            msg = await generate_creative_msg(ticker_count)
-            send_telegram_sync(msg)
+            await MarketDataService.notify_sync_completion(ticker_count)
             
         except Exception as e:
             logger.error(f"Error during sync execution: {e}")
