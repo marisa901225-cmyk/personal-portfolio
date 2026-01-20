@@ -40,6 +40,7 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
         "noise_keywords": [],
         "tagger": lol_league_tagger,
         "is_international": lambda tag: tag in ["Worlds/MSI"],
+        "enabled": True,  # [NEW] Optimization: Only poll enabled games
     },
     "valorant": {
         "display_name": "Valorant",
@@ -51,6 +52,7 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
         ],
         "tagger": valorant_league_tagger,
         "is_international": lambda tag: any(kw in tag.lower() for kw in ["champions", "masters", "kickoff", "ascension"]),
+        "enabled": True,
     },
     "pubg": {
         "display_name": "PUBG",
@@ -59,7 +61,8 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
         "noise_keywords": ["daily", "weekly"],
         "tagger": default_league_tagger,
         "is_international": lambda tag: any(kw in tag.lower() for kw in ["pgs", "pnc", "pgc"]),
-    }
+        "enabled": False,  # PUBG is secondary for now
+    },
 }
 
 def get_game_config(game_id: str) -> Optional[Dict[str, Any]]:

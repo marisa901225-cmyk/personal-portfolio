@@ -33,9 +33,6 @@ async def job_collect_news():
             # 2. SteamSpy 일반 순위 수집
             await async_retry(NewsCollector.collect_steamspy_rankings)(db)
 
-            # 3. PandaScore 일정 수집 (e스포츠)
-            await async_retry(NewsCollector.collect_pandascore_schedules)(db)
-
             # 4. 네이버 뉴스 수집 (E스포츠 + 경제)
             await async_retry(NewsCollector.collect_all_naver_news)(db)
 

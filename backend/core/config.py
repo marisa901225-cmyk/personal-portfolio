@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     kis_vops: Optional[str] = Field(default=None, validation_alias="KIS_VOPS")
     kis_my_agent: Optional[str] = Field(default=None, validation_alias="KIS_MY_AGENT")
     kis_my_token: Optional[str] = Field(default=None, validation_alias="KIS_MY_TOKEN")
+    kis_token_key: Optional[str] = Field(default=None, validation_alias="KIS_TOKEN_KEY")
+
+    # 보안 (CORS)
+    allowed_origins: str = Field(
+        default="http://localhost:3000,http://127.0.0.1:3000,https://personal-portfolio-blue-one-38.vercel.app,http://100.65.50.67,http://100.110.172.108",
+        validation_alias="ALLOWED_ORIGINS"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

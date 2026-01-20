@@ -67,8 +67,8 @@ def train_spam_model(db_path: str | None = None, model_path: str | None = None) 
         df = df[df["is_spam"].notna()].copy()
         df["is_spam"] = df["is_spam"].astype(int)
 
-        if len(df) < 20:
-            logger.warning("Not enough data for spam training (minimum 20 records required)")
+        if len(df) < 100:
+            logger.warning("도라의 조언 💖: 데이터가 너무 적으면 편향이 생길 수 있어요! (현재 %d건 / 최소 100건 필요). 학습을 건너뜁니다.", len(df))
             return False
 
         counts = df["is_spam"].value_counts()
@@ -90,12 +90,12 @@ def train_spam_model(db_path: str | None = None, model_path: str | None = None) 
         )
 
         pipeline = Pipeline([
-            # 한글 특화: char_wb n-gram
+            # 한글 특화: char_wb n-gram (2, 6) - 도라의 신의 한 수 💖
             ("tfidf", TfidfVectorizer(analyzer="char_wb", ngram_range=(2, 6), min_df=2)),
             ("clf", MultinomialNB(alpha=0.01)),
         ])
 
-        # ✅ 간단 홀드아웃 평가 (오탐 줄이려면 precision 확인이 핵심)
+        # ✅ 홀드아웃 평가 (정밀도(Precision) 확인이 핵심 - 도라 제안 💖)
         X_train, X_test, y_train, y_test = train_test_split(
             df["text"],
             df["is_spam"],
@@ -108,7 +108,7 @@ def train_spam_model(db_path: str | None = None, model_path: str | None = None) 
 
         y_pred = pipeline.predict(X_test)
         report = classification_report(y_test, y_pred, digits=3)
-        logger.info("Spam model holdout report:\n%s", report)
+        logger.info("Spam model evaluation (Precision priority 💖):\n%s", report)
 
         # 저장
         Path(model_path).parent.mkdir(parents=True, exist_ok=True)

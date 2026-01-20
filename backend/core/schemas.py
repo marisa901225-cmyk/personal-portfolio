@@ -17,10 +17,19 @@ class DividendRecord(BaseModel):
 
 
 class CmaConfig(BaseModel):
-    principal: float
-    annual_rate: float
-    tax_rate: float
-    start_date: str  # YYYY-MM-DD
+    principal: float = Field(..., ge=0, description="기초 원금")
+    annual_rate: float = Field(..., ge=0, le=1.0, description="연수익률 (예: 0.035)")
+    tax_rate: float = Field(..., ge=0, le=1.0, description="이자소득세율 (예: 0.154)")
+    start_date: str = Field(..., description="수익 산정 시작일 (YYYY-MM-DD)")
+
+    @field_validator("annual_rate", "tax_rate")
+    @classmethod
+    def validate_rates(cls, v: float) -> float:
+        if v > 1.0:
+            # 도라의 걱정 해결! 15.4 같은 입력을 0.154로 자동 보정하거나 에러 발생
+            # 여기서는 엄격하게 에러를 발생시켜 폭발을 방지합니다. 💖
+            raise ValueError("Rate must be between 0 and 1 (e.g., 0.154 for 15.4%)")
+        return v
 
 
 class AssetBase(BaseModel):
@@ -41,13 +50,18 @@ class AssetCreate(AssetBase):
     pass
 
 
-class AssetUpdate(BaseModel):
+class AssetUpdate(AssetBase):
+    """
+    Asset 정보 수정 스키마.
+    AssetBase를 상속받되, 모든 필드를 Optional로 처리하여 중복을 제거합니다. (지옥 같은 관리 탈출! 💖)
+    """
     name: Optional[str] = None
     ticker: Optional[str] = None
     category: Optional[str] = None
     currency: Optional[Literal["KRW", "USD"]] = None
     amount: Optional[float] = None
     current_price: Optional[float] = None
+    # 상속받은 필드들을 명시적으로 Optional 선언하여 부분 업데이트 지원
     purchase_price: Optional[float] = None
     realized_profit: Optional[float] = None
     index_group: Optional[str] = None

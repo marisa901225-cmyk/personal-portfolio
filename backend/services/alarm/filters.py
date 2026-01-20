@@ -25,6 +25,9 @@ SENSITIVE_PATTERNS = [
     (re.compile(r"\b02[- ]?\d{1,4}[- ]?\d{3,4}[- ]?\d{4}\b", re.IGNORECASE), "[전화번호]"),
     (re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", re.IGNORECASE), "[이메일]"),
     (re.compile(r"\b\d{11,}\b", re.IGNORECASE), "[식별번호]"),
+    # 개인화된 호출 마스킹 (LO의 개인정보 보호! 💖)
+    (re.compile(r"칼라의빛(?:님|님께|님을|님이)?"), "[사용자]"),
+    (re.compile(r"[가-힣]{2,4}님(?:께|을|이)?"), "[사용자]"),
 ]
 
 
@@ -272,8 +275,13 @@ def is_whitelisted(text: str) -> bool:
         "라이브가 시작",
     ]
 
-    # 광고가 포함되어 있으면 절대 화이트리스트가 아님
-    if any(p in text for p in ["(광고)", "[광고]", "((광고)"]):
+    # 광고/프로모션 키워드가 포함되어 있으면 절대 화이트리스트가 아님
+    promo_keywords = [
+        "(광고)", "[광고]", "((광고)", 
+        "이용권 선물", "선물 도착", "무료 이용권", 
+        "캐시 뽑기", "무료 캐시", "포인트 선물"
+    ]
+    if any(p in text for p in promo_keywords):
         return False
 
     for kw in whitelist_keywords:
