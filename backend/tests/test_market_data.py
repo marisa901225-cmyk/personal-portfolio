@@ -11,11 +11,23 @@ from backend.services.market_data_service import (
     search_tickers_by_name,
     get_usdkrw_rate,
     KisConfigurationError,
+    EmptyResultError,
 )
 
 class MarketDataServiceTests(unittest.TestCase):
     def setUp(self):
         self.db = MagicMock(spec=Session)
+        # Test environment may not allow spawning threads; avoid asyncio.to_thread.
+        async def _fake_to_thread(func, /, *args, **kwargs):
+            return func(*args, **kwargs)
+        self._to_thread_patcher = patch(
+            "backend.services.market_data_service.asyncio.to_thread",
+            side_effect=_fake_to_thread,
+        )
+        self._to_thread_patcher.start()
+
+    def tearDown(self):
+        self._to_thread_patcher.stop()
 
     @patch("backend.integrations.kis.kis_client.fetch_kis_prices_krw")
     def test_get_kis_prices_krw_success(self, mock_fetch):
@@ -37,6 +49,13 @@ class MarketDataServiceTests(unittest.TestCase):
         with self.assertRaises(KisConfigurationError):
             asyncio.run(get_kis_prices_krw(["005930"], self.db))
 
+    @patch("backend.integrations.kis.kis_client.fetch_kis_prices_krw")
+    def test_get_kis_prices_empty_result_raises_empty_result_error(self, mock_fetch):
+        mock_fetch.return_value = {}
+
+        with self.assertRaises(EmptyResultError):
+            asyncio.run(get_kis_prices_krw(["005930"], self.db, sync_to_assets=False))
+
     @patch("backend.integrations.kis.kis_client.search_tickers_by_name")
     def test_search_tickers_by_name(self, mock_search):
         mock_search.return_value = [{"symbol": "005930", "name": "삼성전자"}]
@@ -53,3 +72,10 @@ class MarketDataServiceTests(unittest.TestCase):
         result = asyncio.run(get_usdkrw_rate())
         
         self.assertEqual(result, 1300.0)
+
+    @patch("backend.integrations.kis.kis_client.fetch_usdkrw_rate")
+    def test_get_usdkrw_rate_empty_result_raises_empty_result_error(self, mock_fetch):
+        mock_fetch.return_value = None
+
+        with self.assertRaises(EmptyResultError):
+            asyncio.run(get_usdkrw_rate())

@@ -1,0 +1,18 @@
+backend/data/*.gguf
+# AI Models (even symlinks)
+backend/data/*.gguf
+backend/data/*.joblib
+backend/data/gemma*
+
+# Heavy dependencies
+**/node_modules
+**/dist
+**/.next
+**/__pycache__
+**/venv
+**/.venv
+
+# Database files
+*.db
+*.db-shm
+*.db-wal

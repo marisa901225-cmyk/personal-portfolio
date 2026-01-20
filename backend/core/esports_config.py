@@ -35,8 +35,8 @@ def lol_league_tagger(match: dict) -> str:
 GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
     "league-of-legends": {
         "display_name": "LoL",
-        "interest_keywords": ["lck", "lpl", "lec", "lcs", "worlds", "msi", "월즈"],
-        "exclude_keywords": [".a", "academy", "youth", "secondary", "아카데미"],
+        "interest_keywords": ["lck", "lpl", "lec", "lcs", "worlds", "msi", "월즈", "challengers", "cl"],
+        "exclude_keywords": [".a", "academy", "youth", "아카데미"],
         "noise_keywords": [],
         "tagger": lol_league_tagger,
         "is_international": lambda tag: tag in ["Worlds/MSI"],

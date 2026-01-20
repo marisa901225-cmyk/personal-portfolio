@@ -6,6 +6,7 @@
 
 import sys
 
+import logging
 import pandas as pd
 
 import kis_auth as ka

@@ -251,8 +251,8 @@ async def collect_pandascore_results(db: Session):
             begin_at_utc = parse_ps_datetime_utc(begin_at_str)
             begin_at_kst = to_kst(begin_at_utc)
             
-            # 비중계일 체크 (수=2, 목=3, 금=4) - KST 기준
-            if begin_at_kst.weekday() not in [2, 3, 4]:
+            # 비중계일 체크 (모든 요일 허용으로 변경하여 수집 누락 방지)
+            if begin_at_kst.weekday() not in [0, 1, 2, 3, 4, 5, 6]: # 모든 요일 포함
                 continue
             
             match_id = m.get("id")

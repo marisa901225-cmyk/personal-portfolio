@@ -69,40 +69,6 @@ class FxRateResponse(BaseModel):
     rate: float
 
 
-def _get_cached_fx_rate(db: Session) -> float | None:
-    user = get_or_create_single_user(db)
-    setting = (
-        db.query(Setting)
-        .filter(Setting.user_id == user.id)
-        .order_by(Setting.id.asc())
-        .first()
-    )
-    if not setting or setting.usd_fx_now is None:
-        return None
-    if not isinstance(setting.usd_fx_now, (int, float)):
-        return None
-    if not math.isfinite(setting.usd_fx_now) or setting.usd_fx_now <= 0:
-        return None
-    return float(setting.usd_fx_now)
-
-
-def _update_cached_fx_rate(db: Session, rate: float) -> None:
-    """DB에 환율 캐시 갱신"""
-    try:
-        user = get_or_create_single_user(db)
-        setting = (
-            db.query(Setting)
-            .filter(Setting.user_id == user.id)
-            .order_by(Setting.id.asc())
-            .first()
-        )
-        if setting:
-            setting.usd_fx_now = rate
-            db.commit()
-    except Exception:
-        db.rollback()
-
-
 # ============================================
 # Endpoints
 # ============================================
@@ -189,9 +155,11 @@ async def get_fx_rate(
     - 캐시가 없으면 자동으로 KIS API 호출
     - 참고용 환율이며, 실제 환전/과세 기준 환율과는 다를 수 있다.
     """
+    from ..services.market_data_service import get_cached_fx_rate, update_cached_fx_rate
+    
     # 캐시 우선 사용 (fresh=false일 때)
     if not fresh:
-        cached = _get_cached_fx_rate(db)
+        cached = get_cached_fx_rate(db)
         if cached is not None:
             return FxRateResponse(base="USD", quote="KRW", rate=cached)
     
@@ -199,16 +167,16 @@ async def get_fx_rate(
     try:
         rate = await get_usdkrw_rate()
         # 캐시 갱신
-        _update_cached_fx_rate(db, rate)
+        update_cached_fx_rate(db, rate)
         return FxRateResponse(base="USD", quote="KRW", rate=rate)
     except KisConfigurationError as exc:
-        cached = _get_cached_fx_rate(db)
+        cached = get_cached_fx_rate(db)
         if cached is not None:
             return FxRateResponse(base="USD", quote="KRW", rate=cached)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except (KisApiError, EmptyResultError) as exc:
         # API 실패 시에도 캐시 반환 시도
-        cached = _get_cached_fx_rate(db)
+        cached = get_cached_fx_rate(db)
         if cached is not None:
             return FxRateResponse(base="USD", quote="KRW", rate=cached)
         raise HTTPException(status_code=502, detail=str(exc)) from exc

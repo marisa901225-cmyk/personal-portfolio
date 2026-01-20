@@ -552,9 +552,105 @@ async def summarize_with_llm(items: List[dict]) -> Optional[str]:
     # 1단계: 환각 제거 및 특수 토큰 제거
     result = sanitize_llm_output(items, result)
     result = clean_exaone_tokens(result)
+
+    def _fallback_summary() -> str:
+        """
+        LLM 출력이 비정상/무의미할 때, 입력 알림을 그대로(마스킹 유지) bullet로 반환한다.
+        - 창작 금지
+        - 너무 길어지지 않도록 상위 N개만 노출
+        """
+        max_items = 6
+        out: List[str] = []
+        used = 0
+        for it in items:
+            if used >= max_items:
+                break
+            source = infer_source(it)
+            title = (it.get("app_title") or "").strip()
+            conv = (it.get("conversation") or "").strip()
+            text = (it.get("text") or "").strip()
+            parts = [p for p in (title, conv, text) if p]
+            if not parts:
+                continue
+            out.append(f"- [{source}] " + " / ".join(parts))
+            used += 1
+        remaining = max(0, len(items) - used)
+        if remaining > 0:
+            out.append(f"- (외 {remaining}건)")
+        return "\n".join(out).strip()
+
+    def _extract_strong_tokens(text: str) -> set[str]:
+        tokens = set()
+        for tok in re.findall(r"[가-힣A-Za-z0-9_*]+", text or ""):
+            if "*" in tok or any(ch.isdigit() for ch in tok):
+                tokens.add(tok)
+                continue
+            if re.search(r"[가-힣]", tok):
+                if len(tok) >= 2:
+                    tokens.add(tok)
+                continue
+            if len(tok) >= 3:
+                tokens.add(tok)
+        return tokens
+
+    def _looks_like_count_only_summary(text: str) -> bool:
+        """
+        '메일 3건'처럼 카운트만 있고 구체적인 제목/본문 단서가 없는 요약을 감지한다.
+        - 프롬프트에서 N건 요약을 허용하더라도, 사용자 입장에서는 요약에 "내용"이 필요하므로 폴백한다.
+        """
+        if not text or not text.strip():
+            return False
+
+        original_body = " ".join(
+            " ".join(
+                [
+                    (it.get("app_title") or "").strip(),
+                    (it.get("conversation") or "").strip(),
+                    (it.get("text") or "").strip(),
+                ]
+            )
+            for it in items
+        )
+        original_tokens = _extract_strong_tokens(original_body)
+        if not original_tokens:
+            return False
+
+        for ln in [l.strip() for l in text.splitlines() if l.strip()]:
+            if not ln.startswith(("-", "•", "*")):
+                continue
+            # contains a count
+            if not re.search(r"\b\d+\s*건\b", ln):
+                continue
+            # if the line includes any strong token from originals, it's fine
+            line_tokens = _extract_strong_tokens(ln)
+            if line_tokens & original_tokens:
+                continue
+            # too generic -> treat as count-only
+            return True
+        return False
+
+    def _is_weak_summary(text: str) -> bool:
+        if not text or not text.strip():
+            return True
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        if not lines:
+            return True
+        if len(" ".join(lines)) < 12:
+            return True
+        if len(lines) == 1:
+            only = re.sub(r"^[-•*]\\s*", "", lines[0]).strip()
+            if only in {"아니다", "없다", "없음", "없습니다", "없어요"}:
+                return True
+        return False
+
+    used_fallback = False
+    if _is_weak_summary(result) or _looks_like_count_only_summary(result):
+        logger.warning("LLM summary too weak; falling back to raw notification bullets.")
+        result = _fallback_summary()
+        used_fallback = True
     
     # 2단계: 경량 LLM으로 사고과정/메타 설명 정제 (Qwen3-0.6B) - 공통 엔진 사용
-    if result and result.strip():
+    if result and result.strip() and not used_fallback:
         result = await refine_draft_with_light_llm_async(
             prompt_key="refine_alarm_summary",
             draft=result,

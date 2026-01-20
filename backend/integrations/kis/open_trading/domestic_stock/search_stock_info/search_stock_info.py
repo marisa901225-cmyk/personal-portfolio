@@ -6,6 +6,7 @@ Created on 2025-06-17
 
 """
 
+import logging
 import sys
 import time
 from typing import Optional

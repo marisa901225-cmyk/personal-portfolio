@@ -38,14 +38,19 @@ def _split_message(text: str, limit: int) -> list[str]:
     return parts
 
 
-async def send_telegram_message(text: str):
+async def send_telegram_message(text: str, bot_type: str = "alarm"):
     """
     텔레그램으로 단일 메시지를 전송한다.
+    bot_type: 'main' (DB백업용), 'alarm' (알람 서비스용)
     """
     load_dotenv()
 
-    bot_token = os.getenv("ALARM_TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("ALARM_TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
+    if bot_type == "main":
+        bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    else:
+        bot_token = os.getenv("ALARM_TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
+        chat_id = os.getenv("ALARM_TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
 
     if not bot_token or not chat_id:
         logger.warning("Telegram bot token/chat id not configured")

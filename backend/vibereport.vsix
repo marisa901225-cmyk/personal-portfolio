@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"> <meta name="viewport" content="width=device-width, initial-scale=1"> <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" /> <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+  <meta property="og:title" content="Oops, something went wrong... | The Eclipse Foundation">
+  <meta name="description" content="Someone or something has likely already alerted us about this, so sit back while we fix the site.">
+  <meta property="og:description" content="Someone or something has likely already alerted us about this, so sit back while we fix the site..">
+  <link href="favicon.ico" rel=icon type=image/x-icon>
+  <meta name="robots" content="follow, noarchive, noindex">
+  <title>Maybe it's us | Open VSX | Eclipse Foundation</title>
+  <style>
+    :root {
+      --primary-color: #f7941e;
+      --primary-dark: #F06C02;
+      --primary-gradient: linear-gradient(180deg, #F06C02 0%, #A34201 100%);
+      --text-color: #2c2c2c;
+      --secondary-text: #666;
+      --link-color: #f7941e;
+      --border-color: #e8e8e8;
+      --card-color: white;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      color: var(--text-color);
+      line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    main {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .container {
+      background: var(--card-color);
+      max-width: 600px;
+      width: 100%;
+      text-align: center;
+      transition: transform 0.3s ease;
+    }
+    .logo {
+      width: 180px;
+      transition: transform 0.3s ease;
+    }
+    h1 {
+      font-size: 2rem;
+      color: var(--text-color);
+      margin-bottom: 1.5rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    .content {
+      margin: 2rem 0;
+      color: var(--secondary-text);
+      text-align: left;
+    }
+    .actions {
+      list-style: none;
+      padding: 0;
+      margin: 2rem 0;
+      text-align: left;
+    }
+    .actions li {
+      margin: 0.75rem 0;
+      padding-left: 1.75rem;
+      position: relative;
+    }
+    .actions li::before {
+      content: "→";
+      color: var(--primary-color);
+      position: absolute;
+      left: 0;
+      font-weight: bold;
+    }
+    .links {
+      margin-top: 2.5rem;
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .links a {
+      font-weight: 700;
+      text-decoration: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 50px;
+      font-size: 1rem;
+      position: relative;
+    }
+    .links a.secondary {
+      color: var(--primary-dark);
+    }
+    .links a.secondary::after {
+      content: "→";
+      color: var(--primary-dark);
+      position: absolute;
+      right: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      font-weight: bold;
+    }
+    .links a.primary {
+      background: linear-gradient(180deg, var(--primary-dark) 0%, var(--primary-dark) 100%);
+      color: white;
+    }
+    .links a.primary:hover {
+      background: var(--primary-gradient);
+    }
+    footer {
+      background: white;
+      border-top: 1px solid var(--border-color);
+      padding: 1.5rem;
+      font-size: 0.875rem;
+      color: var(--secondary-text);
+      text-align: center;
+    }
+    .footer-links {
+      margin-top: 1rem;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 1rem;
+    }
+    .footer-links a {
+      color: var(--secondary-text);
+      text-decoration: none;
+      transition: color 0.3s ease;
+    }
+    .footer-links a:hover {
+      color: var(--primary-color);
+    }
+    @media (max-width: 640px) {
+      main {
+        padding: 1rem;
+      }
+      html {
+        font-size: 14px;
+      }
+      .links a.secondary::after {
+        display: none;
+      }
+      .logo {
+        width: 140px;
+      }
+      .links a {
+        padding: 0.2rem 1rem;
+      }
+    }
+  </style>
+</head>
+<body><main>
+    <div class="container">
+      <img
+        src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0idXRmLTgiPz4KPCEtLSBHZW5lcmF0b3I6IEFkb2JlIElsbHVzdHJhdG9yIDI3LjAuMSwgU1ZHIEV4cG9ydCBQbHVnLUluIC4gU1ZHIFZlcnNpb246IDYuMDAgQnVpbGQgMCkgIC0tPgo8c3ZnIHZlcnNpb249IjEuMSIgaWQ9IkxheWVyXzEiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6eGxpbms9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkveGxpbmsiIHg9IjBweCIgeT0iMHB4IgoJIHZpZXdCb3g9IjAgMCA0MzAgMTM2LjMiIHN0eWxlPSJlbmFibGUtYmFja2dyb3VuZDpuZXcgMCAwIDQzMCAxMzYuMzsiIHhtbDpzcGFjZT0icHJlc2VydmUiPgo8c3R5bGUgdHlwZT0idGV4dC9jc3MiPgoJLnN0MHtmaWxsOiM4NzREOUU7fQoJLnN0MXtmaWxsOiM5RDZBQUQ7fQo8L3N0eWxlPgo8Zz4KCTxwYXRoIGQ9Ik0xMDIuOSw1MC4zYzAtMTMuOSwxMC42LTI0LjIsMjQuOS0yNC4yYzE0LjIsMCwyNC45LDEwLjMsMjQuOSwyNC4yUzE0Miw3NC41LDEyNy44LDc0LjVDMTEzLjUsNzQuNSwxMDIuOSw2NC4xLDEwMi45LDUwLjMKCQl6IE0xNDkuMSw1MC4zYzAtMTIuMS05LjItMjEtMjEuMy0yMWMtMTIuMiwwLTIxLjQsOC45LTIxLjQsMjFjMCwxMi4xLDkuMiwyMSwyMS40LDIxQzE0MCw3MS4zLDE0OS4xLDYyLjMsMTQ5LjEsNTAuM3oiLz4KCTxwYXRoIGQ9Ik0xOTYuMiw1Ni4zYzAsMTAuNy03LjYsMTguMS0xNy42LDE4LjFjLTYuMywwLTExLjYtMy4xLTE0LjUtOC40djIxLjRoLTMuNFYzOC41aDMuM3Y4LjRjMi44LTUuNSw4LjItOC43LDE0LjYtOC43CgkJQzE4OC43LDM4LjIsMTk2LjIsNDUuNywxOTYuMiw1Ni4zeiBNMTkyLjgsNTYuM2MwLTguOS02LjItMTUtMTQuNC0xNWMtOC4yLDAtMTQuMyw2LjEtMTQuMywxNXM2LjEsMTUsMTQuMywxNQoJCUMxODYuNiw3MS40LDE5Mi44LDY1LjMsMTkyLjgsNTYuM3oiLz4KCTxwYXRoIGQ9Ik0yMzUsNTcuMmgtMzAuN2MwLjMsOC41LDYuNiwxNC4yLDE1LjEsMTQuMmM0LjUsMCw4LjctMS42LDExLjQtNWwyLDIuM2MtMy4xLDMuOC04LjEsNS44LTEzLjUsNS44CgkJYy0xMC44LDAtMTguNC03LjUtMTguNC0xOC4xczcuMy0xOC4xLDE3LjEtMTguMWM5LjgsMCwxNyw3LjQsMTcsMThDMjM1LDU2LjUsMjM1LDU2LjgsMjM1LDU3LjJ6IE0yMDQuNCw1NC41aDI3LjMKCQljLTAuNS03LjctNi4xLTEzLjMtMTMuNy0xMy4zUzIwNC45LDQ2LjcsMjA0LjQsNTQuNXoiLz4KCTxwYXRoIGQ9Ik0yNzUuNSw1My4zdjIwLjhoLTMuNFY1My42YzAtOC4xLTQuMy0xMi4zLTExLjUtMTIuM2MtOC40LDAtMTMuNSw1LjQtMTMuNSwxMy45djE5aC0zLjRWMzguNWgzLjN2Ny43YzIuNC01LDcuNC04LDE0LjEtOAoJCUMyNjkuNywzOC4yLDI3NS41LDQzLjQsMjc1LjUsNTMuM3oiLz4KCTxwYXRoIGQ9Ik0zNDUuMSwyNi40bC0yMS4zLDQ3LjhoLTMuNUwyOTksMjYuNGgzLjhsMTkuMyw0My4zbDE5LjMtNDMuM0gzNDUuMXoiLz4KCTxwYXRoIGQ9Ik0zNDkuMSw2OGwxLjYtMi42YzMuMywzLjQsOS40LDYsMTUuOCw2YzkuNiwwLDEzLjgtNC4yLDEzLjgtOS40YzAtMTQuMy0yOS44LTUuNy0yOS44LTIzLjRjMC02LjgsNS4yLTEyLjcsMTYuOS0xMi43CgkJYzUuMywwLDEwLjcsMS42LDE0LjQsNC4zbC0xLjMsMi44Yy00LTIuNy04LjgtNC0xMy4xLTRjLTkuMywwLTEzLjUsNC4zLTEzLjUsOS42YzAsMTQuMywyOS44LDUuOSwyOS44LDIzLjIKCQljMCw2LjgtNS40LDEyLjYtMTcuMiwxMi42QzM1OS40LDc0LjUsMzUyLjYsNzEuOCwzNDkuMSw2OHoiLz4KCTxwYXRoIGQ9Ik00MjUuNiw3NC4yTDQwOS4yLDUybC0xNi40LDIyLjFoLTQuMWwxOC40LTI0LjdMMzkwLDI2LjRoNC4xbDE1LjIsMjAuNmwxNS4yLTIwLjZoMy45bC0xNy4xLDIzLjFsMTguNCwyNC43SDQyNS42eiIvPgo8L2c+CjxnPgoJPHBvbHlnb24gY2xhc3M9InN0MCIgcG9pbnRzPSI1My42LDAuMyAyOC45LDQzLjUgNzguNyw0My41IAkiLz4KCTxwb2x5Z29uIGNsYXNzPSJzdDEiIHBvaW50cz0iMjguOSw0My41IDUzLjYsMC4zIDMuNywwLjMgCSIvPgo8L2c+CjxnPgoJPHBvbHlnb24gY2xhc3M9InN0MCIgcG9pbnRzPSIyNS4zLDUwLjMgNTAuNSw5My4zIDc1LjQsNTAgCSIvPgoJPHBvbHlnb24gY2xhc3M9InN0MSIgcG9pbnRzPSI1MC41LDkzLjMgMjUuMyw1MC4zIDAuNSw5My42IAkiLz4KPC9nPgo8Zz4KCTxwb2x5Z29uIGNsYXNzPSJzdDAiIHBvaW50cz0iNTcsOTIuNyAxMDYuNyw5Mi45IDgyLjEsNDkuNSAJIi8+Cgk8cG9seWdvbiBjbGFzcz0ic3QxIiBwb2ludHM9IjEwNi43LDkyLjkgNTcsOTIuNyA4MS42LDEzNi4xIAkiLz4KPC9nPgo8L3N2Zz4K"
+        alt="Open VSX" class="logo">
+      <h1>Maybe it's us, but...</h1>
+      <section class="content">
+        <p>You're accessing the Open VSX registry aggressively, and we're throttling your requests to ensure fair access to others.</p>
+        <p>If you'd like to discuss increasing your limits to this valuable resource, please contact <a>infrastructure@eclipse-foundation.org</a>.
+      </section>
+    </div>
+  </main>
+  <footer>
+    <div>© Eclipse Foundation AISBL. All Rights Reserved.</div>
+    <div class="footer-links"><a href="https://www.eclipse.org/">Eclipse.org</a><a href="https://www.eclipse.org/legal/privacy/">Privacy Policy</a><a href="https://www.eclipse.org/legal/terms-of-use/">Terms of Use</a><a href="https://www.eclipse.org/legal/compliance/">Compliance</a><a href="https://www.eclipse.org/legal/">Legal</a></div>
+  </footer>
+</body></html>

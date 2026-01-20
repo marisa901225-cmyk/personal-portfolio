@@ -132,14 +132,18 @@ def _ensure_kis_modules_loaded() -> None:
         from overseas_stock.multi_quote.multi_quote import (  # type: ignore
             multi_quote as __overseas_multi_quote,
         )
-    except Exception as exc:
+    except Exception as e:
+        import traceback
+        import sys
+        print(f"FAILED TO IMPORT KIS MODULES: {e}", file=sys.stderr)
+        traceback.print_exc()
+        import logging
         _KIS_AVAILABLE = False
         _KIS_MODULES_LOADED = True
-        logger.warning(
+        logging.getLogger(__name__).warning(
             "KIS integration unavailable (failed to import KIS modules): %s. "
-            "If you don't need KIS during tests, set %s=0.",
-            exc,
-            _KIS_ENABLED_ENV,
+            "If you don't need KIS during tests, set KIS_ENABLED=0.",
+            e,
         )
         return
 
