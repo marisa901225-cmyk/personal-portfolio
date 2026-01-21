@@ -114,18 +114,22 @@ def is_review_spam(text: str) -> bool:
         r"어떠셨나요.*리뷰",
     ]
 
-    # 게임 이벤트 패턴
+    # 게임 이벤트 및 프로모션 패턴
     game_event_patterns = [
         r"득템",
         r"찬스.*놓치지",
         r"마감.*임박",
-        r"\d+연참",  # 버그 수정: \\d+ -> \d+
+        r"\d+연참",
         r"뽑기.*오픈",
         r"가챠",
         r"아래로.*드래그",
         r"클릭.*받기",
         r"오늘만.*특가",
         r"지금.*안.*사면",
+        r"포인트.*뽑기",
+        r"포인트.*선물",
+        r"추억.*알아보세요",
+        r"오늘의.*포인트",
     ]
 
     all_patterns = review_patterns + game_event_patterns
@@ -279,7 +283,9 @@ def is_whitelisted(text: str) -> bool:
     promo_keywords = [
         "(광고)", "[광고]", "((광고)", 
         "이용권 선물", "선물 도착", "무료 이용권", 
-        "캐시 뽑기", "무료 캐시", "포인트 선물"
+        "캐시 뽑기", "무료 캐시", "포인트 선물",
+        "포인트 뽑기", "포인트뽑기", "포인트 선물",
+        "추억을 알아보세요", "오늘의 포인트"
     ]
     if any(p in text for p in promo_keywords):
         return False
@@ -295,7 +301,10 @@ def should_ignore(text: str) -> bool:
     """
     텔레그램으로 전달할 필요가 없는 메시지인지 확인한다.
     """
-    ignore_keywords = ["인증번호", "OTP", "인증 요청", "비밀번호 확인"]
-    if any(kw in text for kw in ignore_keywords):
+    ignore_keywords = [
+        "인증번호", "OTP", "인증 요청", "비밀번호 확인", 
+        "OneDrive", "Google Photos", "보안 알림", "새 로그인"
+    ]
+    if any(kw.lower() in text.lower() for kw in ignore_keywords):
         return True
     return False
