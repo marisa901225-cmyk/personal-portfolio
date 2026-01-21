@@ -23,7 +23,8 @@ from starlette.requests import Request
 
 from .core.logging_config import setup_global_logging
 from .core.db_migrations import ensure_schema
-from .core import auth, db, settings
+from .core import auth, db
+from .core.config import settings
 from .services.alarm.llm_refiner import close_light_client
 
 from .routers.assets import router as assets_router

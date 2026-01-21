@@ -21,13 +21,12 @@ from ...services.users import get_or_create_single_user
 logger = logging.getLogger(__name__)
 
 # 설정 상수
-# 설정 상수
-LOCK_TIMEOUT_SEC = 300  # 락 타임아웃 5분 (도라의 데드락 방지 제안 💖)
+LOCK_TIMEOUT_SEC = 30  # 락 타임아웃 30초 (기존 5분에서 단축하여 지연 방지)
 FAILURE_THRESHOLD = 5  # 서킷 오픈 조건
 CIRCUIT_OPEN_DURATION_SEC = 300  # 5분
 MAX_BACKOFF_SEC = 60
-REFRESH_WINDOW_HOURS = 2  # 만료 2시간 전부터 갱신 시도
-HARD_EXPIRY_BUFFER_HOURS = 0.5  # 만료 30분 전까지는 기존 토큰 사용 가능
+REFRESH_WINDOW_HOURS = 1  # 만료 1시간 전부터 갱신 시도 (기존 2시간에서 단축)
+HARD_EXPIRY_BUFFER_HOURS = 0.083  # 만료 5분 전까지는 기존 토큰 사용 허용 (기존 30분에서 단축)
 
 
 def _get_setting(db: Session) -> Setting:
@@ -74,8 +73,8 @@ def acquire_token_refresh_lock(db: Optional[Session] = None) -> Tuple[bool, Sess
                     session.close()
                 return False, session
             else:
-                # 락 타임아웃 (도라 제안 반영 💖)
-                logger.warning("[KIS Lock] 락 타임아웃됨(5분 경과), 강제 해제 후 재획득 (locked_at=%s)", setting.token_refresh_locked_at)
+                # 락 타임아웃 (30초 경과 시 강제 해제)
+                logger.warning("[KIS Lock] 락 타임아웃됨(%d초 경과), 강제 해제 후 재획득 (locked_at=%s)", LOCK_TIMEOUT_SEC, setting.token_refresh_locked_at)
         
         setting.token_refresh_locked_at = now
         session.commit()

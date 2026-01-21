@@ -90,6 +90,11 @@ def _migrate_assets_table(conn: Connection) -> None:
         stmt = "ALTER TABLE assets ADD COLUMN cma_config JSON"
         logger.info(f"[Migration] Executing: {stmt}")
         conn.execute(text(stmt))
+    
+    if "market_type" not in columns:
+        stmt = "ALTER TABLE assets ADD COLUMN market_type VARCHAR(50)"
+        logger.info(f"[Migration] Executing: {stmt}")
+        conn.execute(text(stmt))
 
 
 def _migrate_expenses_table(conn: Connection) -> None:

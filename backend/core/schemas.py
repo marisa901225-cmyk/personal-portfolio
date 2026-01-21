@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, date
 from typing import List, Optional, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class TargetIndexAllocation(BaseModel):

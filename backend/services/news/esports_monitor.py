@@ -20,7 +20,7 @@ from ...core.models import EsportsMatch, GameNews
 from ...core.time_utils import utcnow, KST
 from ...core.esports_config import get_game_config, GAME_REGISTRY
 from ...integrations.telegram import send_telegram_message
-from ..alarm.catchphrase_fallbacks import build_fallback_lines
+from ..alarm.catchphrase_constants import build_fallback_lines
 from .core import PANDASCORE_URL
 
 def is_retryable_status(exception):

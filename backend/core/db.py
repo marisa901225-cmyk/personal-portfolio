@@ -24,12 +24,14 @@ if DATABASE_URL.startswith("sqlite"):
     # timeout: DB 잠겨있을 때 대기 시간 (30초로 상향하여 busy 에러 방지)
     connect_args = {"check_same_thread": False, "timeout": 30}
 
+from sqlalchemy.pool import NullPool
+
 engine = create_engine(
     DATABASE_URL,
     echo=False,
     future=True,
     connect_args=connect_args,
-    pool_pre_ping=True,
+    poolclass=NullPool,  # 멀티 프로세스/컨테이너 환경에서 SQLite 연결 충돌 방지
 )
 
 
@@ -43,6 +45,8 @@ def set_sqlite_pragma(dbapi_connection, connection_record) -> None:  # type: ign
         cursor.execute("PRAGMA journal_mode=WAL")
         # synchronous=NORMAL: WAL 모드에서 성능과 안정성의 최적 밸런스 (도라 추천 💖)
         cursor.execute("PRAGMA synchronous=NORMAL")
+        # busy_timeout: 락 발생 시 대기 시간 (5초)
+        cursor.execute("PRAGMA busy_timeout=5000")
         # cache_size: 약 2MB의 메모리 캐시 할당
         cursor.execute("PRAGMA cache_size=-2000")
         cursor.close()
