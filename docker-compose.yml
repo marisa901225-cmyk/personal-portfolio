@@ -8,8 +8,7 @@ services:
     volumes:
       - /home/dlckdgn/ai-models:/data:ro
       - ./backend/scripts/shell/run_llm_server.sh:/run.sh:ro
-    devices:
-      - /dev/dri:/dev/dri
+    # GPU devices disabled for CPU-only environment
     environment:
       - LLM_MODEL_PATH=/data/Huihui-Qwen3-VL-8B-Thinking-abliterated-Q5_K_M.gguf
       - LLM_MODEL_PATH_FILE=/data/llm_model_path.txt
@@ -17,7 +16,7 @@ services:
       - GGML_SYCL_DEVICE=0
       - GGML_SYCL_FORCE_MMQ=1
       - ZES_ENABLE_SYSMAN=1
-    command: [ "--n-gpu-layers", "99" ]
+    # GPU usage disabled: running on CPU only
     entrypoint: [ "/bin/bash", "/run.sh" ]
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
