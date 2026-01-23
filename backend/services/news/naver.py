@@ -65,6 +65,7 @@ async def collect_naver_news(db: Session, query: str, category: str = "esports")
         
         items = data.get("items", [])
         count = 0
+        clean_desc = "" # Initialize here to prevent NameError
         
         for item in items:
             title = item.get("title", "")

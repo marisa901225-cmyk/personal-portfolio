@@ -145,7 +145,7 @@ def is_review_spam(text: str) -> bool:
 
 def is_spam_llm(text: str) -> tuple[bool, str]:
     """
-    3단계: LLM을 사용하여 스팸 여부를 판단한다. (실험적 기능)
+    3단계: 고성능 8B 모델을 사용하여 스팸 여부를 정밀 판독한다.
     Returns: (is_spam, confidence_label)
     """
     from ..llm_service import LLMService
@@ -155,50 +155,62 @@ def is_spam_llm(text: str) -> tuple[bool, str]:
     if not llm.is_loaded():
         return False, ""
 
-    # 모델 템플릿에 의존하지 않고 generate_chat 사용
+    # 8B 모델의 지능을 활용한 정교한 판독 프롬프트
     messages = [
         {
             "role": "user",
             "content": f"""
-스팸인지 판단해줘. "spam" 또는 "ham" 중 하나만 출력해.
+당신은 고성능 뉴스/알림 필터링 전문가입니다. 다음 메시지가 사용자가 즉시 확인해야 할 '중요 정보'인지, 아니면 차단해야 할 '스팸/광고'인지 판별하세요.
 
-[스팸 기준]
-- 광고, 프로모션, 할인, 이벤트, 쿠폰
-- 포인트/캐시 적립, 리워드
-- 리뷰 작성 요청, 평가 유도
-- 게임 이벤트 (연참, 뽑기, 득템)
-- 대출, 금융상품 권유
+[판별 기준]
+1. SPAM (광고/유도/이벤트):
+   - 마케팅, 할인 쿠폰, 포인트 적립, 이벤트 참여 유도
+   - "지금 확인하세요", "혜택이 기다려요", "소멸 예정" 등의 촉구성 문구
+   - 주식/코인 리딩방 유도, 대출 권유
+   - 게임 내 이벤트(연참, 뽑기, 득템 등)나 단순 출석 알림
+   - 서비스 이용 후기나 별점 작성 요청
 
-[정상(ham) 기준]
-- 결제 승인, 배송 안내, 택시 도착
-- 개인 메시지 (카카오톡, Discord 등)
-- 웹툰/웹소설 업데이트, 라이브 방송 시작
-- 주식 체결, 금융 거래 알림
-- 중요 공지, API 토큰 발급
+2. HAM (정상/중요 알림):
+   - 실제 결제 승인(카드/페이), 은행 이체 알림, 입출금 정보 (매우 중요)
+   - 택배 배송 상태(배송 시작/완료), 택시/배달 앱 도착 정보
+   - 주식 체결 안내, 증권사 리포트 알림 
+   - 웹툰/웹소설 신작 업데이트 알림
+   - 라이브 방송 시작, 본인 인증 번호, 보안 로그인 안내
 
-확실하지 않으면 "ham" 출력.
+[출력 형식]
+단 한 단어 "spam" 또는 "ham"만 출력하세요. 금융 거래나 배송 알람은 절대 스팸이 아닙니다. 판단이 모호하다면 "ham"을 선택하세요.
 
-내용:
+메시지 내용:
 {text}
 """,
         }
     ]
-    # 성능 개선: 분류용이므로 enable_thinking=False
+    
+    # 스팸 필터링은 즉각적인 판단이 중요하므로 Thinking을 끄고 짧게 대답하도록 유도
     result = llm.generate_chat(
         messages, 
-        max_tokens=10, 
+        max_tokens=20, # spam/ham 단답형을 위해 토큰 제한
         temperature=0.1, 
         enable_thinking=False
     ).strip().lower()
 
-    # 결과 파싱 강화: 첫 토큰만 추출
-    token = result.split()[0] if result else ""
-    if token == "spam":
-        # 보안: 로그에 민감정보 노출 방지
-        logger.info(f"LLM classified as SPAM: {mask_sensitive_info(text)[:50]}...")
-        return True, "llm_spam"
+    # 디버깅: 모델의 실제 출력(Thinking 결과 포함)을 로그에 남김
+    logger.info(f"8B-Thinking Raw Result: {result}")
 
-    return False, "llm_ham"
+    # 결과 파싱: thinking 태그(<thought>...</thought>) 이후의 실제 대답 추출 시도
+    # 태그가 없더라도 텍스트 내에 spam이 명시적으로 포함되어 있는지 확인
+    
+    # 1. 태그 제거 후 순수 텍스트 추출 (있는 경우)
+    import re
+    clean_text = re.sub(r'<thought>.*?</thought>', '', result, flags=re.DOTALL).strip()
+    if not clean_text:
+        clean_text = result # 태그가 덜 닫혔거나 없는 경우 전체 텍스트 사용
+    
+    if "spam" in clean_text:
+        logger.info(f"8B-AI (Thinking) classified as SPAM: {mask_sensitive_info(text)[:50]}...")
+        return True, "llm_spam_8b_thinking"
+
+    return False, "llm_ham_8b_thinking"
 
 
 def is_promo_spam(text: str, db: Session) -> bool:
@@ -242,7 +254,6 @@ def is_whitelisted(text: str) -> bool:
         "AliExpress",
         "내역",
         "안내",
-        "공지",
         "리포트",
         # 배달 알림 보호 (중요!)
         "배달이 시작",
@@ -260,7 +271,7 @@ def is_whitelisted(text: str) -> bool:
         "결제가 완료되었어요",
         "결제가 완료되었습니다",
         "결제되었습니다",
-        "굿딜 결제가 완료",
+        "결제 내역",
         "승인되었습니다",
         # 웹소설/웹툰 업데이트 (사용자 관심사)
         r"\d+화 업로드",
@@ -269,10 +280,6 @@ def is_whitelisted(text: str) -> bool:
         "새 연재",
         "연재 업데이트",
         "업로드 완료",
-        "문피아",
-        "리꼬타",
-        "카카오페이지",
-        "네이버시리즈",
         # 라이브 방송 시작
         "라이브 시작",
         "방송 시작",
@@ -285,7 +292,9 @@ def is_whitelisted(text: str) -> bool:
         "이용권 선물", "선물 도착", "무료 이용권", 
         "캐시 뽑기", "무료 캐시", "포인트 선물",
         "포인트 뽑기", "포인트뽑기", "포인트 선물",
-        "추억을 알아보세요", "오늘의 포인트"
+        "추억을 알아보세요", "오늘의 포인트",
+        "이벤트", "당첨자", "당첨 안내", "응모",
+        "럭키박스", "득템", "사전예약", "쿠폰"
     ]
     if any(p in text for p in promo_keywords):
         return False
