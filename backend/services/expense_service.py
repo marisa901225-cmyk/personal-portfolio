@@ -1,124 +1,47 @@
 """
 Expense Service
 
-지출/수입 관련 비즈니스 로직.
-라우터 간 의존을 제거하기 위해 서비스 레이어로 분리.
+지출/수입 관련 CRUD 비즈니스 로직.
+분류/학습은 expenses.expense_classifier, 통계는 expenses.expense_analytics 참조.
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, List, Optional
+from typing import List
 
 from fastapi import HTTPException
-from sqlalchemy import extract, func
+from sqlalchemy import extract
 from sqlalchemy.orm import Session
 
 from ..core.models import Expense, MerchantPattern
 from ..core.schemas import ExpenseCreate, ExpenseUpdate
 from ..services.users import get_or_create_single_user
 
-# --- Constants & Global State (Migrated from Router) ---
-_INCOME_MERCHANT_KEYWORDS = (
-    "급여",
-    "salary",
-    "월급",
-    "입금",
-    "캐시백",
-    "포인트",
-    "이자",
-    "환급",
+# Import refactored modules
+from .expenses.expense_analytics import get_expense_summary
+from .expenses.expense_classifier import (
+    load_expense_model as _load_expense_model,
+    is_income_merchant as _is_income_merchant,
+    build_review_info as _build_review_info,
+    learn_patterns_from_history,
 )
-_REVIEW_CONFIDENCE_THRESHOLD = 0.65
-_EXPENSE_MODEL_PATH = Path(__file__).resolve().parents[1] / "data" / "expense_model.joblib"
-_EXPENSE_MODEL_CACHE: Any | None = None
-_EXPENSE_MODEL_MTIME: float | None = None
-_EXPENSE_MODEL_LOAD_ERR_ONCE = False
 
-
-# --- Helper Methods ---
-
-def _load_expense_model() -> Any | None:
-    global _EXPENSE_MODEL_CACHE, _EXPENSE_MODEL_MTIME, _EXPENSE_MODEL_LOAD_ERR_ONCE
-    
-    if not _EXPENSE_MODEL_PATH.exists():
-        _EXPENSE_MODEL_CACHE = None
-        _EXPENSE_MODEL_MTIME = None
-        return None
-
-    mtime = _EXPENSE_MODEL_PATH.stat().st_mtime
-    if _EXPENSE_MODEL_CACHE is not None and _EXPENSE_MODEL_MTIME == mtime:
-        return _EXPENSE_MODEL_CACHE
-
-    try:
-        import joblib
-        _EXPENSE_MODEL_CACHE = joblib.load(_EXPENSE_MODEL_PATH)
-        _EXPENSE_MODEL_MTIME = mtime
-        _EXPENSE_MODEL_LOAD_ERR_ONCE = False
-        return _EXPENSE_MODEL_CACHE
-    except Exception as e:
-        if not _EXPENSE_MODEL_LOAD_ERR_ONCE:
-            _EXPENSE_MODEL_LOAD_ERR_ONCE = True
-            import logging
-            logging.getLogger(__name__).warning("Expense model load failed: %s", e)
-        _EXPENSE_MODEL_CACHE = None
-        _EXPENSE_MODEL_MTIME = None
-        return None
-
-
-def _is_income_merchant(merchant: str) -> bool:
-    merchant_lower = merchant.lower()
-    return any(keyword in merchant_lower for keyword in _INCOME_MERCHANT_KEYWORDS)
-
-
-def _build_review_info(
-    expense: Expense,
-    learned_patterns: dict[str, str],
-    model: Any | None,
-) -> tuple[str, str | None] | None:
-    # Skip income (positive amounts), only review expenses (negative amounts)
-    if expense.amount >= 0:
-        return None
-    if not expense.merchant:
-        return None
-
-    merchant = expense.merchant.strip()
-    if not merchant or _is_income_merchant(merchant):
-        return None
-
-    pattern_category = learned_patterns.get(merchant)
-    if pattern_category and pattern_category not in {"급여", "기타수입"}:
-        # 패턴이 현재 카테고리와 다를 때만 검토 필요 표시
-        if expense.category != pattern_category:
-            return (f"학습된 패턴: {pattern_category}", pattern_category)
-
-    if model is None or not hasattr(model, "predict"):
-        return None
-
-    try:
-        predicted = model.predict([merchant])[0]
-    except Exception:
-        return None
-
-    confidence = None
-    if hasattr(model, "predict_proba"):
-        try:
-            proba = model.predict_proba([merchant])[0]
-            confidence = float(max(proba))
-        except Exception:
-            confidence = None
-
-    if confidence is None or confidence < _REVIEW_CONFIDENCE_THRESHOLD:
-        return None
-
-    # AI 추정이 현재 카테고리와 다를 때만 검토 필요 표시
-    if expense.category == str(predicted):
-        return None
-
-    return (f"AI 추정: {predicted} (신뢰 {confidence:.2f})", str(predicted))
+# Re-export for backward compatibility
+__all__ = [
+    "get_categories",
+    "get_expenses_with_review",
+    "get_expense_summary",
+    "create_expense",
+    "update_expense",
+    "delete_expense",
+    "restore_expense",
+    "learn_patterns_from_history",
+]
 
 
 # --- Read Operations ---
+
+
 
 def get_categories(db: Session) -> List[str]:
     """사용자가 사용한 모든 고유 카테고리 목록 조회."""
@@ -182,62 +105,6 @@ def get_expenses_with_review(
     return results
 
 
-def get_expense_summary(
-    db: Session,
-    year: int | None = None,
-    month: int | None = None,
-) -> dict:
-    """
-    소비 내역 요약을 생성한다.
-    """
-    user = get_or_create_single_user(db)
-
-    query = db.query(Expense).filter(Expense.user_id == user.id, Expense.deleted_at.is_(None))
-
-    if year is not None:
-        query = query.filter(extract("year", Expense.date) == year)
-        if month is not None:
-            query = query.filter(extract("month", Expense.date) == month)
-
-    expenses = query.all()
-
-    total_expense = sum(e.amount for e in expenses if e.amount < 0)
-    total_income = sum(e.amount for e in expenses if e.amount >= 0)
-    fixed_expense = sum(e.amount for e in expenses if e.is_fixed and e.amount < 0)
-
-    category_summary: dict[str, float] = {}
-    for e in expenses:
-        if e.amount < 0:  # 지출만
-            if e.category not in category_summary:
-                category_summary[e.category] = 0
-            category_summary[e.category] += abs(e.amount)
-
-    method_summary: dict[str, float] = {}
-    for e in expenses:
-        if e.amount < 0 and e.method:
-            if e.method not in method_summary:
-                method_summary[e.method] = 0
-            method_summary[e.method] += abs(e.amount)
-
-    return {
-        "period": {"year": year, "month": month},
-        "total_expense": abs(total_expense),
-        "total_income": total_income,
-        "net": total_income + total_expense,
-        "fixed_expense": abs(fixed_expense),
-        "fixed_ratio": abs(fixed_expense / total_expense) * 100 if total_expense != 0 else 0,
-        "category_breakdown": [
-            {"category": k, "amount": v}
-            for k, v in sorted(category_summary.items(), key=lambda x: x[1], reverse=True)
-        ],
-        "method_breakdown": [
-            {"method": k, "amount": v}
-            for k, v in sorted(method_summary.items(), key=lambda x: x[1], reverse=True)
-        ],
-        "transaction_count": len(expenses),
-    }
-
-
 # --- Write Operations ---
 
 def create_expense(db: Session, payload: ExpenseCreate) -> Expense:
@@ -286,10 +153,10 @@ def update_expense(db: Session, expense_id: int, payload: ExpenseUpdate) -> Expe
     expense.updated_at = datetime.now(timezone.utc)
 
     try:
-        # 카테고리가 변경되었다면 학습 패턴 업데이트 (가맹점명 정규화 추가)
+        # 카테고리가 변경되었다면 학습 패턴 업데이트
         if payload.category and expense.merchant:
             merchant = expense.merchant.strip()
-            expense.merchant = merchant # DB 값도 정규화
+            expense.merchant = merchant
             pattern = (
                 db.query(MerchantPattern)
                 .filter(MerchantPattern.user_id == user.id, MerchantPattern.merchant == merchant)
@@ -358,74 +225,3 @@ def restore_expense(db: Session, expense_id: int) -> Expense:
     db.refresh(expense)
     return expense
 
-
-def learn_patterns_from_history(db: Session) -> dict:
-    """기존 모든 소비 내역을 분석하여 가맹점별 최빈 카테고리를 학습."""
-    user = get_or_create_single_user(db)
-    
-    # 가맹점별 카테고리 빈도 분석
-    stats = (
-        db.query(Expense.merchant, Expense.category, func.count(Expense.id).label("count"))
-        .filter(
-            Expense.user_id == user.id,
-            Expense.amount < 0,
-            Expense.merchant.isnot(None),
-            Expense.merchant != '',
-            Expense.deleted_at.is_(None),
-        )
-        .group_by(Expense.merchant, Expense.category)
-        .all()
-    )
-    
-    # 가맹점마다 가장 많이 쓰인 카테고리 추출 (로직 단순화)
-    merchant_top_cat: dict[str, str] = {}
-    merchant_top_count: dict[str, int] = {}
-    
-    for merchant, category, count in stats:
-        m_stripped = merchant.strip()
-        if count > merchant_top_count.get(m_stripped, 0):
-            merchant_top_count[m_stripped] = count
-            merchant_top_cat[m_stripped] = category
-
-    # MerchantPattern 테이블 업데이트
-    added = 0
-    updated = 0
-    for merchant, category in merchant_top_cat.items():
-        pattern = (
-            db.query(MerchantPattern)
-            .filter(MerchantPattern.user_id == user.id, MerchantPattern.merchant == merchant)
-            .first()
-        )
-        if pattern:
-            if pattern.category != category:
-                pattern.category = category
-                updated += 1
-        else:
-            pattern = MerchantPattern(
-                user_id=user.id,
-                merchant=merchant,
-                category=category
-            )
-            db.add(pattern)
-            added += 1
-            
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-        
-    # AI 모델 학습 추가
-    ai_success = False
-    try:
-        from ..services.expense_trainer import train_model
-        ai_success = train_model()
-    except Exception as e:
-        print(f"⚠️ AI 모델 학습 중 오류 발생: {e}")
-
-    return {
-        "status": "ok", 
-        "added": added, 
-        "updated": updated, 
-        "ai_trained": ai_success
-    }

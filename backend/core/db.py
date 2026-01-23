@@ -45,8 +45,8 @@ def set_sqlite_pragma(dbapi_connection, connection_record) -> None:  # type: ign
         cursor.execute("PRAGMA journal_mode=WAL")
         # synchronous=NORMAL: WAL 모드에서 성능과 안정성의 최적 밸런스 (도라 추천 💖)
         cursor.execute("PRAGMA synchronous=NORMAL")
-        # busy_timeout: 락 발생 시 대기 시간 (5초)
-        cursor.execute("PRAGMA busy_timeout=5000")
+        # busy_timeout: 락 발생 시 대기 시간 (30초)
+        cursor.execute("PRAGMA busy_timeout=30000")
         # cache_size: 약 2MB의 메모리 캐시 할당
         cursor.execute("PRAGMA cache_size=-2000")
         cursor.close()

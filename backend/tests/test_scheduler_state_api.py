@@ -8,10 +8,13 @@ from sqlalchemy.orm import Session
 
 class TestSchedulerStateApi(unittest.TestCase):
     def setUp(self):
+        # 테스트 전용 테이블 생성
+        Base.metadata.create_all(bind=engine)
         self.client = TestClient(app)
-        # We need a valid token to bypass dependencies=[Depends(verify_api_token)]
-        # However, for simplicity in tests, we can mock the dependency or use a known one.
-        # Here we'll just test the logic if possible.
+        
+    def tearDown(self):
+        # 테스트 후 테이블 삭제 (독립성 보장)
+        Base.metadata.drop_all(bind=engine)
         
     def test_get_scheduler_state(self):
         # We need to mock the dependency in the app, not just the function call

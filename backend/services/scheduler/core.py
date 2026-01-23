@@ -56,7 +56,7 @@ def start_scheduler():
         # LLM 농담은 :00, :10, :20... / 뉴스수집은 :05, :15, :25...
         scheduler.add_job(
             job_collect_news, 
-            CronTrigger(minute='5,15,25,35,45,55'), 
+            CronTrigger(minute='7,17,27,37,47,57'), 
             id="collect_game_news", 
             replace_existing=True
         )

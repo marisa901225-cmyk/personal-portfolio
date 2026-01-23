@@ -56,6 +56,49 @@ class OpenAIPaidBackend(LLMBackend):
             **kwargs,
         )
 
+    def _convert_to_system_prompt(self, messages: List[dict]) -> List[dict]:
+        """
+        OpenAI 유료 모델용: 첫 user 메시지가 시스템 지시문 패턴이면 system role로 변환.
+        로컬 LLM에서는 user role만 써도 되지만, OpenAI API는 system/user 분리가 중요.
+        """
+        import re
+        if not messages:
+            return messages
+        
+        first = messages[0]
+        if first.get("role") != "user":
+            return messages  # 이미 system이 있거나 다른 role이면 그대로
+        
+        content = first.get("content", "")
+        if not content:
+            return messages
+        
+        # 시스템 지시문 패턴 감지 (한글/영어)
+        system_patterns = [
+            r"^당신은\s+",        # 당신은 ~입니다
+            r"^너는\s+",          # 너는 ~야
+            r"^You are\s+",       # You are ~
+            r"^\[?역할\]?",       # [역할] 또는 역할:
+            r"^\[?지침\]?",       # [지침] 또는 지침:
+            r"^\[?작성\s*지침\]?", # [작성 지침]
+        ]
+        
+        is_system_like = any(re.match(p, content.strip(), re.IGNORECASE) for p in system_patterns)
+        
+        if not is_system_like:
+            return messages
+        
+        # 시스템 프롬프트로 변환하고, 간단한 user 메시지 추가
+        new_messages = [
+            {"role": "system", "content": content},
+            {"role": "user", "content": "위 지침대로 작성해주세요."}
+        ]
+        # 기존 메시지가 더 있으면 추가 (첫 번째만 변환)
+        if len(messages) > 1:
+            new_messages = [{"role": "system", "content": content}] + messages[1:]
+        
+        return new_messages
+
     def chat(
         self,
         messages: List[dict],
@@ -69,6 +112,9 @@ class OpenAIPaidBackend(LLMBackend):
     ) -> str:
         import time
         import random
+
+        # OpenAI 유료 모델용 시스템 프롬프트 자동 분리
+        messages = self._convert_to_system_prompt(messages)
 
         api_key = self.settings.ai_report_api_key
         if not api_key:
@@ -145,12 +191,13 @@ class OpenAIPaidBackend(LLMBackend):
                 payload["reasoning"] = {"effort": "low"}
             else:
                 payload["temperature"] = temperature
-            if stop:
+            if stop and not is_gpt5:
                 payload["stop"] = stop
             if seed is not None:
                 payload["seed"] = seed
-            if top_p is not None:
-                payload["top_p"] = top_p
+            # Responses API does not support top_p in some cases, causing 400 error
+            # if top_p is not None:
+            #     payload["top_p"] = top_p
             if current_tier:
                 payload["service_tier"] = current_tier
 
@@ -193,7 +240,7 @@ class OpenAIPaidBackend(LLMBackend):
                     payload["stop"] = stop
                 if seed is not None:
                     payload["seed"] = seed
-                if top_p is not None:
+                if top_p is not None and not is_gpt5:
                     payload["top_p"] = top_p
                 if response_format:
                     payload["response_format"] = response_format

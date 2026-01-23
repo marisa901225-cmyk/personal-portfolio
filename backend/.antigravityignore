@@ -1,0 +1,16 @@
+# --- AI & Agent Ignore Rules (Backend) --- **
+/*.pyc
+**/
+__pycache__ **/.venv **/venv **
+/*.db
+**/
+*.db-shm **
+/*.db-wal
+**/
+*.gguf **
+/*.joblib
+**/
+backend/backups/ **/data_backup_reference/ **/.env **/.env.* **
+/*.token
+**/
+.pytest_cache **/.vscode **/.git **/.github

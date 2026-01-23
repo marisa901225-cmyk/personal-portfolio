@@ -222,8 +222,11 @@ class EsportsMatch(Base):
     last_seen_running_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     missing_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
-    # 알림 멱등성 (finished 알림 중복 방지)
+    # 알림 멱등성 (중복 방지)
+    start_notified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    imminent_notified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     finished_notified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     # 다음 경기 연결 (선택적)
     next_match_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 

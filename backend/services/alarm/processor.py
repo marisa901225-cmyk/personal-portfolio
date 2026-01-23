@@ -59,15 +59,15 @@ async def process_pending_alarms(db: Session):
         .all()
     )
     
-    if not pending:
-        # 알람이 없을 때도 경기 알림이나 LLM 랜덤 메시지 처리를 위해 계속 진행할 수 있지만,
-        # 여기서는 기존 로직대로 진행하되 pending이 비어있으면 선점 로직만 건너뜀
-        pass
-    else:
+    if pending:
         # 선점: 중복 실행 방지
         for alarm in pending:
             alarm.status = "processing"
-        db.commit()
+        try:
+            db.commit()
+        except Exception as e:
+            logger.error(f"Failed to set processing status: {e}")
+            return # 락 걸리면 다음 기회에
     
     # 에러 발생 시 processing 상태인 것들을 pending으로 복구하기 위한 리스트
     processing_alarms = list(pending)
@@ -104,7 +104,6 @@ async def process_pending_alarms(db: Session):
                 tasker_vars = ["%antext", "%antitle", "%ansubtext", "%ansender", "%evtprm", "%anapp", "%ancomm"]
                 check_fields = [original_text, alarm.sender or "", alarm.app_title or ""]
                 if any(tv in field for tv in tasker_vars for field in check_fields):
-                    alarm.status = "discarded"
                     alarm.classification = "placeholder"
                     db.add(SpamAlarm(
                         raw_text=alarm.raw_text, masked_text=masked_text, sender=alarm.sender,
@@ -112,7 +111,7 @@ async def process_pending_alarms(db: Session):
                         conversation=alarm.conversation, classification="placeholder",
                         discard_reason="Tasker placeholder", rule_version=1
                     ))
-                    db.commit()  # 즉시 커밋
+                    # db.commit() 제거: 마지막에 일괄 커밋
                     processing_alarms.remove(alarm)
                     filtered_count += 1
                     filtered_reasons["플레이스홀더"] += 1
@@ -120,7 +119,6 @@ async def process_pending_alarms(db: Session):
 
                 # 1.2 무시할 알림 (OTP 등)
                 if should_ignore(original_text):
-                    alarm.status = "discarded"
                     alarm.classification = "ignored"
                     db.add(SpamAlarm(
                         raw_text=alarm.raw_text, masked_text=masked_text, sender=alarm.sender,
@@ -128,7 +126,7 @@ async def process_pending_alarms(db: Session):
                         conversation=alarm.conversation, classification="ignored",
                         discard_reason="OTP/Security filter", rule_version=1
                     ))
-                    db.commit()  # 즉시 커밋
+                    # db.commit() 제거
                     processing_alarms.remove(alarm)
                     filtered_count += 1
                     filtered_reasons["OTP/보안"] += 1
@@ -157,7 +155,6 @@ async def process_pending_alarms(db: Session):
                                 is_spam_result, classification, discard_reason = True, cls, "LLM spam classification"
                 
                 if is_spam_result:
-                    alarm.status = "discarded"
                     alarm.classification = classification
                     db.add(SpamAlarm(
                         raw_text=alarm.raw_text, masked_text=masked_text, sender=alarm.sender,
@@ -165,7 +162,7 @@ async def process_pending_alarms(db: Session):
                         conversation=alarm.conversation, classification=classification,
                         discard_reason=discard_reason, rule_version=1
                     ))
-                    db.commit()  # 즉시 커밋
+                    # db.commit() 제거
                     processing_alarms.remove(alarm)
                     filtered_count += 1
                     filtered_reasons["광고/프로모션"] += 1
@@ -187,9 +184,8 @@ async def process_pending_alarms(db: Session):
                         merchant=card_info["merchant"], method=card_info["method"],
                         category=category, is_fixed=False
                     ))
-                    alarm.status = "processed"
                     alarm.classification = "rule"
-                    db.commit()  # 즉시 커밋
+                    # db.commit() 제거
                     processing_alarms.remove(alarm)
                     
                     has_expenses = True

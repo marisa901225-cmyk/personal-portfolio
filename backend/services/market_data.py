@@ -163,16 +163,27 @@ class MarketDataService:
             
             messages = [
                 {
+                    "role": "system",
+                    "content": "너는 자산 관리 비서야. 사용자의 주식/자산 시세 동기화가 완료되었음을 알리는 친근하고 활기찬 메시지를 작성해줘."
+                },
+                {
                     "role": "user",
                     "content": prompt_content
                 }
             ]
-            creative_text = llm.generate_chat(messages, max_tokens=512, temperature=0.8)
-            if str(ticker_count) not in creative_text:
-                creative_text += f"\n\n(참고: 총 {ticker_count}개 종목 업데이트 완료)"
+            creative_text = llm.generate_chat(messages, max_tokens=256, temperature=0.9)
+            
+            # 클린업: "성공!" 같은 단순 응답 방지 및 종목 수 확인
+            if len(creative_text.strip()) < 5 or str(ticker_count) not in creative_text:
+                # LLM이 너무 짧게 답하거나 숫자를 빼먹은 경우 강제로 정보 보강
+                info_text = f"💰 {ticker_count}개 종목 업데이트 완료!"
+                if creative_text.strip():
+                    creative_text = f"{creative_text.strip()}\n\n{info_text}"
+                else:
+                    creative_text = info_text
             
             sync_time = datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
-            return f"{prefix}{creative_text}\n\n🕒 {sync_time} 기준"
+            return f"{prefix}{creative_text.strip()}\n\n🕒 {sync_time} 기준"
         except Exception as e:
             logger.error(f"LLM generation failed: {e}")
             return f"{prefix}💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')} 기준"

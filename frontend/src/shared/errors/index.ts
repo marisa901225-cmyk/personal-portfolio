@@ -42,6 +42,9 @@ export type UserErrorMessages = {
 
 export const APP_ERROR_EVENT = 'app:error';
 
+/** CustomEvent 타입 정의 - Layout.tsx 등에서 타입 안전하게 사용 */
+export type AppErrorEvent = CustomEvent<string>;
+
 // ==================== 헬퍼 함수 ====================
 
 export const isNetworkError = (error: unknown): boolean => {

@@ -7,117 +7,115 @@
 ## 1. 개선 요약 (Overall Status)
 
 <!-- AUTO-SUMMARY-START -->
-현재 프로젝트는 기능적으로 안정적이나, 코드 품질과 장기적 유지보수성을 위해 몇 가지 기술적 부채를 해결해야 합니다. 아래는 식별된 보류 항목들의 분포입니다.
+현재 프로젝트는 **코드 품질** 측면에서 매우 우수하지만, **테스트 관리**와 **레거시 코드 정리**에 집중할 필요가 있습니다. 제미나이(Gemini) 등 실험용으로 작성된 코드들이 백엔드 테스트 수집을 방해하고 있으며, 리팩토링 과정에서 변경된 모듈 경로가 반영되지 않은 테스트들이 존재합니다. 따라서 이번 개선 주기는 **핵심 로직 테스트 가동**과 **불필요한 코드 제거**를 중심으로 진행합니다.
 
 ### 📊 우선순위 분포 (Priority Distribution)
 | 우선순위 | 개수 |
 |:---:|---:|
-| P1 | 1 |
-| P2 | 2 |
-| P3 | 1 |
-| OPT | 1 |
+| **P1** | 1 |
+| **P2** | 2 |
+| **P3** | 1 |
+| **OPT** | 1 |
 
 ### 🗂️ 카테고리 분포 (Category Distribution)
 | 카테고리 | 개수 | 대표 ID 예시 |
 |---|---:|---|
-| 🧪 테스트 | 1 | `test-coverage-frontend-001` |
-| 🧹 코드 품질 | 1 | `code-quality-frontend-001` |
-| 🏗️ 아키텍처 | 1 | `arch-backend-refactor-001` |
-| ⚙️ 운영/로그 | 1 | `infra-logging-001` |
-| 🚀 최적화 | 1 | `opt-simhash-cache-001` |
+| 🧪 테스트 | 1 | `test-backend-env-001` |
+| 🛡️ 안정성 | 1 | `feat-error-boundary-001` |
+| 🧹 코드 품질 | 1 | `code-cleanup-legacy-001` |
+| ✨ 기능 추가 | 1 | `feat-telegram-template-001` |
+| 🚀 최적화 | 1 | `opt-duckdb-query-001` |
 
-### 🔎 Origin 분포
+### 🔎 Origin 분포 (Pending Only)
 | Origin | 개수 |
 |---|---:|
-| static-analysis | 5 |
+| test-failure | 2 |
+| manual-idea | 3 |
+| static-analysis | 0 |
 
-### 🚨 Riks Level 분포
+### 🚨 Risk Level 분포 (Pending Only)
 | Risk level | 개수 |
 |---|---:|
+| high | 1 |
 | medium | 3 |
-| low | 2 |
+| low | 1 |
 
 **우선순위 선정 근거:**
-- **P1:** 프론트엔드의 테스트 부족은 회귀 버그 발생 위험이 높아 최우선으로 대응 필요.
-- **P2:** 타입 안정성 및 비즈니스 로직 분리는 유지보수 비용을 낮추기 위해 중요.
-- **P3/OPT:** 운영 편의성 및 성능 개선은 상대적으로 긴급도가 낮음.
+- **P1 (High Risk):** 테스트 수집 에러 해결과 잘못된 모듈 경로 수정을 통해 전체 테스트 파이프라인을 복구합니다.
+- **P2 (Medium Risk):** 실험용 코드 정리와 에러 처리 강화를 통해 시스템의 순수성을 유지합니다.
 <!-- AUTO-SUMMARY-END -->
 
 ---
 
-## 2. 기능 개선 항목 (Functional Improvements)
+## 2. 상세 개선 항목 (Detailed Improvement Items)
 
 <!-- AUTO-IMPROVEMENT-LIST-START -->
 ### 🔴 중요 (P1)
 
-#### [P1-1] 프론트엔드 핵심 로직 테스트 추가
+#### [P1-1] 백엔드 테스트 환경 정렬 및 수집 에러 해결
 | 항목 | 내용 |
 |------|------|
-| **ID** | `test-coverage-frontend-001` |
+| **ID** | `test-backend-env-001` |
 | **카테고리** | 🧪 테스트 |
 | **복잡도** | Medium |
-| **대상 파일** | `frontend/src/shared/api/client/types.ts` 등 |
-| **Evidence** | `package.json`: vitest 설정은 있으나 실제 비즈니스 로직 테스트 부족 |
-| **Origin** | static-analysis |
-| **리스크 레벨** | medium |
+| **대상 파일** | `backend/tests/`, `backend/pytest.ini`, `devplan/test_db/test.db` |
+| **Evidence** | 리팩토링으로 인한 파일명 변경/삭제로 테스트 경로 불일치, `pytest --collect-only` 시 에러 발생 |
+| **Origin** | test-failure |
+| **리스크 레벨** | high |
 | **관련 평가 카테고리** | testCoverage |
 
-- **현재 상태:** `vitest`가 설정되어 있으나, 주요 데이터 파싱이나 상태 관리 로직에 대한 단위 테스트가 부족함.
-- **문제점:** 리팩토링이나 기능 추가 시 기존 로직이 깨지는 것을 감지하기 어려움.
-- **영향:** 런타임 에러 발생 가능성 및 배포 후 장애 위험.
-- **원인:** 초기 개발 시 빠른 기능 구현에 집중하여 테스트 작성이 후순위로 밀림.
-- **개선 내용:** 주요 유틸리티 함수 및 API 클라이언트 로직에 대한 테스트 케이스 작성.
-- **기대 효과:** 코드 안정성 확보 및 리팩토링 신뢰도 향상.
+- **현재 상태:** 리팩토링 과정에서 백엔드 파일명이 변경되거나 삭제되었으나, 테스트 코드가 이를 반영하지 못해 Import 에러가 발생합니다. 또한 테스트 DB가 `devplan/test_db/test.db`에 위치하도록 설정이 필요합니다.
+- **문제점:** 전체 테스트 수집이 불가능하여 개발 중인 기능의 안정성을 검증할 수 없습니다.
+- **개선 내용:** 
+    1. 테스트 코드 내의 임포트 경로를 현재 백엔드 구조(`runners/` 폴더 등)에 맞게 전수 수정.
+    2. 삭제된 파일에 대한 테스트 제거 또는 업데이트.
+    3. `pytest` 실행 시 `DATABASE_URL`이 `devplan/test_db/test.db`를 바라보도록 환경 설정 추가.
+- **기대 효과:** 백엔드와 테스트 환경의 완벽한 동기화 및 전수 테스트 가동.
 
 **Definition of Done:**
-- [ ] 주요 로직에 대한 Unit Test 추가
-- [ ] `npm run test` 통과 확인
-
----
+- [ ] `pytest` 실행 시 `DATABASE_URL`이 `devplan/test_db/test.db`로 정상 연결됨
+- [ ] 수집(Collection) 에러 0건 및 핵심 서비스 테스트 통과
 
 ### 🟡 중요 (P2)
 
-#### [P2-1] 프론트엔드 타입 안정성 강화
+#### [P2-1] 프론트엔드 에러 바운더리(Error Boundary) 및 전역 에러 처리
 | 항목 | 내용 |
 |------|------|
-| **ID** | `code-quality-frontend-001` |
+| **ID** | `feat-error-boundary-001` |
+| **카테고리** | 🛡️ 안정성 |
+| **복잡도** | Low |
+| **대상 파일** | `frontend/src/app/App.tsx`, `frontend/src/shared/ui/ErrorBoundary.tsx` |
+| **Evidence** | 현재 렌더링 에러 발생 시 전체 페이지가 멈추는 현상 발생 가능 |
+| **Origin** | manual-idea |
+| **리스크 레벨** | medium |
+| **관련 평가 카테고리** | stability |
+
+- **현재 상태:** 특정 컴포넌트의 렌더링 실패가 전체 애플리케이션의 중단(White Screen)으로 이어질 수 있습니다.
+- **개선 내용:** React `ErrorBoundary`를 최상위 및 기능 단위로 적용하고, 사용자 친화적인 폴백 UI 제공.
+- **기대 효과:** 앱의 가용성 증대 및 안정적인 사용자 경험 제공.
+
+**Definition of Done:**
+- [ ] 전역 `ErrorBoundary` 적용 완료 및 테스트 성공
+
+#### [P2-2] 실험용/레거시 코드 정리 (Legacy Cleanup)
+| 항목 | 내용 |
+|------|------|
+| **ID** | `code-cleanup-legacy-001` |
 | **카테고리** | 🧹 코드 품질 |
 | **복잡도** | Low |
-| **대상 파일** | `frontend/src/shared/api/client/types.ts` |
-| **Evidence** | `types.ts`: `: any` 사용 감지됨 |
-| **Origin** | static-analysis |
+| **대상 파일** | `backend/scripts/test_gemini_*`, `backend/scripts/test_global_running.py` |
+| **Evidence** | `test_gemini_esports.py` 등 현재 시스템에서 사용하지 않는 실험용 코드 방치 |
+| **Origin** | manual-idea |
 | **리스크 레벨** | medium |
-| **관련 평가 카테고리** | codeQuality |
+| **관련 평가 카테고리** | maintainability |
 
-- **현재 상태:** 일부 타입 정의에서 `any`를 사용하여 TypeScript의 장점을 살리지 못하고 있음.
-- **문제점:** 컴파일 타임에 타입 에러를 잡지 못하고 런타임 에러로 이어질 수 있음.
-- **개선 내용:** `any`를 구체적인 인터페이스나 제네릭으로 대체.
-- **기대 효과:** 런타임 안정성 향상 및 IDE 자동완성 지원 강화.
+- **현재 상태:** 프로젝트 초기 실험용으로 작성된 제미나이(Gemini) 연동 코드들이 프로젝트 공식 스크립트 디렉토리에 섞여 있습니다.
+- **문제점:** 전체 테스트 실행 시 의존성(API Key) 문제로 에러를 유발하며, 유지보수 시 혼란을 줍니다.
+- **개선 내용:** 사용하지 않는 실험용 코드를 `legacy/` 폴더로 이동하거나 삭제 처리.
+- **기대 효과:** 코드베이스 경량화 및 테스트 신뢰도 향상.
 
 **Definition of Done:**
-- [ ] `any` 타입을 구체적인 타입으로 변경
-- [ ] 타입 체크 (`npm run typecheck`) 통과
-
-#### [P2-2] 백엔드 라우터 로직 분리
-| 항목 | 내용 |
-|------|------|
-| **ID** | `arch-backend-refactor-001` |
-| **카테고리** | 🏗️ 아키텍처 |
-| **복잡도** | Medium |
-| **대상 파일** | `backend/routers/portfolio.py` |
-| **Evidence** | `portfolio.py`: `get_portfolio` 라우터 함수 내에 쿼리 및 로직 혼재 |
-| **Origin** | static-analysis |
-| **리스크 레벨** | medium |
-| **관련 평가 카테고리** | codeQuality |
-
-- **현재 상태:** 라우터 함수가 DB 쿼리와 응답 조립 로직을 직접 수행하고 있음.
-- **문제점:** 로직 재사용이 어렵고 테스트가 복잡해짐.
-- **개선 내용:** 비즈니스 로직을 `services/portfolio_service.py` 등으로 완전히 이관하고 라우터는 호출만 담당.
-- **기대 효과:** 코드 가독성 향상 및 단위 테스트 용이성 확보.
-
-**Definition of Done:**
-- [ ] 라우터 내 로직을 Service 계층으로 이동
-- [ ] API 동작 동일성 검증
+- [ ] 불필요한 실험용 스크립트 정리 완료
 <!-- AUTO-IMPROVEMENT-LIST-END -->
 
 ---
@@ -127,25 +125,21 @@
 <!-- AUTO-FEATURE-LIST-START -->
 ### 🟢 보통 (P3)
 
-#### [P3-1] 에러 로그 구조화 및 모니터링 강화
+#### [P3-1] 텔레그램 알림 템플릿 다양화 및 가독성 개선
 | 항목 | 내용 |
 |------|------|
-| **ID** | `infra-logging-001` |
-| **카테고리** | ⚙️ 운영/로그 |
+| **ID** | `feat-telegram-template-001` |
+| **카테고리** | ✨ 기능 추가 |
 | **복잡도** | Low |
-| **대상 파일** | `backend/core/logging_config.py` (신규 또는 수정) |
-| **Evidence** | `main.py`: 기본 logging 설정만 존재, 구조화된 로그 부족 |
+| **대상 파일** | `backend/services/alarm/alarm_service.py`, `backend/prompts/` |
+| **Evidence** | 현재 알림 메시지가 텍스트 위주로 구성되어 시각적 구분이 어려움 |
 | **Origin** | manual-idea |
 | **리스크 레벨** | low |
-| **관련 평가 카테고리** | productionReadiness |
+| **관련 평가 카테고리** | usability |
 
-- **현재 상태:** 텍스트 기반의 단순 로그만 출력됨.
-- **개선 내용:** JSON 포맷 로그를 도입하여 검색 및 분석이 용이하도록 개선.
-- **기대 효과:** 장애 발생 시 원인 분석 시간 단축.
-
-**Definition of Done:**
-- [ ] 로그 포맷터를 JSON 구조로 변경 또는 옵션 추가
-- [ ] 주요 에러 상황에서 Context(Request ID 등) 포함 확인
+- **현재 상태:** 모든 텔레그램 알림이 단일 포맷의 텍스트로 발송됩니다.
+- **개선 내용:** 이모지 활용 강화 및 뉴스/지출/일반 알림별 맞춤형 템플릿 도입.
+- **기대 효과:** 중요한 알림의 가독성 및 사용자 인식률 향상.
 <!-- AUTO-FEATURE-LIST-END -->
 
 ---
@@ -153,32 +147,21 @@
 ## 4. 코드 최적화 (Optimization)
 
 <!-- AUTO-OPTIMIZATION-START -->
-- **분석 결과:**
-  - SimHash 알고리즘이 매번 계산될 수 있어 캐싱이 유리함.
-  - 반복적인 문자열 처리 구간 존재.
+- **분석 결과 (General Analysis):**
+  - DuckDB 쿼리 집계 시 대량의 뉴스 데이터를 매번 스캔하여 자원 낭비 발생.
+  - API 응답 속도 최적화를 위한 데이터 캐싱 레이어 부재.
 
 ### 🚀 코드 최적화 (OPT-1)
 
 | 항목 | 내용 |
 |------|------|
-| **ID** | `opt-simhash-cache-001` |
+| **ID** | `opt-duckdb-query-001` |
 | **카테고리** | 🚀 코드 최적화 |
 | **영향 범위** | 성능 |
-| **대상 파일** | `backend/services/news/deduplication.py` (가정) |
+| **대상 파일** | `backend/services/news/duckdb_refine_queries.py` |
 
-- **현재 상태:** 뉴스 기사 중복 제거 시 SimHash 계산 비용이 발생.
-- **최적화 내용:** 계산된 SimHash 값을 메모리, 또는 DB에 캐싱하여 재계산 방지 (LRU Cache 등 적용).
-- **예상 효과:** 대량의 뉴스 처리 시 CPU 사용량 감소 및 처리 속도 향상.
-- **측정 지표:** 뉴스 처리 배치 작업 소요 시간.
+- **현재 상태:** 뉴스 대시보드 조회 시 원본 테이블(6,600+ 건)을 직접 집계하여 지연이 발생할 수 있습니다.
+- **최적화 내용:** 요약 테이블(Summary Table)을 생성하고 스케줄러를 통해 정기적으로 업데이트하여 조회 시 스캔 범위 최소화.
+- **예상 효과:** 대시보드 뉴스 통계 조회 속도 3배 이상 향상.
+- **측정 지표:** API 응답 지연 시간 (Latency).
 <!-- AUTO-OPTIMIZATION-END -->
-
----
-
-## 5. 세션 로그 (Session Log)
-
-<!-- AUTO-SESSION-LOG-START -->
-### 2026-01-20 (자동 분석 세션)
-- 분석 내용: 코드베이스 스캔을 통해 미적용 개선 항목을 확정함. 식별된 미적용 항목 수: 6 (P1:1, P2:2, P3:1, OPT:2).
-- 새로 발견된 항목: 없음 (현재 목록은 static-analysis 기반 기존 식별 항목 중심).
-- 권장 조치: P1 우선 실행(프론트엔드 핵심 테스트), 이어서 P2 항목 적용(타입 안정성·라우터 분리).
-<!-- AUTO-SESSION-LOG-END -->

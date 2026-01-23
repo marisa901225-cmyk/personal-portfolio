@@ -5,8 +5,7 @@ import asyncio
 from unittest.mock import patch
 
 
-_temp_dir = tempfile.TemporaryDirectory()
-os.environ.setdefault("DATABASE_URL", f"sqlite:///{_temp_dir.name}/test.db")
+os.environ.setdefault("DATABASE_URL", "sqlite:////home/dlckdgn/personal-portfolio/devplan/test_db/test.db")
 os.environ.setdefault("API_TOKEN", "test-token")
 
 

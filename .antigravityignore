@@ -1,18 +1,40 @@
-backend/data/*.gguf
-# AI Models (even symlinks)
-backend/data/*.gguf
-backend/data/*.joblib
-backend/data/gemma*
+# --- AI & Agent Ignore Rules ---
+# Large binary files & AI Models
+**/*.gguf
+**/*.joblib
+**/backend/data/gemma*
 
-# Heavy dependencies
+# Dependencies
 **/node_modules
-**/dist
-**/.next
-**/__pycache__
 **/venv
 **/.venv
+**/__pycache__
+**/*.pyc
 
-# Database files
-*.db
-*.db-shm
-*.db-wal
+# Build artifacts & Tool-generated
+**/dist
+**/dist-ssr
+**/.next
+**/.vercel
+**/.pytest_cache
+
+# Database & Storage
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/backend/backups/
+**/data_backup_reference/
+
+# Tokens & Secrets
+**/.env
+**/.env.*
+**/token*.json
+**/*.token
+
+# Others
+**/.vscode
+**/.git
+**/.github
+**/*.zip
+**/*.gz
+**/*.xlsx

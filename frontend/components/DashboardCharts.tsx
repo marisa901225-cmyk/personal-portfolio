@@ -6,13 +6,12 @@ import {
     PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area,
     XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Legend
 } from 'recharts';
-import { TrendingUp, TrendingDown, AlertTriangle, PieChart as PieIcon, LineChart as LineIcon, BarChart3, ArrowUp, ArrowDown, Wallet } from 'lucide-react';
+import { TrendingUp, TrendingDown, PieChart as PieIcon, LineChart as LineIcon, BarChart3, ArrowUp, ArrowDown, Wallet } from 'lucide-react';
 import { usePortfolioCalculations } from '../src/hooks/usePortfolioCalculations';
 import { getCategoryLabel } from '@/shared/portfolio';
 
 interface DashboardChartsProps {
     summary: PortfolioSummary;
-    rebalanceNotices: string[];
     yearlyStats?: {
         year: string;
         deposit: number;
@@ -25,9 +24,8 @@ interface DashboardChartsProps {
     actualInvested?: number;
 }
 
-export const DashboardCharts: React.FC<DashboardChartsProps> = ({
+const DashboardChartsComponent: React.FC<DashboardChartsProps> = ({
     summary,
-    rebalanceNotices,
     yearlyStats,
     benchmarkName,
     benchmarkReturn,
@@ -77,28 +75,6 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
 
     return (
         <div className="space-y-6">
-            {/* Rebalance Warnings */}
-            {rebalanceNotices.length > 0 && (
-                <div className="animate-fade-in-up">
-                    <div className="bg-amber-50/50 backdrop-blur-sm border border-amber-100 rounded-2xl p-4 flex items-start gap-3 shadow-sm">
-                        <div className="p-2 bg-amber-100/50 rounded-xl text-amber-600 shrink-0">
-                            <AlertTriangle size={18} />
-                        </div>
-                        <div>
-                            <h4 className="text-sm font-semibold text-amber-800 mb-1">리밸런싱 점검 제안</h4>
-                            <ul className="text-xs text-amber-700 space-y-1">
-                                {rebalanceNotices.map((msg, idx) => (
-                                    <li key={idx} className="flex items-center gap-2">
-                                        <span className="w-1 h-1 bg-amber-400 rounded-full shrink-0" />
-                                        <span>{msg}</span>
-                                    </li>
-                                ))}
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
                 {/* 1. Allocation Chart (Visual-focused) */}
                 <div className="bg-white p-0 rounded-3xl shadow-sm hover:shadow-lg transition-shadow duration-300 border border-slate-100 flex flex-col h-full group relative overflow-hidden">
@@ -140,9 +116,9 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
                             </div>
 
                             <div className="flex flex-col items-center">
-                                <span className="text-[10px] text-slate-400 font-bold tracking-widest">총 자산</span>
+                                <span className="text-[10px] text-slate-400 font-bold tracking-widest">금융 자산</span>
                                 <span className="text-2xl font-bold text-slate-900 tabular-nums tracking-tighter">
-                                    {formatCurrency(summary.totalValue)}
+                                    {formatCurrency(summary.categoryDistribution.reduce((sum, cat) => sum + cat.value, 0))}
                                 </span>
                             </div>
 
@@ -380,3 +356,5 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
         </div>
     );
 };
+
+export const DashboardCharts = React.memo(DashboardChartsComponent);

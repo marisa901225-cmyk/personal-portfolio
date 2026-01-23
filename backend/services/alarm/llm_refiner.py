@@ -139,6 +139,7 @@ async def generate_with_main_llm_async(
     top_p: float | None = None,
     top_k: int | None = None,
     stop: List[str] | None = None,
+    enable_thinking: bool | None = None,
 ) -> str:
     """메인 LLM 호출을 asyncio.to_thread로 감싸 비동기 이벤트 루프 블로킹을 방지한다."""
     llm_service = LLMService.get_instance()
@@ -148,6 +149,7 @@ async def generate_with_main_llm_async(
     kwargs = {}
     if top_p is not None: kwargs["top_p"] = top_p
     if top_k is not None: kwargs["top_k"] = top_k
+    if enable_thinking is not None: kwargs["enable_thinking"] = enable_thinking
 
     return await asyncio.to_thread(
         llm_service.generate_chat,
@@ -191,7 +193,8 @@ async def generate_with_light_llm_async(
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,
-            stop=STOP_TOKENS
+            stop=STOP_TOKENS,
+            enable_thinking=False  # 정제 작업은 thinking 불필요
         )
 
 

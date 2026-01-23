@@ -4,17 +4,18 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-_temp_dir = tempfile.TemporaryDirectory()
-os.environ.setdefault("DATABASE_URL", f"sqlite:///{_temp_dir.name}/test.db")
+os.environ.setdefault("DATABASE_URL", "sqlite:////home/dlckdgn/personal-portfolio/devplan/test_db/test.db")
 os.environ["API_TOKEN"] = "test-token"
 
 from backend.main import app  # noqa: E402
 from backend.core.db import SessionLocal  # noqa: E402
 from backend.core.models import SpamRule  # noqa: E402
+from backend.core.db_migrations import ensure_schema # noqa: E402
 
 
 class SpamRulesTests(unittest.TestCase):
     def setUp(self) -> None:
+        ensure_schema()
         self.client = TestClient(app)
         self.headers = {"X-API-Token": "test-token"}
         db = SessionLocal()

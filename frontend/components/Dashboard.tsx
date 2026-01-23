@@ -38,6 +38,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onReload,
 }) => {
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [showWarnings, setShowWarnings] = useState(() => {
+    // 세션에서 이미 닫았는지 확인
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('portfolio_warnings_dismissed') !== 'true';
+    }
+    return true;
+  });
+
+  const handleDismissWarnings = () => {
+    setShowWarnings(false);
+    sessionStorage.setItem('portfolio_warnings_dismissed', 'true');
+  };
 
   const { summary, investableSummary, realEstate } = useMemo(() => {
     const history = historyData || [];
@@ -345,6 +357,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const threshold = 0.05; // 5%p 이상 차이 나면 알림
     const messages: string[] = [];
 
+    // 1. 목표 비중 대비 차이 체크
     targetShareMap.forEach(({ share: targetShare, label }, key) => {
       const actualShare = actualShareMap.get(key) ?? 0;
       const diff = actualShare - targetShare;
@@ -355,8 +368,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }
     });
 
+    // 2. 일반 건강도 체크 (기존 체크 제거됨)
+
     return messages;
-  }, [investableSummary.totalValue, investableSummary.indexDistribution, targetIndexAllocations]);
+  }, [investableSummary.totalValue, investableSummary.indexDistribution, investableSummary.categoryDistribution, targetIndexAllocations]);
 
   return (
     <div className="space-y-6 pb-20 md:pb-0 animate-fade-in">
@@ -370,10 +385,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
         onSyncClick={() => setIsSyncModalOpen(true)}
         realEstateSummary={realEstate}
         actualInvested={actualInvested}
+        rebalanceNotices={showWarnings ? rebalanceNotices : []}
+        onDismissWarnings={handleDismissWarnings}
       />
       <DashboardCharts
         summary={investableSummary}
-        rebalanceNotices={rebalanceNotices}
         yearlyStats={yearlyCashflows}
         benchmarkName={benchmarkName}
         benchmarkReturn={benchmarkReturn}

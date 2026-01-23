@@ -1,434 +1,169 @@
+# AI Agent Improvement Prompts
 
-# 🤖 AI Agent Improvement Prompts
-
-> ## 🚨 MANDATORY: FILE MODIFICATION REQUIRED
-> 
-> **⛔ DO NOT just respond with text or code blocks.**
-> **⛔ DO NOT say "you can modify like this" without actually modifying.**
-> **⛔ DO NOT explain what needs to be done without doing it.**
-> 
-> **✅ YOU MUST use file editing tools (`replace_string_in_file`, `create_file`, `multi_replace_string_in_file`) to directly modify files.**
-> **✅ After each prompt, confirm "I have modified the file(s)" with the actual changes made.**
-> 
-> ---
-> 
-> **Process ALL prompts below SEQUENTIALLY. Do NOT stop after completing one prompt.**
+## ⚠️ Execution Rules
+1. **No Text-Only Responses**: Do not just explain what you will do. You must use tools (`replace_string_in_file`, `create_file`, etc.) to modify the code.
+2. **Sequential Execution**: Follow the checklist order strictly. Do not skip prompts.
+3. **Verification is Mandatory**: For every prompt, you must run the specified verification command (e.g., `npm run typecheck` or `pytest`) to ensure the fix works.
+4. **English Only**: This file must remain in English. No Hangul characters allowed.
 
 ---
 
-## 📋 Execution Checklist
+## ✅ Execution Checklist
 
-| # | Prompt ID | Title | Priority | Status |
-|:---:|:---|:---|:---:|:---:|
-| 1 | PROMPT-001 | Add Unit Tests for Frontend Logic (`test-coverage-frontend-001`) | P1 | ⬜ Pending |
-| 2 | PROMPT-002 | Enhance Frontend Type Safety (`code-quality-frontend-001`) | P2 | ⬜ Pending |
-| 3 | PROMPT-003 | Refactor Portfolio Router Logic (`arch-backend-refactor-001`) | P2 | ⬜ Pending |
-| 4 | PROMPT-004 | Structure Backend Error Logs (`infra-logging-001`) | P3 | ⬜ Pending |
-| 5 | PROMPT-005 | Optimize SimHash with Caching (`opt-simhash-cache-001`) | OPT | ⬜ Pending |
-| 6 | PROMPT-006 | Fix Library Deprecation Warnings (`opt-fix-library-warnings`) | OPT | ⬜ Pending |
+| # | Prompt ID | Improvement ID | Title | Priority | Status |
+|:---:|:---|:---|:---|:---:|:---:|
+| 1 | `PROMPT-001` | `test-backend-env-001` | Fix Backend Test Env | P1 | ✅ Completed |
+| 2 | `PROMPT-002` | `code-cleanup-legacy-001` | Clean Legacy Scripts | P2 | ⬜ Pending |
+| 3 | `PROMPT-003` | `feat-error-boundary-001` | Frontend Error Boundary | P2 | ⬜ Pending |
+| 4 | `PROMPT-004` | `feat-telegram-template-001` | Telegram Templates | P3 | ⬜ Pending |
+| 5 | `OPT-1` | `opt-duckdb-query-001` | DuckDB Optimization | OPT | ⬜ Pending |
 
-**Total: 6 prompts** | **Completed: 0** | **Remaining: 6**
-
----
-
-## 🔴 Priority 1 (Critical) - Execute First
-
-### **⏱️ Execute this prompt now, then proceed to PROMPT-002**
-
-### [PROMPT-001] Add Unit Tests for Frontend Logic (`test-coverage-frontend-001`)
-
-> **🚨 REQUIRED: Use `replace_string_in_file` or `create_file` to make changes. Do NOT just show code.**
-
-Task: Add a runtime validation utility and unit tests to cover critical frontend data-parsing logic.
-
-Files to Modify / Create:
-- `frontend/src/shared/utils/validation.ts` (create)
-- `frontend/src/shared/api/client/types.test.ts` (create)
-
-Implementation Code:
-
-```typescript
-// frontend/src/shared/utils/validation.ts
-export type Asset = {
-    id: string;
-    symbol: string;
-    name?: string;
-    quantity: number;
-    price?: number;
-};
-
-export function isAsset(obj: unknown): obj is Asset {
-    if (typeof obj !== 'object' || obj === null) return false;
-    const o = obj as Record<string, unknown>;
-    return (
-        typeof o.id === 'string' &&
-        typeof o.symbol === 'string' &&
-        typeof o.quantity === 'number' &&
-        (o.name === undefined || typeof o.name === 'string') &&
-        (o.price === undefined || typeof o.price === 'number')
-    );
-}
-
-export function validateAssetsArray(arr: unknown): Asset[] {
-    if (!Array.isArray(arr)) throw new Error('Not an array');
-    const out: Asset[] = [];
-    for (const item of arr) {
-        if (!isAsset(item)) throw new Error('Invalid asset object');
-        out.push(item);
-    }
-    return out;
-}
-```
-
-```typescript
-// frontend/src/shared/api/client/types.test.ts
-import { describe, it, expect } from 'vitest';
-import { isAsset, validateAssetsArray } from '../../utils/validation';
-
-describe('Asset validation utilities', () => {
-    it('validates a correct asset object', () => {
-        const a = { id: '1', symbol: 'ABC', name: 'ABC Corp', quantity: 10, price: 123.45 };
-        expect(isAsset(a)).toBe(true);
-    });
-
-    it('rejects an invalid asset object', () => {
-        const bad = { id: 1, symbol: 'ABC', quantity: '10' };
-        expect(isAsset(bad)).toBe(false);
-    });
-
-    it('validateAssetsArray accepts valid arrays', () => {
-        const arr = [{ id: '1', symbol: 'A', quantity: 1 }];
-        expect(() => validateAssetsArray(arr)).not.toThrow();
-    });
-
-    it('validateAssetsArray rejects invalid arrays', () => {
-        const arr = [{ id: '1', symbol: 'A', quantity: '1' }];
-        expect(() => validateAssetsArray(arr as unknown)).toThrow();
-    });
-});
-```
-
-Verification:
-
-```bash
-cd frontend
-npm run test
-```
-
-**✅ After completing this prompt, proceed to PROMPT-002**
+**Distribution:** Total: 5 | P1: 1 | P2: 2 | P3: 1 | OPT: 1
 
 ---
 
-## 🟡 Priority 2 (High) - Execute Second
+## 🔴 Priority 1 (Critical)
 
-### **⏱️ Execute this prompt now, then proceed to PROMPT-003**
+### [PROMPT-001] Align Backend and Test Env
+**Directive:** Execute this prompt now, then proceed to `PROMPT-002`.
 
-### [PROMPT-002] Enhance Frontend Type Safety (`code-quality-frontend-001`)
+**Improvement ID:** `test-backend-env-001`
 
-> **🚨 REQUIRED: Use `replace_string_in_file` to update `frontend/src/shared/api/client/types.ts`.**
+**Task:**
+Sync the backend and test environment by fixing broken import paths caused by refactoring and setting the correct test database path.
 
-Task: Replace `any` types with concrete interfaces and export them for shared use.
+**Target Files:**
+- `backend/tests/` (All files)
+- `backend/pytest.ini`
 
-Files to Modify:
-- `frontend/src/shared/api/client/types.ts` (replace)
+**Steps:**
+1. Fix all `ModuleNotFoundError` in `backend/tests/` by updating import statements to match the new backend structure (e.g., move scripts to `runners/`).
+2. Update `pytest.ini` to set the environment variable `DATABASE_URL=sqlite:////home/dlckdgn/personal-portfolio/devplan/test_db/test.db`.
+3. Identify and remove test files that reference scripts or services that were deleted during refactoring.
+4. Add a `conftest.py` in `backend/tests/` to ensure `sys.path` correctly includes the backend root.
 
-Implementation Code (complete file):
+**Implementation Details:**
+- Database path must be absolute: `/home/dlckdgn/personal-portfolio/devplan/test_db/test.db`.
+- Use `pytest-env` or set via `os.environ` in `conftest.py` if necessary.
 
-```typescript
-// frontend/src/shared/api/client/types.ts
-export interface AssetDTO {
-    id: string;
-    symbol: string;
-    name?: string;
-    quantity: number;
-    avgPrice?: number;
-}
-
-export interface QuoteDTO {
-    symbol: string;
-    price: number;
-    timestamp: string; // ISO
-}
-
-export interface PortfolioResponse {
-    userId: number;
-    assets: AssetDTO[];
-    totalValue?: number;
-}
-
-// If a dynamic payload is needed, prefer Record<string, unknown>
-export type JsonObject = Record<string, unknown>;
-
-export function parseAsset(raw: unknown): AssetDTO {
-    if (typeof raw !== 'object' || raw === null) throw new Error('Invalid asset');
-    const r = raw as Record<string, unknown>;
-    return {
-        id: String(r.id),
-        symbol: String(r.symbol),
-        name: r.name ? String(r.name) : undefined,
-        quantity: Number(r.quantity),
-        avgPrice: r.avgPrice ? Number(r.avgPrice) : undefined,
-    };
-}
-```
-
-Verification:
-
-```bash
-cd frontend
-npm run typecheck
-```
-
-**✅ After completing this prompt, proceed to PROMPT-003**
+**Verification:**
+- Run `.venv/bin/pytest --collect-only` and verify "0 errors" and that tests point to the correct DB.
+- After completing this prompt, proceed to `[PROMPT-002]`.
 
 ---
 
-### **⏱️ Execute this prompt now, then proceed to PROMPT-004**
+## 🟡 Priority 2 (Medium)
 
-### [PROMPT-003] Refactor Portfolio Router Logic (`arch-backend-refactor-001`)
+### [PROMPT-002] Clean Legacy Scripts
+**Directive:** Execute this prompt now, then proceed to `PROMPT-003`.
 
-> **🚨 REQUIRED: Use `replace_string_in_file` to update router and `create_file` if adding service file.**
+**Improvement ID:** `code-cleanup-legacy-001`
 
-Task: Move business logic from `backend/routers/portfolio.py` into `backend/services/portfolio.py` and update the router to call the service.
+**Task:**
+Clean up experimental and legacy scripts that are no longer part of the core backend but cause interference during testing.
 
-Files to Modify / Create:
-- `backend/services/portfolio.py` (create or replace)
-- `backend/routers/portfolio.py` (replace)
+**Target Files:**
+- `backend/scripts/test_gemini_esports.py`
+- `backend/scripts/test_gemini_vs.py`
+- `backend/scripts/test_global_running.py`
 
-Implementation Code (complete files):
+**Steps:**
+1. Create a `backend/scripts/legacy/` directory.
+2. Move the target experimental/legacy files into this directory.
+3. Update `.gitignore` or `pytest.ini` to ensure these legacy files are ignored by default test discovery.
 
-```python
-# backend/services/portfolio.py
-from typing import Dict, Any
-from sqlalchemy.orm import Session
+**Implementation Details:**
+- Moving files is preferred over deletion to preserve experimental history if needed later.
 
-def get_portfolio_summary(db: Session, user_id: int) -> Dict[str, Any]:
-        # Example implementation: adapt to actual ORM models
-        # Query assets
-        assets = db.execute("SELECT id, symbol, quantity, avg_price FROM assets WHERE user_id = :uid", {'uid': user_id}).fetchall()
-        asset_list = []
-        total_value = 0.0
-        for row in assets:
-                item = {
-                        'id': row['id'],
-                        'symbol': row['symbol'],
-                        'quantity': float(row['quantity']),
-                        'avgPrice': float(row.get('avg_price') or 0),
-                }
-                # Example: compute value if price available via separate query
-                asset_list.append(item)
-        # Summary
-        summary = {
-                'userId': user_id,
-                'assets': asset_list,
-                'totalValue': total_value,
-        }
-        return summary
-```
-
-```python
-# backend/routers/portfolio.py
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from backend.core.db import get_db
-from backend.services.portfolio import get_portfolio_summary
-
-router = APIRouter()
-
-@router.get('/portfolio/{user_id}')
-def get_portfolio(user_id: int, db: Session = Depends(get_db)):
-        try:
-                summary = get_portfolio_summary(db, user_id)
-                return summary
-        except Exception as e:
-                raise HTTPException(status_code=500, detail=str(e))
-```
-
-Verification:
-
-```bash
-cd backend
-python -m py_compile routers/portfolio.py
-```
-
-**✅ After completing this prompt, proceed to PROMPT-004**
+**Verification:**
+- Confirm `pytest` no longer attempts to collect files in the `legacy/` directory.
+- After completing this prompt, proceed to `[PROMPT-003]`.
 
 ---
 
-### **⏱️ Execute this prompt now, then proceed to PROMPT-005**
+### [PROMPT-003] Frontend Error Boundary
+**Directive:** Execute this prompt now, then proceed to `PROMPT-004`.
 
-### [PROMPT-004] Structure Backend Error Logs (`infra-logging-001`)
+**Improvement ID:** `feat-error-boundary-001`
 
-> **🚨 REQUIRED: Replace `backend/core/logging_config.py` with a structured JSON logger implementation.**
+**Task:**
+Implement a React Error Boundary component to catch rendering errors and display a graceful fallback UI.
 
-Task: Provide structured JSON logs using `python-json-logger` if available, with a safe fallback.
+**Target Files:**
+- `frontend/src/shared/ui/ErrorBoundary.tsx` (New)
+- `frontend/src/app/App.tsx`
 
-Files to Modify:
-- `backend/core/logging_config.py` (replace)
+**Steps:**
+1. Create a functional or class component `ErrorBoundary` in `shared/ui`.
+2. Wrap the main application entry in `App.tsx` with this boundary.
+3. Test by simulating a render error in a dashboard component.
 
-Implementation Code (complete file):
+**Implementation Details:**
+- Use React 19 compatible syntax.
+- Fallback UI should include a "Reload Page" button.
 
-```python
-# backend/core/logging_config.py
-import logging
-import sys
-from pythonjsonlogger import jsonlogger
-
-def setup_global_logging(level: int = logging.INFO):
-        handler = logging.StreamHandler(stream=sys.stdout)
-        fmt = jsonlogger.JsonFormatter('%(asctime)s %(levelname)s %(name)s %(message)s')
-        handler.setFormatter(fmt)
-        root = logging.getLogger()
-        root.setLevel(level)
-        # remove existing handlers
-        for h in list(root.handlers):
-                root.removeHandler(h)
-        root.addHandler(handler)
-
-def get_logger(name: str):
-        return logging.getLogger(name)
-
-# Fallback if python-json-logger not installed
-try:
-        # ensure import succeeded above
-        pass
-except Exception:
-        def setup_global_logging(level: int = logging.INFO):
-                fmt = '%(asctime)s %(levelname)s in %(module)s: %(message)s'
-                logging.basicConfig(level=level, format=fmt)
-
-```
-
-Verification:
-
-```bash
-cd backend
-python -m py_compile core/logging_config.py
-```
-
-**✅ After completing this prompt, proceed to PROMPT-005**
+**Verification:**
+- Verify that a simulated error doesn't crash the entire app.
+- After completing this prompt, proceed to `[PROMPT-004]`.
 
 ---
 
-### **⏱️ Execute this prompt now, then proceed to PROMPT-006**
+## 🟢 Priority 3 (Normal)
 
-### [PROMPT-005] Optimize SimHash with Caching (`opt-simhash-cache-001`)
+### [PROMPT-004] Telegram Notification Templates
+**Directive:** Execute this prompt now, then proceed to `OPT-1`.
 
-> **🚨 REQUIRED: Modify the SimHash calculation to use a cache decorator. Replace or create `backend/services/news/deduplication.py`.**
+**Improvement ID:** `feat-telegram-template-001`
 
-Task: Add LRU caching to SimHash computation and ensure hashable inputs.
+**Task:**
+Implement a template-based system for Telegram notifications to improve readability and allow for easier customization of messages.
 
-Files to Modify:
-- `backend/services/news/deduplication.py` (replace)
+**Target Files:**
+- `backend/services/alarm/alarm_service.py`
+- `backend/services/alarm/templates.py` (New)
 
-Implementation Code (complete file):
+**Steps:**
+1. Create `templates.py` with predefined string templates (using f-strings or Jinja2) for different alarm types (News, Expense, Asset).
+2. Refactor `alarm_service.py` to use these templates instead of hardcoded strings.
+3. Enhance the templates with better emoji usage and clear headers.
 
-```python
-# backend/services/news/deduplication.py
-from functools import lru_cache
-from typing import Tuple
-
-def _normalize_text(text: str) -> str:
-        return ' '.join(text.split()).strip().lower()
-
-@lru_cache(maxsize=2048)
-def compute_simhash_for_text(text: str) -> int:
-        # simple placeholder simhash: use Python's hash of normalized text for caching demo
-        norm = _normalize_text(text)
-        return hash(norm)
-
-def is_duplicate(text: str, existing_hashes: Tuple[int, ...]) -> bool:
-        h = compute_simhash_for_text(text)
-        return h in existing_hashes
-
-```
-
-Verification:
-
-```bash
-cd backend
-python -m py_compile services/news/deduplication.py
-```
-
-**✅ After completing this prompt, proceed to PROMPT-006**
+**Verification:**
+- Run a test alarm and verify the formatted output in the logs or via a Mocked telegram client.
+- After completing this prompt, proceed to `[OPT-1]`.
 
 ---
 
-## 🟢 Priority 3 (Medium) - Execute Last
+## 🚀 Optimization (OPT)
 
-### **⏱️ Execute this prompt now, then proceed to the FINAL step**
+### [OPT-1] DuckDB Query Optimization
+**Directive:** Execute this prompt now, then FINISH.
 
-### [PROMPT-006] Fix Library Deprecation Warnings (`opt-fix-library-warnings`)
+**Improvement ID:** `opt-duckdb-query-001`
 
-> **🚨 REQUIRED: Update schema examples and main app lifespan. Replace `backend/core/schemas.py` and `backend/main.py` where applicable.**
+**Task:**
+Optimize news analytics by implementing a summary table in DuckDB to avoid scanning large raw news tables repeatedly.
 
-Task: Provide example migrations for Pydantic v2 style and a lifespan usage pattern for FastAPI.
+**Target Files:**
+- `backend/services/news/duckdb_refine_queries.py`
+- `backend/services/news/news_collector.py`
 
-Files to Modify:
-- `backend/core/schemas.py` (replace example model)
-- `backend/main.py` (replace app startup/shutdown to use lifespan)
+**Steps:**
+1. Create a `news_stats` table in DuckDB.
+2. Update the `news_collector.py` to refresh this table after each successful collection.
+3. Update `duckdb_refine_queries.py` to read from `news_stats` for dashboard summaries.
 
-Implementation Code (complete files):
-
-```python
-# backend/core/schemas.py
-from pydantic import BaseModel
-from pydantic import ConfigDict
-
-class ExampleModel(BaseModel):
-        model_config = ConfigDict(extra='forbid')
-        id: int
-        name: str
-
-```
-
-```python
-# backend/main.py
-from fastapi import FastAPI
-from contextlib import asynccontextmanager
-from backend.core.logging_config import setup_global_logging
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-        # startup
-        setup_global_logging()
-        yield
-        # shutdown
-
-app = FastAPI(lifespan=lifespan)
-
-```
-
-Verification:
-
-```bash
-cd backend
-python -m py_compile core/schemas.py
-python -m py_compile main.py
-```
-
-**✅ After completing this prompt, proceed to the FINAL step**
+**Verification:**
+- Compare query execution time for statistics before and after the change.
+- After completing this prompt, proceed to Final Completion.
 
 ---
 
-## Final Completion
+## 🏁 Final Completion
 
-**🎉 ALL PROMPTS COMPLETED!**
-
-Process to verify end-to-end:
-
-```bash
-# Frontend checks
-cd frontend
-npm run typecheck || true
-npm run test || true
-
-# Backend checks
-cd ../backend
-python -m py_compile core/logging_config.py || true
-python -m py_compile main.py || true
-pytest -q || true
-```
-
-**IMPORTANT:** After each prompt is applied, the agent MUST append a one-line confirmation to the relevant file(s) stating: `I have modified the file(s)` and list file paths changed.
+After implementing **all prompts above**:
+1. Run full system verification:
+   - Frontend: `npm run typecheck` (in frontend dir)
+   - Backend: `.venv/bin/pytest` (in backend dir)
+2. If all pass, output the following message:
+   `ALL PROMPTS COMPLETED. All pending improvement and optimization items from the latest report have been applied.`
 

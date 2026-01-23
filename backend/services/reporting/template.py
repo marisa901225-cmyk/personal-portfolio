@@ -165,11 +165,11 @@ def _format_period_range(start: str, end: str) -> str:
         return f"{start} ~ {end}"
 
 
-def _trade_label(trade_type: Any) -> str:
+def _trade_label(trade_type: str | None) -> str:
     mapping = {
         "BUY": "매수",
         "SELL": "매도",
         "DIVIDEND": "배당",
         "SPLIT": "액면분할",
     }
-    return mapping.get(str(trade_type).upper(), str(trade_type or "거래"))
+    return mapping.get(str(trade_type or "").upper(), str(trade_type or "거래"))

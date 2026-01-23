@@ -6,8 +6,7 @@ PandaScore REST API 기반으로 매치 상태 변화(running → finished)를 �
 """
 import asyncio
 import logging
-import random
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Set, Any
 
 import httpx
@@ -16,12 +15,14 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 from ...core.config import settings
 from ...core.db import SessionLocal
-from ...core.models import EsportsMatch, GameNews
-from ...core.time_utils import utcnow, KST
+from ...core.models import EsportsMatch
+from ...core.time_utils import utcnow, now_kst
 from ...core.esports_config import get_game_config, GAME_REGISTRY
-from ...integrations.telegram import send_telegram_message
-from ..alarm.catchphrase_constants import build_fallback_lines
 from .core import PANDASCORE_URL
+from .esports_notifier import (
+    notify_match_finished, notify_match_start, 
+    notify_pre_match, notify_next_match
+)
 
 def is_retryable_status(exception):
     """429 Too Many Requests 또는 5xx Server Error인 경우에만 재시도"""
@@ -41,7 +42,7 @@ ACTIVE_WINDOWS = {
     ],
     # General Evening (for LCK/LPL/VCT main events)
     "evening": [
-        {"weekday": i, "start": (17, 0), "end": (25, 0)} for i in range(7)  # 25:00 = 01:00 next day
+        {"weekday": i, "start": (18, 0), "end": (25, 0)} for i in range(7)  # 18:00 KST Start
     ],
 }
 
@@ -49,7 +50,7 @@ ACTIVE_WINDOWS = {
 POLL_INTERVAL_ACTIVE = 60      # During active windows or match imminent
 POLL_INTERVAL_IDLE = 600       # 10 minutes when idle
 POLL_INTERVAL_THROTTLED = 180  # When rate limit is low
-UPCOMING_INDEX_INTERVAL = 900  # 15 minutes for upcoming indexer
+UPCOMING_INDEX_INTERVAL = 600   # 10 minutes for upcoming indexer (reduced API calls)
 
 # Rate limit thresholds
 RATE_LIMIT_WARN_THRESHOLD = 100   # Start being careful
@@ -108,9 +109,9 @@ class EsportsMonitor:
 
     def _get_poll_interval(self, db: Session) -> int:
         """Determine current polling interval based on context"""
-        now_kst = datetime.now(KST)
+        current_kst = now_kst()
         base = POLL_INTERVAL_ACTIVE if (
-            self._is_in_active_window(now_kst) or self._has_imminent_match(db)
+            self._is_in_active_window(current_kst) or self._has_imminent_match(db)
         ) else POLL_INTERVAL_IDLE
 
         # rate limit: 절대 더 빨라지지 않게 max()로만 느리게
@@ -243,10 +244,12 @@ class EsportsMonitor:
         return running_ids, pending_notifications
 
     def _parse_datetime(self, iso_str: Optional[str]) -> Optional[datetime]:
-        """Parse ISO datetime string to datetime"""
+        """Parse ISO datetime string to naive UTC datetime"""
         if not iso_str:
             return None
-        return datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        # Convert aware UTC to naive UTC to match system behavior
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
     async def _check_missing_matches(self, db: Session, current_running_ids: Set[int]):
         """Check matches that were running but are no longer in the list"""
@@ -293,74 +296,12 @@ class EsportsMonitor:
 
     async def _on_match_finished(self, db: Session, match: EsportsMatch, api_data: dict):
         """Handle match finished event - notify and find next match"""
-        # Check idempotency
-        if match.finished_notified_at:
-            logger.debug(f"Match {match.match_id} already notified, skipping")
-            return
-
-        if self.dry_run:
-            logger.info(f"[DRY RUN] Would notify: Match {match.name} finished")
-        else:
-            # Send notification
-            winner = api_data.get("winner", {}).get("name", "TBD")
-            
-            # Simple finish message (can be expanded with catchphrases if needed)
-            msg = (
-                f"🏁 <b>경기 종료!</b>\n\n"
-                f"🏆 {match.name}\n"
-                f"🥇 <b>승리팀: {winner}</b>\n"
-                f"⏰ 종료 시각: {utcnow().astimezone(KST).strftime('%H:%M')} (KST)"
-            )
-            try:
-                await send_telegram_message(msg)
-            except Exception as e:
-                logger.error(f"Failed to send notification: {e}")
-
-        match.finished_notified_at = utcnow()
-
-        # Find and schedule next match
-        await self._resolve_next_match(db, match)
-
-    async def _resolve_next_match(self, db: Session, finished_match: EsportsMatch):
-        """Find the next match in the same serie/tournament"""
-        # [FIXED] 명시적 조건으로 NULL 방지 및 KST 시간 표기
-        conds = [
-            EsportsMatch.status == "not_started",
-            EsportsMatch.scheduled_at.isnot(None)
-        ]
-        if finished_match.serie_id:
-            conds.append(EsportsMatch.serie_id == finished_match.serie_id)
-        elif finished_match.tournament_id:
-            conds.append(EsportsMatch.tournament_id == finished_match.tournament_id)
-        else:
-            logger.info(f"No serie/tournament ID for match {finished_match.match_id}; skipping next lookup")
-            return
-
-        next_match = db.query(EsportsMatch).filter(*conds).order_by(EsportsMatch.scheduled_at.asc()).first()
-
+        await notify_match_finished(match, api_data, self.dry_run)
+        
+        # Find and notify next match
+        next_match = await notify_next_match(db, match)
         if next_match:
-            logger.info(f"Next match found in cache: {next_match.name} at {next_match.scheduled_at}")
-            finished_match.next_match_id = next_match.match_id
-
-            if not self.dry_run:
-                # [FIXED] KST 변환 누락 수정
-                time_str = "TBD"
-                if next_match.scheduled_at:
-                    kst_time = next_match.scheduled_at.astimezone(KST)
-                    time_str = kst_time.strftime('%H:%M')
-
-                # Notify about upcoming match
-                msg = (
-                    f"⏳ <b>다음 경기 준비!</b>\n"
-                    f"{next_match.name}\n"
-                    f"예정: {time_str}"
-                )
-                try:
-                    await send_telegram_message(msg)
-                except Exception as e:
-                    logger.error(f"Failed to send next match notification: {e}")
-        else:
-            logger.info(f"No next match found for serie {finished_match.serie_id}")
+            match.next_match_id = next_match.match_id
 
     async def _index_upcoming_matches(self, db: Session):
         """Index upcoming matches to cache and handle pre-match notifications"""
@@ -374,12 +315,46 @@ class EsportsMonitor:
                 api_game = self._get_api_game_slug(game_slug)
                 matches = await self._fetch(
                     f"/{api_game}/matches/upcoming",
-                    {"per_page": 50, "sort": "begin_at"}
+                    {"per_page": 10, "sort": "begin_at"}  # ~3-4 upcoming matches per day per game
                 )
 
                 for m in matches:
                     match_id = m.get("id")
                     if not match_id:
+                        continue
+                    
+                    match_game_slug = game_slug
+                    league_name = (m.get("league") or {}).get("name") or ""
+                    
+                    # [NEW] Strict League Filtering Logic
+                    is_valid_league = False
+                    
+                    if match_game_slug == "league-of-legends":
+                        # Allow LCK (covers LCK CL), LPL, and International Events (2026 Season)
+                        allowed_lol = [
+                            'LCK', 'LPL', 
+                            'First Stand', 'First-Stand',
+                            'MSI', 'Mid-Season Invitational', 
+                            'Worlds', 'World Championship', 
+                            'Esports World Cup', 'EWC'
+                        ]
+                        is_valid_league = any(word in league_name for word in allowed_lol)
+                        
+                    elif match_game_slug == "valorant":
+                        # Block Tier 2
+                        if 'Challengers' in league_name or 'VCL' in league_name:
+                            is_valid_league = False
+                        else:
+                            # Allow Tier 1
+                            allowed_vct = ['VCT', 'Champions', 'Masters']
+                            is_valid_league = any(word in league_name for word in allowed_vct)
+                    else:
+                        # Default fallback for other games (e.g. PUBG)
+                        # Check exclude keywords from config
+                        exclude_kws = config.get("exclude_keywords", [])
+                        is_valid_league = not any(kw.lower() in league_name.lower() for kw in exclude_kws)
+
+                    if not is_valid_league:
                         continue
 
                     existing = db.query(EsportsMatch).filter(EsportsMatch.match_id == match_id).first()
@@ -405,10 +380,11 @@ class EsportsMonitor:
                     if existing.status == "not_started" and existing.scheduled_at:
                         if now <= existing.scheduled_at <= pre_match_threshold:
                             if not existing.imminent_notified_at:
-                                asyncio.create_task(self._handle_pre_match_notify(
+                                asyncio.create_task(notify_pre_match(
                                     match_id=match_id,
                                     name=existing.name,
-                                    scheduled_at=existing.scheduled_at
+                                    scheduled_at=existing.scheduled_at,
+                                    videogame=game_slug
                                 ))
                                 existing.imminent_notified_at = now
 
@@ -435,37 +411,6 @@ class EsportsMonitor:
             logger.error(f"Failed to cleanup old esports matches: {e}")
             db.rollback()
 
-    async def _handle_start_notify(self, match_id: int, videogame: str, name: str, stream_url: Optional[str]):
-        """[NEW] Safe notifier for actual match start"""
-        game_key = "LoL" if videogame == "league-of-legends" else "Valorant"
-        catchphrases = build_fallback_lines(game_key=game_key)
-        phrase = random.choice(catchphrases)
-
-        msg = (
-            f"🎬 <b>{phrase}</b>\n\n"
-            f"🏆 {name}\n"
-            f"⏰ 시작 시각: {utcnow().astimezone(KST).strftime('%H:%M')} (KST)"
-        )
-        try:
-            await send_telegram_message(msg)
-            logger.info(f"Sent start notification for match {match_id}")
-        except Exception as e:
-            logger.error(f"Failed to send start notification for {match_id}: {e}")
-
-    async def _handle_pre_match_notify(self, match_id: int, name: str, scheduled_at: datetime):
-        """[NEW] Pre-match reminder (10 min before)"""
-        time_str = scheduled_at.astimezone(KST).strftime('%H:%M')
-        msg = (
-            f"⏳ <b>경기 시작 10분 전!</b>\n\n"
-            f"🏆 {name}\n"
-            f"⏰ 예정 시각: {time_str} (KST)"
-        )
-        try:
-            await send_telegram_message(msg)
-            logger.info(f"Sent pre-match notification for match {match_id}")
-        except Exception as e:
-            logger.error(f"Failed to send pre-match notification for {match_id}: {e}")
-
     async def run_running_watcher(self):
         """Main loop: watch for running matches"""
         logger.info("Starting Running Watcher...")
@@ -478,28 +423,32 @@ class EsportsMonitor:
             try:
                 # Determine interval
                 interval = self._get_poll_interval(db)
-                now_kst = datetime.now(KST)
-                is_active = self._is_in_active_window(now_kst) or self._has_imminent_match(db)
+                current_kst = now_kst()
+                is_active = self._is_in_active_window(current_kst) or self._has_imminent_match(db)
                 logger.debug(f"Active Window: {is_active}, Polling Interval: {interval}s")
 
-                # Fetch running matches
-                running_matches = await self._fetch_running_matches()
-                running_ids, pending_notifications = self._update_esports_cache(db, running_matches)
-                db.commit()
-                
-                # [FIXED] Send notifications AFTER commit succeeds
-                for notif in pending_notifications:
-                    if notif["type"] == "start":
-                        asyncio.create_task(self._handle_start_notify(
-                            match_id=notif["match_id"],
-                            videogame=notif["videogame"],
-                            name=notif["name"],
-                            stream_url=notif["stream_url"]
-                        ))
+                # [FIXED] Only monitor running matches during active windows or when a match is imminent
+                if is_active:
+                    # Fetch running matches
+                    running_matches = await self._fetch_running_matches()
+                    running_ids, pending_notifications = self._update_esports_cache(db, running_matches)
+                    db.commit()
+                    
+                    # Send notifications AFTER commit succeeds
+                    for notif in pending_notifications:
+                        if notif["type"] == "start":
+                            asyncio.create_task(notify_match_start(
+                                match_id=notif["match_id"],
+                                videogame=notif["videogame"],
+                                name=notif["name"],
+                                stream_url=notif["stream_url"]
+                            ))
 
-                # Check for matches that disappeared
-                await self._check_missing_matches(db, running_ids)
-                db.commit()
+                    # Check for matches that disappeared
+                    await self._check_missing_matches(db, running_ids)
+                    db.commit()
+                else:
+                    logger.debug("Outside active window. Skipping running matches check.")
 
                 # Periodically index upcoming
                 if (utcnow() - last_upcoming_index).total_seconds() > UPCOMING_INDEX_INTERVAL:
