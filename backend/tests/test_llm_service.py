@@ -133,13 +133,13 @@ class TestLLMService(unittest.TestCase):
             self.assertEqual(out, "responses-ok")
             self.assertIsNone(backend.get_last_error())
 
-            # stop/seed가 양쪽 호출에 전달되는지 확인
+            # stop/seed가 Chat Completions에는 전달되고, Responses에는 stop이 빠지는지 확인
             first_payload = backend._post.call_args_list[0].kwargs["payload"]
             second_payload = backend._post.call_args_list[1].kwargs["payload"]
             self.assertEqual(first_payload.get("stop"), ["STOP"])
             self.assertEqual(first_payload.get("seed"), 123)
-            self.assertEqual(second_payload.get("stop"), ["STOP"])
             self.assertEqual(second_payload.get("seed"), 123)
+            self.assertIsNone(second_payload.get("stop"))
 
 
 if __name__ == "__main__":

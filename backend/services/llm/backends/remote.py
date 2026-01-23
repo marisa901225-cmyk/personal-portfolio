@@ -99,40 +99,65 @@ class RemoteLlamaBackend(LLMBackend):
         seed: Optional[int] = None,
         **kwargs,
     ) -> str:
+        import time
+        import random
+        
         base_url = self._base_url()
         if not base_url:
             return ""
 
-        try:
-            url = f"{base_url}/v1/chat/completions"
-            headers = {"Content-Type": "application/json"}
-            if self.settings.llm_api_key:
-                headers["Authorization"] = f"Bearer {self.settings.llm_api_key}"
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                url = f"{base_url}/v1/chat/completions"
+                headers = {"Content-Type": "application/json"}
+                if self.settings.llm_api_key:
+                    headers["Authorization"] = f"Bearer {self.settings.llm_api_key}"
 
-            payload = {
-                "model": kwargs.get("model") or self._get_model_id(),
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-                "top_p": kwargs.get("top_p", 0.8),
-                "top_k": kwargs.get("top_k", 20),
-            }
-            if stop:
-                payload["stop"] = stop
+                payload = {
+                    "model": kwargs.get("model") or self._get_model_id(),
+                    "messages": messages,
+                    "max_tokens": max_tokens,
+                    "temperature": temperature,
+                    "top_p": kwargs.get("top_p", 0.8),
+                    "top_k": kwargs.get("top_k", 20),
+                }
+                if stop:
+                    payload["stop"] = stop
 
-            # enable_thinking 처리 (llama-server 공식 방식)
-            enable_thinking = kwargs.get("enable_thinking")
-            if enable_thinking is not None:
+                # enable_thinking 처리 (명시적 True가 아니면 False로 설정하여 CoT 생성을 억제)
+                enable_thinking = kwargs.get("enable_thinking", False)
                 payload["chat_template_kwargs"] = {"enable_thinking": bool(enable_thinking)}
 
-            r = self._post(url, payload=payload, headers=headers)
-            r.raise_for_status()
-            self._last_error = None
-            return r.json()["choices"][0]["message"]["content"].strip()
-        except Exception as e:
-            self._last_error = f"Remote LLM request failed: {e}"
-            logger.error(self._last_error)
-            return ""
+                r = self._post(url, payload=payload, headers=headers)
+                r.raise_for_status()
+                self._last_error = None
+                
+                resp_json = r.json()
+                content = resp_json["choices"][0]["message"].get("content", "").strip()
+                return content
+            except Exception as e:
+                # DNS 에러(socket.gaierror)나 연결 실패 시 재시도
+                is_last = (attempt == max_attempts - 1)
+                err_msg = str(e).lower()
+                
+                # 재시도 대상: DNS 에러(gaierror), 연결 에러, 타임아웃
+                retryable = any(x in err_msg for x in ["gaierror", "connection", "connect", "timeout"])
+                
+                if retryable and not is_last:
+                    wait_time = (2 ** attempt) + random.random()
+                    logger.warning(
+                        f"Remote LLM connection error (attempt {attempt+1}/{max_attempts}): {e}. "
+                        f"Retrying in {wait_time:.2f}s..."
+                    )
+                    time.sleep(wait_time)
+                    continue
+                    
+                self._last_error = f"Remote LLM request failed: {e}"
+                if "timeout" in err_msg:
+                    logger.error("🚨 타임아웃 타임아웃 🚨 : Remote LLM timed out")
+                logger.error(self._last_error)
+                return ""
 
     def is_loaded(self) -> bool:
         return True

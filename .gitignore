@@ -63,3 +63,5 @@ backend/data/gemma*
 *.log
 alarm_collector.log
 alarm_process.log
+
+backend/data/llm_drafts.jsonl

@@ -156,10 +156,11 @@ async def run_with_monitoring(service_name: str, func: Callable, db_factory: Cal
             logger.info(f"[{service_name}] Task starting...")
             update_scheduler_state(service_name, db, "running")
             
-            if asyncio.iscoroutinefunction(func):
-                await func(*args, **kwargs)
-            else:
-                func(*args, **kwargs)
+            # [FIXED] Support both coroutine functions and functions returning awaitables (e.g. lambdas)
+            import inspect
+            res = func(*args, **kwargs)
+            if inspect.isawaitable(res):
+                await res
 
             logger.info(f"[{service_name}] Task finished successfully")
             update_scheduler_state(service_name, db, "success", "Finished normally")

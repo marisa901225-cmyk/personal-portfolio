@@ -21,7 +21,7 @@ import { formatCurrency } from '@/shared/portfolio';
 import { NotificationModal } from '@components/NotificationModal';
 import { InvestmentQuote } from '@components/InvestmentQuote';
 import { TradeRecord } from '@lib/types';
-import { APP_ERROR_EVENT } from '@/shared/errors';
+import { APP_ERROR_EVENT, AppErrorEvent } from '@/shared/errors';
 
 const navItems = [
     { to: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
@@ -65,11 +65,10 @@ export const Layout: React.FC = () => {
             setHasUnreadHistory(true);
         }
     }, [tradeHistory.length, isHistoryOpen]);
-
     // 전역 에러 이벤트 핸들링
     useEffect(() => {
-        const handleAppError = (event: Event) => {
-            const detail = (event as CustomEvent<string>).detail;
+        const handleAppError = (event: AppErrorEvent) => {
+            const detail = event.detail;
             if (!detail) return;
             setAppError(detail);
             if (errorTimerRef.current !== null) {
@@ -80,11 +79,10 @@ export const Layout: React.FC = () => {
                 errorTimerRef.current = null;
             }, 8000);
         };
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        window.addEventListener(APP_ERROR_EVENT, handleAppError as any);
+        const handler = handleAppError as (e: Event) => void;
+        window.addEventListener(APP_ERROR_EVENT, handler);
         return () => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            window.removeEventListener(APP_ERROR_EVENT, handleAppError as any);
+            window.removeEventListener(APP_ERROR_EVENT, handler);
             if (errorTimerRef.current !== null) {
                 window.clearTimeout(errorTimerRef.current);
             }

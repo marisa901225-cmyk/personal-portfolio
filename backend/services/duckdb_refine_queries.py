@@ -334,3 +334,100 @@ def fetch_news_context(con, start_date: date, end_date: date) -> tuple[list[tupl
     ).fetchall()
     columns = ["time", "tag", "title"]
     return rows, columns
+
+
+# --- News Stats Optimization (OPT-001) ---
+
+def fetch_news_stats_by_tag(con, start_date: date, end_date: date) -> tuple[list[tuple], list[str]]:
+    """
+    태그별 뉴스 수 집계 (최적화된 쿼리).
+    매번 전체 스캔 대신 미리 집계된 결과 반환.
+    """
+    rows = con.execute(
+        f"""
+        SELECT
+            game_tag,
+            COUNT(*) as article_count,
+            MIN(published_at) as first_article,
+            MAX(published_at) as last_article
+        FROM sqlite_db.game_news
+        WHERE published_at >= '{start_date}' AND published_at < '{end_date}'
+        GROUP BY game_tag
+        ORDER BY article_count DESC
+        """
+    ).fetchall()
+    columns = ["tag", "count", "first_at", "last_at"]
+    return rows, columns
+
+
+def create_news_stats_summary_table(con) -> None:
+    """
+    뉴스 통계 요약 테이블 생성 (일별 집계용).
+    수집 사이클 후 호출하여 pre-calculate.
+    """
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS sqlite_db.news_daily_stats (
+            stat_date DATE NOT NULL,
+            game_tag VARCHAR(50) NOT NULL,
+            article_count INTEGER DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (stat_date, game_tag)
+        )
+    """)
+
+
+def upsert_news_daily_stats(con, stat_date: date) -> int:
+    """
+    특정 날짜의 뉴스 통계를 pre-calculate하여 저장.
+    Returns: 업데이트된 태그 수.
+    """
+    # 해당 날짜의 태그별 카운트 계산
+    rows = con.execute(
+        f"""
+        SELECT
+            game_tag,
+            COUNT(*) as cnt
+        FROM sqlite_db.game_news
+        WHERE DATE(published_at) = '{stat_date}'
+        GROUP BY game_tag
+        """
+    ).fetchall()
+    
+    # Upsert logic
+    for tag, count in rows:
+        con.execute(f"""
+            INSERT INTO sqlite_db.news_daily_stats (stat_date, game_tag, article_count, updated_at)
+            VALUES ('{stat_date}', '{tag}', {count}, CURRENT_TIMESTAMP)
+            ON CONFLICT (stat_date, game_tag) DO UPDATE SET
+                article_count = {count},
+                updated_at = CURRENT_TIMESTAMP
+        """)
+    
+    return len(rows)
+
+
+def fetch_news_stats_optimized(con, start_date: date, end_date: date) -> tuple[list[tuple], list[str]]:
+    """
+    Pre-calculated 통계 테이블에서 읽기 (빠름).
+    테이블이 없으면 fallback으로 직접 집계.
+    """
+    try:
+        rows = con.execute(
+            f"""
+            SELECT
+                game_tag,
+                SUM(article_count) as total_count
+            FROM sqlite_db.news_daily_stats
+            WHERE stat_date >= '{start_date}' AND stat_date < '{end_date}'
+            GROUP BY game_tag
+            ORDER BY total_count DESC
+            """
+        ).fetchall()
+        if rows:
+            return rows, ["tag", "count"]
+    except Exception:
+        pass  # Table doesn't exist, fallback
+    
+    # Fallback to raw aggregation
+    return fetch_news_stats_by_tag(con, start_date, end_date)
+

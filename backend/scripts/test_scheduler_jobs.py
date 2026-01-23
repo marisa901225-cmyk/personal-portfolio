@@ -6,7 +6,7 @@ from datetime import datetime
 # 프로젝트 루트를 패스에 추가
 sys.path.append(os.getcwd())
 
-from backend.scripts.run_sync_prices_scheduler import run_sync_script, run_alarm_processing
+from backend.scripts.runners.run_sync_prices_scheduler import run_sync_script, run_alarm_processing
 from backend.core.db import SessionLocal
 
 async def test():

@@ -180,7 +180,6 @@ def run_scheduler(args):
     """Run the master service supervisor (Orchestrator/Policy Manager)"""
     import asyncio
     from backend.services.scheduler.core import start_scheduler, shutdown_scheduler
-    from backend.services.news.esports_monitor import run_esports_monitor
     from backend.core.db import SessionLocal
     from backend.services.scheduler_monitor import (
         run_with_monitoring, 
@@ -207,11 +206,6 @@ def run_scheduler(args):
             await shutdown_event.wait()
 
         services_config = [
-            {
-                "name": "esports_monitor",
-                "func": lambda: run_esports_monitor(dry_run=False),
-                "auto_restart": True,
-            },
             {
                 "name": "apscheduler_core",
                 "func": run_apscheduler,
