@@ -2,7 +2,7 @@ import re
 import html
 import logging
 import urllib.parse
-from typing import List
+from typing import List, Set
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +11,7 @@ URL_PATTERN = re.compile(r'https?://[^\s\)\]<>"]+')
 TOKEN_PATTERN = re.compile(r'[가-힣A-Za-z0-9_*]+')
 LABEL_PATTERN = re.compile(r'^[-•*]\s*\[?([^\]]+)\]?:?')
 MAX_DROP_REASONS = 10
-SUMMARY_KEYWORDS = ['결제', '송금', '입금', '출금', '알림', '메시지', '카톡', '문자']
+SUMMARY_KEYWORDS = ['결제', '송금', '입금', '출금', '알림', '메시지', '카톡', '문자', '배송', '택배', '배달', '업데이트', '건', '도착', '완료']
 
 # URL 정규화용 구두점
 _TRAILING_PUNCT = '.,;:!?)]}>"\''
@@ -249,20 +249,26 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
                 original_senders.add(name)
 
     COMMON_PREFIXES = ('배달', '완료', '알림', '메시지', '확인', '오늘', '내일', '어제', '전송')
-    def _extract_strong_tokens(text: str) -> set[str]:
+    def _extract_strong_tokens(text: str) -> Set[str]:
         """
-        입력 알림 본문에서만 뽑은 '근거 토큰' (환각 방지용).
-        - 길이>=3 또는 숫자/* 포함 토큰만 사용 (오탐 감소, 4->3 완화)
-        - 흔한 단어(배달 등)는 근거에서 제외
+        텍스트에서 의미 있는 '강한 토큰' (주로 명사, 고유대명사 등) 추출.
+        한글은 2글자 이상, 영어/숫자는 3글자 이상.
         """
-        tokens = set()
-        for tok in TOKEN_PATTERN.findall(text or ""):
-            if tok.startswith(COMMON_PREFIXES):
-                continue
-            # 한글은 2자 이상, 영문/숫자는 3자 이상이면 근거로 인정
-            if (re.search(r'[가-힣]', tok) and len(tok) >= 2) or len(tok) >= 3 or any(ch.isdigit() for ch in tok) or "*" in tok:
-                tokens.add(tok)
-        return tokens
+        if not text:
+            return set()
+        
+        # URL 제거
+        text = re.sub(r'https?://[^\s]+', ' ', text)
+        
+        # 한글: 2자 이상
+        ko_tokens = set(re.findall(r'[가-힣]{2,}', text))
+        # 영무/숫자: 3자 이상
+        en_tokens = set(re.findall(r'[a-zA-Z0-9]{3,}', text))
+        
+        # 흔한 단어(COMMON_PREFIXES)는 근거에서 제외
+        filtered_tokens = {tok for tok in (ko_tokens | en_tokens) if not tok.startswith(COMMON_PREFIXES)}
+        
+        return filtered_tokens
 
     original_strong_tokens = _extract_strong_tokens(original_body_text)
 
@@ -314,25 +320,42 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
         if hallucinated_sender:
             continue
 
-        # bullet/번호 뒤에 붙는 "[서비스]" 라벨이 원본에 없으면 제거
+        # bullet/번호 뒤에 붙는 "[서비스]" 라벨이 원본에 부분적으로라도 포함되어 있으면 유지
         label_match = LABEL_PATTERN.match(line.strip())
         if label_match:
             label = label_match.group(1).strip()
-            if label and (label not in original_apps) and (label not in original_senders):
-                if len(dropped_reasons) < MAX_DROP_REASONS:
-                    dropped_reasons.append(f"drop(hallucinated app label '{label}'): {line[:50]}...")
-                continue
+            if label:
+                # 정확히 일치하거나, 원본 앱/발신자 이름에 포함되어 있거나, 포함하고 있는 경우 모두 허용
+                is_valid_label = (
+                    label in original_apps or 
+                    label in original_senders or
+                    any(label in app for app in original_apps) or
+                    any(app in label for app in original_apps) or
+                    any(label in s for s in original_senders) or
+                    any(s in label for s in original_senders)
+                )
+                if not is_valid_label:
+                    if len(dropped_reasons) < MAX_DROP_REASONS:
+                        dropped_reasons.append(f"drop(hallucinated app label '{label}'): {line[:50]}...")
+                    continue
 
-        # 본문 기반 '근거 토큰'이 전혀 없으면 환각으로 간주 (단, 원본 발신자/URL/요약 키워드 포함 시 예외)
+        # 본문 기반 '근거 토큰'이 전혀 없으면 환각으로 간주
         if original_strong_tokens:
-            has_sender = any(s and s in line for s in original_senders)
+            has_sender = any(s and s.lower() in line.lower() for s in original_senders)
             has_original_url = any(normalize_url(u) in original_urls_norm for u in URL_PATTERN.findall(line))
             has_summary_keyword = any(k in line for k in SUMMARY_KEYWORDS)
+            
             if not has_sender and not has_original_url and not has_summary_keyword:
                 line_tokens = _extract_strong_tokens(line)
-                # 오탐 방지를 위해 합집합이 1개라도 있으면 유지하나, 
-                # 흔한 단어(SUMMARY_KEYWORDS)만 있는 경우는 근거로 부족할 수 있음
-                if not (line_tokens & original_strong_tokens):
+                # 교집합이 없더라도, line_tokens 중 하나라도 원본 텍스트 전체에 포함되어 있는지 확인 (부분 일치 허용)
+                # 또는 원본 토큰 중 하나가 line에 포함되어 있는지 확인
+                is_grounded = (
+                    bool(line_tokens & original_strong_tokens) or
+                    any(token in original_body_text for token in line_tokens if len(token) >= 2) or
+                    any(token in line for token in original_strong_tokens if len(token) >= 2)
+                )
+                
+                if not is_grounded:
                     if len(dropped_reasons) < MAX_DROP_REASONS:
                         dropped_reasons.append(f"drop(ungrounded): {line[:50]}...")
                     continue
@@ -344,10 +367,10 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
             if phrase in line_cleaned:
                 line_cleaned = line_cleaned.replace(phrase, "").strip()
 
-        # 메타 문장/설명 제거 (예: "The ... notification fits under ...")
+        # 메타 문장/설명 제거 (사족 필터링)
         meta_patterns = [
             r'fits under', r'belongs to', r'classified as', r'notification type', 
-            r'요약하자면', r'알려드립니다', r'포함시켰습니다', r'해당합니다',
+            r'요약하자면', r'포함시켰습니다',
             # LLM 사고과정 패턴 (출력에 사고과정 포함된 경우)
             r'요약\s*가능', r'같은\s*이벤트니까', r'처리했다는\s*건',
             r'통합하여', r'하나로\s*묶', r'정리하면', r'분석하면',

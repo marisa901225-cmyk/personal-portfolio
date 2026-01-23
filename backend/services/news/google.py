@@ -163,6 +163,7 @@ async def collect_google_news(
         items = channel.findall("item")
         count = 0
         game_tag, category_tag, is_international = _determine_tags(query)
+        clean_desc = "" # Initialize here to prevent NameError
         
         for item in items:
             title_elem = item.find("title")

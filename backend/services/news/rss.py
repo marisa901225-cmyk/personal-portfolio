@@ -96,13 +96,21 @@ async def collect_google_news(db: Session, query: str, region: str = "US"):
     try:
         # feedparser는 동기 라이브러리이므로 블로킹 방지를 위해 run_in_executor 사용 고려 가능
         # 하지만 여기서는 간단히 호출
-        feed = feedparser.parse(feed_url)
+        async with httpx.AsyncClient() as client:
+            response = await client.get(feed_url, timeout=15.0)
+            feed = feedparser.parse(response.content)
+        
+        clean_desc = "" # Initialize here to prevent NameError
         count = 0
         
         for entry in feed.entries[:20]:  # 쿼리당 최대 20개
             title = entry.get("title", "")
             link = entry.get("link", "")
             published_str = entry.get("published", "")
+            
+            # 본문 추출 (RSS는 요약 정보만 제공하는 경우가 많음)
+            description = entry.get("summary", "") or entry.get("description", "")
+            clean_desc = re.sub('<[^<]+?>', '', description) if description else ""
             
             # 날짜 파싱
             try:
