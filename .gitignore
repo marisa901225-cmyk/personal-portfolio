@@ -65,3 +65,4 @@ alarm_collector.log
 alarm_process.log
 
 backend/data/llm_drafts.jsonl
+backend/igt-gpu-tools/
