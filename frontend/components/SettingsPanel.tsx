@@ -5,6 +5,7 @@ import { ApiClient, BackendFxTransaction } from '@/shared/api/client';
 import { alertError } from '@/shared/errors';
 import { ServerTab } from './settings/ServerTab';
 import { PortfolioTab } from './settings/PortfolioTab';
+import { NotificationModal } from './NotificationModal';
 
 type SettingsTab = 'server' | 'portfolio';
 
@@ -41,6 +42,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onBackToDashboard,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>('server');
+  const [notification, setNotification] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+  });
 
   const handleAllocationChange = (
     index: number,
@@ -91,7 +97,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       const apiClient = new ApiClient(settings.serverUrl, settings.apiToken);
       const data = await apiClient.checkHealth();
       if (data && data.status === 'ok') {
-        alert('백엔드 서버가 정상적으로 응답하고 있습니다.');
+        setNotification({
+          isOpen: true,
+          title: '연결 성공!',
+          message: '백엔드 서버가 정상적으로 응답하고 있습니다. ✨',
+        });
       } else {
         alert('서버와 연결은 되었지만 /health 응답이 예상과 다릅니다.');
       }
@@ -127,7 +137,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         ...settings,
         usdFxNow: rateNum,
       });
-      alert(`증권사에서 환율 정보를 성공적으로 불러왔습니다: ${rateNum}원`);
+      setNotification({
+        isOpen: true,
+        title: '환율 정보 업데이트!',
+        message: `증권사에서 환율 정보를 성공적으로 불러왔습니다: ${rateNum}원 📈`,
+      });
     } catch (error) {
       alertError('FX rate fetch error', error, {
         default: '환율을 불러오지 못했습니다.\n잠시 후 다시 시도해주세요.',
@@ -212,7 +226,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         ...settings,
         usdFxBase: rounded,
       });
-      alert(`환전 평균 환율 ${rounded} 적용 완료 (매수 ${records.length}건 기준)`);
+      setNotification({
+        isOpen: true,
+        title: '환율 평균 적용 완료!',
+        message: `환전 평균 환율 ${rounded}원이 포트폴리오에 적용되었습니다. (매수 ${records.length}건 기준) 💰`,
+      });
     } catch (error) {
       alertError('FX average apply error', error, {
         default: '환전 평균 환율을 불러오지 못했습니다.\n잠시 후 다시 시도해주세요.',
@@ -272,6 +290,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           설정 저장 및 돌아가기
         </button>
       </div>
+
+      <NotificationModal
+        isOpen={notification.isOpen}
+        onClose={() => setNotification((prev) => ({ ...prev, isOpen: false }))}
+        title={notification.title}
+        message={notification.message}
+      />
     </div>
   );
 };
