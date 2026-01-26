@@ -95,7 +95,7 @@ def run_stress_test(ngl, iterations=5):
         print(f"   Target: {p['name']}...", end=" ", flush=True)
         for i in range(iterations):
             try:
-                resp = requests.post(TEST_URL, json=p['payload'], timeout=20)
+                resp = requests.post(TEST_URL, json=p['payload'], timeout=30)
                 if resp.status_code != 200:
                     print(f"F(HTTP {resp.status_code})", end="", flush=True)
                     return False
@@ -111,41 +111,17 @@ def run_stress_test(ngl, iterations=5):
     return True
 
 def main():
-    # Start from 30 (known mostly good) and try to go up
-    current_ngl = 30
-    failed_ngl = None
-    pass_ngl = 30
+    print("🔥 Starting Targeted Search for Q6 (NGL 35-37)")
     
-    print("🔥 Starting Golden Line Search (NGL 30-37)")
-    
-    # Phase 1: Climb +2
-    for ngl in [30, 32, 34, 36, 37]:
-        if run_stress_test(ngl):
-            pass_ngl = ngl
+    # LO said 35 should work. Let's verify specifically.
+    for ngl in [35, 36, 37]:
+        if run_stress_test(ngl, iterations=10):
+            print(f"✅ NGL {ngl} is rock solid (10/10 iterations passed)!")
+            update_ngl(ngl)
+            restart_container()
         else:
-            failed_ngl = ngl
+            print(f"❌ NGL {ngl} failed/timed out.")
             break
-            
-    # Phase 2: Binary search if a failure was caught
-    if failed_ngl is not None:
-        print(f"\n🔍 Failure caught between {pass_ngl} and {failed_ngl}. Refining...")
-        while failed_ngl - pass_ngl > 1:
-            mid = (pass_ngl + failed_ngl) // 2
-            if run_stress_test(mid):
-                pass_ngl = mid
-            else:
-                failed_ngl = mid
-                
-    print("\n" + "="*50)
-    print(f"🏆 Pmax found: {pass_ngl}")
-    golden_line = max(0, pass_ngl - 1)
-    print(f"✨ Golden Line Recommended: {golden_line}")
-    print("="*50)
-    
-    # Final apply
-    update_ngl(golden_line)
-    restart_container()
-    print(f"🚀 Applied Golden Line NGL {golden_line} to production.")
 
 if __name__ == "__main__":
     main()

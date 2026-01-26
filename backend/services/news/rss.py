@@ -26,8 +26,27 @@ def collect_rss(db: Session, feed_url: str, source_name: str):
             # HTML 태그 제거
             clean_desc = re.sub('<[^<]+?>', '', description)
             
+            # 날짜 파싱 (RSS 파싱 결과 활용)
+            try:
+                from time import mktime
+                published_at = datetime.fromtimestamp(mktime(entry.published_parsed), tz=timezone.utc)
+            except Exception:
+                published_at = datetime.now(timezone.utc)
+
+            # 너무 오래된 기사 제외 (최근 14일)
+            from datetime import timedelta
+            if published_at < datetime.now(timezone.utc) - timedelta(days=14):
+                continue
+            
             # 중복 체크 (강화된 하이브리드 방식)
             content_hash = calculate_simhash(title + clean_desc)
+            
+            # 1. DB 전체에서 정확히 일치하는 해시나 제목이 있는지 체크
+            exists = db.query(GameNews.id).filter(
+                (GameNews.content_hash == content_hash) | (GameNews.title == title)
+            ).first()
+            if exists:
+                continue
             
             # 최근 48시간 내의 뉴스들과 비교
             from datetime import timedelta
@@ -53,7 +72,7 @@ def collect_rss(db: Session, feed_url: str, source_name: str):
                 title=title,
                 url=link,
                 full_content=clean_desc,
-                published_at=utcnow() # 실제로는 entry.published_parsed 파싱 필요
+                published_at=published_at
             )
             db.add(news)
             db.commit() # ID 생성을 위해 즉시 커밋
@@ -119,8 +138,19 @@ async def collect_google_news(db: Session, query: str, region: str = "US"):
             except Exception:
                 published_at = datetime.now(timezone.utc)
             
+            # 너무 오래된 기사 제외 (최근 14일)
+            if published_at < datetime.now(timezone.utc) - timedelta(days=14):
+                continue
+            
             # 중복 체크 (강화된 하이브리드 방식)
             content_hash = calculate_simhash(title + clean_desc)
+            
+            # 1. DB 전체에서 정확히 일치하는 해시나 제목이 있는지 체크
+            exists = db.query(GameNews.id).filter(
+                (GameNews.content_hash == content_hash) | (GameNews.title == title)
+            ).first()
+            if exists:
+                continue
             
             # 최근 48시간 내의 뉴스들과 비교
             from datetime import timedelta

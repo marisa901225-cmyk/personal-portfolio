@@ -4,7 +4,7 @@ import html
 from sqlalchemy import func, desc
 from sqlalchemy.orm import Session
 
-from ..core.models import SpamNews, SpamAlarm
+from ..core.models import SpamNews, SpamAlarm, GameNews
 from ..integrations.telegram import send_telegram_message
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,7 @@ async def generate_monthly_spam_report(db: Session):
         logger.exception("Failed to generate monthly spam report")
 
 
-async def cleanup_old_spam_data(db: Session, months: int = 3):
+async def cleanup_old_spam_data(db: Session, months: int = 1):
     try:
         now = datetime.now()
         threshold = now - timedelta(days=months * 30)
@@ -101,3 +101,43 @@ async def cleanup_old_spam_data(db: Session, months: int = 3):
     except Exception:
         db.rollback()
         logger.exception("Failed to cleanup old spam data")
+
+
+async def cleanup_old_news_data(db: Session):
+    """
+    오래된 일반 뉴스 데이터를 정리한다.
+    - 경제 뉴스 (Economy): 90일 보관
+    - 기타 뉴스 (LoL, Steam 등): 30일 보관
+    """
+    try:
+        now = datetime.now()
+        economy_threshold = now - timedelta(days=90)
+        general_threshold = now - timedelta(days=30)
+
+        # 1. 경제 뉴스 정리 (90일 기준)
+        economy_deleted = (
+            db.query(GameNews)
+            .filter(GameNews.category_tag == "Economy")
+            .filter(GameNews.published_at < economy_threshold)
+            .delete(synchronize_session=False)
+        )
+
+        # 2. 나머지 뉴스 정리 (30일 기준)
+        general_deleted = (
+            db.query(GameNews)
+            .filter(GameNews.category_tag != "Economy")
+            .filter(GameNews.published_at < general_threshold)
+            .delete(synchronize_session=False)
+        )
+
+        if economy_deleted or general_deleted:
+            db.commit()
+            logger.info(
+                "Cleanup: Deleted %s old economy news (older than %s) and %s general news (older than %s)",
+                economy_deleted, economy_threshold, general_deleted, general_threshold
+            )
+        else:
+            logger.info("Cleanup: No old news to delete.")
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to cleanup old news data")

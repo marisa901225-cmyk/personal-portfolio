@@ -7,7 +7,7 @@ import { ApiClient, BackendSettings } from '@/shared/api/client';
 // localStorage 저장 제거됨 - 페이지 새로고침 시 토큰 초기화
 
 const DEFAULT_SETTINGS: AppSettings = {
-    serverUrl: 'https://dlckdgn-nucboxg3-plus.tail5c2348.ts.net',
+    serverUrl: 'https://marisa-server.tail5c2348.ts.net',
     targetIndexAllocations: [
         { indexGroup: 'S&P500', targetWeight: 6 },
         { indexGroup: 'NASDAQ100', targetWeight: 3 },

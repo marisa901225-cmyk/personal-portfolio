@@ -11,7 +11,7 @@ services:
     devices:
       - /dev/dri:/dev/dri
     environment:
-      - LLM_MODEL_PATH=/data/Huihui-Qwen3-VL-8B-Thinking-abliterated-Q5_K_M.gguf
+      - LLM_MODEL_PATH=/data/Josiefied-Qwen3-8B-abliterated-v1.Q8_0.gguf
       - LLM_MODEL_PATH_FILE=/data/llm_model_path.txt
       - LLM_THREADS=6
       - GGML_SYCL_DEVICE=0
@@ -196,7 +196,7 @@ services:
       - LLM_BASE_URL=http://llama-server:8080
       - AI_REPORT_MODEL=gpt-5.1
       - AI_REPORT_TIMEOUT_SEC=900
-      - LLM_REMOTE_DEFAULT_MODEL=Huihui-Qwen3-VL-8B-Thinking-abliterated-Q5_K_M.gguf
+      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-abliterated-v1.Q8_0.gguf
       - TZ=Asia/Seoul
     env_file:
       - ./backend/.env

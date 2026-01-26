@@ -64,8 +64,13 @@ async def collect_naver_news(db: Session, query: str, category: str = "esports")
             data = response.json()
         
         items = data.get("items", [])
-        count = 0
-        clean_desc = "" # Initialize here to prevent NameError
+        # 최근 7일 내의 뉴스들과 비교하여 중복 판별 (메모리 내 빠른 검색용)
+        from datetime import timedelta
+        recent_limit = datetime.now(timezone.utc) - timedelta(days=7)
+        recent_news = db.query(GameNews).filter(GameNews.published_at >= recent_limit).all()
+        
+        # 현재 배치에서 이미 처리된 해시/제목 추적
+        seen_in_batch = set()
         
         for item in items:
             title = item.get("title", "")
@@ -78,23 +83,34 @@ async def collect_naver_news(db: Session, query: str, category: str = "esports")
             clean_title = re.sub(r'<[^>]+>', '', title)
             clean_desc = re.sub(r'<[^>]+>', '', description)
             
-            # 날짜 파싱 (RFC 2822 형식: "Fri, 09 Jan 2026 10:30:00 +0900")
+            # 정확한 중복 체크 (해시)
+            content_hash = calculate_simhash(clean_title + clean_desc)
+            if content_hash in seen_in_batch:
+                continue
+            
+            # 1. DB 전체에서 정확히 일치하는 해시나 제목이 있는지 체크 (인덱스 활용)
+            exists = db.query(GameNews.id).filter(
+                (GameNews.content_hash == content_hash) | (GameNews.title == clean_title)
+            ).first()
+            if exists:
+                seen_in_batch.add(content_hash)
+                continue
+            
+            # 날짜 파싱 (RFC 2822 형식)
             try:
                 from email.utils import parsedate_to_datetime
                 published_at = parsedate_to_datetime(pub_date_str)
             except Exception:
                 published_at = datetime.now(timezone.utc)
             
-            # 중복 체크 (강화된 하이브리드 방식)
-            content_hash = calculate_simhash(clean_title + clean_desc)
+            # 너무 오래된 기사 제외 (최근 14일 이내만 수시 수집)
+            if published_at < datetime.now(timezone.utc) - timedelta(days=14):
+                continue
             
-            # 최근 48시간 내의 뉴스들과 비교하여 중복 판별
-            from datetime import timedelta
-            recent_limit = datetime.now(timezone.utc) - timedelta(hours=48)
-            recent_news = db.query(GameNews).filter(GameNews.published_at >= recent_limit).all()
-            
+            # 2. 유사도 기반 중복 체크 (최근 7일 데이터와 비교)
             from .core import is_duplicate_complex
             if is_duplicate_complex(clean_title, content_hash, recent_news):
+                seen_in_batch.add(content_hash)
                 continue
             
             # game_tag 및 category_tag 결정 (검색어 기반)
@@ -157,6 +173,8 @@ async def collect_naver_news(db: Session, query: str, category: str = "esports")
                     published_at=published_at,
                 )
                 db.add(news)
+                recent_news.append(news)
+                seen_in_batch.add(content_hash)
                 count += 1
         
         db.commit()
