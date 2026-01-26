@@ -115,7 +115,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
     try {
       const apiClient = new ApiClient(settings.serverUrl, settings.apiToken);
-      const data = await apiClient.fetchUsdKrwFxRate();
+      const data = await apiClient.fetchUsdKrwFxRate(true);
       const rateNum = data?.rate;
 
       if (!rateNum || !Number.isFinite(rateNum)) {
@@ -127,6 +127,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         ...settings,
         usdFxNow: rateNum,
       });
+      alert(`증권사에서 환율 정보를 성공적으로 불러왔습니다: ${rateNum}원`);
     } catch (error) {
       alertError('FX rate fetch error', error, {
         default: '환율을 불러오지 못했습니다.\n잠시 후 다시 시도해주세요.',

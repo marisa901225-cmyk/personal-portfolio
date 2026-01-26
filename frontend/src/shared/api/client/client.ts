@@ -209,8 +209,8 @@ export class ApiClient {
         return fetchPrices(this.requestFn, tickers);
     }
 
-    async fetchUsdKrwFxRate(): Promise<BackendFxRateResponse> {
-        return fetchUsdKrwFxRate(this.requestFn);
+    async fetchUsdKrwFxRate(fresh = false): Promise<BackendFxRateResponse> {
+        return fetchUsdKrwFxRate(this.requestFn, fresh);
     }
 
     async searchTicker(query: string): Promise<BackendTickerSearchResponse> {

@@ -45,8 +45,10 @@ export const fetchPrices = (
         body: JSON.stringify({ tickers }),
     });
 
-export const fetchUsdKrwFxRate = (request: RequestFn): Promise<BackendFxRateResponse> =>
-    request<BackendFxRateResponse>('/api/kis/fx/usdkrw', { method: 'GET' });
+export const fetchUsdKrwFxRate = (request: RequestFn, fresh = false): Promise<BackendFxRateResponse> => {
+    const url = `/api/kis/fx/usdkrw${fresh ? '?fresh=true' : ''}`;
+    return request<BackendFxRateResponse>(url, { method: 'GET' });
+};
 
 export const searchTicker = (
     request: RequestFn,
