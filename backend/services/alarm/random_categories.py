@@ -104,18 +104,23 @@ def get_all_categories() -> List[str]:
     return list(_load_config().get("categories", {}).keys())
 
 
+def get_voices() -> Dict[str, str]:
+    """캐릭터 목소리 맵 반환 (이름: 규칙)"""
+    return _load_config().get("voices", {})
+
+
 def load_recent_categories() -> List[str]:
-    """영구 저장된 최근 카테고리 목록 로드"""
+    """영구 저장된 최근 카테고리 목록 로드 (파일에서 항상 최신 상태 로드)"""
     global _recent_categories
-    if _recent_categories:
-        return _recent_categories
     try:
         if os.path.exists(_RECENT_CATEGORY_FILE):
             with open(_RECENT_CATEGORY_FILE, "r", encoding="utf-8") as f:
-                _recent_categories = json.load(f)
-    except Exception:
-        pass
-    return _recent_categories
+                data = json.load(f)
+                if isinstance(data, list):
+                    _recent_categories = data
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to load recent categories: {e}")
+    return list(_recent_categories)
 
 
 def save_recent_category(category: str) -> None:
@@ -130,8 +135,9 @@ def save_recent_category(category: str) -> None:
         os.makedirs(os.path.dirname(_RECENT_CATEGORY_FILE), exist_ok=True)
         with open(_RECENT_CATEGORY_FILE, "w", encoding="utf-8") as f:
             json.dump(_recent_categories, f, ensure_ascii=False)
-    except Exception:
-        pass
+        logger.info(f"📍 Recent categories saved: {_recent_categories}")
+    except Exception as e:
+        logger.error(f"❌ Failed to save recent categories: {e}", exc_info=True)
 
 
 def load_last_random_topic_sent_at() -> Optional[datetime]:
@@ -145,7 +151,8 @@ def load_last_random_topic_sent_at() -> Optional[datetime]:
         if not val:
             return None
         return datetime.fromisoformat(val)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to load last random topic state: {e}")
         return None
 
 
@@ -155,8 +162,9 @@ def save_last_random_topic_sent_at(sent_at: datetime) -> None:
         os.makedirs(os.path.dirname(_RANDOM_TOPIC_STATE_FILE), exist_ok=True)
         with open(_RANDOM_TOPIC_STATE_FILE, "w", encoding="utf-8") as f:
             json.dump({"last_sent_at": sent_at.isoformat(timespec="seconds")}, f, ensure_ascii=False)
-    except Exception:
-        pass
+        logger.info(f"🕒 Last random topic state updated: {sent_at.isoformat(timespec='seconds')}")
+    except Exception as e:
+        logger.error(f"❌ Failed to save last random topic state: {e}", exc_info=True)
 
 
 def pick_keywords_for_constraints(category: str, *, count: int = 4) -> List[str]:

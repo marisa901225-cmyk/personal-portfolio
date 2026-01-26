@@ -161,9 +161,16 @@ async def collect_google_news(
             return 0
         
         items = channel.findall("item")
+        # 최근 7일 내의 뉴스들과 비교하여 중복 판별 (메모리 내 빠른 검색용)
+        from datetime import timedelta
+        recent_limit = datetime.now(timezone.utc) - timedelta(days=7)
+        recent_news = db.query(GameNews).filter(GameNews.published_at >= recent_limit).all()
+        
+        # 현재 배치에서 이미 처리된 해시/제목 추적
+        seen_in_batch = set()
+        
         count = 0
         game_tag, category_tag, is_international = _determine_tags(query)
-        clean_desc = "" # Initialize here to prevent NameError
         
         for item in items:
             title_elem = item.find("title")
@@ -188,16 +195,27 @@ async def collect_google_news(
             except Exception:
                 published_at = datetime.now(timezone.utc)
             
+            # 너무 오래된 기사 제외 (최근 14일)
+            if published_at < datetime.now(timezone.utc) - timedelta(days=14):
+                continue
+            
             # 중복 체크 (강화된 하이브리드 방식)
             content_hash = calculate_simhash(title + clean_desc)
+            if content_hash in seen_in_batch:
+                continue
             
-            # 최근 48시간 내의 뉴스들과 비교하여 중복 판별
-            from datetime import timedelta
-            recent_limit = datetime.now(timezone.utc) - timedelta(hours=48)
-            recent_news = db.query(GameNews).filter(GameNews.published_at >= recent_limit).all()
+            # 1. DB 전체에서 정확히 일치하는 해시나 제목이 있는지 체크
+            exists = db.query(GameNews.id).filter(
+                (GameNews.content_hash == content_hash) | (GameNews.title == title)
+            ).first()
+            if exists:
+                seen_in_batch.add(content_hash)
+                continue
             
+            # 2. 유사도 기반 중복 체크 (최근 7일 데이터와 비교)
             from .core import is_duplicate_complex
             if is_duplicate_complex(title, content_hash, recent_news):
+                seen_in_batch.add(content_hash)
                 continue
             
             # 광고 체크
@@ -237,6 +255,8 @@ async def collect_google_news(
                     published_at=published_at,
                 )
                 db.add(news)
+                recent_news.append(news)
+                seen_in_batch.add(content_hash)
                 db.flush()  # ID 생성을 위해 flush
                 
                 # 영문 뉴스인 경우 LLM 요약 생성

@@ -13,8 +13,10 @@ KIS(한국투자증권) 관련 API 엔드포인트.
 
 from __future__ import annotations
 
-import math
+import logging
 from typing import Dict, List
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, RootModel
@@ -166,6 +168,7 @@ async def get_fx_rate(
     # KIS API 호출
     try:
         rate = await get_usdkrw_rate()
+        logger.info(f"Fetched fresh USD/KRW rate from KIS: {rate}")
         # 캐시 갱신
         update_cached_fx_rate(db, rate)
         return FxRateResponse(base="USD", quote="KRW", rate=rate)

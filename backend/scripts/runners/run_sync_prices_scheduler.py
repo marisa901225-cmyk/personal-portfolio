@@ -110,13 +110,18 @@ async def run_monthly_maintenance():
     async with monitor_job_async("monthly_maintenance", db):
         logger.info("--- Starting Monthly Maintenance Job ---")
         try:
-            from backend.services.maintenance import generate_monthly_spam_report, cleanup_old_spam_data
+            from backend.services.maintenance import (
+                generate_monthly_spam_report, 
+                cleanup_old_spam_data,
+                cleanup_old_news_data
+            )
             
             # 1. 스팸 리포트 전송
             await generate_monthly_spam_report(db)
             
-            # 2. 오래된 스팸 데이터 정리 (3개월 기준)
-            await cleanup_old_spam_data(db, months=3)
+            # 2. 오래된 스팸 및 일반 뉴스 데이터 정리
+            await cleanup_old_spam_data(db, months=1)
+            await cleanup_old_news_data(db)
             
             logger.info("Monthly maintenance completed successfully.")
         except Exception as e:
@@ -182,12 +187,12 @@ async def main():
         name="Periodic Alarm Summary (Every 5 mins, 7am-10pm)"
     )
 
-    # 4. Daily DB Backup: Every day at 03:00 KST
+    # 4. Daily DB Backup: Every day at 06:30 KST
     scheduler.add_job(
         run_backup_job,
-        CronTrigger(hour=3, minute=0, timezone=KST),
+        CronTrigger(hour=6, minute=30, timezone=KST),
         id="daily_backup",
-        name="Daily DB Backup (03:00 KST)"
+        name="Daily DB Backup (06:30 KST)"
     )
 
     # 5. Monthly Maintenance: 1st day of every month at 04:00 KST (Cleanup) and 09:00 KST (Report)

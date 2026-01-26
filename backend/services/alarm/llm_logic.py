@@ -2,6 +2,8 @@
 """LLM을 이용한 알림 요약 및 랜덤 메시지 생성"""
 import logging
 import re
+import json
+import random
 from datetime import datetime, timedelta
 from typing import List, Optional
 
@@ -24,6 +26,8 @@ from .random_categories import (
     save_last_random_topic_sent_at,
     pick_keywords_for_constraints,
     has_category_anchor,
+    get_voices,
+    get_category_keywords,
 )
 from .fallback_logic import (
     FALLBACK_TAG,
@@ -93,21 +97,62 @@ async def summarize_with_llm(items: List[dict]) -> Optional[str]:
         formats = get_formats()
         
         recent = load_recent_categories()
-        available_categories = [c for c in all_categories if c not in recent]
-        if not available_categories:  # 모두 최근에 사용된 경우 전체에서 선택
+        recent_clean = [c.strip() for c in recent]
+        available_categories = [c for c in all_categories if c.strip() not in recent_clean]
+        
+        logger.info(f"🔍 Recent categories: {recent_clean}")
+        
+        if not available_categories:
+            logger.warning("All categories were recently used! Resetting selection pool.")
             available_categories = all_categories
-        forced_category = random.choice(available_categories)
-        forced_format = random.choice(formats)
+
+        # 확률 기반 선택 (SystemRandom 사용으로 더 고른 분포 보장)
+        rng = random.SystemRandom()
+        
+        # 1. 캐릭터(Voice) 선택
+        voices = get_voices()
+        voice_names = list(voices.keys())
+        forced_voice = rng.choice(voice_names)
+        voice_rule = voices[forced_voice]
+
+        # 2. 카테고리 선택 (가중치 관리 로직 뼈대 유지)
+        weights = [1.0] * len(available_categories)
+        forced_category = rng.choices(available_categories, weights=weights, k=1)[0]
+        forced_format = rng.choice(formats)
+        
+        logger.info(f"🎯 Candidates pool ({len(available_categories)}): {available_categories}")
+        logger.info(f"🎲 Topic: '{forced_category}', Voice: '{forced_voice}', Format: '{forced_format}'")
 
         must_keywords = pick_keywords_for_constraints(forced_category, count=4)
+        rng.shuffle(must_keywords)  # ✅ 키워드 순서 셔플로 첫 단어 고정 현상 방지
+
+        # 디버깅을 위한 메타데이터 덤프
+        dump_llm_draft("random_wisdom_meta", json.dumps({
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "forced_category": forced_category,
+            "forced_voice": forced_voice,
+            "forced_format": forced_format,
+            "must_keywords": must_keywords,
+            "pool_size": len(available_categories),
+            "recent_clean": recent_clean
+        }, ensure_ascii=False))
         
+        # 최근 카테고리들의 모든 키워드를 피해야 할 키워드로 설정
+        category_kw_map = get_category_keywords()
+        avoid_list = []
+        for rc in recent_clean:
+            avoid_list.extend(category_kw_map.get(rc, []))
+        avoid_keywords_str = ", ".join(list(set(avoid_list))[:15]) # 중복 제거 후 상위 15개만
+
         # 캐시 효율을 위해 system(불변)/user(가변) 분리
-        system_prompt = load_prompt("random_topic_system")
+        system_prompt = load_prompt("random_topic_system", voice=forced_voice, voice_rule=voice_rule)
         user_prompt = load_prompt(
             "random_topic_user",
+            voice=forced_voice,
             category=forced_category,
             format=forced_format,
             must_keywords=", ".join(must_keywords),
+            avoid_keywords=avoid_keywords_str
         )
         if not system_prompt or not user_prompt:
             # 폴백: 파일이 없으면 기본 메시지

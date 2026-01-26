@@ -86,9 +86,10 @@ while true; do
         --port 8080 \
         --threads "$THREADS" \
         --ctx-size 4096 \
-        --n-gpu-layers 35 \
+        --n-gpu-layers 36 \
+        --parallel 1 \
         --reasoning-budget 0 \
-        --flash-attn on \
+        --flash-attn off \
         --jinja \
         $TEMPLATE_ARGS &
 
