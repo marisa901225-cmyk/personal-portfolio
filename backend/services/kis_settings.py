@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..core.models import Setting
 from ..services.users import get_or_create_single_user
+from .kis_secret_store import KIS_SECRET_FIELDS, decrypt_kis_secret
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,12 @@ def apply_kis_config_from_setting(setting: Setting) -> None:
     updates: Dict[str, str] = {}
     for field, (env_key, cfg_key) in _KIS_FIELD_MAP.items():
         value = getattr(setting, field, None)
+        if field in KIS_SECRET_FIELDS:
+            try:
+                value = decrypt_kis_secret(value)
+            except Exception as exc:
+                logger.warning("Failed to decrypt KIS secret field %s: %s", field, exc)
+                value = None
         if value is None:
             os.environ.pop(env_key, None)
             continue

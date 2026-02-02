@@ -63,13 +63,13 @@ class MarketDataService:
         tickers = sorted({a.ticker for a in assets if a.ticker})
         logger.info(f"Syncing prices for {len(tickers)} tickers...")
         
-        # 2. KIS 시세 조회
+        # 2. KIS 시세 및 환율 조회
         try:
             # KRW 기반 시세와 환율 조회
             prices = fetch_kis_prices_krw(tickers)
             rate = fetch_usdkrw_rate()
             
-            # 3. DB 업데이트
+            # 3. DB 업데이트 (자산 시세)
             updated_count = 0
             for asset in assets:
                 if asset.ticker in prices:
@@ -77,6 +77,17 @@ class MarketDataService:
                     asset.current_price = new_price
                     asset.updated_at = datetime.now()
                     updated_count += 1
+            
+            # 4. 환율 업데이트 (Setting 테이블)
+            if rate:
+                from backend.services.users import get_or_create_single_user
+                from backend.core.models import Setting
+                user = get_or_create_single_user(db)
+                setting = db.query(Setting).filter(Setting.user_id == user.id).first()
+                if setting:
+                    setting.usd_fx_now = rate
+                    setting.updated_at = datetime.now()
+                    logger.info(f"USD/KRW rate updated: {rate}")
             
             db.commit()
             logger.info(f"Successfully updated {updated_count} assets.")

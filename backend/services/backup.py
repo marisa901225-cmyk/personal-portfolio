@@ -49,7 +49,8 @@ class BackupService:
                 logger.info("Password protected zip created via subprocess.")
                 return
             except Exception as e:
-                logger.error(f"Subprocess zip failed: {e}. Falling back to standard zip (unencrypted).")
+                logger.error(f"Subprocess zip failed: {e}.")
+                raise RuntimeError("Encrypted zip failed") from e
         
         with zipfile.ZipFile(zip_file, "w", zipfile.ZIP_DEFLATED) as zf:
             zf.write(src_file, arcname=src_file.name)

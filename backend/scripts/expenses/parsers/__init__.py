@@ -1,6 +1,7 @@
 """파서 모듈"""
 from .excel_csv import parse_excel_or_csv
 from .naver_pay import parse_naver_pay_text
+from typing import List, Dict, Any, Optional
 from .utils import (
     generate_hash,
     build_dedup_key,

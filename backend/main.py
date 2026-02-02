@@ -42,6 +42,7 @@ from .routers.spam_rules import router as spam_rules_router
 from .routers.news import router as news_router
 from .routers.telegram_webhook import router as telegram_webhook_router
 from .routers.memories import router as memories_router
+from .routers.memory_chat import router as memory_chat_router
 from .routers.scheduler_state import router as scheduler_state_router
 
 # Logging Configuration (Sensitive Data Masking enabled)
@@ -67,6 +68,9 @@ def _build_allowed_origins() -> list[str]:
                 s.add(f"https://{hostname}.{tailnet}")
         except Exception:
             pass
+
+    # Vercel Production 도메인 명시적 추가
+    s.add("https://personal-portfolio-blue-one-38.vercel.app")
 
     # allow_credentials=True일 때 "*"는 브라우저에서 막힘
     if "*" in s:
@@ -146,6 +150,7 @@ app.include_router(spam_rules_router)
 app.include_router(news_router)
 app.include_router(telegram_webhook_router)
 app.include_router(memories_router)
+app.include_router(memory_chat_router)
 app.include_router(scheduler_state_router)
 
 # ============================================

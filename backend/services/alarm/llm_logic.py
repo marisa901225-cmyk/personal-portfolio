@@ -301,7 +301,7 @@ async def summarize_with_llm(items: List[dict]) -> Optional[str]:
     
     result = await generate_with_main_llm_async(
         messages, 
-        max_tokens=256,  # 요약은 짧아야 하므로 토큰 수 제한
+        max_tokens=512,  # 상세 정보를 포함할 수 있도록 토큰 수 확장
         temperature=0.05,  # 거의 greedy decoding
         stop=enhanced_stop_tokens, 
         enable_thinking=False
@@ -390,16 +390,12 @@ async def summarize_with_llm(items: List[dict]) -> Optional[str]:
         result = build_alarm_summary_fallback(items)
         used_fallback = True
     
-    # 2단계: 경량 LLM으로 사고과정/메타 설명 정제 (Qwen3-0.6B) - 공통 엔진 사용
+    # 2단계: 메타 헤더만 제거 (경량 LLM 정제 스킵)
+    # 이유: 알림 요약은 여러 bullet point를 포함하는데, 경량 LLM이 과도하게 축약하여 중요 내용을 제거하는 문제 발생
+    # 메인 LLM의 1차 요약이 이미 충분히 좋으므로 메타 정보만 정리
     if result and result.strip() and not used_fallback:
-        result = await refine_draft_with_light_llm_async(
-            prompt_key="refine_alarm_summary",
-            draft=result,
-            temperature=0.3,
-            dump_tag="alarm_summary_refined",
-            clean_meta=True
-        )
-        logger.info(f"LLM refined (len={len(result)})")
+        result = clean_meta_headers(result)
+        logger.info(f"Alarm summary meta headers cleaned (len={len(result)})")
 
     if used_fallback:
         return mark_fallback(result)

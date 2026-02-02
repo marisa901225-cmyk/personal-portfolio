@@ -36,6 +36,7 @@ class Settings(BaseSettings):
     pandascore_api_key: Optional[str] = Field(default=None, validation_alias="PANDASCORE_API_KEY")
     naver_client_id: Optional[str] = Field(default=None, validation_alias="NAVER_CLIENT_ID")
     naver_client_secret: Optional[str] = Field(default=None, validation_alias="NAVER_CLIENT_SECRET")
+    kma_service_key: Optional[str] = Field(default=None, validation_alias="KMA_SERVICE_KEY")
     
     # 알림 (Telegram)
     telegram_bot_token: Optional[str] = Field(default=None, validation_alias="TELEGRAM_BOT_TOKEN")

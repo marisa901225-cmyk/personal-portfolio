@@ -4,13 +4,14 @@ from datetime import datetime, timedelta
 from typing import Optional, List
 
 from sqlalchemy import select, delete
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from ..core.models import UserMemory
 from ..core.time_utils import utcnow
 
-async def list_memories(
-    db: AsyncSession,
+
+def list_memories(
+    db: Session,
     user_id: int = 1,
     category: Optional[str] = None,
     min_importance: int = 1,
@@ -28,11 +29,12 @@ async def list_memories(
         )
     stmt = stmt.order_by(UserMemory.importance.desc(), UserMemory.updated_at.desc())
     stmt = stmt.offset(offset).limit(limit)
-    result = await db.execute(stmt)
+    result = db.execute(stmt)
     return list(result.scalars().all())
 
-async def get_memory(
-    db: AsyncSession,
+
+def get_memory(
+    db: Session,
     memory_id: int,
     user_id: int = 1,
 ) -> Optional[UserMemory]:
@@ -40,11 +42,12 @@ async def get_memory(
         UserMemory.id == memory_id,
         UserMemory.user_id == user_id
     )
-    result = await db.execute(stmt)
+    result = db.execute(stmt)
     return result.scalar_one_or_none()
 
-async def create_or_update_memory(
-    db: AsyncSession,
+
+def create_or_update_memory(
+    db: Session,
     user_id: int,
     content: str,
     category: str = "general",
@@ -58,7 +61,7 @@ async def create_or_update_memory(
             UserMemory.user_id == user_id,
             UserMemory.key == key
         )
-        result = await db.execute(stmt)
+        result = db.execute(stmt)
         existing = result.scalar_one_or_none()
         if existing:
             existing.content = content
@@ -69,8 +72,8 @@ async def create_or_update_memory(
                 existing.expires_at = utcnow() + timedelta(days=ttl_days)
             else:
                 existing.expires_at = None
-            await db.commit()
-            await db.refresh(existing)
+            db.commit()
+            db.refresh(existing)
             return existing
 
     # 새 메모리 생성
@@ -88,12 +91,13 @@ async def create_or_update_memory(
         updated_at=utcnow(),
     )
     db.add(memory)
-    await db.commit()
-    await db.refresh(memory)
+    db.commit()
+    db.refresh(memory)
     return memory
 
-async def update_memory(
-    db: AsyncSession,
+
+def update_memory(
+    db: Session,
     memory_id: int,
     user_id: int,
     content: Optional[str] = None,
@@ -102,7 +106,7 @@ async def update_memory(
     importance: Optional[int] = None,
     ttl_days: Optional[int] = None,
 ) -> Optional[UserMemory]:
-    memory = await get_memory(db, memory_id, user_id)
+    memory = get_memory(db, memory_id, user_id)
     if not memory:
         return None
     if content is not None:
@@ -119,24 +123,26 @@ async def update_memory(
         else:
             memory.expires_at = None
     memory.updated_at = utcnow()
-    await db.commit()
-    await db.refresh(memory)
+    db.commit()
+    db.refresh(memory)
     return memory
 
-async def delete_memory(
-    db: AsyncSession,
+
+def delete_memory(
+    db: Session,
     memory_id: int,
     user_id: int = 1,
 ) -> bool:
-    memory = await get_memory(db, memory_id, user_id)
+    memory = get_memory(db, memory_id, user_id)
     if not memory:
         return False
-    await db.delete(memory)
-    await db.commit()
+    db.delete(memory)
+    db.commit()
     return True
 
-async def search_memories(
-    db: AsyncSession,
+
+def search_memories(
+    db: Session,
     user_id: int = 1,
     query: Optional[str] = None,
     category: Optional[str] = None,
@@ -154,11 +160,12 @@ async def search_memories(
         stmt = stmt.where(UserMemory.content.ilike(f"%{query}%"))
     stmt = stmt.order_by(UserMemory.importance.desc(), UserMemory.updated_at.desc())
     stmt = stmt.limit(limit)
-    result = await db.execute(stmt)
+    result = db.execute(stmt)
     return list(result.scalars().all())
 
-async def cleanup_expired_memories(
-    db: AsyncSession,
+
+def cleanup_expired_memories(
+    db: Session,
     user_id: int = 1,
 ) -> None:
     stmt = delete(UserMemory).where(
@@ -166,5 +173,5 @@ async def cleanup_expired_memories(
         UserMemory.expires_at != None,
         UserMemory.expires_at < utcnow()
     )
-    await db.execute(stmt)
-    await db.commit()
+    db.execute(stmt)
+    db.commit()

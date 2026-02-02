@@ -4,9 +4,17 @@ from typing import Optional
 
 from ..core.db import get_db
 from ..core.auth import verify_api_token
+from ..core.rate_limit import rate_limit
 from ..services import news_service
 
-router = APIRouter(prefix="/api/news", tags=["News"], dependencies=[Depends(verify_api_token)])
+router = APIRouter(
+    prefix="/api/news",
+    tags=["News"],
+    dependencies=[
+        Depends(verify_api_token),
+        Depends(rate_limit(limit=30, window_sec=60, key_prefix="news")),
+    ],
+)
 
 @router.get("/search")
 async def search_news(

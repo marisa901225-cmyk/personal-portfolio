@@ -13,26 +13,45 @@ STEAMSPY_URL = "https://steamspy.com/api.php"
 PANDASCORE_URL = "https://api.pandascore.co"
 NAVER_NEWS_URL = "https://openapi.naver.com/v1/search/news.json"
 
-# 네이버 뉴스 검색 키워드 버킷 (2026 시즌 기준)
-NAVER_ESPORTS_QUERIES = [
-    "T1 티원",
-    "Gen.G 젠지",
-    "LCK",
-    "LCK CUP LCK컵",
-    "롤드컵 Worlds 월즈",
-    "VCT Pacific 퍼시픽 킥오프 Kickoff",
-    "챌린저스 코리아 CK 2군리그",
-]
+# 네이버 뉴스 검색 키워드 로딩
+def load_naver_queries():
+    import json
+    from pathlib import Path
+    
+    # 기본값
+    default_esports = [
+        "T1 티원",
+        "Gen.G 젠지",
+        "LCK",
+        "LCK CUP LCK컵",
+        "롤드컵 Worlds 월즈",
+        "VCT Pacific 퍼시픽 킥오프 Kickoff",
+        "챌린저스 코리아 CK 2군리그",
+    ]
+    default_economy = [
+        "코스피 코스닥 주식시장",
+        "환율 원달러",
+        "한국은행 금통위 기준금리",
+        "FOMC 연준 CPI PCE",
+        "삼성전자",
+        "ETF",
+        "반도체 HBM DRAM",
+    ]
+    
+    config_path = Path(__file__).resolve().parents[2] / "data" / "news_queries.json"
+    
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data.get("esports", default_esports), data.get("economy", default_economy)
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Failed to load news_queries.json: {e}")
+            
+    return default_esports, default_economy
 
-NAVER_ECONOMY_QUERIES = [
-    "코스피 코스닥 주식시장",
-    "환율 원달러",
-    "한국은행 금통위 기준금리",
-    "FOMC 연준 CPI PCE",
-    "삼성전자",
-    "ETF",
-    "반도체 HBM DRAM",
-]
+# 검색 키워드 (실행 시 로드)
+NAVER_ESPORTS_QUERIES, NAVER_ECONOMY_QUERIES = load_naver_queries()
 
 # 해외 거시경제 키워드 (구글 뉴스 RSS용)
 GOOGLE_NEWS_MACRO_QUERIES = {

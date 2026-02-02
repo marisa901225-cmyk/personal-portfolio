@@ -45,37 +45,57 @@ def parse_file(file_path: Path) -> pd.DataFrame:
     return parse_excel_or_csv(file_path)
 
 
-# 중복으로 건너뛸 가맹점 패턴
-SKIP_MERCHANT_PATTERNS = {
-    'check_card': lambda m: m.startswith('체크'),
-    'naver_financial': lambda m: '네이버파이낸셜' in m,
-}
-
+# 중복으로 건너뛸 가맹점 패턴 (참고용, 실제 로직은 should_skip_merchant에서 수행)
 CARD_PAYMENT_KEYWORDS = [
     '신한카드', '우리카드결제', '삼성카드', '국민카드', 
-    '현대카드', '롯데카드', 'BC카드'
+    '현대카드', '롯데카드', 'BC카드', '체크우리', '우리카드_펌뱅킹', '우리카드-오픈뱅킹'
 ]
 
+REFUND_KEYWORDS = {"취소", "환불", "캐시백", "포인트", "적립", "리워드", "페이백", "환급", "정산"}
+CARD_METHODS = {"creditcard", "checkcard"}
 
-def should_skip_merchant(merchant: str, amount: float, is_naverpay_file: bool) -> bool:
+def normalize_amount(amount: float, method: str, merchant: str) -> float:
+    m = (method or "").strip().lower()
+    mer = (merchant or "").strip()
+
+    # 카드/체크카드: 기본은 지출(-)로 통일
+    if m in CARD_METHODS:
+        if any(k in mer for k in REFUND_KEYWORDS):
+            return abs(amount)    # 환불/취소/캐시백류는 +
+        return -abs(amount)       # 일반 사용은 -
+
+    # 그 외는 입력 그대로
+    return float(amount)
+
+
+def should_skip_merchant(merchant: str, amount: float, method: str, is_naverpay_file: bool, existing_items_at_same_time: list | None = None) -> bool:
     """통장 내역에서 중복될 수 있는 항목 필터링"""
     if is_naverpay_file:
         return False
     
-    if amount >= 0:
-        return False
+    m = (method or "").strip().lower()
+    mer = (merchant or "").strip()
+
+    # 카드 결제 대금 통장 출금건 키워드
+    is_card_pay_keyword = any(kw in mer for kw in CARD_PAYMENT_KEYWORDS)
     
-    # 체크카드 통장 출금건
-    if merchant.startswith('체크'):
-        return True
-    
-    # 네이버파이낸셜 통장 출금건
-    if '네이버파이낸셜' in merchant:
-        return True
-    
-    # 카드 결제 대금 통장 출금건
-    if any(kw in merchant for kw in CARD_PAYMENT_KEYWORDS):
-        return True
+    # 1. 명백한 카드/체크카드 대금 인출건 (통장 내역이거나 키워드가 있는 경우)
+    if m == "banktransfer" or is_card_pay_keyword:
+        if amount < 0:
+            # 1-1. 이미 동일 날짜/금액에 '진짜 상점' 거래가 있는 경우, 이 카드 대금 인출건은 100% 중복임
+            if existing_items_at_same_time:
+                real_merchants = [i for i in existing_items_at_same_time if not any(kw in i[1] for kw in CARD_PAYMENT_KEYWORDS)]
+                if real_merchants:
+                    print(f"   🚫 중복 차단: 이미 실제 상점 거래({real_merchants[0][1]})가 존재함 -> {mer} 스킵")
+                    return True
+
+            # 1-2. 키워드 기반 필터링
+            if mer.startswith('체크') or '체크우리' in mer or is_card_pay_keyword:
+                return True
+            
+            # 1-3. 네이버파이낸셜 통장 출금건
+            if '네이버파이낸셜' in mer:
+                return True
     
     return False
 
@@ -84,7 +104,8 @@ def import_expenses_from_file(
     db_path: str,
     file_path: Path,
     dry_run: bool = False,
-    auto_category: bool = True
+    auto_category: bool = True,
+    original_filename: str | None = None
 ) -> Tuple[int, int, int, dict[str, int]]:
     """
     파일에서 지출 데이터를 읽어서 DB에 임포트
@@ -94,6 +115,7 @@ def import_expenses_from_file(
         file_path: Excel/CSV/TXT 파일 경로
         dry_run: True이면 실제 삽입하지 않고 미리보기만
         auto_category: True이면 자동 카테고리 분류
+        original_filename: 실제 파일명 (임시 파일인 경우 중요)
     
     Returns:
         (총 행수, 새로 추가된 행수, 중복 스킵 행수, 스킵 사유 카운트)
@@ -101,8 +123,15 @@ def import_expenses_from_file(
     engine = create_engine(f"sqlite:///{db_path}")
     
     # 파일 파싱
-    print(f"📄 파일 읽는 중: {file_path}")
-    df = parse_file(file_path)
+    print(f"📄 파일 읽는 중: {file_path} (원본: {original_filename})")
+    
+    # original_filename을 넘겨주도록 수정
+    if file_path.suffix.lower() == '.txt':
+        df = parse_naver_pay_text(file_path)
+    else:
+        # parse_excel_or_csv 가 original_filename을 받도록 내부에서 처리 가능
+        # 일단은 Path 객체의 특성상 stem 등을 쓰므로 original_filename이 있으면 그것의 stem을 쓰게함
+        df = parse_excel_or_csv(file_path, original_filename=original_filename)
     
     if df.empty:
         print("⚠️ 데이터가 없습니다.")
@@ -153,25 +182,35 @@ def import_expenses_from_file(
                 existing_hashes.add(memo.split('HASH:')[1])
 
         # 기존 데이터 중복 체크용 키 구축
+        from collections import defaultdict
         existing_keys = set()
         existing_abs = {}
         existing_core = {}
         existing_methodless = {}
+        existing_date_amount = defaultdict(list) # [NEW] (date, abs_amount) -> [(id, merchant, method, amount), ...]
+
         stmt = select(Expense.id, Expense.date, Expense.merchant, Expense.amount, Expense.method).where(
             Expense.user_id == user.id
         )
         for exp_id, exp_date, exp_merchant, exp_amount, exp_method in session.execute(stmt):
             if exp_date and exp_merchant is not None and exp_amount is not None:
-                existing_keys.add(
-                    build_dedup_key(exp_date, str(exp_merchant), float(exp_amount), str(exp_method or ""))
-                )
-                existing_abs[build_abs_dedup_key(
-                    exp_date, str(exp_merchant), float(exp_amount), str(exp_method or "")
-                )] = (exp_id, float(exp_amount))
-                core_key = build_core_key(exp_date, str(exp_merchant), str(exp_method or ""))
-                existing_core.setdefault(core_key, []).append((exp_id, float(exp_amount)))
-                methodless_key = build_methodless_key(exp_date, str(exp_merchant), float(exp_amount))
-                existing_methodless.setdefault(methodless_key, []).append((exp_id, str(exp_method or "")))
+                d_obj = exp_date.date() if hasattr(exp_date, "date") else exp_date
+                amt_val = float(exp_amount)
+                mer_val = str(exp_merchant).strip()
+                met_val = str(exp_method or "").strip()
+                
+                existing_keys.add(build_dedup_key(exp_date, mer_val, amt_val, met_val))
+                existing_abs[build_abs_dedup_key(exp_date, mer_val, amt_val, met_val)] = (exp_id, amt_val)
+                
+                core_key = build_core_key(exp_date, mer_val, met_val)
+                existing_core.setdefault(core_key, []).append((exp_id, amt_val))
+                
+                methodless_key = build_methodless_key(exp_date, mer_val, amt_val)
+                existing_methodless.setdefault(methodless_key, []).append((exp_id, met_val))
+                
+                # 지능형 필터링을 위한 상세 인덱스
+                date_amt_key = (d_obj, abs(amt_val))
+                existing_date_amount[date_amt_key].append((exp_id, mer_val, met_val, amt_val))
 
         # [NEW] 복구 데이터 매칭용맵 (merchant, amount) -> list of exp_id
         # 오늘 날짜(2026-01-14) 부근이거나 [복구] 메모가 있는 건들
@@ -187,22 +226,44 @@ def import_expenses_from_file(
         for idx, row in df.iterrows():
             # 날짜 파싱
             raw_date = row['date']
+            
+            # NaN 날짜 조기 필터링 (신한카드 합계 행 등)
+            if pd.isna(raw_date):
+                skipped_count += 1
+                skip_breakdown.setdefault("invalid_date", 0)
+                skip_breakdown["invalid_date"] += 1
+                continue
+            
             if hasattr(raw_date, "to_pydatetime"):
                 date = raw_date.to_pydatetime()
             elif isinstance(raw_date, str):
                 parsed = pd.to_datetime(raw_date.strip(), errors='coerce')
                 if pd.isna(parsed):
+                    skipped_count += 1
+                    skip_breakdown.setdefault("invalid_date", 0)
+                    skip_breakdown["invalid_date"] += 1
                     continue
                 date = parsed.to_pydatetime()
             else:
                 date = raw_date
             
             merchant = str(row['merchant']).strip()
-            amount = float(row['amount'])
+            raw_amount = float(row['amount'])
             method = str(row['method']).strip() if pd.notna(row.get('method')) else ''
 
+            # ✅ 부호 표준화 먼저!
+            amount = normalize_amount(raw_amount, method, merchant)
+
+            # ✅ 키 먼저 생성 (중요: NameError 방지 및 지능형 필터용)
+            d_obj = date.date() if hasattr(date, "date") else date
+            date_amt_key = (d_obj, abs(amount))
+            methodless_key = build_methodless_key(date, merchant, amount)
+            
+            # 동일 날짜/abs(금액)의 기존 데이터 확인 (지능형 필터링용)
+            existing_at_same_time = existing_date_amount.get(date_amt_key, [])
+
             # 중복 가능 항목 건너뛰기
-            if should_skip_merchant(merchant, amount, is_naverpay_file):
+            if should_skip_merchant(merchant, amount, method, is_naverpay_file, existing_at_same_time):
                 skipped_count += 1
                 skip_breakdown["skip_merchant"] += 1
                 continue
@@ -217,7 +278,7 @@ def import_expenses_from_file(
             tx_hash = generate_hash(date, merchant, amount, method)
             dedup_key = build_dedup_key(date, merchant, amount, method)
             core_key = build_core_key(date, merchant, method)
-            methodless_key = build_methodless_key(date, merchant, amount)
+            # methodless_key는 위에서 미리 생성함
 
             # 금액이 0으로 들어간 기존 거래 보정
             core_entries = existing_core.get(core_key)
@@ -268,6 +329,24 @@ def import_expenses_from_file(
                 skipped_count += 1
                 skip_breakdown["duplicate"] += 1
                 continue
+
+            # 지능형 중복 체크 (날짜/금액은 같지만 가맹점명이 미세하게 다르거나 카드 대금인 경우)
+            if existing_at_same_time:
+                # 보람상조 예외: 가맹점명이 같으면 2건까지 허용
+                if '보람상조' in merchant:
+                    same_name_count = len([i for i in existing_at_same_time if i[1] == merchant])
+                    if same_name_count >= 2:
+                        skipped_count += 1
+                        skip_breakdown["duplicate"] += 1
+                        continue
+                else:
+                    # 일반적인 경우: 날짜/금액이 같은데 이미 다른 항목이 있으면 보수적으로 스킵
+                    # 단, 기존 항목이 카드 대금인 경우에는 현재 '상점 거래'가 더 우월하므로 대체 가능성이 있지만,
+                    # 일단은 안전하게 스킵 (나중에 cleanup_duplicates가 처리)
+                    # 만약 현재 들어오는게 카드 대금이고, 기존에 상점 거래가 있다면 위 should_skip_merchant에서 걸러졌을 것임
+                    skipped_count += 1
+                    skip_breakdown["duplicate"] += 1
+                    continue
             
             # [NEW] [복구] 데이터 보정 로직
             # 엑셀 날짜는 정확한데, DB에는 오늘 날짜로 들어간 [복구] 데이터가 있는 경우
@@ -305,6 +384,7 @@ def import_expenses_from_file(
                 existing_hashes.add(tx_hash)
                 existing_keys.add(dedup_key)
                 existing_methodless.setdefault(methodless_key, []).append((expense.id, method))
+                existing_date_amount[date_amt_key].append((expense.id, merchant, method, amount))
             
             added_count += 1
         

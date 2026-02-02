@@ -176,7 +176,8 @@ async def main():
         CronTrigger(day_of_week='tue-sat', hour=6, minute=30, timezone=KST),
         id="us_market_close",
         name="US Market Close Sync (06:30 KST)",
-        kwargs={"job_id": "us_market_close"}
+        kwargs={"job_id": "us_market_close"},
+        misfire_grace_time=60  # 최대 60초까지 늦어도 실행
     )
     
     # 3. Alarm Processing: Every 5 minutes (07:00 - 21:59 KST)
