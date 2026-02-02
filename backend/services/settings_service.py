@@ -1,5 +1,6 @@
 import logging
 from sqlalchemy.orm import Session
+from fastapi import HTTPException
 
 from ..core.models import Setting
 from ..core.time_utils import utcnow
@@ -11,11 +12,67 @@ from ..core.schemas import (
 )
 from .users import get_or_create_single_user
 from .benchmark import compute_calendar_year_total_return, DEFAULT_BENCHMARK_NAME
+from .kis_secret_store import (
+    KIS_SECRET_FIELDS,
+    decrypt_kis_secret,
+    encrypt_kis_secret,
+    is_kis_secret_encrypted,
+)
 
 logger = logging.getLogger(__name__)
 
 def _normalize_benchmark_name(name: str) -> str:
     return name.replace(" ", "").upper()
+
+def _mask_secret(value: str | None) -> str | None:
+    if not value:
+        return None
+    if len(value) <= 4:
+        return "***"
+    return f"{value[:2]}***{value[-2:]}"
+
+def _safe_decrypt_secret(value: str | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        return decrypt_kis_secret(value)
+    except Exception as exc:
+        logger.warning("KIS secret decrypt failed: %s", exc)
+        return None
+
+def _encrypt_secret_or_raise(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value_str = str(value).strip()
+    if not value_str:
+        return None
+    try:
+        return encrypt_kis_secret(value_str)
+    except Exception as exc:
+        logger.warning("KIS secret encryption failed: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="KIS token key not configured or invalid",
+        ) from exc
+
+def _maybe_encrypt_legacy_kis_secrets(setting: Setting, db: Session) -> None:
+    changed = False
+    for field in KIS_SECRET_FIELDS:
+        value = getattr(setting, field, None)
+        if not value or is_kis_secret_encrypted(value):
+            continue
+        try:
+            encrypted = encrypt_kis_secret(value)
+        except Exception as exc:
+            logger.warning("KIS secret migration skipped: %s", exc)
+            return
+        if encrypted and encrypted != value:
+            setattr(setting, field, encrypted)
+            changed = True
+    if changed:
+        setting.updated_at = utcnow()
+        db.commit()
+        db.refresh(setting)
 
 
 def _is_default_benchmark_name(name: str) -> bool:
@@ -80,6 +137,7 @@ def get_settings(db: Session, user_id: int) -> Setting:
         db.refresh(setting)
     
     refresh_benchmark_if_needed(setting, db)
+    _maybe_encrypt_legacy_kis_secrets(setting, db)
     return setting
 
 
@@ -120,6 +178,27 @@ def update_settings(db: Session, user_id: int, payload: SettingsUpdate) -> Setti
     ):
         setting.benchmark_updated_at = utcnow()
 
+    if "kis_app" in payload.model_fields_set:
+        setting.kis_app = _encrypt_secret_or_raise(payload.kis_app)
+    if "kis_sec" in payload.model_fields_set:
+        setting.kis_sec = _encrypt_secret_or_raise(payload.kis_sec)
+    if "kis_acct_stock" in payload.model_fields_set:
+        setting.kis_acct_stock = _encrypt_secret_or_raise(payload.kis_acct_stock)
+    if "kis_prod" in payload.model_fields_set:
+        setting.kis_prod = _encrypt_secret_or_raise(payload.kis_prod)
+    if "kis_htsid" in payload.model_fields_set:
+        setting.kis_htsid = _encrypt_secret_or_raise(payload.kis_htsid)
+    if "kis_agent" in payload.model_fields_set:
+        setting.kis_agent = _encrypt_secret_or_raise(payload.kis_agent)
+    if "kis_prod_url" in payload.model_fields_set:
+        setting.kis_prod_url = payload.kis_prod_url
+    if "kis_ops_url" in payload.model_fields_set:
+        setting.kis_ops_url = payload.kis_ops_url
+    if "kis_vps_url" in payload.model_fields_set:
+        setting.kis_vps_url = payload.kis_vps_url
+    if "kis_vops_url" in payload.model_fields_set:
+        setting.kis_vops_url = payload.kis_vops_url
+
     setting.updated_at = utcnow()
     db.commit()
     db.refresh(setting)
@@ -150,14 +229,14 @@ def to_settings_read(setting: Setting) -> SettingsRead:
         usd_fx_now=setting.usd_fx_now,
         benchmark_name=setting.benchmark_name,
         benchmark_return=setting.benchmark_return,
-        kis_app=setting.kis_app,
-        kis_sec=setting.kis_sec,
-        kis_acct_stock=setting.kis_acct_stock,
-        kis_prod=setting.kis_prod,
-        kis_htsid=setting.kis_htsid,
+        kis_app=_mask_secret(_safe_decrypt_secret(setting.kis_app)),
+        kis_sec=_mask_secret(_safe_decrypt_secret(setting.kis_sec)),
+        kis_acct_stock=_mask_secret(_safe_decrypt_secret(setting.kis_acct_stock)),
+        kis_prod=_mask_secret(_safe_decrypt_secret(setting.kis_prod)),
+        kis_htsid=_mask_secret(_safe_decrypt_secret(setting.kis_htsid)),
         kis_prod_url=setting.kis_prod_url,
         kis_ops_url=setting.kis_ops_url,
         kis_vps_url=setting.kis_vps_url,
         kis_vops_url=setting.kis_vops_url,
-        kis_agent=setting.kis_agent,
+        kis_agent=_mask_secret(_safe_decrypt_secret(setting.kis_agent)),
     )

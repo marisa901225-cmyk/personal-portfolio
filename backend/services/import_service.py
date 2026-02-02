@@ -1,6 +1,6 @@
+import logging
 import os
 import re
-import shutil
 import tempfile
 from sqlalchemy.orm import Session
 from fastapi import UploadFile, HTTPException
@@ -8,6 +8,10 @@ from fastapi import UploadFile, HTTPException
 from .brokerage_parser import get_parser
 from ..core.models import ExternalCashflow
 
+logger = logging.getLogger(__name__)
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "10"))
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+CHUNK_SIZE = 1024 * 1024
 
 def _normalize_description(description: str | None) -> str:
     """Normalize description for consistent deduplication."""
@@ -37,14 +41,23 @@ def process_brokerage_upload(
             detail="Unsupported brokerage or file format. Only Samsung Securities Excel files are supported."
         )
 
-    # 임시 파일 저장
-    file.file.seek(0) # 안정성: 파일 포인터 리셋
-    suffix = os.path.splitext(file.filename)[1]
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        shutil.copyfileobj(file.file, tmp)
-        tmp_path = tmp.name
-
+    tmp_path: str | None = None
     try:
+        # 임시 파일 저장 (크기 제한 + 스트리밍)
+        file.file.seek(0) # 안정성: 파일 포인터 리셋
+        suffix = os.path.splitext(file.filename)[1]
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp_path = tmp.name
+            total = 0
+            while True:
+                chunk = file.file.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="File too large")
+                tmp.write(chunk)
+
         new_items = parser.parse(tmp_path, user_id)
         if not new_items:
             return {"message": "No items found to import", "added": 0, "skipped": 0, "total_parsed": 0}
@@ -100,14 +113,14 @@ def process_brokerage_upload(
             "total_parsed": len(new_items)
         }
         
+    except HTTPException:
+        raise
     except ValueError as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Validation error during import: {e}")
+        logger.warning("Validation error during import: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"Import failed: {e}", exc_info=True)
+        logger.error("Import failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="An error occurred during file processing. Please check the logs.")
     finally:
-        if os.path.exists(tmp_path):
+        if tmp_path and os.path.exists(tmp_path):
             os.remove(tmp_path)

@@ -5,13 +5,18 @@ from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 from datetime import datetime
 
+from ..core.auth import verify_api_token
 from ..core.db import get_db
 from ..services import memory_service
 
-router = APIRouter(prefix="/api/memories", tags=["Memories"])
+router = APIRouter(
+    prefix="/api/memories",
+    tags=["Memories"],
+    dependencies=[Depends(verify_api_token)],
+)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -61,16 +66,16 @@ class MemorySearchRequest(BaseModel):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @router.get("/", response_model=List[MemoryResponse])
-async def list_memories(
+def list_memories(
     category: Optional[str] = Query(None, pattern="^(profile|preference|project|fact|general)$"),
     min_importance: int = Query(1, ge=1, le=5),
     include_expired: bool = Query(False),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
     """모든 메모리 조회 (필터링/페이지네이션 지원)"""
-    return await memory_service.list_memories(
+    return memory_service.list_memories(
         db=db,
         category=category,
         min_importance=min_importance,
@@ -81,24 +86,24 @@ async def list_memories(
 
 
 @router.get("/{memory_id}", response_model=MemoryResponse)
-async def get_memory(
+def get_memory(
     memory_id: int,
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
     """특정 메모리 조회"""
-    memory = await memory_service.get_memory(db, memory_id)
+    memory = memory_service.get_memory(db, memory_id)
     if not memory:
         raise HTTPException(status_code=404, detail="Memory not found")
     return memory
 
 
 @router.post("/", response_model=MemoryResponse, status_code=201)
-async def create_memory(
+def create_memory(
     data: MemoryCreate,
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
     """새 메모리 생성 (key가 동일하면 기존 것 업데이트)"""
-    return await memory_service.create_or_update_memory(
+    return memory_service.create_or_update_memory(
         db=db,
         user_id=1,
         content=data.content,
@@ -110,13 +115,13 @@ async def create_memory(
 
 
 @router.patch("/{memory_id}", response_model=MemoryResponse)
-async def update_memory(
+def update_memory(
     memory_id: int,
     data: MemoryUpdate,
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
     """메모리 수정"""
-    memory = await memory_service.update_memory(
+    memory = memory_service.update_memory(
         db=db,
         memory_id=memory_id,
         user_id=1,
@@ -132,23 +137,23 @@ async def update_memory(
 
 
 @router.delete("/{memory_id}", status_code=204)
-async def delete_memory(
+def delete_memory(
     memory_id: int,
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
     """메모리 삭제"""
-    success = await memory_service.delete_memory(db, memory_id)
+    success = memory_service.delete_memory(db, memory_id)
     if not success:
         raise HTTPException(status_code=404, detail="Memory not found")
 
 
 @router.post("/search", response_model=List[MemoryResponse])
-async def search_memories(
+def search_memories(
     req: MemorySearchRequest,
-    db: AsyncSession = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
     """메모리 검색 (AI 에이전트용 컨텍스트 조회)"""
-    return await memory_service.search_memories(
+    return memory_service.search_memories(
         db=db,
         user_id=1,
         query=req.query,
@@ -159,8 +164,8 @@ async def search_memories(
 
 
 @router.delete("/", status_code=204)
-async def cleanup_expired(
-    db: AsyncSession = Depends(get_db),
+def cleanup_expired(
+    db: Session = Depends(get_db),
 ):
     """만료된 메모리 일괄 삭제"""
-    await memory_service.cleanup_expired_memories(db, user_id=1)
+    memory_service.cleanup_expired_memories(db, user_id=1)

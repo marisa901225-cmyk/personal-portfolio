@@ -131,7 +131,7 @@ def parse_report_xls(file_path: Path) -> pd.DataFrame:
     return mapped_df
 
 
-def parse_excel_or_csv(file_path: Path) -> pd.DataFrame:
+def parse_excel_or_csv(file_path: Path, original_filename: str | None = None) -> pd.DataFrame:
     """
     Excel 또는 CSV 파일을 읽어서 표준 형식으로 변환
     
@@ -144,13 +144,21 @@ def parse_excel_or_csv(file_path: Path) -> pd.DataFrame:
     Returns:
         표준화된 DataFrame
     """
+    # 원본 파일명 기반 판단 (임시 파일 대비)
+    check_name = original_filename or file_path.name
+    check_stem = Path(check_name).stem
+    
     # report.xls 계열은 별도 처리
-    if file_path.suffix == '.xls' and file_path.stem.startswith('report'):
+    if file_path.suffix == '.xls' and (check_stem.startswith('report') or '우리' in check_name):
         return parse_report_xls(file_path)
     
     # 파일 읽기
     if file_path.suffix in ['.xlsx', '.xls']:
-        df = pd.read_excel(file_path)
+        try:
+            # 신한카드는 가끔 skiprows가 필요할 수 있음 (하지만 위에서 본 건 바로 헤더였음)
+            df = pd.read_excel(file_path)
+        except Exception as e:
+            raise ValueError(f"Excel 파일을 읽을 수 없습니다: {e}")
     elif file_path.suffix == '.csv':
         try:
             df = pd.read_csv(file_path, encoding='utf-8')
@@ -190,12 +198,14 @@ def parse_excel_or_csv(file_path: Path) -> pd.DataFrame:
     missing = [col for col in required if col not in mapped_df.columns]
     if missing:
         raise ValueError(f"필수 컬럼이 없습니다: {missing}\n현재 컬럼: {list(df.columns)}")
-    
-    return mapped_df
 
     # method가 없으면 파일명에서 추출
     if 'method' not in mapped_df.columns:
-        mapped_df['method'] = file_path.stem
+        # [NEW] 입금/출금 컬럼이 모두 있었으면 통장 내역(banktransfer)으로 간주
+        if 'withdrawal' in mapped_from and 'deposit' in mapped_from:
+            mapped_df['method'] = 'banktransfer'
+        else:
+            mapped_df['method'] = check_stem
     
     # 날짜 형식 변환
     raw_dates = mapped_df['date'].astype(str)
@@ -203,7 +213,7 @@ def parse_excel_or_csv(file_path: Path) -> pd.DataFrame:
     
     # [FIX] 파일명에서 연도 추출 (가장 우선순위 높음)
     filename_year = None
-    year_match = re.search(r"(20\d{2})", file_path.stem)
+    year_match = re.search(r"(20\d{2})", check_name)
     if year_match:
         filename_year = year_match.group(1)
         
@@ -288,11 +298,15 @@ def parse_excel_or_csv(file_path: Path) -> pd.DataFrame:
             mapped_df.loc[mask, 'amount'] = overseas_amount[mask]
     
     # 카드 이용내역은 지출로 음수 처리
-    normalized_cols = set(df.columns)
-    if (
-        any(x in normalized_cols for x in ['이용금액(원)', '국내이용금액(원)', '이용하신곳', '이용가맹점(은행)명'])
-        or '카드' in file_path.stem
-    ) and 'deposit' not in mapped_df.columns:
+    normalized_cols = {normalize_col(c) for c in df.columns}
+    # 체크할 키워드도 정규화해서 비교
+    card_keywords = ['이용금액(원)', '국내이용금액(원)', '이용하신곳', '이용가맹점(은행)명', '카드구분', '매입구분', '승인번호']
+    is_card = (
+        any(normalize_col(keyword) in normalized_cols for keyword in card_keywords)
+        or '카드' in check_name 
+        or 'card' in check_name.lower()
+    )
+    if is_card and 'deposit' not in mapped_df.columns:
         mapped_df['amount'] = -mapped_df['amount'].abs()
     
     # 가맹점 정리

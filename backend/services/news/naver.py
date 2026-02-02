@@ -8,7 +8,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from sqlalchemy.orm import Session
 from ...core.config import settings
 from ...core.models import GameNews, SpamNews
-from .core import calculate_simhash, NAVER_NEWS_URL, NAVER_ESPORTS_QUERIES, NAVER_ECONOMY_QUERIES
+from .core import calculate_simhash, NAVER_NEWS_URL
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +40,7 @@ async def collect_naver_news(db: Session, query: str, category: str = "esports")
         return 0
     
     logger.info(f"Collecting Naver news for query: '{query}' (category: {category})")
+    count = 0
     
     headers = {
         "X-Naver-Client-Id": client_id,
@@ -192,17 +193,20 @@ async def collect_all_naver_news(db: Session):
     """
     모든 네이버 뉴스 검색 버킷을 순회하며 수집한다.
     """
+    from .core import load_naver_queries
+    esports_queries, economy_queries = load_naver_queries()
+    
     logger.info("Starting Naver News collection for all buckets...")
     total_count = 0
     
     # E스포츠 버킷
-    for query in NAVER_ESPORTS_QUERIES:
+    for query in esports_queries:
         count = await collect_naver_news(db, query, category="esports")
         total_count += count
         await asyncio.sleep(0.3)  # Rate limit 방지
     
     # 경제 버킷
-    for query in NAVER_ECONOMY_QUERIES:
+    for query in economy_queries:
         count = await collect_naver_news(db, query, category="economy")
         total_count += count
         await asyncio.sleep(0.3)

@@ -4,7 +4,7 @@ MODEL_PATH_FILE=${LLM_MODEL_PATH_FILE:-/data/llm_model_path.txt}
 EXAONE_TEMPLATE_PATH=/data/chat_template_exaone.jinja
 QWEN3_TEMPLATE_PATH=/data/chat_template_qwen3.jinja
 QWEN3VL_TEMPLATE_PATH=/data/chat_template_qwen3vl.jinja
-THREADS=${LLM_THREADS:-4}
+THREADS=${LLM_THREADS:-6}
 
 resolve_model_path() {
     if [ -f "$MODEL_PATH_FILE" ]; then
@@ -85,11 +85,12 @@ while true; do
         --host 0.0.0.0 \
         --port 8080 \
         --threads "$THREADS" \
-        --ctx-size 4096 \
-        --n-gpu-layers 36 \
+        --ctx-size 8192 \
+        --n-gpu-layers 37 \
         --parallel 1 \
         --reasoning-budget 0 \
         --flash-attn off \
+        --no-mmap \
         --jinja \
         $TEMPLATE_ARGS &
 

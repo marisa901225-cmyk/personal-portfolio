@@ -1,6 +1,8 @@
 """File upload endpoint for expense import"""
 from __future__ import annotations
 
+import logging
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -10,6 +12,11 @@ from sqlalchemy.orm import Session
 
 from ..core.auth import verify_api_token
 from ..core.db import get_db
+
+logger = logging.getLogger(__name__)
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "10"))
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
+CHUNK_SIZE = 1024 * 1024
 
 router = APIRouter(
     prefix="/api/expenses",
@@ -46,13 +53,21 @@ async def upload_expense_file(
             detail="Only Excel (.xlsx, .xls), CSV (.csv), and NaverPay TXT (.txt) files are supported"
         )
     
-    # 임시 파일로 저장
-    with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_file:
-        tmp_path = Path(tmp_file.name)
-        content = await file.read()
-        tmp_file.write(content)
-    
+    tmp_path: Path | None = None
     try:
+        # 임시 파일로 저장 (크기 제한 + 스트리밍)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_file:
+            tmp_path = Path(tmp_file.name)
+            total = 0
+            while True:
+                chunk = await file.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="File too large")
+                tmp_file.write(chunk)
+
         # import_expenses 로직 호출
         from ..scripts.expenses.importer import import_expenses_from_file
         
@@ -64,7 +79,8 @@ async def upload_expense_file(
             db_path=str(db_path),
             file_path=tmp_path,
             dry_run=False,
-            auto_category=True
+            auto_category=True,
+            original_filename=file.filename
         )
         
         return {
@@ -76,14 +92,15 @@ async def upload_expense_file(
             "filename": file.filename,
         }
     
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Expense upload failed")
+        raise HTTPException(status_code=500, detail="Internal error during import")
     
     finally:
         # 임시 파일 삭제
-        if tmp_path.exists():
+        if tmp_path and tmp_path.exists():
             tmp_path.unlink()
