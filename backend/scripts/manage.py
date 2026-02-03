@@ -179,6 +179,9 @@ def backup_db(args):
         except Exception as e:
             logging.error(f"Telegram backup failed: {e}")
 
+    client_id = os.getenv("GOOGLE_DRIVE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_DRIVE_CLIENT_SECRET")
+    refresh_token = os.getenv("GOOGLE_DRIVE_REFRESH_TOKEN")
     folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
     
     # Google Drive 전용 레이트 리밋 체크 (하루 50회)
