@@ -3,7 +3,8 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$(dirname "$SCRIPT_DIR")"
-VENV_DIR="$BACKEND_DIR/.venv"
+PROJECT_ROOT="$(dirname "$BACKEND_DIR")"
+VENV_DIR="$PROJECT_ROOT/venv"
 
 if [ ! -d "$VENV_DIR" ]; then
     echo "🔧 Creating virtual environment..."
