@@ -14,7 +14,7 @@
 		}
 	],
 	"settings": {
-		"vibereport.defaultQualityFocus": "maintenance",
-		"vibereport.projectVisionMode": "custom"
+		"vibereport.defaultQualityFocus": "development",
+		"vibereport.projectVisionMode": "auto"
 	}
 }

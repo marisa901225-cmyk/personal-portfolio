@@ -82,3 +82,37 @@ export const searchMemories = async (requestFn: RequestFn, params: MemorySearchR
 export const cleanupExpiredMemories = async (requestFn: RequestFn): Promise<void> => {
     await requestFn('/api/memories/', { method: 'DELETE' });
 };
+
+/**
+ * 장기기억 기반 AI 채팅 (스트리밍)
+ */
+export async function* chatWithMemories(
+    params: {
+        messages: { role: string; content: string }[];
+        model?: string;
+        session_id?: string;
+    },
+    baseUrl: string,
+    createHeaders: (withJson?: boolean) => HeadersInit
+): AsyncGenerator<string> {
+    const url = `${baseUrl}/api/memories/chat`;
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: createHeaders(true),
+        body: JSON.stringify(params),
+    });
+
+    if (!response.ok) {
+        throw new Error(`Chat failed: ${response.statusText}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) return;
+
+    const decoder = new TextDecoder();
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        yield decoder.decode(value, { stream: true });
+    }
+}

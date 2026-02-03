@@ -98,8 +98,14 @@ def sync_prices(args):
 def backup_db(args):
     """Backup SQLite database, compress, and notify."""
     try:
+        from dotenv import load_dotenv
+        # .env 파일 로드
+        project_root = Path(__file__).resolve().parent.parent
+        env_path = project_root / ".env"
+        load_dotenv(env_path)
+        
         from backend.services.backup import BackupService
-        from backend.services.dropbox_client import DropboxService
+        from backend.services.google_drive_client import GoogleDriveService
         from backend.scripts.utils.generate_backup_msg import generate_backup_message
         from backend.core.config import settings
     except ImportError as e:
@@ -110,9 +116,24 @@ def backup_db(args):
         print("Cancelled.")
         return
 
-    db_path = Path(settings.database_url.replace("sqlite:///", ""))
-    if not db_path.is_absolute():
-        db_path = Path(os.getcwd()) / db_path
+    db_url = settings.database_url.replace("sqlite:///", "")
+    # 프로젝트 루트(backend/) 경로 찾기
+    project_root = Path(__file__).resolve().parent.parent
+    
+    # db_url이 'backend/'로 시작하는데 현재 위치가 backend/ 폴더 안이면 중복 제거
+    if db_url.startswith("backend/") and project_root.name == "backend":
+        db_url_fixed = db_url.replace("backend/", "", 1)
+    else:
+        db_url_fixed = db_url
+
+    db_path = (project_root / db_url_fixed).resolve()
+
+    if not db_path.exists():
+        logging.error(f"Database file not found at: {db_path}")
+        # 혹시나 해서 project_root 없이도 시도해봄 (예외 상황 대비)
+        db_path = Path(db_url_fixed).resolve()
+        if not db_path.exists():
+            return
 
     backup_dir = db_path.parent.parent / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
@@ -124,9 +145,11 @@ def backup_db(args):
     raw_backup = backup_dir / f"{base_name}.db"
     BackupService.create_hot_backup(db_path, raw_backup)
 
-    zip_ext = ".zip" if os.getenv("BACKUP_ZIP_PASSWORD") else ".gz"
-    archive_path = backup_dir / f"{base_name}.db{zip_ext}"
-    BackupService.compress_with_password(raw_backup, archive_path, os.getenv("BACKUP_ZIP_PASSWORD"))
+    # 비밀번호 변수명 교정 (BACKUP_ZIP_PASSWORD -> BACKEND_ZIP_PASSWORD)
+    zip_password = os.getenv("BACKEND_ZIP_PASSWORD")
+    archive_path = backup_dir / f"{base_name}.db.zip" # 항상 .zip으로 통일
+    
+    BackupService.compress_with_password(raw_backup, archive_path, zip_password)
     if raw_backup.exists():
         raw_backup.unlink()
 
@@ -155,17 +178,39 @@ def backup_db(args):
         except Exception as e:
             logging.error(f"Telegram backup failed: {e}")
 
-    app_key = os.getenv("DROPBOX_APP_KEY")
-    app_secret = os.getenv("DROPBOX_APP_SECRET")
-    refresh_token = os.getenv("DROPBOX_REFRESH_TOKEN")
-    if app_key and app_secret and refresh_token:
+    client_id = os.getenv("GOOGLE_DRIVE_CLIENT_ID")
+    client_secret = os.getenv("GOOGLE_DRIVE_CLIENT_SECRET")
+    refresh_token = os.getenv("GOOGLE_DRIVE_REFRESH_TOKEN")
+    folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
+    
+    if client_id and client_secret and refresh_token:
+        print(f"DEBUG: Attempting Google Drive upload (ID: {client_id[:10]}...)")
         try:
-            access_token = DropboxService.get_access_token(app_key, app_secret, refresh_token)
+            access_token = GoogleDriveService.get_access_token(client_id, client_secret, refresh_token)
             if access_token:
-                DropboxService.upload_file(str(archive_path), f"/portfolio-backups/{archive_path.name}", access_token)
-                print("Dropbox backup upload completed.")
+                # 폴더 ID가 없으면 이름으로 찾거나 생성
+                if not folder_id:
+                    folder_name = "portfolio-backups"
+                    folder_id = GoogleDriveService.get_folder_id_by_name(folder_name, access_token)
+                    if not folder_id:
+                        print(f"DEBUG: Creating new folder '{folder_name}'...")
+                        folder_id = GoogleDriveService.create_folder(folder_name, access_token)
+                
+                success = GoogleDriveService.upload_file(str(archive_path), folder_id, access_token)
+                if success:
+                    print("✅ Google Drive backup upload completed successfully!💖")
+                else:
+                    print("❌ Google Drive upload failed. Check logs for details.")
+            else:
+                print("❌ Failed to get Google Drive access token. Refresh token might be invalid.")
         except Exception as e:
-            logging.error(f"Dropbox backup failed: {e}")
+            logging.error(f"Google Drive backup failed: {e}")
+    else:
+        missing = []
+        if not client_id: missing.append("CLIENT_ID")
+        if not client_secret: missing.append("CLIENT_SECRET")
+        if not refresh_token: missing.append("REFRESH_TOKEN")
+        print(f"⚠️ Google Drive upload skipped. Missing: {', '.join(missing)}")
 
     try:
         BackupService.cleanup_old_backups(backup_dir)

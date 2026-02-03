@@ -76,6 +76,7 @@ import {
     deleteMemory,
     searchMemories,
     cleanupExpiredMemories,
+    chatWithMemories,
 } from './memories';
 import {
     MemoryResponse,
@@ -473,4 +474,17 @@ export class ApiClient {
     async cleanupExpiredMemories(): Promise<void> {
         return cleanupExpiredMemories(this.requestFn);
     }
+
+    async *chatWithMemories(params: {
+        messages: { role: string; content: string }[];
+        model?: string;
+        session_id?: string;
+    }): AsyncGenerator<string> {
+        yield* chatWithMemories(
+            params,
+            this.baseUrl,
+            (withJson) => this.createHeaders(withJson)
+        );
+    }
+
 }
