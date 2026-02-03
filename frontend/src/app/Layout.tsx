@@ -30,7 +30,7 @@ const navItems = [
     { to: '/exchange', icon: ArrowLeftRight, label: '환전 내역' },
     { to: '/expenses', icon: Wallet, label: '가계부' },
     { to: '/ai-report', icon: Sparkles, label: 'AI 리포트' },
-    { to: '/memories', icon: Brain, label: 'AI 장기 기억' },
+    { to: '/memories', icon: Brain, label: 'Annie와 대화' },
     { to: '/add-asset', icon: PlusCircle, label: '자산 추가' },
 ];
 
@@ -335,7 +335,7 @@ function getPageTitle(pathname: string): string {
         '/exchange': '환전 내역',
         '/expenses': '가계부',
         '/ai-report': 'AI 리포트',
-        '/memories': 'AI 장기 기억',
+        '/memories': 'Annie와 대화',
         '/add-asset': '자산 추가',
         '/settings': '서버 설정',
     };
@@ -350,7 +350,7 @@ function getPageDescription(pathname: string): string {
         '/exchange': '환전 기록 조회 및 수정',
         '/expenses': '월별 지출/수입 분석',
         '/ai-report': '가계부 + 투자 리포트 생성',
-        '/memories': 'AI 에이전트가 학습한 나의 프로필과 정보',
+        '/memories': '우리만의 소중한 장기 기억과 대화',
         '/add-asset': '새로운 자산 등록',
         '/settings': '연결 및 환경 설정',
     };

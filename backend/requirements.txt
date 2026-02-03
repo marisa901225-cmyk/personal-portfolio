@@ -19,3 +19,6 @@ simhash==2.1.2
 beautifulsoup4==4.12.2
 feedparser==6.0.10
 tenacity==9.0.0
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client

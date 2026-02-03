@@ -11,13 +11,12 @@ services:
     devices:
       - /dev/dri:/dev/dri
     environment:
-      - LLM_MODEL_PATH=/data/Josiefied-Qwen3-8B-abliterated-v1.Q8_0.gguf
+      - LLM_MODEL_PATH=/data/Josiefied-Qwen3-8B-abliterated-v1.Q6_K.gguf
       - LLM_MODEL_PATH_FILE=/data/llm_model_path.txt
       - LLM_THREADS=6
       - GGML_SYCL_DEVICE=0
       - GGML_SYCL_FORCE_MMQ=1
       - ZES_ENABLE_SYSMAN=1
-    command: [ "--n-gpu-layers", "99" ]
     entrypoint: [ "/bin/bash", "/run.sh" ]
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
