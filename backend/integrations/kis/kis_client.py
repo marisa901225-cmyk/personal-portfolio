@@ -169,7 +169,7 @@ def _require_kis() -> None:
         )
 
 
-_DOMESTIC_TICKER_RE = re.compile(r"^\d{6}$")
+_DOMESTIC_TICKER_RE = re.compile(r"^[0-9A-Z]{6}$")
 
 
 def _stocks_info_dir() -> Path:

@@ -100,6 +100,7 @@ export async function* chatWithMemories(
         method: 'POST',
         headers: createHeaders(true),
         body: JSON.stringify(params),
+        credentials: 'include',
     });
 
     if (!response.ok) {

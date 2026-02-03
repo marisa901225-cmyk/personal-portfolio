@@ -11,6 +11,7 @@ import { ApiClient } from '@/shared/api/client';
 export interface ApiConfig {
     serverUrl: string;
     apiToken?: string;
+    cookieAuth?: boolean;
 }
 
 /**
@@ -19,7 +20,7 @@ export interface ApiConfig {
  */
 export function useApiClient(config: ApiConfig): ApiClient | null {
     return useMemo(() => {
-        if (!config.serverUrl || !config.apiToken) return null;
+        if (!config.serverUrl) return null;
         return new ApiClient(config.serverUrl, config.apiToken);
     }, [config.serverUrl, config.apiToken]);
 }
@@ -28,5 +29,5 @@ export function useApiClient(config: ApiConfig): ApiClient | null {
  * API 설정이 유효한지 확인
  */
 export function isApiEnabled(config: ApiConfig): boolean {
-    return Boolean(config.serverUrl && config.apiToken);
+    return Boolean(config.serverUrl && (config.apiToken || config.cookieAuth));
 }

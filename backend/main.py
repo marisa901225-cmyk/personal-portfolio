@@ -44,6 +44,8 @@ from .routers.telegram_webhook import router as telegram_webhook_router
 from .routers.memories import router as memories_router
 from .routers.memory_chat import router as memory_chat_router
 from .routers.scheduler_state import router as scheduler_state_router
+from .routers.naver_auth import router as naver_auth_router
+
 
 # Logging Configuration (Sensitive Data Masking enabled)
 log_level_name = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -151,6 +153,8 @@ app.include_router(telegram_webhook_router)
 app.include_router(memories_router)
 app.include_router(memory_chat_router)
 app.include_router(scheduler_state_router)
+app.include_router(naver_auth_router)
+
 
 # ============================================
 # Health & Root
