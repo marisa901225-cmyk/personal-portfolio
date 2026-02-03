@@ -95,7 +95,6 @@ async def lifespan(app: FastAPI):
     logger.info("MyAsset Backend 종료 중...")
     await close_light_client()
 
-
 app = FastAPI(title="MyAsset Portfolio Backend", lifespan=lifespan)
 
 # ============================================

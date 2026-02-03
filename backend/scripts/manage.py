@@ -108,6 +108,7 @@ def backup_db(args):
         from backend.services.google_drive_client import GoogleDriveService
         from backend.scripts.utils.generate_backup_msg import generate_backup_message
         from backend.core.config import settings
+        import json
     except ImportError as e:
         logging.error("Failed to import backup dependencies: %s", e)
         return
@@ -178,10 +179,31 @@ def backup_db(args):
         except Exception as e:
             logging.error(f"Telegram backup failed: {e}")
 
-    client_id = os.getenv("GOOGLE_DRIVE_CLIENT_ID")
-    client_secret = os.getenv("GOOGLE_DRIVE_CLIENT_SECRET")
-    refresh_token = os.getenv("GOOGLE_DRIVE_REFRESH_TOKEN")
     folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
+    
+    # Google Drive 전용 레이트 리밋 체크 (하루 50회)
+    if client_id and client_secret and refresh_token:
+        state_file = project_root / "data" / "google_drive_backup_state.json"
+        today = datetime.now().strftime("%Y-%m-%d")
+        
+        backup_count = 0
+        if state_file.exists():
+            try:
+                with open(state_file, "r") as f:
+                    state_data = json.load(f)
+                    if state_data.get("last_backup_date") == today:
+                        backup_count = state_data.get("count", 0)
+                    else:
+                        # 날짜가 바뀌었으면 초기화
+                        backup_count = 0
+            except Exception as e:
+                logging.error(f"Failed to read backup state: {e}")
+
+        if backup_count >= 50:
+            print(f"⚠️ Google Drive 레이트 리밋 도달 (오늘 {backup_count}회). 업로드를 건너뜁니다!💖")
+            client_id = None # 업로드 블록을 건너뛰기 위해 설정 해제
+        else:
+            print(f"DEBUG: Attempting Google Drive upload (오늘 {backup_count + 1}회째 시도...)")
     
     if client_id and client_secret and refresh_token:
         print(f"DEBUG: Attempting Google Drive upload (ID: {client_id[:10]}...)")
@@ -199,6 +221,13 @@ def backup_db(args):
                 success = GoogleDriveService.upload_file(str(archive_path), folder_id, access_token)
                 if success:
                     print("✅ Google Drive backup upload completed successfully!💖")
+                    # 업로드 성공 시 카운트 업데이트
+                    try:
+                        state_file.parent.mkdir(parents=True, exist_ok=True)
+                        with open(state_file, "w") as f:
+                            json.dump({"last_backup_date": today, "count": backup_count + 1}, f)
+                    except Exception as e:
+                        logging.error(f"Failed to save backup state: {e}")
                 else:
                     print("❌ Google Drive upload failed. Check logs for details.")
             else:
