@@ -86,8 +86,25 @@ class Settings(BaseSettings):
         validation_alias="ALLOWED_ORIGINS"
     )
 
+    # JWT 인증 설정
+    jwt_secret_key: str = Field(..., validation_alias="JWT_SECRET_KEY")
+    jwt_algorithm: str = Field(default="HS256", validation_alias="JWT_ALGORITHM")
+    jwt_access_token_expire_minutes: int = Field(default=1440, validation_alias="JWT_ACCESS_TOKEN_EXPIRE_MINUTES")
+
+    # 네이버 OAuth 설정
+    naver_redirect_uri: str = Field(
+        default="http://localhost:3000/auth/callback",
+        validation_alias="NAVER_REDIRECT_URI"
+    )
+    # 접근 제어: 허용된 네이버 아이디 목록 (쉼표로 구분)
+    naver_allowed_ids: str = Field(
+        default="nav654",
+        validation_alias="NAVER_ALLOWED_IDS"
+    )
+
+
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(BASE_DIR / ".env"),
         env_file_encoding="utf-8",
         extra="ignore"
     )

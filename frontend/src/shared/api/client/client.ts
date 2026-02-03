@@ -109,9 +109,13 @@ export class ApiClient {
         const headers: HeadersInit = withJson
             ? { 'Content-Type': 'application/json' }
             : {};
+
+        // 레거시 API 토큰 (쿠키 인증이 없을 때만 사용)
         if (this.apiToken) {
             headers['X-API-Token'] = this.apiToken;
+            headers['X-API-Key'] = this.apiToken;
         }
+
         return headers;
     }
 
@@ -130,7 +134,7 @@ export class ApiClient {
 
         let response: Response;
         try {
-            response = await fetch(url, { ...options, headers });
+            response = await fetch(url, { ...options, headers, credentials: 'include' });
         } catch (error) {
             // AbortError는 정상적인 요청 취소이므로 그대로 throw
             if (error instanceof Error && error.name === 'AbortError') {
