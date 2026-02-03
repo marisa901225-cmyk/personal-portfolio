@@ -6,9 +6,9 @@
     "description": "MyAsset Portfolio Project (Frontend + Backend)",
     "scripts": {
         "dev:frontend": "npm run dev --prefix frontend",
-        "dev:backend": "bash backend/scripts/ensure_venv.sh && cd backend && . .venv/bin/activate && uvicorn main:app --reload --port 8000",
+        "dev:backend": "bash backend/scripts/ensure_venv.sh && cd backend && . ../venv/bin/activate && uvicorn main:app --reload --port 8000",
         "test:frontend": "npm run test --prefix frontend",
-        "test:backend": "bash backend/scripts/ensure_venv.sh && cd backend && . .venv/bin/activate && PYTHONPATH=.. pytest tests/ -v"
+        "test:backend": "bash backend/scripts/ensure_venv.sh && cd backend && . ../venv/bin/activate && PYTHONPATH=.. pytest tests/ -v"
     },
     "dependencies": {},
     "devDependencies": {
