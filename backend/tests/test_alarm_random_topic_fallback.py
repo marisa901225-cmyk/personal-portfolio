@@ -1,11 +1,13 @@
 import unittest
 from datetime import datetime as real_datetime
 from unittest.mock import AsyncMock, MagicMock, patch
+import pytest
 
 
 from backend.services.alarm import llm_logic
 
 
+@pytest.mark.integration
 class TestAlarmRandomTopicFallback(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         from backend.services.llm.service import LLMService
@@ -15,7 +17,7 @@ class TestAlarmRandomTopicFallback(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(llm_logic, "LLMService") as MockLLM,
             patch.object(llm_logic, "datetime") as mock_datetime,
-            patch.object(llm_logic, "_load_last_random_topic_sent_at", return_value=real_datetime(2025, 1, 1, 12, 10)),
+            patch.object(llm_logic, "load_last_random_topic_sent_at", return_value=real_datetime(2025, 1, 1, 12, 10)),
         ):
             instance = MockLLM.get_instance.return_value
             instance.is_loaded.return_value = True
@@ -25,24 +27,24 @@ class TestAlarmRandomTopicFallback(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(result)
 
     async def test_random_topic_catches_up_when_missed_slot(self) -> None:
-        def choice_side_effect(seq):
-            if isinstance(seq, (list, tuple)) and "역사/문화" in seq:
-                return "역사/문화"
-            return seq[0]
-
         anchored = "역사 이야기를 툭 던져요! 조선 시대 기록은 꽤 촘촘해서, 한 번 보면 오히려 숨이 턱 막힌다더라요. 아무튼 이런 얘기 꺼내면 괜히 고개가 끄덕끄덕!"
 
         save_category_mock = MagicMock()
         save_last_sent_mock = MagicMock()
+        
+        # SystemRandom 모킹을 위한 Mock 객체
+        mock_rng = MagicMock()
+        mock_rng.choice.side_effect = lambda seq: "지구 관찰 외계인" if "지구 관찰 외계인" in seq else seq[0]
+        mock_rng.choices.side_effect = lambda seq, **kwargs: ["역사/문화"]
 
         with (
             patch.object(llm_logic, "LLMService") as MockLLM,
             patch.object(llm_logic, "datetime") as mock_datetime,
-            patch.object(llm_logic, "_load_recent_categories", return_value=[]),
-            patch.object(llm_logic, "_save_recent_category", save_category_mock),
-            patch.object(llm_logic, "_load_last_random_topic_sent_at", return_value=real_datetime(2025, 1, 1, 12, 0)),
-            patch.object(llm_logic, "_save_last_random_topic_sent_at", save_last_sent_mock),
-            patch.object(llm_logic.random, "choice", side_effect=choice_side_effect),
+            patch.object(llm_logic, "load_recent_categories", return_value=[]),
+            patch.object(llm_logic, "save_recent_category", save_category_mock),
+            patch.object(llm_logic, "load_last_random_topic_sent_at", return_value=real_datetime(2025, 1, 1, 12, 0)),
+            patch.object(llm_logic, "save_last_random_topic_sent_at", save_last_sent_mock),
+            patch.object(llm_logic.random, "SystemRandom", return_value=mock_rng),
             patch.object(llm_logic, "generate_with_main_llm_async", new=AsyncMock(return_value=anchored)),
         ):
             instance = MockLLM.get_instance.return_value
@@ -58,28 +60,24 @@ class TestAlarmRandomTopicFallback(unittest.IsolatedAsyncioTestCase):
             save_last_sent_mock.assert_called()
 
     async def test_random_topic_falls_back_after_validation_failures(self) -> None:
-        def choice_side_effect(seq):
-            if isinstance(seq, (list, tuple)) and "역사/문화" in seq:
-                return "역사/문화"
-            return seq[0]
-
-        invalid = (
-            "질문 하나 툭 던져볼까요? "
-            "요즘은 어째서 그런지 사소한 것들이 더 눈에 들어오더라요, 이상하죠. "
-            "아무튼 오늘은 그냥 이런 기분입니다, 하하. "
-            "가볍게 웃고 지나가도 되는 얘기라서 더 마음이 편하달까요, 으흠!"
-        )
+        # 한국어 비율이 낮아 폴백이 트리거되도록 유도 (영어/특수문자 위주)
+        invalid = "Generating random... ERROR 500. #@!$!@#$ retry later..."
 
         save_mock = MagicMock()
         save_last_sent_mock = MagicMock()
 
+        # SystemRandom 모킹
+        mock_rng = MagicMock()
+        mock_rng.choice.side_effect = lambda seq: "지구 관찰 외계인" if "지구 관찰 외계인" in seq else seq[0]
+        mock_rng.choices.side_effect = lambda seq, **kwargs: ["도시괴담/오컬트"]
+
         with (
             patch.object(llm_logic, "LLMService") as MockLLM,
             patch.object(llm_logic, "datetime") as mock_datetime,
-            patch.object(llm_logic, "_load_recent_categories", return_value=[]),
-            patch.object(llm_logic, "_save_recent_category", save_mock),
-            patch.object(llm_logic, "_save_last_random_topic_sent_at", save_last_sent_mock),
-            patch.object(llm_logic.random, "choice", side_effect=choice_side_effect),
+            patch.object(llm_logic, "load_recent_categories", return_value=[]),
+            patch.object(llm_logic, "save_recent_category", save_mock),
+            patch.object(llm_logic, "save_last_random_topic_sent_at", save_last_sent_mock),
+            patch.object(llm_logic.random, "SystemRandom", return_value=mock_rng),
             patch.object(llm_logic, "generate_with_main_llm_async", new=AsyncMock(return_value=invalid)),
             patch.object(llm_logic, "refine_draft_with_light_llm_async", new=AsyncMock(return_value=invalid)),
         ):
@@ -91,6 +89,7 @@ class TestAlarmRandomTopicFallback(unittest.IsolatedAsyncioTestCase):
             result = await llm_logic.summarize_with_llm([])
             self.assertIsInstance(result, str)
             self.assertTrue(result)
-            self.assertIn("역사/문화", result)
-            save_mock.assert_called_with("역사/문화")
+            self.assertIn("도시괴담/오컬트", result)
+            self.assertIn("[fallback]", result) # 폴백임을 명시적으로 확인
+            save_mock.assert_called_with("도시괴담/오컬트")
             save_last_sent_mock.assert_called()

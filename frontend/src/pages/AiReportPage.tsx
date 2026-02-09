@@ -13,6 +13,7 @@ export const AiReportPage: React.FC = () => {
         <AiReportDashboard
             serverUrl={settings.serverUrl}
             apiToken={settings.apiToken}
+            cookieAuth={settings.cookieAuth}
         />
     );
 };

@@ -79,14 +79,15 @@ async def notify_match_start(
     match_id: int,
     videogame: str,
     name: str,
-    stream_url: Optional[str] = None
+    stream_url: Optional[str] = None,
+    league_tag: Optional[str] = None,
 ) -> bool:
     """경기 시작 알림 전송"""
     current_kst = now_kst()
-    league_tag = infer_league_tag_from_name(name, videogame)
+    resolved_league_tag = league_tag or infer_league_tag_from_name(name, videogame)
     
-    if not _check_league_active(league_tag, videogame, current_kst):
-        logger.info(f"Skipping start notification for {name} - outside {league_tag} active window")
+    if not _check_league_active(resolved_league_tag, videogame, current_kst):
+        logger.info(f"Skipping start notification for {name} - outside {resolved_league_tag} active window")
         return True
     
     game_key = "LoL" if videogame == "league-of-legends" else "Valorant"
@@ -111,14 +112,15 @@ async def notify_pre_match(
     match_id: int,
     name: str,
     scheduled_at: datetime,
-    videogame: str = "league-of-legends"
+    videogame: str = "league-of-legends",
+    league_tag: Optional[str] = None,
 ) -> bool:
     """경기 10분 전 알림 전송"""
     current_kst = now_kst()
-    league_tag = infer_league_tag_from_name(name, videogame)
+    resolved_league_tag = league_tag or infer_league_tag_from_name(name, videogame)
     
-    if not _check_league_active(league_tag, videogame, current_kst):
-        logger.info(f"Skipping pre-match notification for {name} - outside {league_tag} active window")
+    if not _check_league_active(resolved_league_tag, videogame, current_kst):
+        logger.info(f"Skipping pre-match notification for {name} - outside {resolved_league_tag} active window")
         return True
     
     time_str = format_kst_time(scheduled_at)

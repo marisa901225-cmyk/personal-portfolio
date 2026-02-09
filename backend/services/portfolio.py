@@ -158,10 +158,20 @@ class PortfolioService:
     @staticmethod
     def get_portfolio_data(db: Session, user_id: int) -> dict:
         """포트폴리오 자산, 최근 거래, 요약 정보를 한꺼번에 조회합니다."""
+        # 목록/편집 대상은 활성(미삭제) 자산만 반환한다.
         assets = (
             db.query(Asset)
-            .filter(Asset.user_id == user_id)
+            .filter(
+                Asset.user_id == user_id,
+                Asset.deleted_at.is_(None),
+            )
             .order_by(Asset.id.asc())
+            .all()
+        )
+        # 요약의 실현손익은 누적 추적을 위해 삭제 자산도 포함한다.
+        assets_for_summary = (
+            db.query(Asset)
+            .filter(Asset.user_id == user_id)
             .all()
         )
         trades = (
@@ -177,7 +187,7 @@ class PortfolioService:
             .all()
         )
 
-        summary = calculate_summary(assets, external_cashflows)
+        summary = calculate_summary(assets_for_summary, external_cashflows)
         return {
             "assets": [to_asset_read(a) for a in assets],
             "trades": [to_trade_read(t) for t in trades],

@@ -38,6 +38,45 @@ def _split_message(text: str, limit: int) -> list[str]:
     return parts
 
 
+async def _send_chunk(
+    client: httpx.AsyncClient,
+    url: str,
+    chat_id: str,
+    chunk: str,
+    *,
+    parse_mode: str | None = "HTML",
+) -> bool:
+    payload = {"chat_id": chat_id, "text": chunk}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+
+    try:
+        response = await client.post(url, json=payload, timeout=10.0)
+        response.raise_for_status()
+        return True
+    except httpx.HTTPStatusError as e:
+        # Best-effort fallback: if HTML parsing fails, retry as plain text so the message isn't dropped.
+        # This may show raw tags, but it's better than losing the notification entirely.
+        if parse_mode and e.response is not None and e.response.status_code == 400:
+            try:
+                response2 = await client.post(
+                    url,
+                    json={"chat_id": chat_id, "text": chunk},
+                    timeout=10.0,
+                )
+                response2.raise_for_status()
+                logger.warning("Telegram chunk sent without parse_mode due to HTML error.")
+                return True
+            except Exception:
+                pass
+
+        logger.error("Telegram chunk failed: %s", e)
+        return False
+    except Exception as e:
+        logger.error("Telegram chunk failed: %s", e)
+        return False
+
+
 async def send_telegram_message(text: str, bot_type: str = "alarm"):
     """
     텔레그램으로 단일 메시지를 전송한다.
@@ -61,15 +100,21 @@ async def send_telegram_message(text: str, bot_type: str = "alarm"):
 
     try:
         async with httpx.AsyncClient() as client:
+            ok_count = 0
             for chunk in chunks:
-                payload = {
-                    "chat_id": chat_id,
-                    "text": chunk,
-                    "parse_mode": "HTML",
-                }
-                response = await client.post(url, json=payload, timeout=10.0)
-                response.raise_for_status()
-            return True
+                if await _send_chunk(client, url, chat_id, chunk, parse_mode="HTML"):
+                    ok_count += 1
+
+            if ok_count == len(chunks):
+                return True
+            if ok_count > 0:
+                logger.warning(
+                    "Telegram message partially sent: %d/%d chunks succeeded.",
+                    ok_count,
+                    len(chunks),
+                )
+                return True
+            return False
     except Exception as e:
         logger.error(f"Telegram message failed: {e}")
         return False

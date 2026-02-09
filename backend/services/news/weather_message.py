@@ -108,23 +108,16 @@ async def fetch_briefing_context() -> Tuple[Optional[Any], Optional[Any], Option
 
     try:
         from ..economy.economy_service import EconomyService
+        from ..economy.kr_derivatives_weekly_briefing import get_latest_option_snapshot_summary
         from ...integrations.air_korea.air_korea_client import air_korea_client
         from .esports_results import fetch_lec_results_summary
-        from ...integrations.kis.kis_client import get_options_display_board, get_futures_daily_chart
 
-        logger.info("Fetching economic, dust, LEC, and futures/options data for morning briefing...")
-        
-        # 날짜 설정
-        from datetime import datetime
-        from zoneinfo import ZoneInfo
-        kst = ZoneInfo("Asia/Seoul")
-        now = datetime.now(kst)
-        maturity_month = now.strftime("%Y%m")
-        
-        econ_task = EconomyService.get_morning_snapshot() # 캐싱 로직은 EconomyService 내부 참고
+        logger.info("Fetching economic, dust, LEC, and futures/options snapshot data for morning briefing...")
+
+        econ_task = EconomyService.get_morning_snapshot()  # 캐싱 로직은 EconomyService 내부 참고
         dust_task = air_korea_client.get_latest_active_alarm(district_name="서울")
         lec_task = fetch_lec_results_summary(limit=10, lookback_hours=48, max_chars=0)
-        options_task = get_options_display_board(maturity_month)
+        options_task = asyncio.to_thread(get_latest_option_snapshot_summary)
 
         econ_result, dust_result, lec_result, options_result = await asyncio.gather(
             econ_task,
@@ -209,19 +202,52 @@ async def generate_weather_message_with_llm(
     fo_str = "데이터 없음"
     if futures_options_data:
         try:
-            calls = futures_options_data.get("output1", [])
-            puts = futures_options_data.get("output2", [])
-            total_call_ask = sum(int(c.get("total_askp_rsqn", 0)) for c in calls)
-            total_call_bid = sum(int(c.get("total_bidp_rsqn", 0)) for c in calls)
-            total_put_ask = sum(int(p.get("total_askp_rsqn", 0)) for p in puts)
-            total_put_bid = sum(int(p.get("total_bidp_rsqn", 0)) for p in puts)
-            total_call_oi_change = sum(int(c.get("otst_stpl_qty_icdc", 0)) for c in calls)
-            total_put_oi_change = sum(int(p.get("otst_stpl_qty_icdc", 0)) for p in puts)
-            
-            fo_str = (
-                f"콜옵션 매도잔량:{total_call_ask:,}, 매수잔량:{total_call_bid:,}, OI증감:{total_call_oi_change:+,} | "
-                f"풋옵션 매도잔량:{total_put_ask:,}, 매수잔량:{total_put_bid:,}, OI증감:{total_put_oi_change:+,}"
-            )
+            def _to_int(value: Any) -> int:
+                try:
+                    return int(float(str(value).replace(",", "").strip()))
+                except (TypeError, ValueError):
+                    return 0
+
+            def _to_float(value: Any) -> float:
+                try:
+                    return float(str(value).replace(",", "").strip())
+                except (TypeError, ValueError):
+                    return 0.0
+
+            # 1) 주간 파생용 스냅샷 캐시 포맷(권장 경로)
+            if "call_bid_total" in futures_options_data and "put_bid_total" in futures_options_data:
+                total_call_ask = _to_int(futures_options_data.get("call_ask_total"))
+                total_call_bid = _to_int(futures_options_data.get("call_bid_total"))
+                total_put_ask = _to_int(futures_options_data.get("put_ask_total"))
+                total_put_bid = _to_int(futures_options_data.get("put_bid_total"))
+                total_call_oi_change = _to_int(futures_options_data.get("call_oi_change_total"))
+                total_put_oi_change = _to_int(futures_options_data.get("put_oi_change_total"))
+                pcr = _to_float(futures_options_data.get("put_call_bid_ratio"))
+                trading_date = str(futures_options_data.get("trading_date") or "")
+                if len(trading_date) == 8:
+                    trading_date = f"{trading_date[:4]}-{trading_date[4:6]}-{trading_date[6:8]}"
+
+                fo_str = (
+                    f"{trading_date} 장마감 스냅샷 | "
+                    f"콜옵션 매도잔량:{total_call_ask:,}, 매수잔량:{total_call_bid:,}, OI증감:{total_call_oi_change:+,} | "
+                    f"풋옵션 매도잔량:{total_put_ask:,}, 매수잔량:{total_put_bid:,}, OI증감:{total_put_oi_change:+,} | "
+                    f"Put/Call(매수잔량):{pcr:.2f}"
+                )
+            # 2) (하위호환) 실시간 옵션 전광판 raw payload 포맷
+            else:
+                calls = futures_options_data.get("output1", [])
+                puts = futures_options_data.get("output2", [])
+                total_call_ask = sum(_to_int(c.get("total_askp_rsqn")) for c in calls if isinstance(c, dict))
+                total_call_bid = sum(_to_int(c.get("total_bidp_rsqn")) for c in calls if isinstance(c, dict))
+                total_put_ask = sum(_to_int(p.get("total_askp_rsqn")) for p in puts if isinstance(p, dict))
+                total_put_bid = sum(_to_int(p.get("total_bidp_rsqn")) for p in puts if isinstance(p, dict))
+                total_call_oi_change = sum(_to_int(c.get("otst_stpl_qty_icdc")) for c in calls if isinstance(c, dict))
+                total_put_oi_change = sum(_to_int(p.get("otst_stpl_qty_icdc")) for p in puts if isinstance(p, dict))
+
+                fo_str = (
+                    f"콜옵션 매도잔량:{total_call_ask:,}, 매수잔량:{total_call_bid:,}, OI증감:{total_call_oi_change:+,} | "
+                    f"풋옵션 매도잔량:{total_put_ask:,}, 매수잔량:{total_put_bid:,}, OI증감:{total_put_oi_change:+,}"
+                )
         except Exception as e:
             logger.error("Failed to format futures/options data for LLM: %s", e)
 

@@ -29,6 +29,12 @@ from .random_categories import (
     get_voices,
     get_category_keywords,
 )
+
+# ✅ 기존 테스트 코드(test_alarm_random_topic_fallback)와의 호환성을 위한 별칭
+_load_recent_categories = load_recent_categories
+_save_recent_category = save_recent_category
+_load_last_random_topic_sent_at = load_last_random_topic_sent_at
+_save_last_random_topic_sent_at = save_last_random_topic_sent_at
 from .fallback_logic import (
     FALLBACK_TAG,
     mark_fallback,
@@ -151,8 +157,8 @@ async def summarize_with_llm(items: List[dict]) -> Optional[str]:
             voice=forced_voice,
             category=forced_category,
             format=forced_format,
-            must_keywords=", ".join(must_keywords),
-            avoid_keywords=avoid_keywords_str
+            must_keywords=", ".join(must_keywords) if must_keywords else "(없음, 카테고리에 맞춰 자유롭게 창작)",
+            avoid_keywords=avoid_keywords_str if avoid_keywords_str else "(없음)"
         )
         if not system_prompt or not user_prompt:
             # 폴백: 파일이 없으면 기본 메시지

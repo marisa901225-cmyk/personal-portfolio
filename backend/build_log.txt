@@ -1,0 +1,2 @@
+ Image personal-portfolio-backend-api Building 
+checking context: no permission to read from '/home/dlckdgn/personal-portfolio/backend/data/llm_drafts.jsonl'

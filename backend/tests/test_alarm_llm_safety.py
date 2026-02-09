@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 import asyncio
+import pytest
 from unittest.mock import patch
 
 
@@ -29,6 +30,7 @@ class _StubLLMService:
         return self.response
 
 
+@pytest.mark.integration
 class AlarmLLMSafetyTests(unittest.TestCase):
     def tearDown(self):
         from backend.services.llm.service import LLMService

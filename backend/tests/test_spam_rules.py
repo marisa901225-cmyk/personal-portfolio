@@ -4,7 +4,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-os.environ.setdefault("DATABASE_URL", "sqlite:////home/dlckdgn/personal-portfolio/devplan/test_db/test.db")
+# DATABASE_URL is managed by conftest.py
 os.environ["API_TOKEN"] = "test-token"
 
 from backend.main import app  # noqa: E402

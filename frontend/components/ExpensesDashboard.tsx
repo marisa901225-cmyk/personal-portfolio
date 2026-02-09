@@ -29,6 +29,7 @@ import { ExpenseRow, ExpenseUploadPanel } from './expenses';
 interface ExpensesDashboardProps {
   serverUrl: string;
   apiToken?: string;
+  cookieAuth?: boolean;
 }
 
 const COMMON_CATEGORIES = [
@@ -50,7 +51,7 @@ const parseYearMonth = (value: string) => {
   return { year, month };
 };
 
-export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl, apiToken }) => {
+export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl, apiToken, cookieAuth }) => {
   const [uploadResult, setUploadResult] = useState<BackendExpenseUploadResult | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -77,7 +78,7 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
   const hasMountedRef = useRef(false);
   const fallbackYearMonth = useMemo(() => ({ year: new Date().getFullYear(), month: new Date().getMonth() + 1 }), []);
 
-  const isRemoteEnabled = Boolean(serverUrl && apiToken);
+  const isRemoteEnabled = Boolean(serverUrl && (apiToken || cookieAuth));
   const apiClient = useMemo(() => new ApiClient(serverUrl, apiToken), [serverUrl, apiToken]);
   const selectedYearMonth = useMemo(() => parseYearMonth(selectedMonth) ?? fallbackYearMonth, [fallbackYearMonth, selectedMonth]);
   const yearOptions = useMemo(() => Array.from({ length: 7 }, (_, i) => fallbackYearMonth.year - 5 + i), [fallbackYearMonth.year]);

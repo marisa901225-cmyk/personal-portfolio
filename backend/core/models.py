@@ -16,7 +16,17 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
-from .models_misc import GameNews, IncomingAlarm, SpamRule, SpamNews, SpamAlarm, SchedulerState, EsportsMatch
+from .models_misc import (
+    GameNews,
+    IncomingAlarm,
+    SpamRule,
+    SpamNews,
+    SpamAlarm,
+    SchedulerState,
+    EconRateState,
+    KrOptionBoardSnapshot,
+    EsportsMatch,
+)
 from .time_utils import utcnow
 
 

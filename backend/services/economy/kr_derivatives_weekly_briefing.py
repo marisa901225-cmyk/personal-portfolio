@@ -10,11 +10,17 @@ from statistics import mean
 from typing import Any, Dict, Optional
 from zoneinfo import ZoneInfo
 
+from sqlalchemy.orm import Session
+
+from ...core.db import SessionLocal
+from ...core.models_misc import KrOptionBoardSnapshot
+
 logger = logging.getLogger(__name__)
 KST = ZoneInfo("Asia/Seoul")
 
 SNAPSHOT_DIR = Path(__file__).resolve().parents[2] / "storage" / "market_sentiment"
 SNAPSHOT_FILE = SNAPSHOT_DIR / "kr_option_board_snapshots.jsonl"
+_LEGACY_MIGRATION_DONE = False
 
 
 def _to_int(value: Any) -> int:
@@ -77,6 +83,136 @@ def _ensure_snapshot_dir() -> None:
     SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _to_kst_naive(dt: datetime) -> datetime:
+    """datetime을 KST naive로 정규화한다."""
+    if dt.tzinfo is None:
+        return dt
+    return dt.astimezone(KST).replace(tzinfo=None)
+
+
+def _parse_snapshot_collected_at(value: str) -> datetime:
+    """스냅샷 문자열 시각을 KST naive datetime으로 변환한다."""
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        dt = datetime.now(KST)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=KST)
+    else:
+        dt = dt.astimezone(KST)
+    return dt.replace(tzinfo=None)
+
+
+def _row_to_snapshot(row: KrOptionBoardSnapshot) -> OptionBoardSnapshot:
+    collected_at = row.collected_at
+    if collected_at.tzinfo is None:
+        collected_at = collected_at.replace(tzinfo=KST)
+    else:
+        collected_at = collected_at.astimezone(KST)
+
+    return OptionBoardSnapshot(
+        collected_at=collected_at.isoformat(),
+        trading_date=row.trading_date,
+        maturity_month=row.maturity_month,
+        market_cls=row.market_cls,
+        call_bid_total=row.call_bid_total,
+        call_ask_total=row.call_ask_total,
+        put_bid_total=row.put_bid_total,
+        put_ask_total=row.put_ask_total,
+        call_oi_change_total=row.call_oi_change_total,
+        put_oi_change_total=row.put_oi_change_total,
+        bid_pressure=row.bid_pressure,
+        oi_pressure=row.oi_pressure,
+        put_call_bid_ratio=row.put_call_bid_ratio,
+    )
+
+
+def _upsert_snapshot_row(db: Session, snapshot: OptionBoardSnapshot) -> None:
+    row = (
+        db.query(KrOptionBoardSnapshot)
+        .filter(KrOptionBoardSnapshot.trading_date == snapshot.trading_date)
+        .first()
+    )
+    collected_at = _parse_snapshot_collected_at(snapshot.collected_at)
+    values = {
+        "collected_at": collected_at,
+        "maturity_month": snapshot.maturity_month,
+        "market_cls": snapshot.market_cls,
+        "call_bid_total": snapshot.call_bid_total,
+        "call_ask_total": snapshot.call_ask_total,
+        "put_bid_total": snapshot.put_bid_total,
+        "put_ask_total": snapshot.put_ask_total,
+        "call_oi_change_total": snapshot.call_oi_change_total,
+        "put_oi_change_total": snapshot.put_oi_change_total,
+        "bid_pressure": snapshot.bid_pressure,
+        "oi_pressure": snapshot.oi_pressure,
+        "put_call_bid_ratio": snapshot.put_call_bid_ratio,
+    }
+
+    if row is None:
+        db.add(
+            KrOptionBoardSnapshot(
+                trading_date=snapshot.trading_date,
+                **values,
+            )
+        )
+        return
+
+    for key, value in values.items():
+        setattr(row, key, value)
+
+
+def _load_legacy_file_snapshots() -> list[OptionBoardSnapshot]:
+    """기존 JSONL 파일 스냅샷을 로드한다 (DB 이관용)."""
+    if not SNAPSHOT_FILE.exists():
+        return []
+
+    snapshots: list[OptionBoardSnapshot] = []
+    with open(SNAPSHOT_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                raw = json.loads(line)
+                snapshots.append(OptionBoardSnapshot.from_dict(raw))
+            except Exception:
+                continue
+    return snapshots
+
+
+def _migrate_legacy_file_cache_to_db_if_needed() -> None:
+    """
+    JSONL 기반 구형 스냅샷 캐시를 DB로 1회 이관한다.
+
+    - DB에 데이터가 이미 있으면 이관하지 않는다.
+    - 프로세스 수명 동안 한 번만 체크한다.
+    """
+    global _LEGACY_MIGRATION_DONE
+    if _LEGACY_MIGRATION_DONE:
+        return
+    _LEGACY_MIGRATION_DONE = True
+
+    if not SNAPSHOT_FILE.exists():
+        return
+
+    legacy = _load_legacy_file_snapshots()
+    if not legacy:
+        return
+
+    try:
+        with SessionLocal() as db:
+            exists = db.query(KrOptionBoardSnapshot.id).first()
+            if exists:
+                return
+            for snap in legacy:
+                _upsert_snapshot_row(db, snap)
+            db.commit()
+            logger.info("Migrated %s KR option snapshots from legacy JSONL cache into DB.", len(legacy))
+    except Exception as e:
+        logger.error("Failed to migrate legacy option snapshot cache: %s", e)
+
+
 def _week_key(trading_date: str) -> Optional[tuple[int, int]]:
     if len(trading_date) != 8:
         return None
@@ -137,42 +273,83 @@ def _aggregate_option_board(payload: Dict[str, Any], *, maturity_month: str, mar
 
 
 def _append_snapshot(snapshot: OptionBoardSnapshot) -> None:
-    _ensure_snapshot_dir()
-    with open(SNAPSHOT_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(snapshot.to_dict(), ensure_ascii=False) + "\n")
+    _migrate_legacy_file_cache_to_db_if_needed()
+    with SessionLocal() as db:
+        _upsert_snapshot_row(db, snapshot)
+        db.commit()
 
 
 def _load_snapshots(days: int = 35) -> list[OptionBoardSnapshot]:
-    if not SNAPSHOT_FILE.exists():
+    _migrate_legacy_file_cache_to_db_if_needed()
+    cutoff = _to_kst_naive(datetime.now(KST)) - timedelta(days=max(days, 1))
+
+    try:
+        with SessionLocal() as db:
+            rows = (
+                db.query(KrOptionBoardSnapshot)
+                .filter(KrOptionBoardSnapshot.collected_at >= cutoff)
+                .order_by(KrOptionBoardSnapshot.trading_date.asc())
+                .all()
+            )
+            return [_row_to_snapshot(row) for row in rows]
+    except Exception as e:
+        logger.error("Failed to load KR option snapshots from DB: %s", e)
         return []
 
-    cutoff = datetime.now(KST) - timedelta(days=max(days, 1))
-    snapshots: list[OptionBoardSnapshot] = []
-    with open(SNAPSHOT_FILE, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                raw = json.loads(line)
-                snap = OptionBoardSnapshot.from_dict(raw)
-                collected_at = datetime.fromisoformat(snap.collected_at)
-                if collected_at.tzinfo is None:
-                    collected_at = collected_at.replace(tzinfo=KST)
-                else:
-                    collected_at = collected_at.astimezone(KST)
-                if collected_at < cutoff:
-                    continue
-                snapshots.append(snap)
-            except Exception:
-                continue
 
-    dedup: dict[str, OptionBoardSnapshot] = {}
+def get_latest_option_snapshot_summary(
+    now: Optional[datetime] = None,
+    *,
+    days: int = 14,
+) -> Optional[Dict[str, Any]]:
+    """
+    최근 옵션 전광판 스냅샷(장마감 수집본) 1건을 요약 형태로 반환한다.
+
+    모닝 브리핑(07:00)에서 실시간 전광판 대신 전일 장마감 수치를 쓰기 위한 용도.
+    """
+    base = now or datetime.now(KST)
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=KST)
+    else:
+        base = base.astimezone(KST)
+
+    snapshots = _load_snapshots(days=max(days, 1))
+    if not snapshots:
+        return None
+
+    candidates: list[tuple[datetime, OptionBoardSnapshot]] = []
     for snap in snapshots:
-        dedup[snap.trading_date] = snap
-    ordered = list(dedup.values())
-    ordered.sort(key=lambda item: item.trading_date)
-    return ordered
+        try:
+            collected_at = datetime.fromisoformat(snap.collected_at)
+        except ValueError:
+            continue
+
+        if collected_at.tzinfo is None:
+            collected_at = collected_at.replace(tzinfo=KST)
+        else:
+            collected_at = collected_at.astimezone(KST)
+
+        if collected_at <= base:
+            candidates.append((collected_at, snap))
+
+    if not candidates:
+        return None
+
+    _, latest = max(candidates, key=lambda item: item[0])
+    return {
+        "source": "snapshot_db",
+        "trading_date": latest.trading_date,
+        "maturity_month": latest.maturity_month,
+        "call_bid_total": latest.call_bid_total,
+        "call_ask_total": latest.call_ask_total,
+        "put_bid_total": latest.put_bid_total,
+        "put_ask_total": latest.put_ask_total,
+        "call_oi_change_total": latest.call_oi_change_total,
+        "put_oi_change_total": latest.put_oi_change_total,
+        "put_call_bid_ratio": latest.put_call_bid_ratio,
+        "bid_pressure": latest.bid_pressure,
+        "oi_pressure": latest.oi_pressure,
+    }
 
 
 async def collect_option_board_snapshot(
@@ -377,4 +554,5 @@ async def build_weekly_derivatives_briefing(now: Optional[datetime] = None) -> O
 __all__ = [
     "collect_option_board_snapshot",
     "build_weekly_derivatives_briefing",
+    "get_latest_option_snapshot_summary",
 ]

@@ -28,32 +28,23 @@ def build_random_topic_fallback(category: str) -> str:
     korean_keywords = [k for k in keywords if re.search(r"[가-힣]", k)]
     pool = korean_keywords if len(korean_keywords) >= 2 else keywords
 
-    picked = random.sample(pool, k=2) if len(pool) >= 2 else (pool or ["잡학", "TMI"])
-    k1 = picked[0]
-    k2 = picked[1] if len(picked) > 1 else picked[0]
+    # ✅ 키워드 풀이 충분할 때와 없을 때를 구분하여 메시지 생성
+    if len(pool) >= 2:
+        picked = random.sample(pool, k=2)
+        k1, k2 = picked[0], picked[1]
+        body = f"{k1} 얘기만 하다 보면 {k2}가 슬쩍 튀어나오는데, 그 순간이 은근히 짜릿하다더라요. 다음에 {k1} 떠오르면 '아 그거!' 하고 피식 웃어봐요."
+    else:
+        # 키워드가 없거나 부족할 때 (LO 요청: 카테고리 중심)
+        body = f"{category}에 대해 깊이 생각하다 보면 세상이 조금은 다르게 보일지도 몰라요. 때로는 정해진 내용보다 당신의 상상이 더 큰 정답일 수 있거든요."
 
-    openers = [
-        "툭 던지는",
-        "쓱 꺼내는",
-        "탁 치는",
-        "살짝 과장한",
-    ]
-    closers = [
-        "아무튼 오늘은 여기까지!",
-        "아무튼 그렇다더라!",
-        "아무튼 다음에 또 툭!",
-        "아무튼 뇌가 간질간질하죠?",
-    ]
+    openers = ["툭 던지는", "쓱 꺼내는", "탁 치는", "살짝 과장한"]
+    closers = ["아무튼 오늘은 여기까지!", "아무튼 그렇다더라!", "아무튼 다음에 또 툭!", "아무튼 뇌가 간질간질하죠?"]
 
     opener = random.choice(openers)
     closer = random.choice(closers)
 
-    message = (
-        f"{opener} {category} 잡학 한 토막! "
-        f"{k1} 얘기만 하다 보면 {k2}가 슬쩍 튀어나오는데, 그 순간이 은근히 짜릿하다더라요. "
-        f"다음에 {k1} 떠오르면 '아 그거!' 하고 피식 웃어봐요, {closer}"
-    ).strip()
-    return mark_fallback(message)
+    message = f"{opener} {category} 이야기 한 토막! {body} {closer}"
+    return mark_fallback(message.strip())
 
 
 def build_alarm_summary_fallback(items: List[dict]) -> str:

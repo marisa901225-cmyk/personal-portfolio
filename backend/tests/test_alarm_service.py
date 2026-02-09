@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+import pytest
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
@@ -19,6 +20,7 @@ async def run_processing():
     finally:
         db.close()
 
+@pytest.mark.integration
 async def test_alarm_service():
     print("--- Starting Alarm Service Test ---")
     ts = datetime.now().strftime("%H%M%S")

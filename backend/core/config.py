@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     naver_client_id: Optional[str] = Field(default=None, validation_alias="NAVER_CLIENT_ID")
     naver_client_secret: Optional[str] = Field(default=None, validation_alias="NAVER_CLIENT_SECRET")
     kma_service_key: Optional[str] = Field(default=None, validation_alias="KMA_SERVICE_KEY")
+    fred_api_key: Optional[str] = Field(default=None, validation_alias="FRED_API_KEY")
+    bok_ecos_api_key: Optional[str] = Field(default=None, validation_alias="BOK_ECOS_API_KEY")
     
     # 알림 (Telegram)
     telegram_bot_token: Optional[str] = Field(default=None, validation_alias="TELEGRAM_BOT_TOKEN")

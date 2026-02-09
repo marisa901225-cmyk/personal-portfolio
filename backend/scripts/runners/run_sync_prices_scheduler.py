@@ -102,6 +102,28 @@ async def run_backup_job():
             db.close()
             logger.info("--- DB Backup Job Finished ---")
 
+async def run_rate_change_check():
+    """
+    한국은행/미국 기준금리 변경 감지
+    """
+    from backend.services.economy.rate_alerts import check_rate_changes_and_notify
+
+    db = SessionLocal()
+    async with monitor_job_async("rate_change_check", db):
+        logger.info("--- Starting Rate Change Check ---")
+        try:
+            changed = await check_rate_changes_and_notify()
+            if changed:
+                logger.info("Rate change alert sent.")
+            else:
+                logger.info("No rate changes detected.")
+        except Exception as e:
+            logger.error(f"Rate change check job failed: {e}")
+            raise e
+        finally:
+            db.close()
+            logger.info("--- Rate Change Check Finished ---")
+
 async def run_monthly_maintenance():
     """
     매월 1일 수행되는 유지보수 작업 (스팸 리포트 및 데이터 정리)
@@ -194,6 +216,14 @@ async def main():
         CronTrigger(hour=6, minute=30, timezone=KST),
         id="daily_backup",
         name="Daily DB Backup (06:30 KST)"
+    )
+
+    # 4-1. Rate Change Check: Every day at 09:05 KST
+    scheduler.add_job(
+        run_rate_change_check,
+        CronTrigger(hour=9, minute=5, timezone=KST),
+        id="rate_change_check",
+        name="Rate Change Check (09:05 KST)"
     )
 
     # 5. Monthly Maintenance: 1st day of every month at 04:00 KST (Cleanup) and 09:00 KST (Report)

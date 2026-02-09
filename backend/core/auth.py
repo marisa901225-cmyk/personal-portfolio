@@ -30,14 +30,16 @@ async def verify_api_token(
 ) -> None:
     """
     통합 인증 로직.
-    1. Authorization 헤더가 있으면 JWT 검증 시도.
+    1. JWT 검증 시도 (Cookie or Authorization: Bearer <TOKEN>)
     2. JWT가 성공하면 API 키 검사 없이 통과.
-    3. JWT가 없거나 실패하면 기존 X-API-Token (API 키) 검사.
+    3. JWT가 없거나 실패하더라도 X-API-Token (API 키)이 유효하면 통과.
     """
-    # 1. JWT 검증 시도 (Cookie or Authorization: Bearer <TOKEN>)
+    # 1. JWT 검증 시도
     token = auth_token
     if not token and authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ")[1]
+    
+    jwt_valid = False
     if token:
         try:
             jwt.decode(
@@ -45,22 +47,33 @@ async def verify_api_token(
                 settings.jwt_secret_key,
                 algorithms=[settings.jwt_algorithm]
             )
-            # JWT 검증 성공 시 API 키 검사 우회
-            return
+            # JWT 검증 성공
+            jwt_valid = True
         except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
-            # JWT 실패 시 API 키 검사로 넘어가거나 에러 발생
-            if not x_api_token:
-                raise HTTPException(status_code=401, detail="Invalid token and no API key provided")
+            # JWT 실패 시 로그를 남기거나 조용히 넘어가서 API 키를 확인하게 함
+            pass
+
+    if jwt_valid:
+        return
 
     # 2. 기존 API 키 검사
-    token = resolve_api_token()
-    if not token:
+    token_required = resolve_api_token()
+    
+    # 설정이 없는 경우 (디버그 모드나 무인증 허용 시)
+    if not token_required:
         if settings.debug or ALLOW_NO_AUTH:
             return
         raise HTTPException(status_code=503, detail="API token not configured")
     
-    if not x_api_token or not hmac.compare_digest(x_api_token, token):
-        raise HTTPException(status_code=401, detail="invalid api token")
+    # X-API-Token 헤더 확인
+    if x_api_token and hmac.compare_digest(x_api_token, token_required):
+        return
+
+    # 둘 다 실패한 경우
+    raise HTTPException(
+        status_code=401, 
+        detail="Invalid authentication credentials (JWT or API Key required)"
+    )
 
 
 # ============================================

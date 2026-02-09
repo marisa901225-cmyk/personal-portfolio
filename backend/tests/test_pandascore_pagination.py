@@ -1,8 +1,10 @@
 import os
 import unittest
+import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
+@pytest.mark.integration
 class PandaScorePaginationTests(unittest.IsolatedAsyncioTestCase):
     async def test_collect_paginates_until_match_found(self) -> None:
         os.environ["PANDASCORE_API_KEY"] = "test-key"

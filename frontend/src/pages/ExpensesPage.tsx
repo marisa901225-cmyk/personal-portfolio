@@ -15,6 +15,7 @@ export const ExpensesPage: React.FC = () => {
         <ExpensesDashboard
             serverUrl={settings.serverUrl}
             apiToken={settings.apiToken}
+            cookieAuth={settings.cookieAuth}
         />
     );
 };
