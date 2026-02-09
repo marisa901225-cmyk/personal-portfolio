@@ -10,6 +10,7 @@ type FxFilter = 'ALL' | FxTransactionType;
 interface ExchangeHistoryProps {
   serverUrl: string;
   apiToken?: string;
+  cookieAuth?: boolean;
   onFxBaseUpdated?: (value: number) => void;
 }
 
@@ -43,6 +44,7 @@ const parseNumber = (value: string): number | null => {
 export const ExchangeHistory: React.FC<ExchangeHistoryProps> = ({
   serverUrl,
   apiToken,
+  cookieAuth,
   onFxBaseUpdated,
 }) => {
   const [records, setRecords] = useState<FxTransactionRecord[]>([]);
@@ -63,7 +65,7 @@ export const ExchangeHistory: React.FC<ExchangeHistoryProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
 
-  const isRemoteEnabled = Boolean(serverUrl && apiToken);
+  const isRemoteEnabled = Boolean(serverUrl && (apiToken || cookieAuth));
   const apiClient = useMemo(() => new ApiClient(serverUrl, apiToken), [serverUrl, apiToken]);
 
   const loadRecords = async ({ reset }: { reset: boolean }) => {

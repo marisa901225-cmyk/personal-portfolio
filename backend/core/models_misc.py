@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Integer, String, Text, Index
+from sqlalchemy import DateTime, Integer, String, Text, Index, Float
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -199,6 +199,64 @@ class SchedulerState(Base):
     )
 
 
+class EconRateState(Base):
+    """경제 지표(기준금리) 변경 감지 상태 저장"""
+    __tablename__ = "econ_rate_states"
+
+    name: Mapped[str] = mapped_column(String(50), primary_key=True)
+
+    fed_funds_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fed_funds_date: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    bok_base_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    bok_base_date: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow,
+        onupdate=utcnow,
+        nullable=False,
+    )
+
+
+class KrOptionBoardSnapshot(Base):
+    """국내 옵션 전광판 일별 스냅샷 (주간 파생 심리 브리핑용)"""
+
+    __tablename__ = "kr_option_board_snapshots"
+    __table_args__ = (
+        Index("idx_kr_option_board_snapshots_trading_date", "trading_date", unique=True),
+        Index("idx_kr_option_board_snapshots_collected_at", "collected_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    trading_date: Mapped[str] = mapped_column(String(8), nullable=False)
+    maturity_month: Mapped[str] = mapped_column(String(6), nullable=False)
+    market_cls: Mapped[str] = mapped_column(String(6), nullable=False, default="")
+
+    call_bid_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    call_ask_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    put_bid_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    put_ask_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    call_oi_change_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    put_oi_change_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    bid_pressure: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    oi_pressure: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    put_call_bid_ratio: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow,
+        onupdate=utcnow,
+        nullable=False,
+    )
+
+
 class EsportsMatch(Base):
     """E-Sports 매치 상태 캐시 (스마트 폴링 로직용)"""
     __tablename__ = "esports_matches"
@@ -239,4 +297,3 @@ class EsportsMatch(Base):
         onupdate=utcnow,
         nullable=False,
     )
-

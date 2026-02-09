@@ -13,6 +13,7 @@ export const ExchangePage: React.FC = () => {
         <ExchangeHistory
             serverUrl={settings.serverUrl}
             apiToken={settings.apiToken}
+            cookieAuth={settings.cookieAuth}
             onFxBaseUpdated={(value) => setSettings((prev) => ({ ...prev, usdFxBase: value }))}
         />
     );

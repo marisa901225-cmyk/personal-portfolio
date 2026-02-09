@@ -39,19 +39,13 @@ class TestAlarmProcessorNoRandomWithExpense(unittest.IsolatedAsyncioTestCase):
              patch.object(processor, "should_ignore", return_value=False), \
              patch.object(processor, "is_whitelisted", return_value=True), \
              patch.object(processor, "parse_card_approval", return_value=fake_card_info), \
-             patch.object(processor, "summarize_expenses_with_llm", new=AsyncMock(return_value="지출이 안정적이에요.")), \
              patch.object(processor, "summarize_with_llm", new=AsyncMock(return_value="랜덤메시지")), \
              patch.object(processor, "send_telegram_message", new=AsyncMock()) as mock_send:
 
             await processor.process_pending_alarms(db)
 
             processor.summarize_with_llm.assert_not_awaited()
-            processor.summarize_expenses_with_llm.assert_awaited_once()
-            mock_send.assert_awaited_once()
-
-            sent_text = mock_send.await_args.args[0]
-            self.assertIn("[가계부 리포트]", sent_text)
-            self.assertNotIn("랜덤메시지", sent_text)
+            mock_send.assert_not_awaited()
 
 
 if __name__ == "__main__":

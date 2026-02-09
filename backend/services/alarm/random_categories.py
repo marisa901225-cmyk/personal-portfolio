@@ -172,6 +172,7 @@ def pick_keywords_for_constraints(category: str, *, count: int = 4) -> List[str]
     category_keywords = get_category_keywords()
     keywords = list(category_keywords.get(category) or [])
     if not keywords:
+        # ✅ 키워드 리스트가 비어있으면 빈 리스트 반환 (LO 요청: 카테고리 자율성 확보)
         return []
     korean_keywords = [k for k in keywords if re.search(r"[가-힣]", k)]
     pool = korean_keywords or keywords
@@ -187,6 +188,7 @@ def has_category_anchor(text: str, category: str) -> bool:
     category_keywords = get_category_keywords()
     keywords = category_keywords.get(category)
     if not keywords:
+        # ✅ 키워드가 정의되지 않은 카테고리는 검증 생략 (항상 통과)
         return True
     lowered = text.lower()
     return any(keyword.lower() in lowered for keyword in keywords)

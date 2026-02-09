@@ -367,7 +367,7 @@ def run_collector(args):
     """Run the alarm collector FastAPI service."""
     import uvicorn
     # Import app lazily to avoid immediate side effects
-    from backend.alarm_collector import app
+    from backend.services.alarm.collector_app import app
     
     logging.info("Starting alarm collector on %s:%d", args.host, args.port)
     uvicorn.run(app, host=args.host, port=args.port)

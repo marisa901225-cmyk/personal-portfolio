@@ -17,9 +17,14 @@ export const DashboardPage: React.FC = () => {
     const apiClient = useApiClient({
         serverUrl: settings.serverUrl,
         apiToken: settings.apiToken,
+        cookieAuth: settings.cookieAuth,
     });
 
-    const enabled = isApiEnabled({ serverUrl: settings.serverUrl, apiToken: settings.apiToken });
+    const enabled = isApiEnabled({
+        serverUrl: settings.serverUrl,
+        apiToken: settings.apiToken,
+        cookieAuth: settings.cookieAuth,
+    });
 
     // Query 훅들
     const assetsQuery = useAssetsQuery(apiClient, { enabled });

@@ -6,6 +6,7 @@ import { getUserErrorMessage } from '@/shared/errors';
 interface UseAiReportProps {
     serverUrl: string;
     apiToken?: string;
+    cookieAuth?: boolean;
 }
 
 export type GeneralPeriod = {
@@ -15,7 +16,7 @@ export type GeneralPeriod = {
     half?: number | null;
 };
 
-export const useAiReport = ({ serverUrl, apiToken }: UseAiReportProps) => {
+export const useAiReport = ({ serverUrl, apiToken, cookieAuth }: UseAiReportProps) => {
     const [query, setQuery] = useState('2025년 6월 리포트');
     const [maxTokens, setMaxTokens] = useState(8000);
     const [currentResult, setCurrentResult] = useState<BackendAiReportTextResponse | null>(null);
@@ -33,7 +34,7 @@ export const useAiReport = ({ serverUrl, apiToken }: UseAiReportProps) => {
     const [isSavedLoading, setIsSavedLoading] = useState(false);
     const [deletingId, setDeletingId] = useState<number | null>(null);
 
-    const isRemoteEnabled = Boolean(serverUrl && apiToken);
+    const isRemoteEnabled = Boolean(serverUrl && (apiToken || cookieAuth));
     const apiClient = useMemo(() => new ApiClient(serverUrl, apiToken), [serverUrl, apiToken]);
 
     const loadGeneralReport = useCallback(async (period: GeneralPeriod) => {

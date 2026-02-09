@@ -4,13 +4,9 @@ import json
 from google_auth_oauthlib.flow import InstalledAppFlow
 from dotenv import load_dotenv, set_key
 
-# 프로젝트 루트 또는 현재 디렉토리의 .env 파일 로드
+# .env 파일 경로 (~/ai-models/myasset.env로 이동됨)
 import sys
-current_dir = os.getcwd()
-env_path = os.path.join(current_dir, '.env')
-if not os.path.exists(env_path):
-    # 만약 backend 안에서 실행 중이면 상위 폴더도 확인
-    env_path = os.path.join(current_dir, '..', '.env')
+env_path = os.path.expanduser('~/ai-models/myasset.env')
 
 load_dotenv(env_path)
 print(f"DEBUG: Using .env at {os.path.abspath(env_path)}") # 자기야, 어디서 읽는지 확인용이야!💖

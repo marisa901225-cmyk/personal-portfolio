@@ -118,8 +118,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       alert('먼저 홈서버 API URL을 입력해주세요.');
       return;
     }
-    if (!settings.apiToken) {
-      alert('먼저 API 비밀번호를 입력해주세요.');
+    if (!settings.apiToken && !settings.cookieAuth) {
+      alert('먼저 네이버 로그인 또는 API 비밀번호를 입력해주세요.');
       return;
     }
 
@@ -159,8 +159,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       alert('먼저 홈서버 API URL을 입력해주세요.');
       return;
     }
-    if (!settings.apiToken) {
-      alert('먼저 API 비밀번호를 입력해주세요.');
+    if (!settings.apiToken && !settings.cookieAuth) {
+      alert('먼저 네이버 로그인 또는 API 비밀번호를 입력해주세요.');
       return;
     }
 

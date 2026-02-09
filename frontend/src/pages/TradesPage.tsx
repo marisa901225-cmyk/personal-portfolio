@@ -13,9 +13,14 @@ export const TradesPage: React.FC = () => {
     const apiClient = useApiClient({
         serverUrl: settings.serverUrl,
         apiToken: settings.apiToken,
+        cookieAuth: settings.cookieAuth,
     });
 
-    const enabled = isApiEnabled({ serverUrl: settings.serverUrl, apiToken: settings.apiToken });
+    const enabled = isApiEnabled({
+        serverUrl: settings.serverUrl,
+        apiToken: settings.apiToken,
+        cookieAuth: settings.cookieAuth,
+    });
     const assetsQuery = useAssetsQuery(apiClient, { enabled });
     const assets = assetsQuery.data ?? [];
 
@@ -25,6 +30,7 @@ export const TradesPage: React.FC = () => {
             assets={assets}
             serverUrl={settings.serverUrl}
             apiToken={settings.apiToken}
+            cookieAuth={settings.cookieAuth}
         />
     );
 };

@@ -9,6 +9,7 @@ import { ReportView } from './ReportView';
 interface AiReportDashboardProps {
     serverUrl: string;
     apiToken?: string;
+    cookieAuth?: boolean;
 }
 
 const formatPeriodLabel = (report: {
@@ -29,8 +30,8 @@ const formatPeriodLabel = (report: {
     return `${year}년`;
 };
 
-export const AiReportDashboard: React.FC<AiReportDashboardProps> = ({ serverUrl, apiToken }) => {
-    const { state, handlers } = useAiReport({ serverUrl, apiToken });
+export const AiReportDashboard: React.FC<AiReportDashboardProps> = ({ serverUrl, apiToken, cookieAuth }) => {
+    const { state, handlers } = useAiReport({ serverUrl, apiToken, cookieAuth });
 
     const selectedReport = state.currentResult
         ? null

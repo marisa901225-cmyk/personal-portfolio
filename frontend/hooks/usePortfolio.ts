@@ -45,7 +45,9 @@ export interface UsePortfolioResult {
 export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
   const queryClient = useQueryClient();
   const [syncing, setSyncing] = useState(false);
-  const isRemoteEnabled = Boolean(settings.serverUrl && settings.apiToken);
+  const isRemoteEnabled = Boolean(
+    settings.serverUrl && (settings.apiToken || settings.cookieAuth)
+  );
   const apiClient = useMemo(
     () => new ApiClient(settings.serverUrl, settings.apiToken),
     [settings.serverUrl, settings.apiToken]

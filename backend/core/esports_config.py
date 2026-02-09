@@ -17,7 +17,9 @@ def lol_league_tagger(match: dict) -> str:
     league_name = (match.get("league") or {}).get("name") or ""
     lower_league = league_name.lower()
     
-    if "lck" in lower_league:
+    if "lcq" in lower_league: # Last Chance Qualifier (보통 국제대회 직전)
+        return "Worlds/MSI"
+    if "lck" in lower_league or "lck cup" in lower_league:
         if any(kw in lower_league for kw in ["challengers", "cl"]):
             return "LCK-CL"
         return "LCK"
@@ -55,14 +57,18 @@ LEAGUE_ACTIVE_WINDOWS: Dict[str, List[Dict[str, Any]]] = {
     "international": [
         {"weekday": i, "start": (14, 0), "end": (25, 0)} for i in range(7)
     ],
+    # LEC: 주로 주말 밤 시간대 (LO의 수면 시각인 22시 이후 알람 억제)
+    "lec": [
+        {"weekday": i, "start": (22, 0), "end": (22, 0)} for i in range(7)
+    ],
 }
 
 # 게임 레지스트리 설정
 GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
     "league-of-legends": {
         "display_name": "LoL",
-        "interest_keywords": ["lck", "lpl", "worlds", "msi", "월즈", "challengers", "cl"],
-        "exclude_keywords": [".a", "academy", "youth", "아카데미", "lec", "lcs"],  # Exclude EU/NA leagues (KST timezone mismatch)
+        "interest_keywords": ["lck", "lpl", "lec", "worlds", "msi", "월즈", "challengers", "cl"],
+        "exclude_keywords": [".a", "academy", "youth", "아카데미", "lcs"],  # Exclude LCS but keep LEC
         "noise_keywords": [],
         "tagger": lol_league_tagger,
         "is_international": lambda tag: tag in ["Worlds/MSI"],
@@ -72,6 +78,7 @@ GAME_REGISTRY: Dict[str, Dict[str, Any]] = {
             "LCK-CL": "lck-cl",
             "LCK": "lck",
             "LPL": "lpl",
+            "LEC": "lec",
             "Worlds/MSI": "international",
         },
     },
@@ -118,16 +125,17 @@ def infer_league_tag_from_name(name: str, videogame: str) -> str:
     name_lower = name.lower()
     
     if videogame == "league-of-legends":
-        if "lck" in name_lower and ("cl" in name_lower or "challengers" in name_lower):
-            return "LCK-CL"
-        elif "lck" in name_lower:
+        if "lck" in name_lower or "lck cup" in name_lower:
             return "LCK"
         elif "lpl" in name_lower:
             return "LPL"
         elif "worlds" in name_lower or "msi" in name_lower:
             return "Worlds/MSI"
+        # [NEW] Default to LCK for LoL if no other keywords found
+        return "LCK" 
     
-    return "default"
+    if videogame == "valorant":
+        return "vct" # Valorant는 기본적으로 VCT 시간대 사용
 
 
 def is_league_in_active_window(league_tag: str, game_slug: str, weekday: int, current_time_minutes: int) -> bool:

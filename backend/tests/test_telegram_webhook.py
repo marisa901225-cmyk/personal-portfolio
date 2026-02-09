@@ -1,4 +1,5 @@
 import unittest
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -6,6 +7,7 @@ from backend.main import app
 import backend.routers.telegram_webhook as telegram_webhook
 
 
+@pytest.mark.integration
 class TelegramWebhookAuthTests(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)

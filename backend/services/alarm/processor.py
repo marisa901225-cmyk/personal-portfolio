@@ -2,7 +2,6 @@
 # 420줄 alarm_service.py에서 추출한 알람 처리 로직
 import logging
 import os
-import html
 import joblib
 from datetime import datetime
 from typing import List, Set
@@ -21,7 +20,7 @@ from .filters import (
 )
 from .parsers import parse_card_approval
 from .sanitizer import escape_html_preserve_urls
-from .llm_logic import summarize_with_llm, summarize_expenses_with_llm
+from .llm_logic import summarize_with_llm
 from .match_notifier import check_upcoming_matches
 
 logger = logging.getLogger(__name__)
@@ -83,9 +82,7 @@ async def process_pending_alarms(db: Session):
 
         summaries: List[str] = []
         to_summarize_alarms: List[dict] = []
-        to_analyze_expenses: List[dict] = []
         senders: Set[str] = set()
-        has_expenses = False
         
         filtered_count = 0
         filtered_reasons = {"광고/프로모션": 0, "OTP/보안": 0, "플레이스홀더": 0}
@@ -187,13 +184,6 @@ async def process_pending_alarms(db: Session):
                     alarm.classification = "rule"
                     # db.commit() 제거
                     processing_alarms.remove(alarm)
-                    
-                    has_expenses = True
-                    to_analyze_expenses.append({
-                        "merchant": card_info["merchant"], "amount": card_info["amount"], "category": category
-                    })
-                    merchant_esc = html.escape(card_info['merchant'])
-                    summaries.append(f"💳 <b>결제 승인</b>: {merchant_esc} ({abs(card_info['amount']):,.0f}원)")
                     continue
 
                 # 3. 요약 대상 알람 (루프 끝난 후 LLM 처리)
@@ -212,11 +202,7 @@ async def process_pending_alarms(db: Session):
                 db.rollback()
                 # 개별 알람 실패 시 다음 알람으로 진행 (해당 알람은 processing 상태 유지되어 finally에서 복구됨)
 
-        # 4. 요약 및 지출 분석 (배치 처리)
-        if to_analyze_expenses:
-            expense_insight = await summarize_expenses_with_llm(to_analyze_expenses)
-            if expense_insight:
-                summaries.insert(0, f"💰 <b>지출 분석</b>: {html.escape(expense_insight)}\n")
+        # 4. 요약 처리 (가계부 리포트 비활성화)
 
         llm_summary = None
         if to_summarize_alarms:
@@ -240,9 +226,7 @@ async def process_pending_alarms(db: Session):
 
         # 5. 텔레그램 전송
         if summaries:
-            if has_expenses and to_summarize_alarms: title = "알림 및 가계부 리포트"
-            elif has_expenses: title = "가계부 리포트"
-            elif to_summarize_alarms: title = "알림 리포트"
+            if to_summarize_alarms: title = "알림 리포트"
             else:
                 random_titles = ["랜덤 토픽", "잡학사전", "브레이크 타임", "오늘의 TMI", "잠깐 쉬어가기", "심심풀이 지식"]
                 title = random_titles[(datetime.now().minute // 10) % len(random_titles)]
@@ -250,7 +234,7 @@ async def process_pending_alarms(db: Session):
             sender_info = f" ({', '.join(list(senders)[:3])}{'...' if len(senders) > 3 else ''})" if senders else ""
             header = f"<b>[{title}]{sender_info}</b>\n\n"
             
-            if filtered_count > 0 and (to_summarize_alarms or has_expenses):
+            if filtered_count > 0 and to_summarize_alarms:
                 details = [f"{r} {c}개" for r, c in filtered_reasons.items() if c > 0]
                 if details: header += f"🗑️ <i>필터링됨: {', '.join(details)}</i>\n\n"
             

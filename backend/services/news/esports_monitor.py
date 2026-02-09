@@ -198,6 +198,9 @@ class EsportsMonitor:
             running_ids.add(match_id)
 
             existing = db.query(EsportsMatch).filter(EsportsMatch.match_id == match_id).first()
+            game_cfg = GAME_REGISTRY.get((existing.videogame if existing else m.get("_videogame")) or "", {})
+            tagger = game_cfg.get("tagger")
+            league_tag = tagger(m) if tagger else "default"
             if existing:
                 # [FIXED] Idempotent start notification
                 if existing.status == "not_started" and not existing.start_notified_at:
@@ -207,7 +210,8 @@ class EsportsMonitor:
                         "match_id": match_id,
                         "videogame": existing.videogame,
                         "name": existing.name,
-                        "stream_url": m.get('official_stream_url')
+                        "stream_url": m.get('official_stream_url'),
+                        "league_tag": league_tag,
                     })
                 
                 existing.status = "running"
@@ -237,7 +241,8 @@ class EsportsMonitor:
                     "match_id": match_id,
                     "videogame": videogame,
                     "name": name,
-                    "stream_url": m.get('official_stream_url')
+                    "stream_url": m.get('official_stream_url'),
+                    "league_tag": league_tag,
                 })
         
         # Return both running IDs and pending notifications
@@ -330,15 +335,19 @@ class EsportsMonitor:
                     is_valid_league = False
                     
                     if match_game_slug == "league-of-legends":
-                        # Allow LCK (covers LCK CL), LPL, and International Events (2026 Season)
+                        # Allow LCK (covers LCK CL), LPL, LEC and International Events (2026 Season)
                         allowed_lol = [
-                            'LCK', 'LPL', 
+                            'LCK', 'LPL', 'LEC',
                             'First Stand', 'First-Stand',
                             'MSI', 'Mid-Season Invitational', 
                             'Worlds', 'World Championship', 
                             'Esports World Cup', 'EWC'
                         ]
                         is_valid_league = any(word in league_name for word in allowed_lol)
+                        if not is_valid_league:
+                            logger.debug(f"Filtered out LoL match: {m.get('name')} (League: {league_name})")
+                        else:
+                            logger.info(f"Accepted LoL match: {m.get('name')} (League: {league_name})")
                         
                     elif match_game_slug == "valorant":
                         # Block Tier 2
@@ -384,7 +393,8 @@ class EsportsMonitor:
                                     match_id=match_id,
                                     name=existing.name,
                                     scheduled_at=existing.scheduled_at,
-                                    videogame=game_slug
+                                    videogame=game_slug,
+                                    league_tag=(config.get("tagger")(m) if config.get("tagger") else "default"),
                                 ))
                                 existing.imminent_notified_at = now
 
@@ -441,7 +451,8 @@ class EsportsMonitor:
                                 match_id=notif["match_id"],
                                 videogame=notif["videogame"],
                                 name=notif["name"],
-                                stream_url=notif["stream_url"]
+                                stream_url=notif["stream_url"],
+                                league_tag=notif.get("league_tag"),
                             ))
 
                     # Check for matches that disappeared

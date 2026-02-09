@@ -6,6 +6,7 @@ import { DashboardCharts } from './DashboardCharts';
 import { BrokerageSync } from './BrokerageSync';
 import { ApiClient, type BackendPortfolioSummary } from '@/shared/api/client';
 import type { YearlyCashflowData } from '../hooks/usePortfolio';
+import { safeStorage } from '@/shared/storage';
 
 const normalizeIndexKey = (name: string): string =>
   name.replace(/\s+/g, '').toUpperCase();
@@ -39,16 +40,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
 }) => {
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [showWarnings, setShowWarnings] = useState(() => {
-    // 세션에서 이미 닫았는지 확인
-    if (typeof window !== 'undefined') {
-      return sessionStorage.getItem('portfolio_warnings_dismissed') !== 'true';
-    }
-    return true;
+    return safeStorage.getItem('session', 'portfolio_warnings_dismissed') !== 'true';
   });
 
   const handleDismissWarnings = () => {
     setShowWarnings(false);
-    sessionStorage.setItem('portfolio_warnings_dismissed', 'true');
+    safeStorage.setItem('session', 'portfolio_warnings_dismissed', 'true');
   };
 
   const { summary, investableSummary, realEstate } = useMemo(() => {

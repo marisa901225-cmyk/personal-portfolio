@@ -32,11 +32,11 @@ Jinja2==3.1.6
 joblib==1.5.3
 limits==5.6.0
 MarkupSafe==3.0.3
-numpy==2.3.5
+numpy>=2.2.6,<2.3.0
 oauthlib==3.3.1
 openpyxl==3.1.5
 packaging==25.0
-pandas==2.3.1
+pandas>=2.3.2
 pluggy==1.6.0
 proto-plus==1.27.1
 protobuf==6.33.5
@@ -84,3 +84,5 @@ websockets==15.0.1
 wrapt==2.1.0
 xlrd==2.0.2
 PyJWT==2.8.0
+pandas-ta==0.4.71b0
+fredapi==0.5.2

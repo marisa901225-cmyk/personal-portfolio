@@ -60,16 +60,15 @@ services:
       - ./backend/storage:/app/backend/storage
       - ./backend/data:/app/backend/data
       - ./backend/logs:/app/backend/logs
-      - ./backend/.env:/app/backend/.env
+      - /home/dlckdgn/ai-models/myasset.env:/app/backend/.env:ro
       - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
     environment:
-      - PYTHONUNBUFFERED=1
       - LLM_BASE_URL=http://llama-server:8080
-      - LLM_REMOTE_DEFAULT_MODEL=EXAONE-4.0-1.2B-Q8_0.gguf
+      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-abliterated-v1.Q8_0.gguf
       - TZ=Asia/Seoul
     env_file:
-      - ./backend/.env
+      - /home/dlckdgn/ai-models/myasset.env
     depends_on:
       llama-server:
         condition: service_healthy
@@ -94,17 +93,16 @@ services:
       - ./backend/storage:/app/backend/storage
       - ./backend/data:/app/backend/data
       - ./backend/logs:/app/backend/logs
-      - ./backend/.env:/app/backend/.env
+      - /home/dlckdgn/ai-models/myasset.env:/app/backend/.env:ro
       - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
     command: python -m backend.scripts.manage run-collector --host 0.0.0.0 --port 8001
     environment:
       - PYTHONPATH=/app
-      - PYTHONUNBUFFERED=1
       - LLM_BASE_URL=http://llama-server:8080
-      - LLM_REMOTE_DEFAULT_MODEL=EXAONE-4.0-1.2B-Q8_0.gguf
+      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-abliterated-v1.Q8_0.gguf
       - TZ=Asia/Seoul
     env_file:
-      - ./backend/.env
+      - /home/dlckdgn/ai-models/myasset.env
     depends_on:
       llama-server:
         condition: service_healthy
@@ -128,17 +126,16 @@ services:
       - ./backend/storage:/app/backend/storage
       - ./backend/data:/app/backend/data
       - ./backend/logs:/app/backend/logs
-      - ./backend/.env:/app/backend/.env
+      - /home/dlckdgn/ai-models/myasset.env:/app/backend/.env:ro
       - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
     command: python -m backend.scripts.manage run-scheduler
     environment:
       - PYTHONPATH=/app
-      - PYTHONUNBUFFERED=1
       - LLM_BASE_URL=http://llama-server:8080
-      - LLM_REMOTE_DEFAULT_MODEL=EXAONE-4.0-1.2B-Q8_0.gguf
+      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-abliterated-v1.Q8_0.gguf
       - TZ=Asia/Seoul
     env_file:
-      - ./backend/.env
+      - /home/dlckdgn/ai-models/myasset.env
     depends_on:
       llama-server:
         condition: service_healthy
@@ -160,14 +157,13 @@ services:
       - ./backend/storage:/app/backend/storage
       - ./backend/data:/app/backend/data
       - ./backend/logs:/app/backend/logs
-      - ./backend/.env:/app/backend/.env
+      - /home/dlckdgn/ai-models/myasset.env:/app/backend/.env:ro
     command: python -m backend.scripts.manage listen-esports
     environment:
       - PYTHONPATH=/app
-      - PYTHONUNBUFFERED=1
       - TZ=Asia/Seoul
     env_file:
-      - ./backend/.env
+      - /home/dlckdgn/ai-models/myasset.env
     networks:
       - appnet
     # Resource limits: Light monitoring service
@@ -185,12 +181,11 @@ services:
       - ./backend/storage:/app/backend/storage
       - ./backend/data:/app/backend/data
       - ./backend/logs:/app/backend/logs
-      - ./backend/.env:/app/backend/.env
+      - /home/dlckdgn/ai-models/myasset.env:/app/backend/.env:ro
       - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
     command: python -m backend.scripts.runners.run_sync_prices_scheduler
     environment:
       - PYTHONPATH=/app
-      - PYTHONUNBUFFERED=1
       - BACKEND_URL=http://backend-api:8000
       - LLM_BASE_URL=http://llama-server:8080
       - AI_REPORT_MODEL=gpt-5.1
@@ -198,7 +193,7 @@ services:
       - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-abliterated-v1.Q8_0.gguf
       - TZ=Asia/Seoul
     env_file:
-      - ./backend/.env
+      - /home/dlckdgn/ai-models/myasset.env
     depends_on:
       llama-server:
         condition: service_healthy

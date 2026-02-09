@@ -11,7 +11,7 @@ URL_PATTERN = re.compile(r'https?://[^\s\)\]<>"]+')
 TOKEN_PATTERN = re.compile(r'[가-힣A-Za-z0-9_*]+')
 LABEL_PATTERN = re.compile(r'^[-•*]\s*\[?([^\]]+)\]?:?')
 MAX_DROP_REASONS = 10
-SUMMARY_KEYWORDS = ['결제', '송금', '입금', '출금', '알림', '메시지', '카톡', '문자', '배송', '택배', '배달', '업데이트', '건', '도착', '완료']
+SUMMARY_KEYWORDS = ['결제', '송금', '입금', '출금', '알림', '메시지', '카톡', '문자', '배송', '택배', '배달', '업데이트', '건', '도착', '완료', '기상청', '공지']
 
 # URL 정규화용 구두점
 _TRAILING_PUNCT = '.,;:!?)]}>"\''

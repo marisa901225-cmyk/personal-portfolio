@@ -65,7 +65,7 @@ export const usePortfolioCalculations = ({
             return item;
         });
 
-        const indices = summary.indexDistribution || [];
+        const indices = (summary.indexDistribution || []).filter(item => item.value > 0);
 
         return { categories, indices, grandTotal, investableTotal };
     }, [summary.totalValue, summary.categoryDistribution, summary.indexDistribution, realEstateSummary]);

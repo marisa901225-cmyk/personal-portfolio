@@ -3,6 +3,7 @@ import { Send, User, Bot, Loader2, MessageSquare, Info } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ApiClient } from '@/shared/api/client';
+import { safeStorage } from '@/shared/storage';
 
 interface Message {
     role: 'user' | 'assistant';
@@ -23,12 +24,12 @@ export const MemoryChat: React.FC<MemoryChatProps> = ({ apiClient }) => {
     const sessionId = useMemo(() => {
         if (typeof window === 'undefined') return 'default';
         const key = 'memory_chat_session_id';
-        const existing = window.localStorage.getItem(key);
+        const existing = safeStorage.getItem('local', key);
         if (existing) return existing;
         const generated = window.crypto?.randomUUID
             ? window.crypto.randomUUID()
             : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-        window.localStorage.setItem(key, generated);
+        safeStorage.setItem('local', key, generated);
         return generated;
     }, []);
 

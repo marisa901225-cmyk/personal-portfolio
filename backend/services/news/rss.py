@@ -2,7 +2,8 @@ import logging
 import feedparser
 import re
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 from sqlalchemy.orm import Session
 from urllib.parse import quote
@@ -34,7 +35,6 @@ def collect_rss(db: Session, feed_url: str, source_name: str):
                 published_at = datetime.now(timezone.utc)
 
             # 너무 오래된 기사 제외 (최근 14일)
-            from datetime import timedelta
             if published_at < datetime.now(timezone.utc) - timedelta(days=14):
                 continue
             
@@ -49,7 +49,6 @@ def collect_rss(db: Session, feed_url: str, source_name: str):
                 continue
             
             # 최근 48시간 내의 뉴스들과 비교
-            from datetime import timedelta
             recent_limit = datetime.now(timezone.utc) - timedelta(hours=48)
             recent_news = db.query(GameNews).filter(GameNews.published_at >= recent_limit).all()
             
@@ -117,6 +116,7 @@ async def collect_google_news(db: Session, query: str, region: str = "US"):
         # 하지만 여기서는 간단히 호출
         async with httpx.AsyncClient() as client:
             response = await client.get(feed_url, timeout=15.0)
+            response.raise_for_status()
             feed = feedparser.parse(response.content)
         
         clean_desc = "" # Initialize here to prevent NameError
@@ -153,7 +153,6 @@ async def collect_google_news(db: Session, query: str, region: str = "US"):
                 continue
             
             # 최근 48시간 내의 뉴스들과 비교
-            from datetime import timedelta
             recent_limit = datetime.now(timezone.utc) - timedelta(hours=48)
             recent_news = db.query(GameNews).filter(GameNews.published_at >= recent_limit).all()
             
