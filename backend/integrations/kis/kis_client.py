@@ -159,6 +159,56 @@ def _ensure_kis_modules_loaded() -> None:
     _KIS_MODULES_LOADED = True
 
 
+async def get_futures_period_price(
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    period_div: str = "D",
+    market_div: str = "F",
+) -> Optional[Dict]:
+    """
+    국내 선물/옵션 기간별 시세 조회 (FHKIF03020100)
+
+    Args:
+        symbol: 종목코드 (지수선물 6자리, 지수옵션 9자리)
+        start_date: 조회 시작일자 (YYYYMMDD)
+        end_date: 조회 종료일자 (YYYYMMDD)
+        period_div: 기간구분 (D:일, W:주, M:월, Y:년)
+        market_div: 시장분류 (F:지수선물, O:지수옵션, JF:주식선물, JO:주식옵션, ...)
+    """
+    _ensure_auth()
+    period = period_div.strip().upper()
+    if period not in {"D", "W", "M", "Y"}:
+        raise ValueError("period_div must be one of 'D', 'W', 'M', 'Y'")
+
+    tr_id = "FHKIF03020100"
+    params = {
+        "FID_COND_MRKT_DIV_CODE": market_div,
+        "FID_COND_SCR_DIV_CODE": "00000",
+        "FID_INPUT_ISCD": symbol,
+        "FID_INPUT_DATE_1": start_date,
+        "FID_INPUT_DATE_2": end_date,
+        "FID_PERIOD_DIV_CODE": period,
+        "FID_ORG_ADJ_PRC": "0"
+    }
+    
+    try:
+        headers = ka._getBaseHeader()
+        headers["tr_id"] = tr_id
+        headers["custtype"] = "P"
+        
+        url = ka.getTREnv().my_url + "/uapi/domestic-futureoption/v1/quotations/inquire-daily-fuopchartprice"
+        
+        import httpx
+        async with httpx.AsyncClient() as client:
+            res = await client.get(url, headers=headers, params=params)
+            res.raise_for_status()
+            return res.json()
+    except Exception as e:
+        logger.error("선물 기간별 시세 조회 실패: %s", e)
+        return None
+
+
 def _require_kis() -> None:
     _ensure_kis_modules_loaded()
     if not _KIS_AVAILABLE:
@@ -239,9 +289,136 @@ def search_tickers(query: str) -> list[Dict[str, str | None]]:
     return _search(query)
 
 
+async def get_futures_daily_chart(
+    symbol: str, 
+    start_date: str, 
+    end_date: str, 
+    period_div: str = "D"
+) -> Optional[Dict]:
+    """
+    국내 선물/옵션 일자별 차트 조회 (FHKIF03030100)
+    
+    Args:
+        symbol: 종목코드 (예: '101S03' - 코스피200 선물)
+        start_date: 시작일자 (YYYYMMDD)
+        end_date: 종료일자 (YYYYMMDD)
+        period_div: 기간구분 (D:일, W:주, M:월, Y:년)
+    """
+    _ensure_auth()
+    period = period_div.strip().upper()
+    if period not in {"D", "W", "M", "Y"}:
+        raise ValueError("period_div must be one of 'D', 'W', 'M', 'Y'")
+    
+    # KIS 내부 TR 환경 설정
+    tr_id = "FHKIF03020100"
+    params = {
+        "FID_COND_MRKT_DIV_CODE": "F", # 지수선물 'F' (LO가 알려준 정확한 코드!)
+        "FID_COND_SCR_DIV_CODE": "00000",
+        "FID_INPUT_ISCD": symbol,
+        "FID_INPUT_DATE_1": start_date,
+        "FID_INPUT_DATE_2": end_date,
+        "FID_PERIOD_DIV_CODE": period,
+        "FID_ORG_ADJ_PRC": "0" # 수정주가 반영 여부
+    }
+    
+    try:
+        # kis_auth_rest._url_fetch를 직접 활용하여 호출
+        headers = ka._getBaseHeader()
+        headers["tr_id"] = tr_id
+        headers["custtype"] = "P" # 개인
+        
+        url = ka.getTREnv().my_url + "/uapi/domestic-futureoption/v1/quotations/inquire-daily-fuopchartprice"
+        
+        # 비동기 요청을 위해 httpx 활용 (기존 kis_prices 등 패턴 참고)
+        import httpx
+        async with httpx.AsyncClient() as client:
+            res = await client.get(url, headers=headers, params=params)
+            res.raise_for_status()
+            data = res.json()
+            
+            if data.get("rt_cd") != "0":
+                logger.error("KIS 선물 API 오류: %s", data.get("msg1"))
+                return None
+                
+            return data
+    except Exception as e:
+        logger.error("선물 차트 데이터 수집 실패: %s", e)
+        return None
+
+
+async def get_futures_option_price(
+    symbol: str, 
+    market_div: str = "F"
+) -> Optional[Dict]:
+    """
+    선물옵션 현재가 시세 조회 (FHMIF10000000)
+    """
+    _ensure_auth()
+    tr_id = "FHMIF10000000"
+    params = {
+        "FID_COND_MRKT_DIV_CODE": market_div,
+        "FID_INPUT_ISCD": symbol
+    }
+    
+    try:
+        headers = ka._getBaseHeader()
+        headers["tr_id"] = tr_id
+        headers["custtype"] = "P"
+        
+        url = ka.getTREnv().my_url + "/uapi/domestic-futureoption/v1/quotations/inquire-price"
+        
+        import httpx
+        async with httpx.AsyncClient() as client:
+            res = await client.get(url, headers=headers, params=params)
+            res.raise_for_status()
+            return res.json()
+    except Exception as e:
+        logger.error("선물옵션 시세 조회 실패: %s", e)
+        return None
+
+
+async def get_options_display_board(
+    maturity_month: str, 
+    market_cls: str = "", 
+    call_put_cls: str = "CO"
+) -> Optional[Dict]:
+    """
+    국내 옵션 전광판 조회 (FHPIF05030100)
+    """
+    _ensure_auth()
+    tr_id = "FHPIF05030100"
+    params = {
+        "FID_COND_MRKT_DIV_CODE": "O",
+        "FID_COND_SCR_DIV_CODE": "20503",
+        "FID_MRKT_CLS_CODE": call_put_cls,
+        "FID_MTRT_CNT": maturity_month,
+        "FID_COND_MRKT_CLS_CODE": market_cls,
+        "FID_MRKT_CLS_CODE1": "PO" if call_put_cls == "CO" else "CO"
+    }
+    
+    try:
+        headers = ka._getBaseHeader()
+        headers["tr_id"] = tr_id
+        headers["custtype"] = "P"
+        
+        url = ka.getTREnv().my_url + "/uapi/domestic-futureoption/v1/quotations/display-board-callput"
+        
+        import httpx
+        async with httpx.AsyncClient() as client:
+            res = await client.get(url, headers=headers, params=params)
+            res.raise_for_status()
+            return res.json()
+    except Exception as e:
+        logger.error("옵션 전광판 조회 실패: %s", e)
+        return None
+
 __all__ = [
     "fetch_kis_prices_krw",
     "fetch_usdkrw_rate",
     "search_tickers_by_name",
     "search_tickers",
+    "get_futures_daily_chart",
+    "get_futures_option_price",
+    "get_options_display_board",
+    "get_futures_period_price",
 ]
