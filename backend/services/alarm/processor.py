@@ -218,7 +218,11 @@ async def process_pending_alarms(db: Session):
             if expense_insight:
                 summaries.insert(0, f"💰 <b>지출 분석</b>: {html.escape(expense_insight)}\n")
 
-        llm_summary = await summarize_with_llm([a for a in to_summarize_alarms])
+        llm_summary = None
+        if to_summarize_alarms:
+            llm_summary = await summarize_with_llm([a for a in to_summarize_alarms])
+        else:
+            logger.info("No non-expense alarms to summarize; skip random topic generation for expense report.")
         if llm_summary:
             safe_summary = escape_html_preserve_urls(llm_summary)
             if to_summarize_alarms:
