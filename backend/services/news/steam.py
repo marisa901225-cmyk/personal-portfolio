@@ -35,7 +35,9 @@ async def collect_steamspy_rankings(db: Session):
             content = f"Game: {name}\nAppID: {appid}\nDeveloper: {info.get('developer')}\nPublisher: {info.get('publisher')}\nPrice: {price_str}\nOwners: {owners}\nPositive/Negative: {info.get('positive')}/{info.get('negative')}"
             
             content_hash = calculate_simhash(title + content)
-            existing = db.query(GameNews).filter(GameNews.content_hash == content_hash).first()
+            existing = db.query(GameNews.id).filter(
+                (GameNews.content_hash == content_hash) | (GameNews.title == title)
+            ).first()
             if existing:
                 continue
 
@@ -105,9 +107,12 @@ async def collect_steam_new_trends(db: Session):
                         
                         # DB 저장 (중복 방지)
                         content = f"[장르: {genres}] {desc}"
+                        title = f"[TREND] {name}"
                         content_hash = calculate_simhash(content)
                         
-                        existing = db.query(GameNews).filter(GameNews.content_hash == str(content_hash)).first()
+                        existing = db.query(GameNews.id).filter(
+                            (GameNews.content_hash == str(content_hash)) | (GameNews.title == title)
+                        ).first()
                         if not existing:
                             news = GameNews(
                                 game_tag="Steam",

@@ -1,0 +1,398 @@
+너는 시니어 Python 엔지니어다. 나는 이미 한국투자증권 KIS OpenAPI(국내주식) 연동을 끝냈고, 인증/토큰/해시키/HTTP/레이트리밋/재시도/로깅은 전부 갖고 있다.
+그러니 “인증/세션/키/토큰 발급/해시키 생성/HTTP 래퍼” 코드는 절대 만들지 말고, 아래 “조건검색식 + 하이브리드(스윙+단타) 자동매매 엔진” 로직만 구현해라.
+
+────────────────────────────────────────
+0) 전제 / 목표
+────────────────────────────────────────
+- 시장: 국내주식(KRX, KOSPI/KOSDAQ). ETF 포함 여부는 옵션.
+- 초기 자본: 1,000,000원(실험용)
+- 목표: 월 +5%를 “노리는” 운용(보장 아님). 핵심은 과매매 방지 + 하락장 PASS.
+- 스타일: 스윙(보유 최대 2주=10영업일) + 단타(당일청산) 섞기
+- 원칙: 후보 없거나 하락장(RISK_OFF)이면 기계적으로 거래 PASS
+
+────────────────────────────────────────
+1) 내가 이미 가진 인터페이스(의존성 주입으로 사용)
+────────────────────────────────────────
+아래는 “예시 시그니처”다. 네 코드는 Protocol/타입힌트로 인터페이스만 정의하고, 실제 구현은 내가 주입한다.
+
+[데이터/시세]
+- api.volume_rank(kind: "volume"|"value", top_n: int, asof: str) -> list[dict]
+- api.market_cap_rank(top_k: int, asof: str) -> list[dict]
+- api.daily_bars(code: str, end: str, lookback: int) -> DataFrame
+  - 최소 컬럼: date, close, volume
+  - 있으면: value(일별 거래대금)
+- api.quote(code: str) -> dict
+  - 최소: price(현재가), change_pct(등락률), (있으면) bid/ask 등
+
+[주문/계좌]
+- api.positions() -> list[dict]            # 보유 포지션(평단/수량 등 포함)
+- api.cash_available() -> int              # 주문가능현금(원)
+- api.place_order(side: "BUY"|"SELL", code: str, qty: int, order_type: str, price: int|None) -> dict
+- api.open_orders() -> list[dict]
+- api.cancel_order(order_id: str) -> dict
+
+주의:
+- 레이트리밋/재시도는 api 내부에 있지만, 너 로직이 “짧은 폴링/폭주 루프”를 만들면 안 됨.
+- DataFrame은 pandas 사용 가능.
+
+────────────────────────────────────────
+2) 조건검색식(스캐너) 2종 구현
+────────────────────────────────────────
+(1) 인기순위형 popular_screener(asof: "YYYYMMDD", include_etf: bool=False) -> DataFrame
+- 조건:
+  A. 5일 평균 거래대금 상위 10
+  B. 거래량 순위 상위 100
+  결과: A ∩ B (교집합)
+- 구현 방식(후보군 축소):
+  - api.volume_rank("volume", top_n=100, asof=asof)로 B 확보
+  - api.volume_rank("value", top_n=200, asof=asof)로 거래대금 후보군 추가(상위 200)
+  - 후보군 = (B codes) ∪ (value_rank codes)
+  - 후보군에 대해서만 daily_bars(lookback>=10) 받아서 5일 평균 거래대금 계산
+    * 거래대금(value) 컬럼 있으면 그걸 우선
+    * 없으면 proxy = close*volume로 근사하고 used_value_proxy=True 표시
+  - avg_value_5d 내림차순으로 상위 10을 A로 만들고 A∩B 반환
+  - 교집합이 0이면 fallback 옵션:
+    - B 내부에서 avg_value_5d 상위 10을 alt로 함께 반환 가능
+
+- 반환 컬럼(최소):
+  code, name(있으면), avg_value_5d, used_value_proxy, asof_date,
+  volume_rank(1~100 or NaN), value_rank_5d_top10(1~10 or NaN),
+  close(가능하면), change_pct(가능하면)
+
+(2) 모범생형 model_screener(asof: "YYYYMMDD", include_etf: bool=False) -> DataFrame
+- 조건:
+  A. 20일 평균 거래대금 >= 5,000억원 (=500_000_000_000원)
+  B. MA120 < MA60 < MA20 < MA5 (일봉 종가, 0봉전 기준)
+  C. 시가총액 >= 1조원 (=1_000_000_000_000원)
+- 구현 방식(후보군 축소):
+  - api.market_cap_rank(top_k=500, asof=asof)로 후보군 생성
+  - 시총 >= 1조만 남김
+  - 남은 후보군에 대해 daily_bars(lookback>=140) 받아서 MA5/20/60/120 계산
+  - 20일 평균 거래대금 계산(value 우선, 없으면 close*volume proxy)
+  - 조건 통과 종목 반환
+- 데이터 부족(120일 미만)은 기본 제외(옵션으로 포함 가능하나 기본은 제외)
+
+- 반환 컬럼(최소):
+  code, name, mcap, avg_value_20d, ma5, ma20, ma60, ma120,
+  used_value_proxy, asof_date, close(가능하면), change_pct(가능하면)
+
+공통 유틸:
+- compute_sma(close_series, window)
+- compute_avg_value(df, window) -> (avg_value, used_proxy)
+- standardize_rank_df(list[dict]) -> DataFrame (필드 매핑은 실제 응답을 보고 튼튼하게 처리)
+
+────────────────────────────────────────
+3) 시장 레짐 필터(하락장 PASS)
+────────────────────────────────────────
+- 인덱스 대신 ETF를 시장 대리인으로 사용:
+  - KODEX200 = "069500"
+  - (옵션) KODEX코스닥150 = "229200"
+- regime(asof) 계산:
+  - daily_bars("069500", end=asof, lookback>=80)
+  - MA20, MA60 계산
+  - RISK_ON: close > MA60 AND MA20 > MA60
+  - RISK_OFF: close < MA60 AND MA20 < MA60
+  - (옵션) 229200도 동일 조건을 만족해야 RISK_ON(더 보수적으로)
+- RISK_OFF면 신규진입(스윙/단타) 전부 PASS
+
+────────────────────────────────────────
+4) 자동매매: 하이브리드(스윙 2주 + 단타)
+────────────────────────────────────────
+포지션 타입 2개:
+- S = Swing(보유 최대 10영업일, 메인 수익 엔진)
+- T = DayTrade(당일 청산, 기회 있을 때만 보조)
+
+4-1) 공통 PASS 게이트(가장 먼저 체크)
+- RISK_OFF => PASS(신규진입 금지)
+- 후보군 0 => PASS
+- 리스크 컷(아래 4-4) 발동 => PASS
+- 진입 횟수 제한 초과 => PASS
+
+4-2) 후보군/선정
+- 후보군 = popular_screener ∪ model_screener (중복 제거)
+- 스윙 후보 우선순위: model 통과 종목
+- 단타 후보 우선순위: popular 교집합 종목
+
+[점수화(설명 가능하고 단순하게)]
+- Swing score(상위 1개 pick):
+  +30 (model 통과)
+  +10 (close > MA20)
+  +10 (MA20 > MA60)
+  +가중 (avg_value_20d 크기 또는 순위)
+  -20 (과열 방지: (close/MA20 - 1) > 0.08 이면 감점)
+- DayTrade score(상위 1개 pick):
+  +30 (popular 교집합)
+  +가중 (avg_value_5d 크기)
+  +10 (당일 change_pct가 +0.5%~+4% 범위면 가점)
+  -10 (change_pct가 너무 크면 과열 감점, 예: > +6%)
+  -10 (스프레드/유동성 나쁘면 감점. 정보 없으면 스킵)
+
+호출량 통제:
+- quote는 후보군 전체를 다 찍지 말고, 스캐너에서 거래대금 상위(예: 상위 30개)만 추가 확인해서 점수에 반영
+- 스캐너 계산 과정에서 만든 MA/avg_value는 캐시 재사용
+
+4-3) 진입/청산 규칙
+[S: Swing]
+- 최대 보유: 10영업일(=2주 정도). 보유일 계산은 “일봉 date 개수” 기반으로 처리(캘린더 의존 최소화)
+- 손절: -3% 고정 (entry_avg_price 기준)
+- 익절: 기본 2가지 중 하나(둘 다 지원하고 config로 선택)
+  A) 고정 TP: +5%
+  B) 트레일링: +3% 돌파 후 최고가 대비 -2% 이탈 시 청산
+- 타임스탑: 10영업일 경과 시 무조건 청산(기본 ON)
+  - 단, 옵션으로 “수익이면 청산, 손실이면 더 보유” 같은 복잡한 건 기본 OFF
+
+[T: DayTrade]
+- 당일 청산 강제: 15:15에 전량 청산
+- 손절: -1.2% (기본)  ※ 단타를 -3%로 두면 왜곡 심해서 분리 권장
+- 익절: +1.8% (기본)
+- 진입 후 미체결 관리:
+  - 30초 내 미체결이면 취소 후 1회 재시도
+  - 그래도 미체결이면 그 진입은 포기(폭주 금지)
+
+주문 방식(공통):
+- 시장가 또는 최우선 지정가(체결 우선)
+- qty 계산:
+  - swing_cash_ratio 기본 0.75
+  - day_cash_ratio 기본 0.20
+  - 주문가능현금 기반으로 계산하고, 호가단위/최소수량 고려해 내림
+- 동시 보유 기본:
+  - Swing 최대 1
+  - DayTrade 최대 1
+  - 전체 동시 보유 최대 2(옵션)
+- 이미 보유한 종목은 당일 재진입 금지(기본)
+
+4-4) 리스크 관리(필수)
+- 일일 최대 손실 한도: -2% (실현손익 기준). 도달 시 그날 신규진입 전부 금지
+- 연속 손실 횟수 제한: 2연패면 그날 신규진입 금지
+- 주간 스윙 진입 제한: max_swing_entries_per_week = 2
+- 일간 단타 진입 제한: max_day_entries_per_day = 1
+- 스윙/단타 진입 타이밍:
+  - 진입 시도 윈도우:
+    1) 09:05~09:20 (S 우선, 조건 맞으면 1회)
+    2) 13:00~13:20 (T는 여기서만 시도하거나, 둘 중 한 번만 시도하도록 옵션)
+  - 15:00 이후 신규 진입 금지
+
+4-5) 모니터링(폭주 금지)
+- monitor_interval_sec = 180~300(3~5분)
+- 매 사이클에서:
+  - 보유 포지션 조회(positions)
+  - 필요한 종목만 quote 조회
+  - TP/SL/TRAIL/TIME 조건 체크 후 청산 주문
+- 초단위 반복/무한루프/짧은 폴링 절대 금지
+
+────────────────────────────────────────
+5) 상태 저장(재시작 안전)
+────────────────────────────────────────
+TradeState를 json 또는 sqlite로 영속화(가볍게 json 기본).
+필수 저장 항목:
+- trade_date, week_id
+- swing_entries_today, swing_entries_week
+- day_entries_today
+- realized_pnl_today, consecutive_losses_today
+- blacklist_today(set of codes)
+- open_positions: {code: {type:S|T, entry_time, entry_price, qty, highest_price(for trailing), entry_date, bars_held}}
+- last_run_timestamp
+
+재시작해도:
+- 당일/주간 진입 제한 유지
+- 이미 보유한 포지션 관리 계속
+- 15:15 단타 강제청산 동작 유지
+
+────────────────────────────────────────
+6) 모듈 구조(권장)
+────────────────────────────────────────
+- screeners.py
+  - popular_screener()
+  - model_screener()
+- regime.py
+  - get_regime(asof) -> "RISK_ON"|"RISK_OFF"|"NEUTRAL"
+- strategy.py
+  - build_candidates(asof) -> Candidates(DF들 + 캐시)
+  - pick_swing(candidates, quotes_subset) -> code|None
+  - pick_daytrade(candidates, quotes_subset) -> code|None
+- execution.py
+  - enter_position(type, code, cash_ratio) -> fill/position_state
+  - exit_position(code, reason) -> result
+  - handle_open_orders()  # 미체결 관리(짧은 폴링 금지, 타임아웃 기반)
+- risk.py
+  - can_enter(type, trade_state, regime, candidates) -> (bool, reason)
+  - update_after_fill(trade_state, fill)
+- state.py
+  - load_state(), save_state()
+- bot.py (또는 scheduler.py)
+  - run():
+    - 08:55 스캐너 계산 + 후보군 캐시
+    - 09:05~09:20 Swing 진입 시도(게이트 통과 시)
+    - 13:00~13:20 DayTrade 진입 시도(게이트 통과 시)
+    - 장중 3~5분 주기로 모니터링/청산
+    - 15:15 DayTrade 강제 청산
+    - 종료 리포트 저장
+
+────────────────────────────────────────
+7) 로그/리포트(필수)
+────────────────────────────────────────
+- PASS 사유 로그(후보없음/하락장/횟수초과/리스크컷 등)
+- 각 트레이드:
+  - type(S/T), 진입시각/가격/수량, 청산시각/가격
+  - 수익률, 청산사유(TP/SL/TRAIL/TIME/FORCE)
+- 스캐너 요약:
+  - 후보군 수, proxy 사용 종목 수, 최종 선택 종목
+- 실행 요약:
+  - 성공/실패 API 호출 수(가능하면), 캐시 히트율(가능하면)
+
+────────────────────────────────────────
+8) 기본 Config 값
+────────────────────────────────────────
+- initial_capital = 1_000_000
+- include_etf = False (옵션)
+- max_swing_positions = 1
+- max_day_positions = 1
+- max_total_positions = 2
+- max_swing_entries_per_week = 2
+- max_swing_entries_per_day = 1
+- max_day_entries_per_day = 1
+- swing_cash_ratio = 0.75
+- day_cash_ratio = 0.20
+- swing_stop_loss_pct = -0.03
+- swing_take_profit_pct = +0.05
+- swing_trail_start = +0.03
+- swing_trail_gap = -0.02
+- swing_max_hold_bars = 10
+- day_stop_loss_pct = -0.012
+- day_take_profit_pct = +0.018
+- day_force_exit_at = "15:15"
+- daily_max_loss_pct = -0.02
+- max_consecutive_losses = 2
+- entry_windows = [("09:05","09:20"), ("13:00","13:20")]
+- no_new_entry_after = "15:00"
+- monitor_interval_sec = 240
+
+────────────────────────────────────────
+9) 완료 기준(Acceptance Criteria)
+────────────────────────────────────────
+- 스캐너 2종이 안정적으로 산출되고, 후보 없거나 RISK_OFF면 거래가 기계적으로 PASS됨
+- 스윙은 최대 10영업일 보유, 손절 -3%, 익절/트레일링/타임스탑이 기계적으로 동작
+- 단타는 당일청산 강제(15:15), 손절/익절이 분리돼 동작
+- 일부 종목 데이터 실패/주문 미체결이 있어도 폭주/무한루프 없이 안전 종료
+- TradeState가 저장돼 재시작해도 제한/보유관리/강제청산이 유지
+- 외부 의존성은 pandas 정도로 제한, 내 api 인터페이스만 주입받아 바로 붙일 수 있게 작성
+
+이 요구사항대로 Python 코드(모듈 단위)로 구현해라. 인증/토큰/해시키/HTTP 코드는 절대 포함하지 마라.
+
+6) 거래일지(Trade Journal) 생성 + 텔레그램 전송(추가 요구사항)
+────────────────────────────────────────
+목표: 텔레그램 DB 백업봇에 “거래일지/요약/백업파일”을 던져서 자동 백업되게 한다.
+중요: 텔레그램 전송 실패가 트레이딩을 멈추면 안 된다.
+
+6-1) 거래일지 포맷(기계가 읽기 쉬움)
+- 파일 기본: JSONL 1줄=1이벤트 (권장) 또는 CSV 병행
+- 이벤트 타입 예시:
+  - RUN_START, SCAN_DONE, PASS, ENTRY_SUBMIT, ENTRY_FILL, EXIT_SUBMIT, EXIT_FILL, FORCE_EXIT, ERROR, RUN_END
+- 공통 필드:
+  ts(KST ISO8601), event, asof_date, code(optional), side(optional), qty(optional),
+  price(optional), avg_price(optional), pnl(optional), pnl_pct(optional),
+  reason(optional), regime(optional), strategy_type(S/T optional),
+  candidates_count(optional), used_value_proxy(optional)
+- 파일명:
+  - output/trade_journal_YYYYMMDD.jsonl
+  - output/trade_journal_YYYYMMDD.csv (옵션)
+  - output/runlog_YYYYMMDD.log (기존 로그)
+  - state/state_YYYYMMDD.json (또는 state.json 스냅샷)
+
+6-2) 텔레그램 전송 정책(스팸 방지 + 백업 목적)
+- “실시간 알림(텍스트)”은 중요한 것만:
+  - RUN_START(간단)
+  - PASS 중에서도 RISK_OFF, DAILY_MAX_LOSS 같은 핵심만(옵션)
+  - ENTRY_FILL, EXIT_FILL(필수)
+  - ERROR(필수, 요약+event_id)
+- “파일 전송(백업)”은 하루 1~2번:
+  - RUN_END 시점에 trade_journal 파일 + state 스냅샷 + runlog를 zip으로 묶어서 1회 전송(권장)
+  - 또는 trade_journal만 먼저 보내고 zip은 선택
+- 전송 실패 시:
+  - 예외 삼키고 로컬에만 저장
+  - 다음 RUN_END 때 재전송 큐에 포함(단, 무한 재시도 금지: 최대 3회)
+
+6-3) 구현 방식(엔진 안정성)
+- Notifier 레이어를 별도로 만들고, 트레이딩 루프와 분리:
+  - 메인 루프는 “기록(write journal)”을 먼저 하고,
+  - 텔레그램 전송은 try/except로 감싸서 best-effort
+- 가능하면 간단 큐(메모리 deque) + 백그라운드 worker(thread)로 전송하되,
+  - worker가 죽어도 메인 엔진은 계속
+  - 종료 시 큐 플러시를 2초 이내로만 시도(블로킹 금지)
+
+6-4) 전송 내용 템플릿(간단/파싱 가능)
+- ENTRY_FILL 메시지 예:
+  "[ENTRY][S] 005930 qty=3 avg=71200 pnl=0% regime=RISK_ON"
+- EXIT_FILL 메시지 예:
+  "[EXIT][S][TP] 005930 qty=3 avg=74800 pnl=+5.05%"
+- RUN_END 메시지 예:
+  "[END] trades=2 realized=+12,340원 (+1.23%) pass=RISK_OFF(3)"
+
+[ETF 포함 정책(추가)]
+- include_etf 옵션을 기본 True로 지원한다.
+- 단, ETF는 아래 필터를 통과한 경우에만 후보로 포함한다.
+
+1) 기본 제외(디폴트)
+- 레버리지/인버스/파생형/선물형 ETF는 제외
+  - 종목마스터의 상품구분(ETF 레버리지/인버스/파생) 필드가 있으면 그걸 우선 사용
+  - 없으면 name 기반 휴리스틱으로 제외(예: "레버", "2X", "인버스", "선물", "파생" 포함)
+
+2) 유동성 컷(필수)
+- ETF 후보는 avg_value_20d(또는 avg_value_5d)로 유동성 하한을 둔다.
+  - swing_etf_min_avg_value_20d = 100_000_000_000 (예: 1,000억) 기본값
+  - day_etf_min_avg_value_5d = 50_000_000_000 (예: 500억) 기본값
+- value 컬럼 없으면 close*volume proxy를 쓰되 used_value_proxy 플래그를 남긴다.
+
+3) 스캐너 결합 방식
+- popular_screener는 include_etf=True면 ETF도 동일하게 후보에 포함한다(거래대금/거래량 상위 기반이라 자연스럽게 필터됨).
+- model_screener는 기본적으로 "개별주 전용"으로 유지한다.
+- 대신 별도 함수: etf_swing_screener(asof) -> DataFrame 을 추가 구현한다:
+  - (유동성 컷 통과) AND (MA60 < MA20 < MA5 또는 close > MA20)
+  - 결과를 swing 후보군에 합친다.
+
+4) 전략에서 ETF 우선순위
+- swing에서 개별주 후보가 없거나, 점수 상위가 과열/부적합이면
+  - etf_swing_screener 상위 1개를 대체 후보로 선택 가능하게 한다(옵션).
+- daytrade는 popular 교집합 안에서 ETF도 섞이게 하되, 유동성 컷을 더 빡세게 적용한다.
+
+────────────────────────────────────────
+(추가) 휴장일/장운영 체크(필수)
+────────────────────────────────────────
+목표: 주말/공휴일/임시휴장일에는 스캐너/주문/모니터링을 실행하지 않고 즉시 PASS 후 다음 날로 넘어간다.
+중요: “휴장일에 asof를 직전 영업일로 보정해서 거래” 같은 동작은 금지(휴장일엔 거래 자체를 안 함).
+
+[필수 함수]
+- is_trading_day(date: "YYYYMMDD") -> bool
+- get_last_trading_day(date: "YYYYMMDD") -> "YYYYMMDD"   # 스캐너 계산용 보정이 필요할 때만 사용
+- get_market_session(date) -> dict
+  - 예: {"is_trading_day": bool, "open": "09:00", "close": "15:30", "force_exit": "15:15"}
+  - 반장/조기종료 같은 케이스는 옵션 처리(알 수 없으면 기본 장시간 사용)
+
+[휴장일 판정 로직 (우선순위)]
+1) (가능하면) KIS의 휴장일/장운영 조회 엔드포인트가 있으면 그걸 사용해서 is_trading_day를 판단한다.
+   - 이 부분은 내가 가진 api 래퍼에 이미 함수가 있을 수 있으니, api.is_trading_day(date) 같은 형태로 “호출만” 하게 설계(구현은 하지 말 것).
+2) (폴백) 휴장일 API가 없다면 “대리 ETF 일봉으로 검증”한다:
+   - proxy_code = "069500" (KODEX200)
+   - bars = api.daily_bars(proxy_code, end=date, lookback=3)
+   - bars의 마지막 행 date가 요청 date와 같으면 trading day, 다르면 휴장일(주말/공휴일/임시휴장)로 판단
+   - 주의: 이 폴백은 ‘거래 가능일 여부’만 판단한다. 휴장일이면 절대 거래하지 않는다.
+
+[Runloop에서의 동작]
+- 매일 08:50(KST) 또는 run 시작 시:
+  - 오늘이 trading day가 아니면:
+    - journal에 PASS 이벤트 기록: event="PASS", reason="HOLIDAY"
+    - 텔레그램(옵션): "[PASS] HOLIDAY YYYYMMDD"
+    - 다음날 08:50까지 sleep (또는 1시간 단위로 깨어서 날짜만 재확인, 폭주 금지)
+    - 그 날은 스캐너/진입/모니터링/청산(단타 강제청산 포함) 전부 실행하지 않음
+
+[스캐너 asof 처리]
+- trading day에만 스캐너/매매를 실행한다.
+- 스캐너는 기본적으로 asof=오늘 날짜를 사용하되, 데이터가 아직 안 쌓인 시점(개장 직전 등)에는 “직전 영업일”을 사용해도 된다.
+  - 단, 이건 “후보군 계산”만 보정하는 용도이고, 실제 주문은 trading day에만 실행한다.
+  - 예: 08:55에 스캔할 때는 last_trading_day(today)로 스캐너 계산 OK
+  - 09:05 이후는 오늘 데이터/시세 기반으로 진입 판단
+
+[추가 안전 게이트]
+- 진입 시도 직전에 한 번 더 체크:
+  - is_trading_day(today) == True AND 현재 시간이 장중(09:00~15:00) 범위에 있을 때만 신규진입 가능
+- 휴장일에 들어온 quote/주문 에러가 발생하면 즉시 PASS로 전환하고 당일 루프 종료(재시도 루프 금지)

@@ -10,7 +10,7 @@
 | 항목 | 값 |
 |------|-----|
 | **프로젝트명** | personal-portfolio |
-| **최초 분석일** | 2025-12-24 14:03 |
+| **최초 분석일** | 2026-02-03 15:48 |
 
 ---
 
@@ -26,59 +26,93 @@
 <!-- AUTO-SUMMARY-START -->
 ## 📊 개선 현황 요약
 
-| 상태 | 개수 |
+| 우선순위 | 미적용 개수 |
 |------|------|
 | 🔴 긴급 (P1) | 0 |
-| 🟡 중요 (P2) | 1 |
-| 🟢 개선 (P3) | 0 |
+| 🟡 중요 (P2) | 2 |
+| 🟢 개선 (P3) | 1 |
 
-총 미적용: 1건
-카테고리별 분포: 🧹 코드 품질 1
+총 미적용 항목: 3건
+
+| 카테고리 | 개수 |
+|------|------|
+| 🧹 코드 품질 | 1 |
+| 🧰 툴링 | 1 |
+| ⚡ 성능/API | 1 |
+
 우선순위별 한줄 요약:
-- P1: 긴급 이슈 없음.
-- P2: 텔레그램 웹훅 라우터 중복/도달 불가 분기 정리 필요.
-- P3: 현재 시점에서 신규 기능 추가 과제는 없음.
+- P2: 프론트엔드 타입 안정성과 ESLint 설정 정비가 필요
+- P3: 뉴스 검색 API 결과 수 제한 옵션 추가 필요
 <!-- AUTO-SUMMARY-END -->
 
 ---
 
 <!-- AUTO-IMPROVEMENT-LIST-START -->
-## 🔧 기능 개선 항목 (기존 기능 개선)
+## 📝 개선 항목 목록
 
 ### 🟡 중요 (P2)
 
-#### [P2-1] 텔레그램 웹훅 라우터 중복/도달 불가 분기 정리 및 분류 함수 정합성 개선
+#### [P2-1] 프론트엔드 explicit any 제거 및 오류 처리 타입 안정화
 | 항목 | 내용 |
 |------|------|
-| **ID** | `telegram-webhook-refactor` |
+| **ID** | `p2-frontend-any-001` |
 | **카테고리** | 🧹 코드 품질 |
-| **복잡도** | Medium |
-| **대상 파일** | backend/routers/telegram_webhook.py |
+| **복잡도** | Low |
+| **대상 파일** | frontend/src/pages/AuthCallbackPage.tsx, frontend/test/portfolioBackupValidation.test.ts |
 
-**현재 상태:** `classify_query()` 내 중복 코드/문서 불일치가 존재하고, 핸들러에는 도달 불가한 분기(중복 `game_trend`)와 유사 로직이 섞여 있어 유지보수성과 동작 예측성이 저하됨.  
-**개선 내용:** 명령어 처리(/report 등)와 자연어 처리 흐름을 명확히 분리하고, 분류 함수의 반환값/문서를 일치시키며, `game_trend` 경로를 단일화. 필요 시 최소 단위 테스트로 회귀를 방지.  
-**기대 효과:** 코드 복잡도 감소, 버그 가능성 감소, 기능 확장(새 분기 추가) 용이.
+**현재 상태:** 오류 처리와 테스트 데이터에 explicit `any`가 존재해 타입 안정성이 낮음.  
+**개선 내용:** `unknown` 기반 에러 처리 및 테스트 fixture를 타입 안전하게 구성해 `any` 제거.  
+**기대 효과:** 런타임 오류 메시지 신뢰도 개선, 테스트 타입 안정성 향상.  
+**Evidence:**  
+frontend/src/pages/AuthCallbackPage.tsx:74 - } catch (error: any) {  
+frontend/test/portfolioBackupValidation.test.ts:17 - category: 'INVALID' as any,
+
+#### [P2-2] ESLint no-undef 예외 제거 및 설정 정비
+| 항목 | 내용 |
+|------|------|
+| **ID** | `p2-eslint-no-undef-001` |
+| **카테고리** | 🧰 툴링 |
+| **복잡도** | Medium |
+| **대상 파일** | eslint.config.js, frontend/src/shared/api/client/core.ts, frontend/src/shared/api/client/client.ts, frontend/test/apiClient.test.ts |
+
+**현재 상태:** TS 파일에서 `no-undef` 룰이 강제되어 파일 단위 eslint-disable 사용.  
+**개선 내용:** TS 범위에서는 `no-undef`를 비활성화하고, 파일 상단의 eslint-disable 제거.  
+**기대 효과:** 린트 예외 감소, 규칙 일관성 강화.  
+**Evidence:**  
+eslint.config.js:32 - "no-undef": "error"  
+frontend/src/shared/api/client/core.ts:1 - /* eslint-disable no-undef */  
+frontend/src/shared/api/client/client.ts:1 - /* eslint-disable no-undef */  
+frontend/test/apiClient.test.ts:1 - /* eslint-disable no-undef */
 <!-- AUTO-IMPROVEMENT-LIST-END -->
 
 ---
 
 <!-- AUTO-FEATURE-LIST-START -->
 ## ✨ 기능 추가 항목 (새 기능)
-*(None)*
+
+### 🟢 개선 (P3)
+
+#### [P3-1] 뉴스 검색 결과 limit 파라미터 지원
+| 항목 | 내용 |
+|------|------|
+| **ID** | `p3-news-limit-001` |
+| **카테고리** | ⚡ 성능/API |
+| **복잡도** | Low |
+| **대상 파일** | backend/routers/news.py, backend/services/news_service.py |
+
+**현재 상태:** 뉴스 검색 API가 고정된 결과 수(내부 limit 30/15)로 동작하여 클라이언트가 결과 수를 제어하기 어려움.  
+**개선 내용:** `limit` 쿼리 파라미터 추가 및 서비스 로직에서 결과 수를 제한.  
+**기대 효과:** 클라이언트 요구에 맞춘 응답 크기 제어, 성능 안정성 향상.  
+**Evidence:**  
+backend/routers/news.py:19 - @router.get("/search")  
+backend/services/news_service.py:166 -         ).limit(30).all()  
+backend/services/news_service.py:187 -     articles = filtered_articles[:15]
 <!-- AUTO-FEATURE-LIST-END -->
 
 ---
 
 <!-- AUTO-SESSION-LOG-START -->
 ## 📜 분석 이력
- - 2026-01-12 17:35 - 세션: P2-2(백업 보관 정책)를 2일 유지로 강화하여 도커 스케줄러에 통합 완료 (Daily 03:00). 로컬 스토리지에 백업이 무분별하게 쌓이지 않도록 자동화함.
- - 2026-01-12 16:40 - 세션: 알림 수집 파이프라인에 `raw_text`/`masked_text` 분리 및 이중 마스킹 적용으로 외부 노출 경로(로그/LLM/텔레그램) 기준 민감정보 이슈를 해소. 프로젝트 변경사항(백업 압축본, KIS 토큰 저장소, 리포팅 템플릿, 텔레그램 스크립트 등) 기반으로 개선 항목을 재정리. 현재 미적용 2건(P1:0, P2:2, P3:0). 적용 완료 3건.
- - 2026-01-09 16:21 - 세션: 이전 개선 과제 중 적용 완료 2건 확인. 신규 미적용 항목 1건(게임 트렌드 컨텍스트) 발굴, 기존 P3 1건 유지. 현재 미적용 2건(P2:1, P3:1). 적용 완료 2건.
- - 2026-01-09 09:26 - 세션: 알림/스팸/뉴스 모듈 확인. 미적용 항목 3건(P2:2, P3:1) 정리, 신규 항목 1건(스팸 규칙 API 인증) 추가. 적용 완료 0건.
- - 2026-01-05 11:55 - 세션: `backendClient.ts`가 `lib/api/client.ts`로 리팩토링됨에 따라 관련 P2-1(삭제 기능) 완료 처리. P3-1(차트)는 대상 파일을 업데이트하여 유지. 신규 항목으로 [P2-1] API Client 테스트 추가를 제안함.
- - 2026-01-02 15:35 - 세션: 사용자의 "월 1회 엑셀 사용" 피드백 반영, P2-1(CRUD)에서 '수동 추가' 제외하고 '삭제' 기능만 남김. 프론트엔드의 업로드 기능 존재 재확인.
- - 2026-01-02 15:30 - 세션: 지출 관리 기능 코드 분석 결과, CRUD(Create/Delete) 및 시각화 기능 부재 확인. 사용자 요청에 따라 기존 미적용 항목(타임아웃, CSV수출)은 제거하고, 신규 발견된 Expense 항목 2건(P2, P3)을 등록함.
- - 2025-12-30 19:37 - 세션: 개인 프로젝트 기준 종합 분석 수행. P2-3(서버측 트랜잭션)은 `assets.py`의 `with_for_update()` 및 `db.commit()/rollback()`으로 이미 구현되어 있어 목록에서 제거함. 미적용 항목 총 2건 유지 (P2:1, P3:1).
- - 2025-12-24 14:24 - 세션: `manual-snapshot-action` (P3-1) 항목을 UI의 가격 동기화 버튼에 통합하여 적용 완료. 개선 목록에서 제외함. `settings-local-persistence`는 서버 기반으로 이미 구현되어 있어 목록에서 제거됨. `Prompt.md` 및 개선 목록 갱신 완료. 미적용 항목 총 3건 유지 (P2:2, P3:1).
- - 2025-12-24 14:11 - 신규 개선 항목 4건 발견 (P2:2, P3:2). 적용 완료 항목 0건.
+
+- **2026-02-03 15:52**: 신규 분석 완료. 미적용 항목 3건 추가(P2: 2, P3: 1). 적용 완료 0건.
 <!-- AUTO-SESSION-LOG-END -->

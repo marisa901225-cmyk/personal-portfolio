@@ -1,4 +1,53 @@
 services:
+  llama-server:
+    image: ghcr.io/ggml-org/llama.cpp:server-intel
+    container_name: myasset-llm
+    restart: always
+    ports:
+      - "8080:8080"
+    volumes:
+      - /home/dlckdgn/ai-models:/data:ro
+      - ./backend/scripts/shell/run_llm_server.sh:/run.sh:ro
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      - LLM_MODEL_PATH=/data/Josiefied-Qwen3-8B-abliterated-v1.Q6_K.gguf
+      - LLM_MODEL_PATH_FILE=/data/llm_model_path.txt
+      - LLM_THREADS=6
+      - GGML_SYCL_DEVICE=0
+      - GGML_SYCL_FORCE_MMQ=1
+      - ZES_ENABLE_SYSMAN=1
+    entrypoint: [ "/bin/bash", "/run.sh" ]
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - appnet
+
+  llama-server-light:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: myasset-llm-light
+    restart: always
+    ports:
+      - "8081:8081"
+    volumes:
+      - /home/dlckdgn/ai-models:/data:ro
+    environment:
+      - TZ=Asia/Seoul
+    command: >
+      --model /data/Qwen3-0.6B-Q8_0.gguf --host 0.0.0.0 --port 8081 --ctx-size 2048 --threads 2
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8081/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - appnet
+
   backend-api:
     build:
       context: ./backend
@@ -10,13 +59,28 @@ services:
     volumes:
       - ./backend/storage:/app/backend/storage
       - ./backend/data:/app/backend/data
-      - ./backend/.env:/app/backend/.env
-      - /home/dlckdgn/KIS/config:/root/KIS/config
+      - ./backend/logs:/app/backend/logs
+      - /home/dlckdgn/ai-models/myasset.env:/app/backend/.env:ro
+      - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
+      - /mnt/one-touch/backups:/mnt/one-touch/backups
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
     environment:
-      - PYTHONUNBUFFERED=1
+      - LLM_BASE_URL=http://llama-server:8080
+      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-abliterated-v1.Q8_0.gguf
+      - TZ=Asia/Seoul
     env_file:
-      - ./backend/.env
+      - /home/dlckdgn/ai-models/myasset.env
+    depends_on:
+      llama-server:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - appnet
 
   alarm-collector:
     build:
@@ -29,11 +93,29 @@ services:
     volumes:
       - ./backend/storage:/app/backend/storage
       - ./backend/data:/app/backend/data
-      - ./backend/.env:/app/backend/.env
-      - /home/dlckdgn/KIS/config:/root/KIS/config
-    command: uvicorn backend.alarm_collector:app --host 0.0.0.0 --port 8001
+      - ./backend/logs:/app/backend/logs
+      - /home/dlckdgn/ai-models/myasset.env:/app/backend/.env:ro
+      - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
+      - /mnt/one-touch/backups:/mnt/one-touch/backups
+    command: python -m backend.scripts.manage run-collector --host 0.0.0.0 --port 8001
     environment:
-      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      - LLM_BASE_URL=http://llama-server:8080
+      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-abliterated-v1.Q8_0.gguf
+      - TZ=Asia/Seoul
+    env_file:
+      - /home/dlckdgn/ai-models/myasset.env
+    depends_on:
+      llama-server:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8001/health" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - appnet
 
   news-scheduler:
     build:
@@ -42,13 +124,63 @@ services:
     container_name: myasset-news-scheduler
     restart: always
     volumes:
+      - ./backend:/app/backend
       - ./backend/storage:/app/backend/storage
       - ./backend/data:/app/backend/data
-      - ./backend/.env:/app/backend/.env
-      - /home/dlckdgn/KIS/config:/root/KIS/config
-    command: python backend/scripts/run_news_scheduler.py
+      - ./backend/logs:/app/backend/logs
+      - /home/dlckdgn/ai-models/myasset.env:/app/backend/.env:ro
+      - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
+      - /mnt/one-touch/backups:/mnt/one-touch/backups
+    command: python -m backend.scripts.manage run-scheduler
     environment:
-      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      - LLM_BASE_URL=http://llama-server:8080
+      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-abliterated-v1.Q8_0.gguf
+      - TZ=Asia/Seoul
+      - TRADING_ENGINE_ENABLED=1
+      - TRADING_ENGINE_API_FACTORY=${TRADING_ENGINE_API_FACTORY:-backend.integrations.kis.trading_adapter:create_trading_api}
+      - TRADING_ENGINE_SCHEDULE_INTERVAL_MIN=${TRADING_ENGINE_SCHEDULE_INTERVAL_MIN:-4}
+      - TRADING_ENGINE_INCLUDE_ETF=${TRADING_ENGINE_INCLUDE_ETF:-1}
+      - TRADING_ENGINE_STATE_PATH=${TRADING_ENGINE_STATE_PATH:-backend/storage/trading_engine/state.json}
+      - TRADING_ENGINE_OUTPUT_DIR=${TRADING_ENGINE_OUTPUT_DIR:-backend/storage/trading_engine/output}
+      - TRADING_ENGINE_RUNLOG_PATH=${TRADING_ENGINE_RUNLOG_PATH:-backend/storage/trading_engine/runlog_current.log}
+    env_file:
+      - /home/dlckdgn/ai-models/myasset.env
+    depends_on:
+      llama-server:
+        condition: service_healthy
+    networks:
+      - appnet
+    # Resource limits: Crawler + scheduler (moderate CPU during scraping)
+    cpus: "1.0"
+    mem_limit: "512m"
+    pids_limit: 300
+
+  esports-monitor:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: myasset-esports-monitor
+    restart: unless-stopped
+    volumes:
+      - ./backend:/app/backend
+      - ./backend/storage:/app/backend/storage
+      - ./backend/data:/app/backend/data
+      - ./backend/logs:/app/backend/logs
+      - /home/dlckdgn/ai-models/myasset.env:/app/backend/.env:ro
+      - /mnt/one-touch/backups:/mnt/one-touch/backups
+    command: python -m backend.scripts.manage listen-esports
+    environment:
+      - PYTHONPATH=/app
+      - TZ=Asia/Seoul
+    env_file:
+      - /home/dlckdgn/ai-models/myasset.env
+    networks:
+      - appnet
+    # Resource limits: Light monitoring service
+    cpus: "0.50"
+    mem_limit: "256m"
+    pids_limit: 200
 
   sync-prices:
     build:
@@ -59,10 +191,33 @@ services:
     volumes:
       - ./backend/storage:/app/backend/storage
       - ./backend/data:/app/backend/data
-      - ./backend/.env:/app/backend/.env
-      - /home/dlckdgn/KIS/config:/root/KIS/config
-    command: python backend/scripts/run_sync_prices_scheduler.py
+      - ./backend/logs:/app/backend/logs
+      - /home/dlckdgn/ai-models/myasset.env:/app/backend/.env:ro
+      - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
+      - /mnt/one-touch/backups:/mnt/one-touch/backups
+    command: python -m backend.scripts.runners.run_sync_prices_scheduler
     environment:
-      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
       - BACKEND_URL=http://backend-api:8000
+      - LLM_BASE_URL=http://llama-server:8080
+      - AI_REPORT_MODEL=gpt-5.1
+      - AI_REPORT_TIMEOUT_SEC=900
+      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-abliterated-v1.Q8_0.gguf
       - TZ=Asia/Seoul
+    env_file:
+      - /home/dlckdgn/ai-models/myasset.env
+    depends_on:
+      llama-server:
+        condition: service_healthy
+      backend-api:
+        condition: service_healthy
+    networks:
+      - appnet
+    # Resource limits: Scheduler + LLM calls (needs more resources)
+    cpus: "1.5"
+    mem_limit: "768m"
+    pids_limit: 400
+
+networks:
+  appnet:
+    driver: bridge

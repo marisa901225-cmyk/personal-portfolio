@@ -16,6 +16,7 @@ export const AddAssetPage: React.FC = () => {
     const apiClient = useApiClient({
         serverUrl: settings.serverUrl,
         apiToken: settings.apiToken,
+        cookieAuth: settings.cookieAuth,
     });
 
     const createAssetMutation = useCreateAsset(apiClient);

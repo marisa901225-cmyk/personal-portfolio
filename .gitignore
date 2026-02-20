@@ -14,6 +14,8 @@ dist-ssr
 
 # Backend local env / venv / cache
 backend/.venv
+backend/venv
+venv/
 backend/.env
 backend/__pycache__/
 *.pyc
@@ -34,6 +36,8 @@ backend/__pycache__/
 backend/crontab.bak
 backend/backups/
 backend/storage/backups/
+data_backup_reference/*
+!data_backup_reference/README.md
 *.db
 *.db-shm
 *.db-wal
@@ -59,3 +63,6 @@ backend/data/gemma*
 *.log
 alarm_collector.log
 alarm_process.log
+
+backend/data/llm_drafts.jsonl
+backend/igt-gpu-tools/

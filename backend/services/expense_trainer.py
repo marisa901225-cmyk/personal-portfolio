@@ -49,47 +49,73 @@ def train_model(
     logger.info(f"Loading data from {db_path}...")
     
     try:
-        conn = sqlite3.connect(db_path)
+        # 데이터 로드 (With 문맥 매니저로 자동 Close)
+        with sqlite3.connect(db_path) as conn:
+            # SQL 단에서 정규화: TRIM() 사용, amount < 0 지출만 대상
+            query = """
+            SELECT TRIM(merchant) as merchant, TRIM(category) as category 
+            FROM expenses 
+            WHERE amount < 0
+              AND merchant IS NOT NULL 
+              AND TRIM(merchant) != ''
+              AND category IS NOT NULL 
+              AND TRIM(category) != ''
+            """
+            df = pd.read_sql_query(query, conn)
         
-        # 충분한 데이터가 있는 카테고리만 학습 (최소 2건 이상)
-        query = """
-        SELECT merchant, category 
-        FROM expenses 
-        WHERE (amount < 0 OR amount = 1.0)
-          AND merchant IS NOT NULL 
-          AND merchant != ''
-          AND category IS NOT NULL 
-          AND category != ''
-        """
-        df = pd.read_sql_query(query, conn)
-        conn.close()
+        # Pandas 단에서 추가 정규화
+        df["merchant"] = df["merchant"].astype(str).str.strip()
+        df = df[df["merchant"] != ""]
         
+        # 데이터 건수 체크
         if len(df) < 10:
             logger.warning("Not enough data for training (minimum 10 records required)")
             return False
             
-        logger.info(f"Training with {len(df)} records...")
+        # 카테고리 다양성 체크
+        if df["category"].nunique() < 2:
+            logger.warning("Not enough category diversity (at least 2 categories required)")
+            return False
+            
+        logger.info(f"Training with {len(df)} records ({df['category'].nunique()} categories)...")
         
+        # 0.5 홀드아웃 검증 (데이터가 충분할 때만)
+        do_split = len(df) >= 20
+        if do_split:
+            from sklearn.model_selection import train_test_split
+            X_train, X_test, y_train, y_test = train_test_split(
+                df["merchant"], df["category"], 
+                test_size=0.2, 
+                random_state=42, 
+                stratify=df["category"]
+            )
+        else:
+            X_train, y_train = df["merchant"], df["category"]
+            X_test, y_test = X_train, y_train
+
         # 텍스트 전처리 및 모델 파이프라인 구성
-        # analyzer='char_wb'와 ngram_range=(2, 5)를 사용하여 한글 단어 일부만으로도 매칭되게 함
         pipeline = Pipeline([
             ('tfidf', TfidfVectorizer(analyzer='char_wb', ngram_range=(2, 5))),
-            ('clf', MultinomialNB(alpha=0.1))  # alpha를 낮춰서 조금 더 민감하게 반응하게 함
+            ('clf', MultinomialNB(alpha=0.1))
         ])
         
         # 학습
-        pipeline.fit(df['merchant'], df['category'])
+        pipeline.fit(X_train, y_train)
         
-        # 저장
-        model_dir = Path(model_path).parent
-        model_dir.mkdir(parents=True, exist_ok=True)
-        joblib.dump(pipeline, model_path)
+        # 원자적(Atomic) 저장: 임시 파일에 쓰고 교체하여 동시 읽기 안전 확보
+        model_path_obj = Path(model_path)
+        model_path_obj.parent.mkdir(parents=True, exist_ok=True)
         
-        logger.info(f"Model saved to {model_path}")
+        tmp_path = model_path_obj.with_suffix(".joblib.tmp")
+        joblib.dump(pipeline, str(tmp_path))
+        tmp_path.replace(model_path_obj)
         
-        # 정확도 대략 확인 (학습 데이터에 대해서만)
-        score = pipeline.score(df['merchant'], df['category'])
-        logger.info(f"Training accuracy: {score:.2%}")
+        logger.info(f"Model saved atomically to {model_path}")
+        
+        # 정확도 확인
+        score = pipeline.score(X_test, y_test)
+        score_type = "Validation" if do_split else "Training-set"
+        logger.info(f"{score_type} accuracy: {score:.2%}")
         
         return True
         

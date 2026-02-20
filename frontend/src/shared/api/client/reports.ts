@@ -97,6 +97,7 @@ export const fetchAiReportTextStream = async (
                 ...createHeaders(false),
                 Accept: 'text/event-stream',
             },
+            credentials: 'include',
         });
     } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') {

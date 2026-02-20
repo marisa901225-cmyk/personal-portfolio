@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from ..core.auth import verify_api_token
 from ..core.db import get_db
-from ..core.models import Trade, Asset
 from ..core.schemas import TradeRead, TradeCreate, TradeUpdate
+from ..services import trade_service
 from ..services.portfolio import to_trade_read
 from ..services.users import get_or_create_single_user
 
@@ -23,22 +22,8 @@ def get_trades(
     asset_id: int | None = Query(None, ge=1),
     db: Session = Depends(get_db),
 ) -> List[TradeRead]:
-    """
-    거래 내역을 최신순으로 페이지네이션해서 반환한다.
-
-    - 기본 정렬: id desc (신규 거래가 항상 앞)
-    - 다음 페이지: before_id 에 직전 페이지의 마지막 trade.id 를 넣어 조회
-    """
     user = get_or_create_single_user(db)
-    query = db.query(Trade).filter(Trade.user_id == user.id)
-
-    if asset_id is not None:
-        query = query.filter(Trade.asset_id == asset_id)
-
-    if before_id is not None:
-        query = query.filter(Trade.id < before_id)
-
-    trades = query.order_by(Trade.id.desc()).limit(limit).all()
+    trades = trade_service.get_trades(db, user.id, limit, before_id, asset_id)
     return [to_trade_read(t) for t in trades]
 
 
@@ -48,33 +33,14 @@ def get_recent_trades(
     db: Session = Depends(get_db),
 ) -> List[TradeRead]:
     user = get_or_create_single_user(db)
-    trades = (
-        db.query(Trade)
-        .filter(Trade.user_id == user.id)
-        .order_by(Trade.timestamp.desc())
-        .limit(limit)
-        .all()
-    )
+    trades = trade_service.get_recent_trades(db, user.id, limit)
     return [to_trade_read(t) for t in trades]
 
 
 @router.post("/trades", response_model=TradeRead)
 def create_trade(item: TradeCreate, db: Session = Depends(get_db)):
     user = get_or_create_single_user(db)
-    asset = db.query(Asset).filter(Asset.id == item.asset_id, Asset.user_id == user.id).first()
-    if not asset:
-        raise HTTPException(status_code=404, detail="Asset not found")
-
-    db_item = Trade(
-        user_id=user.id,
-        asset_id=item.asset_id,
-        type=item.type,
-        quantity=item.quantity,
-        price=item.price,
-        timestamp=item.timestamp or datetime.utcnow(),
-        note=item.note
-    )
-    db.add(db_item)
+    db_item = trade_service.create_trade_with_sync(db, user.id, item, sync_asset=True)
     try:
         db.commit()
     except Exception:
@@ -87,33 +53,12 @@ def create_trade(item: TradeCreate, db: Session = Depends(get_db)):
 @router.put("/trades/{trade_id}", response_model=TradeRead)
 def update_trade(trade_id: int, item: TradeUpdate, db: Session = Depends(get_db)):
     user = get_or_create_single_user(db)
-    db_item = db.query(Trade).filter(Trade.id == trade_id, Trade.user_id == user.id).first()
-    if not db_item:
-        raise HTTPException(status_code=404, detail="Trade not found")
-
-    for key, value in item.model_dump(exclude_unset=True).items():
-        setattr(db_item, key, value)
-
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    db.refresh(db_item)
+    db_item = trade_service.update_trade(db, user.id, trade_id, item.model_dump(exclude_unset=True))
     return to_trade_read(db_item)
 
 
 @router.delete("/trades/{trade_id}")
 def delete_trade(trade_id: int, db: Session = Depends(get_db)):
     user = get_or_create_single_user(db)
-    db_item = db.query(Trade).filter(Trade.id == trade_id, Trade.user_id == user.id).first()
-    if not db_item:
-        raise HTTPException(status_code=404, detail="Trade not found")
-
-    db.delete(db_item)
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
+    trade_service.delete_trade(db, user.id, trade_id)
     return {"message": "Trade deleted"}

@@ -5,7 +5,7 @@
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ApiClient, BackendAsset } from '@/shared/api/client';
+import { ApiClient } from '@/shared/api/client';
 import { AssetCategory } from '@lib/types';
 import { queryKeys } from '../queryKeys';
 
@@ -13,7 +13,7 @@ interface CreateAssetPayload {
     name: string;
     ticker?: string;
     category: AssetCategory;
-    currency: string;
+    currency: 'KRW' | 'USD';
     amount: number;
     current_price: number;
     purchase_price?: number;
@@ -34,6 +34,7 @@ interface UpdateAssetPayload {
     amount?: number;
     current_price?: number;
     purchase_price?: number;
+    realized_profit?: number;
     index_group?: string | null;
     cma_config?: {
         principal: number;

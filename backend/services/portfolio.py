@@ -51,16 +51,19 @@ def calculate_summary(assets: List[Asset], external_cashflows: List[ExternalCash
     index_map: dict[str, float] = {}
 
     for asset in assets:
+        # 실현손익은 삭제 여부와 상관없이 항상 합산 (누적 손익 추적용)
+        realized = asset.realized_profit or 0.0
+        realized_profit_total += realized
+
+        # 현재 보유 중인 자산에 대해서만 가치와 투자금 계산
         if asset.deleted_at is not None:
             continue
 
         value = asset.amount * asset.current_price
         invested = asset.amount * (asset.purchase_price or asset.current_price)
-        realized = asset.realized_profit or 0.0
 
         total_value += value
         total_invested += invested
-        realized_profit_total += realized
 
         category_map[asset.category] = category_map.get(asset.category, 0.0) + value
 
@@ -149,3 +152,116 @@ def calculate_summary(assets: List[Asset], external_cashflows: List[ExternalCash
         index_distribution=index_distribution,
         xirr_rate=xirr_rate,
     )
+
+
+class PortfolioService:
+    @staticmethod
+    def get_portfolio_data(db: Session, user_id: int) -> dict:
+        """포트폴리오 자산, 최근 거래, 요약 정보를 한꺼번에 조회합니다."""
+        # 목록/편집 대상은 활성(미삭제) 자산만 반환한다.
+        assets = (
+            db.query(Asset)
+            .filter(
+                Asset.user_id == user_id,
+                Asset.deleted_at.is_(None),
+            )
+            .order_by(Asset.id.asc())
+            .all()
+        )
+        # 요약의 실현손익은 누적 추적을 위해 삭제 자산도 포함한다.
+        assets_for_summary = (
+            db.query(Asset)
+            .filter(Asset.user_id == user_id)
+            .all()
+        )
+        trades = (
+            db.query(Trade)
+            .filter(Trade.user_id == user_id)
+            .order_by(Trade.timestamp.desc())
+            .limit(50)
+            .all()
+        )
+        external_cashflows = (
+            db.query(ExternalCashflow)
+            .filter(ExternalCashflow.user_id == user_id)
+            .all()
+        )
+
+        summary = calculate_summary(assets_for_summary, external_cashflows)
+        return {
+            "assets": [to_asset_read(a) for a in assets],
+            "trades": [to_trade_read(t) for t in trades],
+            "summary": summary,
+        }
+
+    @staticmethod
+    def restore_assets(db: Session, user_id: int, asset_items: list) -> dict:
+        """기존 자산을 모두 삭제(소프트)하고 새로운 자산 목록으로 복원합니다."""
+        from ..core.time_utils import utcnow
+        now = utcnow()
+
+        existing_assets = (
+            db.query(Asset)
+            .filter(Asset.user_id == user_id, Asset.deleted_at.is_(None))
+            .all()
+        )
+        for asset in existing_assets:
+            asset.deleted_at = now
+            asset.updated_at = now
+
+        for item in asset_items:
+            asset = Asset(
+                user_id=user_id,
+                name=item.name,
+                ticker=item.ticker,
+                category=item.category,
+                currency=item.currency,
+                amount=item.amount,
+                current_price=item.current_price,
+                purchase_price=item.purchase_price,
+                realized_profit=item.realized_profit,
+                index_group=item.index_group,
+                cma_config=item.cma_config.model_dump()
+                if item.cma_config is not None
+                else None,
+            )
+            db.add(asset)
+
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+
+        return {
+            "restored": len(asset_items),
+            "deleted": len(existing_assets),
+        }
+
+    @staticmethod
+    def create_snapshot(db: Session, user_id: int) -> PortfolioSnapshot:
+        """
+        현재 전체 자산의 가치를 합산하여 PortfolioSnapshot을 생성합니다.
+        """
+        from ..core.time_utils import utcnow
+        
+        assets = db.query(Asset).filter(Asset.user_id == user_id).all()
+        external_cashflows = db.query(ExternalCashflow).filter(ExternalCashflow.user_id == user_id).all()
+        summary = calculate_summary(assets, external_cashflows)
+
+        snapshot = PortfolioSnapshot(
+            user_id=user_id,
+            snapshot_at=utcnow(),
+            total_value=summary.total_value,
+            total_invested=summary.total_invested,
+            realized_profit_total=summary.realized_profit_total,
+            unrealized_profit_total=summary.unrealized_profit_total,
+        )
+        db.add(snapshot)
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        db.refresh(snapshot)
+        return snapshot

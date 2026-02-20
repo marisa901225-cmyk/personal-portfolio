@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { Asset, AssetCategory, PortfolioSummary, TargetIndexAllocation, DividendEntry } from '../lib/types';
-import { COLORS, REAL_ESTATE_SHARE_RATIO } from '@/shared/portfolio';
+import { COLORS, REAL_ESTATE_SHARE_RATIO, getCategoryLabel } from '@/shared/portfolio';
 import { DashboardSummary } from './DashboardSummary';
 import { DashboardCharts } from './DashboardCharts';
 import { BrokerageSync } from './BrokerageSync';
 import { ApiClient, type BackendPortfolioSummary } from '@/shared/api/client';
 import type { YearlyCashflowData } from '../hooks/usePortfolio';
+import { safeStorage } from '@/shared/storage';
 
 const normalizeIndexKey = (name: string): string =>
   name.replace(/\s+/g, '').toUpperCase();
@@ -38,6 +39,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onReload,
 }) => {
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [showWarnings, setShowWarnings] = useState(() => {
+    return safeStorage.getItem('session', 'portfolio_warnings_dismissed') !== 'true';
+  });
+
+  const handleDismissWarnings = () => {
+    setShowWarnings(false);
+    safeStorage.setItem('session', 'portfolio_warnings_dismissed', 'true');
+  };
 
   const { summary, investableSummary, realEstate } = useMemo(() => {
     const history = historyData || [];
@@ -95,7 +104,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const invUnrealizedProfitTotal = invTotalValue - invTotalInvested;
 
     const invCategoryDistribution = Array.from(invCatMap.entries()).map(([name, value], index) => ({
-      name,
+      name: getCategoryLabel(name),
       value,
       color: COLORS[index % COLORS.length]
     })).sort((a, b) => b.value - a.value);
@@ -135,7 +144,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     if (backendSummary) {
       const categoryDistribution = backendSummary.category_distribution
         .map((item, index) => ({
-          name: item.name,
+          name: getCategoryLabel(item.name),
           value: item.value,
           color: COLORS[index % COLORS.length],
         }))
@@ -212,7 +221,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const unrealizedProfitTotal = totalValue - totalInvested;
 
       const categoryDistribution = Array.from(catMap.entries()).map(([name, value], index) => ({
-        name,
+        name: getCategoryLabel(name),
         value,
         color: COLORS[index % COLORS.length],
       })).sort((a, b) => b.value - a.value);
@@ -345,6 +354,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const threshold = 0.05; // 5%p 이상 차이 나면 알림
     const messages: string[] = [];
 
+    // 1. 목표 비중 대비 차이 체크
     targetShareMap.forEach(({ share: targetShare, label }, key) => {
       const actualShare = actualShareMap.get(key) ?? 0;
       const diff = actualShare - targetShare;
@@ -355,8 +365,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }
     });
 
+    // 2. 일반 건강도 체크 (기존 체크 제거됨)
+
     return messages;
-  }, [investableSummary.totalValue, investableSummary.indexDistribution, targetIndexAllocations]);
+  }, [investableSummary.totalValue, investableSummary.indexDistribution, investableSummary.categoryDistribution, targetIndexAllocations]);
 
   return (
     <div className="space-y-6 pb-20 md:pb-0 animate-fade-in">
@@ -370,10 +382,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
         onSyncClick={() => setIsSyncModalOpen(true)}
         realEstateSummary={realEstate}
         actualInvested={actualInvested}
+        rebalanceNotices={showWarnings ? rebalanceNotices : []}
+        onDismissWarnings={handleDismissWarnings}
       />
       <DashboardCharts
         summary={investableSummary}
-        rebalanceNotices={rebalanceNotices}
         yearlyStats={yearlyCashflows}
         benchmarkName={benchmarkName}
         benchmarkReturn={benchmarkReturn}

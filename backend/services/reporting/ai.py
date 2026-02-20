@@ -10,33 +10,19 @@ from sqlalchemy.orm import Session
 
 from ...core.models import Asset, ExternalCashflow
 from ...core.schemas import ReportAiResponse, ReportAiTextResponse, ReportPeriod, TopAssetSummary
+from ...core.time_utils import utcnow
 from ...services.portfolio import calculate_summary
 from .core import aggregate_activity, build_monthly_summaries, get_user
 from .expenses import merge_expense_summaries
 from .periods import parse_report_query, resolve_period
+from ..prompt_loader import load_prompt
 
-AI_REPORT_SYSTEM_PROMPT = """너는 Ailey & Bailey 듀오의 가계부+투자 리포트 작성자야.
+# System prompt is loaded from backend/prompts/ai_report.txt
+AI_REPORT_SYSTEM_PROMPT = load_prompt("ai_report")
 
-Ailey는 공감적 코치로서 칭찬과 격려, 쉬운 비유를 사용해 요약해.
-Bailey는 냉정한 악마의 변호인으로서 리스크와 약점을 짚어줘.
 
-규칙:
-- 한국어 반말로 작성해.
-- 섹션 제목은 '###'로 시작해.
-- 표, 코드블록, 백틱은 쓰지 마.
-- 데이터에 없는 내용은 추정하지 말고 '데이터 없음'이라고 적어.
-- 숫자는 데이터 값을 그대로 사용하고, 단위/부호 의미를 설명해.
 
-출력 형식:
-### 한줄 요약
-### Ailey 코멘트
-### Bailey 코멘트
-### 투자 요약
-### 가계부 요약
-### 리스크/개선 포인트
-### 다음 액션 (3개, 번호 목록)
-"""
-
+from ...core.config import settings
 
 def get_ai_config(
     period: ReportPeriod,
@@ -44,29 +30,24 @@ def get_ai_config(
     max_tokens: int | None = None,
 ) -> tuple[str, str, str, int, float]:
     """
-    AI API 설정을 환경변수에서 가져온다.
-
-    Returns:
-        (base_url, api_key, model, max_tokens, temperature)
-
-    Raises:
-        ValueError: API 키가 설정되지 않은 경우
+    AI API 설정을 중앙 settings에서 가져온다.
     """
-    base_url = os.getenv("AI_REPORT_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-    api_key = os.getenv("AI_REPORT_API_KEY")
-    default_model = os.getenv("AI_REPORT_MODEL", "gpt-5.2")
-    yearly_model = os.getenv("AI_REPORT_MODEL_YEARLY", "gpt-5.2-pro")
-    temperature = float(os.getenv("AI_REPORT_TEMPERATURE", "0.3"))
-    default_tokens = int(os.getenv("AI_REPORT_MAX_TOKENS", "8000"))
-
-    if not api_key:
+    if not settings.ai_report_api_key:
         raise ValueError("AI_REPORT_API_KEY is not configured")
 
     selected_model = model or (
-        yearly_model if period.month is None and period.quarter is None and period.half is None else default_model
+        settings.ai_report_model_yearly if period.month is None and period.quarter is None and period.half is None 
+        else settings.ai_report_model
     )
-    selected_tokens = max_tokens or default_tokens
-    return base_url, api_key, selected_model, selected_tokens, temperature
+    selected_tokens = max_tokens or settings.ai_report_max_tokens
+    
+    return (
+        settings.ai_report_base_url, 
+        settings.ai_report_api_key, 
+        selected_model, 
+        selected_tokens, 
+        settings.ai_report_temperature
+    )
 
 
 def format_sse(event: str, data: str) -> str:
@@ -177,7 +158,7 @@ async def generate_ai_report_text(
             json={
                 "model": selected_model,
                 "messages": [
-                    {"role": "system", "content": AI_REPORT_SYSTEM_PROMPT},
+                    {"role": "system", "content": load_prompt("ai_report")},
                     {"role": "user", "content": prompt},
                 ],
                 "temperature": temperature,
@@ -193,7 +174,7 @@ async def generate_ai_report_text(
     report_text = data["choices"][0]["message"]["content"].strip()
 
     return ReportAiTextResponse(
-        generated_at=datetime.utcnow(),
+        generated_at=utcnow(),
         period=period,
         report=report_text,
         model=selected_model,
@@ -208,7 +189,7 @@ async def generate_ai_report_stream(
 ) -> AsyncGenerator[str, None]:
     """AI API 호출 (Streaming)."""
     base_url, api_key, selected_model, selected_tokens, temperature = get_ai_config(period, model, max_tokens)
-    generated_at = datetime.utcnow()
+    generated_at = utcnow()
 
     # Meta 정보 먼저 전달
     meta_payload = json.dumps(
@@ -233,7 +214,7 @@ async def generate_ai_report_stream(
                 json={
                     "model": selected_model,
                     "messages": [
-                        {"role": "system", "content": AI_REPORT_SYSTEM_PROMPT},
+                        {"role": "system", "content": load_prompt("ai_report")},
                         {"role": "user", "content": prompt},
                     ],
                     "temperature": temperature,
@@ -296,7 +277,7 @@ def get_ai_report_metrics(
     if not user:
         summary = calculate_summary([], [])
         return ReportAiResponse(
-            generated_at=datetime.utcnow(),
+            generated_at=utcnow(),
             period=period,
             summary=summary,
             activity=activity,
@@ -363,7 +344,7 @@ def get_ai_report_metrics(
     top_assets.sort(key=lambda item: item.value, reverse=True)
 
     return ReportAiResponse(
-        generated_at=datetime.utcnow(),
+        generated_at=utcnow(),
         period=period,
         summary=summary,
         activity=activity,

@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "../../backend"
+		},
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../scripts"
+		},
+		{
+			"path": "../../tools"
+		}
+	],
+	"settings": {
+		"vibereport.defaultQualityFocus": "development",
+		"vibereport.projectVisionMode": "auto"
+	}
+}

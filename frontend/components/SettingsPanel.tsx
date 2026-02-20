@@ -5,6 +5,7 @@ import { ApiClient, BackendFxTransaction } from '@/shared/api/client';
 import { alertError } from '@/shared/errors';
 import { ServerTab } from './settings/ServerTab';
 import { PortfolioTab } from './settings/PortfolioTab';
+import { NotificationModal } from './NotificationModal';
 
 type SettingsTab = 'server' | 'portfolio';
 
@@ -15,18 +16,16 @@ interface SettingsPanelProps {
 }
 
 interface TabButtonProps {
-  tab: SettingsTab;
-  icon: any;
+  icon: React.ComponentType<{ size?: number | string }>;
   label: string;
   isActive: boolean;
   onClick: () => void;
 }
 
-const TabButton: React.FC<TabButtonProps> = ({ tab, icon: Icon, label, isActive, onClick }) => (
+const TabButton: React.FC<TabButtonProps> = ({ icon: Icon, label, isActive, onClick }) => (
   <button
     type="button"
     onClick={onClick}
-    data-tab={tab}
     className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium rounded-xl transition-all ${isActive
       ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200'
       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -43,6 +42,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onBackToDashboard,
 }) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>('server');
+  const [notification, setNotification] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+  });
 
   const handleAllocationChange = (
     index: number,
@@ -93,7 +97,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       const apiClient = new ApiClient(settings.serverUrl, settings.apiToken);
       const data = await apiClient.checkHealth();
       if (data && data.status === 'ok') {
-        alert('백엔드 서버가 정상적으로 응답하고 있습니다.');
+        setNotification({
+          isOpen: true,
+          title: '연결 성공!',
+          message: '백엔드 서버가 정상적으로 응답하고 있습니다. ✨',
+        });
       } else {
         alert('서버와 연결은 되었지만 /health 응답이 예상과 다릅니다.');
       }
@@ -110,14 +118,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       alert('먼저 홈서버 API URL을 입력해주세요.');
       return;
     }
-    if (!settings.apiToken) {
-      alert('먼저 API 비밀번호를 입력해주세요.');
+    if (!settings.apiToken && !settings.cookieAuth) {
+      alert('먼저 네이버 로그인 또는 API 비밀번호를 입력해주세요.');
       return;
     }
 
     try {
       const apiClient = new ApiClient(settings.serverUrl, settings.apiToken);
-      const data = await apiClient.fetchUsdKrwFxRate();
+      const data = await apiClient.fetchUsdKrwFxRate(true);
       const rateNum = data?.rate;
 
       if (!rateNum || !Number.isFinite(rateNum)) {
@@ -128,6 +136,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       onSettingsChange({
         ...settings,
         usdFxNow: rateNum,
+      });
+      setNotification({
+        isOpen: true,
+        title: '환율 정보 업데이트!',
+        message: `증권사에서 환율 정보를 성공적으로 불러왔습니다: ${rateNum}원 📈`,
       });
     } catch (error) {
       alertError('FX rate fetch error', error, {
@@ -146,8 +159,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       alert('먼저 홈서버 API URL을 입력해주세요.');
       return;
     }
-    if (!settings.apiToken) {
-      alert('먼저 API 비밀번호를 입력해주세요.');
+    if (!settings.apiToken && !settings.cookieAuth) {
+      alert('먼저 네이버 로그인 또는 API 비밀번호를 입력해주세요.');
       return;
     }
 
@@ -213,7 +226,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         ...settings,
         usdFxBase: rounded,
       });
-      alert(`환전 평균 환율 ${rounded} 적용 완료 (매수 ${records.length}건 기준)`);
+      setNotification({
+        isOpen: true,
+        title: '환율 평균 적용 완료!',
+        message: `환전 평균 환율 ${rounded}원이 포트폴리오에 적용되었습니다. (매수 ${records.length}건 기준) 💰`,
+      });
     } catch (error) {
       alertError('FX average apply error', error, {
         default: '환전 평균 환율을 불러오지 못했습니다.\n잠시 후 다시 시도해주세요.',
@@ -229,14 +246,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       {/* 탭 버튼 */}
       <div className="flex gap-2 mb-6">
         <TabButton
-          tab="server"
           icon={Server}
           label="서버 연결"
           isActive={activeTab === 'server'}
           onClick={() => setActiveTab('server')}
         />
         <TabButton
-          tab="portfolio"
           icon={Sliders}
           label="포트폴리오 & 외관"
           isActive={activeTab === 'portfolio'}
@@ -275,6 +290,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           설정 저장 및 돌아가기
         </button>
       </div>
+
+      <NotificationModal
+        isOpen={notification.isOpen}
+        onClose={() => setNotification((prev) => ({ ...prev, isOpen: false }))}
+        title={notification.title}
+        message={notification.message}
+      />
     </div>
   );
 };

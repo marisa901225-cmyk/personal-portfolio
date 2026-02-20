@@ -4,9 +4,13 @@ from bisect import bisect_right
 from datetime import date, datetime, timedelta
 from pathlib import Path
 import logging
+import os
 
 import requests
 import yaml
+
+from backend.core.config import settings
+from backend.integrations.kis.config_paths import get_kis_user_config_path
 
 from ..integrations.kis.token_store import read_kis_token
 
@@ -59,16 +63,31 @@ def _parse_datetime(value) -> datetime | None:
 
 
 def _load_kis_config() -> dict | None:
-    """Load KIS config, returning None on failure instead of raising."""
+    """Load KIS config from centralized settings."""
+    # Check if essential config exists in settings
+    if settings.kis_my_app and settings.kis_my_sec and settings.kis_prod:
+        return {
+            "my_app": settings.kis_my_app,
+            "my_sec": settings.kis_my_sec,
+            "my_acct_stock": settings.kis_my_acct_stock,
+            "my_prod": settings.kis_my_prod,
+            "my_htsid": settings.kis_my_htsid,
+            "prod": settings.kis_prod,
+        }
+
+    # Fallback to file (legacy support, or if user prefers file but envs are missing)
+    # But user specifically asked to use env from config, allowing fallback is still safe.
     try:
-        cfg_path = Path.home() / "KIS" / "config" / "kis_user.yaml"
-        if not cfg_path.exists():
-            logger.warning("kis_user.yaml not found in ~/KIS/config")
-            return None
-        return yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        if not (os.getenv("KIS_CONFIG_DIR") or getattr(settings, "kis_config_dir", None)):
+            raise FileNotFoundError("KIS_CONFIG_DIR not configured (file config disabled)")
+        cfg_path = get_kis_user_config_path()
+        if cfg_path.exists():
+            return yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     except Exception as e:
-        logger.warning(f"Failed to load KIS config: {e}")
-        return None
+        logger.warning(f"Failed to load KIS config from file: {e}")
+
+    logger.warning("KIS config not found in settings (환경변수 KIS_MY_APP...) or file (~/KIS/config/kis_user.yaml)")
+    return None
 
 
 def _load_kis_token() -> str | None:

@@ -1,0 +1,957 @@
+{
+  "lastSnapshot": {
+    "generatedAt": "2026-01-23T02:07:57.579Z",
+    "rootPath": "/home/dlckdgn/personal-portfolio/devplan",
+    "projectName": "devplan",
+    "filesCount": 10,
+    "dirsCount": 4,
+    "languageStats": {
+      "md": 6,
+      "json": 1
+    },
+    "mainConfigFiles": {
+      "otherConfigs": []
+    },
+    "importantFiles": [],
+    "fileList": [
+      ".antigravityignore",
+      "schedule_optimization_analysis.md",
+      "사용설명서.md",
+      ".vscode/vibereport-state.json",
+      "devplan/backend.code-workspace",
+      "devplan/Prompt.md",
+      "test_db/test.db",
+      "devplan/Project_Evaluation_Report.md",
+      "devplan/Project_Improvement_Exploration_Report.md",
+      "devplan/Session_History.md"
+    ],
+    "structureSummary": [
+      {
+        "name": "devplan",
+        "type": "directory",
+        "children": [
+          {
+            "name": "backend.code-workspace",
+            "type": "file",
+            "extension": "code-workspace"
+          },
+          {
+            "name": "Project_Evaluation_Report.md",
+            "type": "file",
+            "extension": "md"
+          },
+          {
+            "name": "Project_Improvement_Exploration_Report.md",
+            "type": "file",
+            "extension": "md"
+          },
+          {
+            "name": "Prompt.md",
+            "type": "file",
+            "extension": "md"
+          },
+          {
+            "name": "Session_History.md",
+            "type": "file",
+            "extension": "md"
+          }
+        ]
+      },
+      {
+        "name": "test_db",
+        "type": "directory",
+        "children": [
+          {
+            "name": "test.db",
+            "type": "file",
+            "extension": "db"
+          }
+        ]
+      },
+      {
+        "name": "사용설명서.md",
+        "type": "file",
+        "extension": "md"
+      },
+      {
+        "name": "schedule_optimization_analysis.md",
+        "type": "file",
+        "extension": "md"
+      }
+    ]
+  },
+  "sessions": [
+    {
+      "id": "session_mkl1e7je_wyl9cv",
+      "timestamp": "2026-01-19T10:43:09.098Z",
+      "userPrompt": "프로젝트 초기 분석",
+      "changesSummary": "초기 보고서 생성 (이전 스냅샷 없음)",
+      "diffSummary": {
+        "newFilesCount": 0,
+        "removedFilesCount": 0,
+        "changedConfigsCount": 0,
+        "totalChanges": 0
+      },
+      "aiMetadata": {
+        "risksIdentified": 0,
+        "improvementsProposed": 0
+      }
+    },
+    {
+      "id": "session_mkl2h29k_0o9glh",
+      "timestamp": "2026-01-19T11:13:21.848Z",
+      "userPrompt": "보고서 업데이트",
+      "changesSummary": "### 변경 요약 (2026-01-19T10:43:09.077Z 이후)\n\n**새 파일 (6개):**\n- devplan/Prompt.md\n- devplan/Session_History.md\n- .vscode/vibereport-state.json\n- devplan/backend.code-workspace\n- devplan/Project_Evaluation_Report.md\n- devplan/Project_Improvement_Exploration_Report.md\n\n**삭제된 파일 (3개):**\n- Prompt.md\n- Project_Evaluation_Report.md\n- Project_Improvement_Exploration_Report.md\n\n**언어별 파일 수 변화:**\n- md: +1\n\n**Git 변경사항:** 수정 0, 추가 11, 삭제 4\n\n**라인 변경:** +81 / -1219 (총 1300줄)\n",
+      "diffSummary": {
+        "newFilesCount": 6,
+        "removedFilesCount": 3,
+        "changedConfigsCount": 0,
+        "totalChanges": 9,
+        "linesAdded": 81,
+        "linesRemoved": 1219,
+        "linesTotal": 1300
+      },
+      "aiMetadata": {
+        "risksIdentified": 0,
+        "improvementsProposed": 0,
+        "evaluationScores": {
+          "codeQuality": {
+            "score": 100,
+            "grade": "A+"
+          },
+          "architecture": {
+            "score": 0,
+            "grade": "F"
+          },
+          "security": {
+            "score": 100,
+            "grade": "A+"
+          },
+          "performance": {
+            "score": 0,
+            "grade": "F"
+          },
+          "testCoverage": {
+            "score": 0,
+            "grade": "F"
+          },
+          "errorHandling": {
+            "score": 0,
+            "grade": "F"
+          },
+          "documentation": {
+            "score": 100,
+            "grade": "A+"
+          },
+          "scalability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "maintainability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "productionReadiness": {
+            "score": 0,
+            "grade": "F"
+          },
+          "totalAverage": {
+            "score": 30,
+            "grade": "F"
+          }
+        }
+      }
+    },
+    {
+      "id": "session_mkl2h9vr_7jbrxm",
+      "timestamp": "2026-01-19T11:13:31.719Z",
+      "userPrompt": "보고서 업데이트",
+      "changesSummary": "### 변경 요약 (2026-01-19T11:13:21.559Z 이후)\n\n**새 파일 (1개):**\n- .vscode/vibereport-state.json\n\n**Git 변경사항:** 수정 0, 추가 11, 삭제 4\n\n**라인 변경:** +81 / -1219 (총 1300줄)\n",
+      "diffSummary": {
+        "newFilesCount": 1,
+        "removedFilesCount": 0,
+        "changedConfigsCount": 0,
+        "totalChanges": 1,
+        "linesAdded": 81,
+        "linesRemoved": 1219,
+        "linesTotal": 1300
+      },
+      "aiMetadata": {
+        "risksIdentified": 0,
+        "improvementsProposed": 0,
+        "evaluationScores": {
+          "codeQuality": {
+            "score": 100,
+            "grade": "A+"
+          },
+          "architecture": {
+            "score": 0,
+            "grade": "F"
+          },
+          "security": {
+            "score": 100,
+            "grade": "A+"
+          },
+          "performance": {
+            "score": 0,
+            "grade": "F"
+          },
+          "testCoverage": {
+            "score": 0,
+            "grade": "F"
+          },
+          "errorHandling": {
+            "score": 0,
+            "grade": "F"
+          },
+          "documentation": {
+            "score": 100,
+            "grade": "A+"
+          },
+          "scalability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "maintainability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "productionReadiness": {
+            "score": 0,
+            "grade": "F"
+          },
+          "totalAverage": {
+            "score": 30,
+            "grade": "F"
+          }
+        }
+      }
+    },
+    {
+      "id": "session_mkl2hq9z_5ogt8s",
+      "timestamp": "2026-01-19T11:13:52.967Z",
+      "userPrompt": "보고서 업데이트",
+      "changesSummary": "### 변경 요약 (2026-01-19T11:13:31.560Z 이후)\n\n**새 파일 (1개):**\n- .vscode/vibereport-state.json\n\n**Git 변경사항:** 수정 0, 추가 11, 삭제 4\n\n**라인 변경:** +81 / -1219 (총 1300줄)\n",
+      "diffSummary": {
+        "newFilesCount": 1,
+        "removedFilesCount": 0,
+        "changedConfigsCount": 0,
+        "totalChanges": 1,
+        "linesAdded": 81,
+        "linesRemoved": 1219,
+        "linesTotal": 1300
+      },
+      "aiMetadata": {
+        "risksIdentified": 0,
+        "improvementsProposed": 0,
+        "evaluationScores": {
+          "codeQuality": {
+            "score": 100,
+            "grade": "A+"
+          },
+          "architecture": {
+            "score": 0,
+            "grade": "F"
+          },
+          "security": {
+            "score": 100,
+            "grade": "A+"
+          },
+          "performance": {
+            "score": 0,
+            "grade": "F"
+          },
+          "testCoverage": {
+            "score": 0,
+            "grade": "F"
+          },
+          "errorHandling": {
+            "score": 0,
+            "grade": "F"
+          },
+          "documentation": {
+            "score": 100,
+            "grade": "A+"
+          },
+          "scalability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "maintainability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "productionReadiness": {
+            "score": 0,
+            "grade": "F"
+          },
+          "totalAverage": {
+            "score": 30,
+            "grade": "F"
+          }
+        }
+      }
+    },
+    {
+      "id": "session_mkl2i1al_1oy31n",
+      "timestamp": "2026-01-19T11:14:07.245Z",
+      "userPrompt": "보고서 업데이트",
+      "changesSummary": "### 변경 요약 (2026-01-19T11:13:52.815Z 이후)\n\n**새 파일 (1개):**\n- .vscode/vibereport-state.json\n\n**Git 변경사항:** 수정 0, 추가 11, 삭제 4\n\n**라인 변경:** +81 / -1219 (총 1300줄)\n",
+      "diffSummary": {
+        "newFilesCount": 1,
+        "removedFilesCount": 0,
+        "changedConfigsCount": 0,
+        "totalChanges": 1,
+        "linesAdded": 81,
+        "linesRemoved": 1219,
+        "linesTotal": 1300
+      },
+      "aiMetadata": {
+        "risksIdentified": 0,
+        "improvementsProposed": 0,
+        "evaluationScores": {
+          "codeQuality": {
+            "score": 100,
+            "grade": "A+"
+          },
+          "architecture": {
+            "score": 0,
+            "grade": "F"
+          },
+          "security": {
+            "score": 100,
+            "grade": "A+"
+          },
+          "performance": {
+            "score": 0,
+            "grade": "F"
+          },
+          "testCoverage": {
+            "score": 0,
+            "grade": "F"
+          },
+          "errorHandling": {
+            "score": 0,
+            "grade": "F"
+          },
+          "documentation": {
+            "score": 100,
+            "grade": "A+"
+          },
+          "scalability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "maintainability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "productionReadiness": {
+            "score": 0,
+            "grade": "F"
+          },
+          "totalAverage": {
+            "score": 30,
+            "grade": "F"
+          }
+        }
+      }
+    },
+    {
+      "id": "session_mkl2jiwe_6gkpv7",
+      "timestamp": "2026-01-19T11:15:16.718Z",
+      "userPrompt": "보고서 업데이트",
+      "changesSummary": "### 변경 요약 (2026-01-19T11:14:07.046Z 이후)\n\n**새 파일 (1개):**\n- .vscode/vibereport-state.json\n\n**Git 변경사항:** 수정 0, 추가 11, 삭제 4\n\n**라인 변경:** +81 / -1219 (총 1300줄)\n",
+      "diffSummary": {
+        "newFilesCount": 1,
+        "removedFilesCount": 0,
+        "changedConfigsCount": 0,
+        "totalChanges": 1,
+        "linesAdded": 81,
+        "linesRemoved": 1219,
+        "linesTotal": 1300
+      },
+      "aiMetadata": {
+        "risksIdentified": 0,
+        "improvementsProposed": 0,
+        "evaluationScores": {
+          "codeQuality": {
+            "score": 100,
+            "grade": "A+"
+          },
+          "architecture": {
+            "score": 0,
+            "grade": "F"
+          },
+          "security": {
+            "score": 100,
+            "grade": "A+"
+          },
+          "performance": {
+            "score": 0,
+            "grade": "F"
+          },
+          "testCoverage": {
+            "score": 0,
+            "grade": "F"
+          },
+          "errorHandling": {
+            "score": 0,
+            "grade": "F"
+          },
+          "documentation": {
+            "score": 100,
+            "grade": "A+"
+          },
+          "scalability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "maintainability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "productionReadiness": {
+            "score": 0,
+            "grade": "F"
+          },
+          "totalAverage": {
+            "score": 30,
+            "grade": "F"
+          }
+        }
+      }
+    },
+    {
+      "id": "session_mkly0pnn_19ph0i",
+      "timestamp": "2026-01-20T01:56:26.723Z",
+      "userPrompt": "보고서 업데이트",
+      "changesSummary": "### 변경 요약 (2026-01-20T00:07:41.098Z 이후)\n\n**삭제된 파일 (3개):**\n- Session_History.md\n- Project_Evaluation_Report.md\n- Project_Improvement_Exploration_Report.md\n\n**언어별 파일 수 변화:**\n- md: -3\n- json: -1\n",
+      "diffSummary": {
+        "newFilesCount": 0,
+        "removedFilesCount": 3,
+        "changedConfigsCount": 0,
+        "totalChanges": 3
+      },
+      "aiMetadata": {
+        "risksIdentified": 3,
+        "improvementsProposed": 5,
+        "overallScore": 86,
+        "evaluationScores": {
+          "codeQuality": {
+            "score": 84,
+            "grade": "B"
+          },
+          "architecture": {
+            "score": 0,
+            "grade": "F"
+          },
+          "security": {
+            "score": 0,
+            "grade": "F"
+          },
+          "performance": {
+            "score": 0,
+            "grade": "F"
+          },
+          "testCoverage": {
+            "score": 78,
+            "grade": "C+"
+          },
+          "errorHandling": {
+            "score": 0,
+            "grade": "F"
+          },
+          "documentation": {
+            "score": 90,
+            "grade": "A-"
+          },
+          "scalability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "maintainability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "productionReadiness": {
+            "score": 0,
+            "grade": "F"
+          },
+          "totalAverage": {
+            "score": 25,
+            "grade": "F"
+          }
+        },
+        "priorityItems": [
+          "프론트엔드 핵심 로직 테스트 추가",
+          "프론트엔드 타입 안정성 강화",
+          "백엔드 라우터 로직 분리"
+        ]
+      }
+    },
+    {
+      "id": "session_mkncd1qe_c2mg94",
+      "timestamp": "2026-01-21T01:25:43.046Z",
+      "userPrompt": "보고서 업데이트",
+      "changesSummary": "### 변경 요약 (2026-01-20T01:56:26.558Z 이후)\n\n**새 파일 (1개):**\n- .vscode/vibereport-state.json\n\n**라인 변경:** +389 / -549 (총 938줄)\n",
+      "diffSummary": {
+        "newFilesCount": 1,
+        "removedFilesCount": 0,
+        "changedConfigsCount": 0,
+        "totalChanges": 1,
+        "linesAdded": 389,
+        "linesRemoved": 549,
+        "linesTotal": 938
+      },
+      "aiMetadata": {
+        "risksIdentified": 3,
+        "improvementsProposed": 7,
+        "overallScore": 86.2,
+        "evaluationScores": {
+          "codeQuality": {
+            "score": 85,
+            "grade": "B"
+          },
+          "architecture": {
+            "score": 0,
+            "grade": "F"
+          },
+          "security": {
+            "score": 0,
+            "grade": "F"
+          },
+          "performance": {
+            "score": 0,
+            "grade": "F"
+          },
+          "testCoverage": {
+            "score": 78,
+            "grade": "C+"
+          },
+          "errorHandling": {
+            "score": 0,
+            "grade": "F"
+          },
+          "documentation": {
+            "score": 92,
+            "grade": "A-"
+          },
+          "scalability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "maintainability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "productionReadiness": {
+            "score": 0,
+            "grade": "F"
+          },
+          "totalAverage": {
+            "score": 26,
+            "grade": "F"
+          }
+        },
+        "priorityItems": [
+          "프론트엔드 핵심 타입 정의 강화 (`any` 제거)",
+          "백엔드 핵심 비즈니스 로직 테스트 보강",
+          "텔레그램 알림 템플릿 다양화"
+        ]
+      }
+    },
+    {
+      "id": "session_mkndg985_whptyc",
+      "timestamp": "2026-01-21T01:56:12.341Z",
+      "userPrompt": "보고서 업데이트",
+      "changesSummary": "### 변경 요약 (2026-01-21T01:25:42.949Z 이후)\n\n**새 파일 (1개):**\n- .vscode/vibereport-state.json\n\n**Git 변경사항:** 수정 0, 추가 9, 삭제 0\n\n**라인 변경:** +783 / -811 (총 1594줄)\n",
+      "diffSummary": {
+        "newFilesCount": 1,
+        "removedFilesCount": 0,
+        "changedConfigsCount": 0,
+        "totalChanges": 1,
+        "linesAdded": 783,
+        "linesRemoved": 811,
+        "linesTotal": 1594
+      },
+      "aiMetadata": {
+        "risksIdentified": 3,
+        "improvementsProposed": 8,
+        "overallScore": 85.8,
+        "evaluationScores": {
+          "codeQuality": {
+            "score": 85,
+            "grade": "B"
+          },
+          "architecture": {
+            "score": 0,
+            "grade": "F"
+          },
+          "security": {
+            "score": 0,
+            "grade": "F"
+          },
+          "performance": {
+            "score": 0,
+            "grade": "F"
+          },
+          "testCoverage": {
+            "score": 78,
+            "grade": "C+"
+          },
+          "errorHandling": {
+            "score": 0,
+            "grade": "F"
+          },
+          "documentation": {
+            "score": 92,
+            "grade": "A-"
+          },
+          "scalability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "maintainability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "productionReadiness": {
+            "score": 0,
+            "grade": "F"
+          },
+          "totalAverage": {
+            "score": 26,
+            "grade": "F"
+          }
+        },
+        "priorityItems": [
+          "프론트엔드 핵심 타입 정의 강화 (`any` 제거)",
+          "백엔드 핵심 비즈니스 로직 테스트 보강",
+          "비용 서비스 리팩토링 (SRP 준수)"
+        ]
+      }
+    },
+    {
+      "id": "session_mkndn17r_e69dwn",
+      "timestamp": "2026-01-21T02:01:28.551Z",
+      "userPrompt": "보고서 업데이트",
+      "changesSummary": "### 변경 요약 (2026-01-21T01:56:12.243Z 이후)\n\n**새 파일 (1개):**\n- .vscode/vibereport-state.json\n\n**Git 변경사항:** 수정 0, 추가 9, 삭제 0\n\n**라인 변경:** +931 / -813 (총 1744줄)\n",
+      "diffSummary": {
+        "newFilesCount": 1,
+        "removedFilesCount": 0,
+        "changedConfigsCount": 0,
+        "totalChanges": 1,
+        "linesAdded": 931,
+        "linesRemoved": 813,
+        "linesTotal": 1744
+      },
+      "aiMetadata": {
+        "risksIdentified": 3,
+        "improvementsProposed": 8,
+        "overallScore": 85.8,
+        "evaluationScores": {
+          "codeQuality": {
+            "score": 85,
+            "grade": "B"
+          },
+          "architecture": {
+            "score": 0,
+            "grade": "F"
+          },
+          "security": {
+            "score": 0,
+            "grade": "F"
+          },
+          "performance": {
+            "score": 0,
+            "grade": "F"
+          },
+          "testCoverage": {
+            "score": 78,
+            "grade": "C+"
+          },
+          "errorHandling": {
+            "score": 0,
+            "grade": "F"
+          },
+          "documentation": {
+            "score": 92,
+            "grade": "A-"
+          },
+          "scalability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "maintainability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "productionReadiness": {
+            "score": 0,
+            "grade": "F"
+          },
+          "totalAverage": {
+            "score": 26,
+            "grade": "F"
+          }
+        },
+        "priorityItems": [
+          "프론트엔드 핵심 타입 정의 강화 (`any` 제거)",
+          "백엔드 핵심 비즈니스 로직 테스트 보강",
+          "비용 서비스 리팩토링 (SRP 준수)"
+        ]
+      }
+    },
+    {
+      "id": "session_mknfxaoz_0pdzmk",
+      "timestamp": "2026-01-21T03:05:26.627Z",
+      "userPrompt": "보고서 업데이트",
+      "changesSummary": "### 변경 요약 (2026-01-21T02:01:28.461Z 이후)\n\n**새 파일 (3개):**\n- test_db/test.db\n- .antigravityignore\n- .vscode/vibereport-state.json\n\n**Git 변경사항:** 수정 0, 추가 17, 삭제 3\n\n**라인 변경:** +2578 / -1187 (총 3765줄)\n",
+      "diffSummary": {
+        "newFilesCount": 3,
+        "removedFilesCount": 0,
+        "changedConfigsCount": 0,
+        "totalChanges": 3,
+        "linesAdded": 2578,
+        "linesRemoved": 1187,
+        "linesTotal": 3765
+      },
+      "aiMetadata": {
+        "risksIdentified": 3,
+        "improvementsProposed": 7,
+        "overallScore": 80.4,
+        "evaluationScores": {
+          "codeQuality": {
+            "score": 84,
+            "grade": "B"
+          },
+          "architecture": {
+            "score": 0,
+            "grade": "F"
+          },
+          "security": {
+            "score": 0,
+            "grade": "F"
+          },
+          "performance": {
+            "score": 0,
+            "grade": "F"
+          },
+          "testCoverage": {
+            "score": 65,
+            "grade": "D"
+          },
+          "errorHandling": {
+            "score": 0,
+            "grade": "F"
+          },
+          "documentation": {
+            "score": 92,
+            "grade": "A-"
+          },
+          "scalability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "maintainability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "productionReadiness": {
+            "score": 0,
+            "grade": "F"
+          },
+          "totalAverage": {
+            "score": 24,
+            "grade": "F"
+          }
+        },
+        "priorityItems": [
+          "프론트엔드 핵심 타입 정의 강화 (`any` 제거)",
+          "백엔드 테스트 환경 복구 및 실행",
+          "백엔드 레거시 TODO 및 FIXME 일괄 해소"
+        ]
+      }
+    },
+    {
+      "id": "session_mknmpcaw_aivs9b",
+      "timestamp": "2026-01-21T06:15:12.776Z",
+      "userPrompt": "보고서 업데이트",
+      "changesSummary": "### 변경 요약 (2026-01-21T03:05:26.490Z 이후)\n\n**새 파일 (1개):**\n- .vscode/vibereport-state.json\n\n**Git 변경사항:** 수정 0, 추가 21, 삭제 4\n\n**라인 변경:** +2948 / -1495 (총 4443줄)\n",
+      "diffSummary": {
+        "newFilesCount": 1,
+        "removedFilesCount": 0,
+        "changedConfigsCount": 0,
+        "totalChanges": 1,
+        "linesAdded": 2948,
+        "linesRemoved": 1495,
+        "linesTotal": 4443
+      },
+      "aiMetadata": {
+        "risksIdentified": 3,
+        "improvementsProposed": 5,
+        "overallScore": 85.4,
+        "evaluationScores": {
+          "codeQuality": {
+            "score": 82,
+            "grade": "B-"
+          },
+          "architecture": {
+            "score": 0,
+            "grade": "F"
+          },
+          "security": {
+            "score": 0,
+            "grade": "F"
+          },
+          "performance": {
+            "score": 0,
+            "grade": "F"
+          },
+          "testCoverage": {
+            "score": 60,
+            "grade": "D-"
+          },
+          "errorHandling": {
+            "score": 0,
+            "grade": "F"
+          },
+          "documentation": {
+            "score": 92,
+            "grade": "A-"
+          },
+          "scalability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "maintainability": {
+            "score": 0,
+            "grade": "F"
+          },
+          "productionReadiness": {
+            "score": 0,
+            "grade": "F"
+          },
+          "totalAverage": {
+            "score": 23,
+            "grade": "F"
+          }
+        },
+        "priorityItems": [
+          "백엔드 테스트 환경 정렬 및 수집 에러 해결",
+          "프론트엔드 에러 바운더리(Error Boundary) 및 전역 에러 처리",
+          "실험용/레거시 코드 정리 (Legacy Cleanup)"
+        ]
+      }
+    }
+  ],
+  "appliedImprovements": [],
+  "lastUpdated": "2026-01-23T02:07:57.762Z",
+  "version": 1,
+  "evaluationHistory": [
+    {
+      "version": "git:3d8b1e8@fix/dashboard-api-caching",
+      "evaluatedAt": "2026-01-20T01:56:26.723Z",
+      "totalScore": 86,
+      "grade": "B",
+      "scoresByCategory": {
+        "codeQuality": 84,
+        "testCoverage": 78,
+        "documentation": 90
+      }
+    },
+    {
+      "version": "git:1c8f089@fix/dashboard-api-caching",
+      "evaluatedAt": "2026-01-21T01:25:43.046Z",
+      "totalScore": 86.2,
+      "grade": "B",
+      "scoresByCategory": {
+        "codeQuality": 85,
+        "testCoverage": 78,
+        "documentation": 92
+      }
+    },
+    {
+      "version": "git:1c8f089@fix/dashboard-api-caching",
+      "evaluatedAt": "2026-01-21T02:01:28.551Z",
+      "totalScore": 85.8,
+      "grade": "B",
+      "scoresByCategory": {
+        "codeQuality": 85,
+        "testCoverage": 78,
+        "documentation": 92
+      }
+    },
+    {
+      "version": "git:1c8f089@fix/dashboard-api-caching",
+      "evaluatedAt": "2026-01-21T03:05:26.627Z",
+      "totalScore": 80.4,
+      "grade": "B-",
+      "scoresByCategory": {
+        "codeQuality": 84,
+        "testCoverage": 65,
+        "documentation": 92
+      }
+    },
+    {
+      "version": "git:1c8f089@fix/dashboard-api-caching",
+      "evaluatedAt": "2026-01-21T06:15:12.776Z",
+      "totalScore": 85.4,
+      "grade": "B",
+      "scoresByCategory": {
+        "codeQuality": 82,
+        "testCoverage": 60,
+        "documentation": 92
+      }
+    }
+  ],
+  "projectVision": {
+    "projectType": "web-backend",
+    "coreGoals": [
+      "개인의 금융 자산",
+      "지출 흐름",
+      "관심 뉴스를 홈서버에서 통합관리"
+    ],
+    "targetUsers": "코드모르는 초보ai본인",
+    "qualityFocus": "maintenance",
+    "focusCategories": [
+      "testing",
+      "security",
+      "performance",
+      "documentation",
+      "code-quality",
+      "architecture",
+      "error-handling",
+      "accessibility",
+      "internationalization",
+      "devops",
+      "ux-improvement",
+      "new-feature",
+      "refactoring",
+      "dependency-update",
+      "monitoring"
+    ],
+    "excludeCategories": [
+      "testing",
+      "security",
+      "performance",
+      "documentation",
+      "code-quality",
+      "architecture",
+      "error-handling",
+      "accessibility",
+      "internationalization",
+      "devops",
+      "ux-improvement",
+      "new-feature",
+      "refactoring",
+      "dependency-update",
+      "monitoring"
+    ],
+    "techStackPriorities": [
+      "fastapi",
+      "sqlite"
+    ]
+  }
+}

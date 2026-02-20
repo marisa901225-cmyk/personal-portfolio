@@ -1,3 +1,4 @@
+# Replace the entire file: backend/services/alarm/filters.py
 import re
 import logging
 import os
@@ -5,8 +6,30 @@ from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
-SPAM_MODEL_PATH = os.path.join(os.path.dirname(__file__), "../../data/spam_model.joblib")
+BACKEND_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+DATA_DIR = os.path.join(BACKEND_DIR, "data")
+SPAM_MODEL_PATH = os.path.join(DATA_DIR, "spam_model.joblib")
+
 _spam_model_instance = None
+
+# 성능 최적화: 민감정보 마스킹 정규식을 모듈 전역에서 컴파일
+SENSITIVE_PATTERNS = [
+    (re.compile(r"\[(?:인증번호|OTP|확인번호)\]\s*\d{4,6}", re.IGNORECASE), "[인증번호]"),
+    (re.compile(r"(?:인증번호|OTP|확인번호)는?\s*\[?\d{4,6}\]?", re.IGNORECASE), "[인증번호]"),
+    (re.compile(r"(?<=:)\s*\d{6}(?=\s)", re.IGNORECASE), "[인증번호]"),
+    (re.compile(r"\b\d{3,6}-\d{2,6}-\d{3,}(?:\*+|)\b", re.IGNORECASE), "[계좌번호]"),
+    (re.compile(r"\b\d{4}-\d{4}-\d{4}-\d{4}\b", re.IGNORECASE), "[카드번호]"),
+    (re.compile(r"\b\d{4}-\*{4,}-\d{4}\b", re.IGNORECASE), "[카드번호]"),
+    (re.compile(r"\b\d{4,}\*+\d{4,}\b", re.IGNORECASE), "[카드번호/계좌]"),
+    (re.compile(r"\b010[- ]?\d{3,4}[- ]?\d{4}\b", re.IGNORECASE), "[전화번호]"),
+    (re.compile(r"\b02[- ]?\d{1,4}[- ]?\d{3,4}[- ]?\d{4}\b", re.IGNORECASE), "[전화번호]"),
+    (re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", re.IGNORECASE), "[이메일]"),
+    (re.compile(r"\b\d{11,}\b", re.IGNORECASE), "[식별번호]"),
+    # 개인화된 호출 마스킹 (LO의 개인정보 보호! 💖)
+    (re.compile(r"칼라의빛(?:님|님께|님을|님이)?"), "[사용자]"),
+    (re.compile(r"[가-힣]{2,4}님(?:께|을|이)?"), "[사용자]"),
+]
+
 
 def get_spam_model():
     """
@@ -17,47 +40,24 @@ def get_spam_model():
         if os.path.exists(SPAM_MODEL_PATH):
             try:
                 import joblib
+
                 logger.info(f"Loading Spam AI model from {SPAM_MODEL_PATH}...")
                 _spam_model_instance = joblib.load(SPAM_MODEL_PATH)
             except Exception as e:
                 logger.error(f"Failed to load Spam AI model: {e}")
     return _spam_model_instance
 
+
 def mask_sensitive_info(text: str) -> str:
     """
     인증번호, 계좌번호, 전화번호, 이메일 등 민감 정보를 마스킹한다.
+    성능 최적화: 전역 컴파일된 정규식 사용
     """
-    patterns = [
-        # 1. OTP/인증번호
-        (r'\[(?:인증번호|OTP|확인번호)\]\s*\d{4,6}', "[인증번호]"),
-        (r'(?:인증번호|OTP|확인번호)는?\s*\[?\d{4,6}\]?', "[인증번호]"),
-        (r'(?<=:)\s*\d{6}(?=\s)', "[인증번호]"),
-        
-        # 2. 계좌번호 (3~6자리 - 2~6자리 - 3~자리)
-        # 예: 1002-556-011***, 68694229-01
-        (r'\b\d{3,6}-\d{2,6}-\d{3,}(?:\*+|)\b', "[계좌번호]"),
-        
-        # 3. 카드번호 (4자리-4자리-4자리-4자리 또는 마스킹 포함)
-        (r'\b\d{4}-\d{4}-\d{4}-\d{4}\b', "[카드번호]"),
-        (r'\b\d{4}-\*{4,}-\d{4}\b', "[카드번호]"),
-        (r'\b\d{4,}\*+\d{4,}\b', "[카드번호/계좌]"),
-        
-        # 4. 전화번호
-        (r'\b010[- ]?\d{3,4}[- ]?\d{4}\b', "[전화번호]"),
-        (r'\b02[- ]?\d{1,4}[- ]?\d{3,4}[- ]?\d{4}\b', "[전화번호]"),
-        
-        # 5. 이메일
-        (r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', "[이메일]"),
-        
-        # 6. 기타 긴 식별 번호 (11자리 이상 연속 숫자, 고객번호/송장번호 등)
-        (r'\b\d{11,}\b', "[식별번호]"),
-    ]
-    
     masked_text = text
-    for pattern, replacement in patterns:
-        masked_text = re.sub(pattern, replacement, masked_text, flags=re.IGNORECASE)
-    
+    for compiled_rx, replacement in SENSITIVE_PATTERNS:
+        masked_text = compiled_rx.sub(replacement, masked_text)
     return masked_text
+
 
 def is_spam(text: str, db: Session) -> tuple[bool, str]:
     """
@@ -65,12 +65,13 @@ def is_spam(text: str, db: Session) -> tuple[bool, str]:
     Returns: (is_spam, classification)
     """
     from ...core.models import SpamRule
-    
-    rules = db.query(SpamRule).filter(
-        SpamRule.is_enabled == True,
-        SpamRule.rule_type.in_(["contains", "regex"])
-    ).all()
-    
+
+    rules = (
+        db.query(SpamRule)
+        .filter(SpamRule.is_enabled.is_(True), SpamRule.rule_type.in_(["contains", "regex"]))
+        .all()
+    )
+
     for rule in rules:
         if rule.rule_type == "contains":
             if rule.pattern in text:
@@ -97,55 +98,222 @@ def is_spam(text: str, db: Session) -> tuple[bool, str]:
 
     return False, ""
 
+
+def is_review_spam(text: str) -> bool:
+    """
+    리뷰 요청 및 게임 이벤트 스팸 필터링 (규칙 기반)
+    """
+    # 리뷰 요청 패턴
+    review_patterns = [
+        r"리뷰.*기록",
+        r"리뷰.*남기",
+        r"리뷰.*작성",
+        r"평가.*기다",
+        r"별점.*매겨",
+        r"후기.*남겨",
+        r"어떠셨나요.*리뷰",
+    ]
+
+    # 게임 이벤트 및 프로모션 패턴
+    game_event_patterns = [
+        r"득템",
+        r"찬스.*놓치지",
+        r"마감.*임박",
+        r"\d+연참",
+        r"뽑기.*오픈",
+        r"가챠",
+        r"아래로.*드래그",
+        r"클릭.*받기",
+        r"오늘만.*특가",
+        r"지금.*안.*사면",
+        r"포인트.*뽑기",
+        r"포인트.*선물",
+        r"추억.*알아보세요",
+        r"오늘의.*포인트",
+    ]
+
+    all_patterns = review_patterns + game_event_patterns
+
+    for pattern in all_patterns:
+        if re.search(pattern, text):
+            # 보안: 로그에 민감정보 노출 방지
+            logger.info(f"Review/Event spam filtered: {pattern} in {mask_sensitive_info(text)[:50]}...")
+            return True
+
+    return False
+
+
+def is_spam_llm(text: str) -> tuple[bool, str]:
+    """
+    3단계: 고성능 8B 모델을 사용하여 스팸 여부를 정밀 판독한다.
+    Returns: (is_spam, confidence_label)
+    """
+    from ..llm_service import LLMService
+
+    llm = LLMService.get_instance()
+
+    if not llm.is_loaded():
+        return False, ""
+
+    # 8B 모델의 지능을 활용한 정교한 판독 프롬프트
+    messages = [
+        {
+            "role": "user",
+            "content": f"""
+당신은 고성능 뉴스/알림 필터링 전문가입니다. 다음 메시지가 사용자가 즉시 확인해야 할 '중요 정보'인지, 아니면 차단해야 할 '스팸/광고'인지 판별하세요.
+
+[판별 기준]
+1. SPAM (광고/유도/이벤트):
+   - 마케팅, 할인 쿠폰, 포인트 적립, 이벤트 참여 유도
+   - "지금 확인하세요", "혜택이 기다려요", "소멸 예정" 등의 촉구성 문구
+   - 주식/코인 리딩방 유도, 대출 권유
+   - 게임 내 이벤트(연참, 뽑기, 득템 등)나 단순 출석 알림
+   - 서비스 이용 후기나 별점 작성 요청
+
+2. HAM (정상/중요 알림):
+   - 실제 결제 승인(카드/페이), 은행 이체 알림, 입출금 정보 (매우 중요)
+   - 택배 배송 상태(배송 시작/완료), 택시/배달 앱 도착 정보
+   - 주식 체결 안내, 증권사 리포트 알림 
+   - 웹툰/웹소설 신작 및 연재 업데이트 알림 (중요 관심사)
+   - 라이브 방송 시작, 본인 인증 번호, 보안 로그인 안내
+
+[출력 형식]
+단 한 단어 "spam" 또는 "ham"만 출력하세요. 금융 거래나 배송 알람은 절대 스팸이 아닙니다. 판단이 모호하다면 "ham"을 선택하세요.
+
+메시지 내용:
+{text}
+""",
+        }
+    ]
+    
+    # 스팸 필터링은 즉각적인 판단이 중요하므로 Thinking을 끄고 짧게 대답하도록 유도
+    result = llm.generate_chat(
+        messages, 
+        max_tokens=20, # spam/ham 단답형을 위해 토큰 제한
+        temperature=0.1, 
+        enable_thinking=False
+    ).strip().lower()
+
+    # 디버깅: 모델의 실제 출력(Thinking 결과 포함)을 로그에 남김
+    logger.info(f"8B-Thinking Raw Result: {result}")
+
+    # 결과 파싱: thinking 태그(<thought>...</thought>) 이후의 실제 대답 추출 시도
+    # 태그가 없더라도 텍스트 내에 spam이 명시적으로 포함되어 있는지 확인
+    
+    # 1. 태그 제거 후 순수 텍스트 추출 (있는 경우)
+    import re
+    clean_text = re.sub(r'<thought>.*?</thought>', '', result, flags=re.DOTALL).strip()
+    if not clean_text:
+        clean_text = result # 태그가 덜 닫혔거나 없는 경우 전체 텍스트 사용
+    
+    if "spam" in clean_text:
+        logger.info(f"8B-AI (Thinking) classified as SPAM: {mask_sensitive_info(text)[:50]}...")
+        return True, "llm_spam_8b_thinking"
+
+    return False, "llm_ham_8b_thinking"
+
+
 def is_promo_spam(text: str, db: Session) -> bool:
     """
     프로모션 + 긴급성 조합 스팸 필터링 (DB 규칙)
     """
     from ...core.models import SpamRule
-    
-    rules = db.query(SpamRule).filter(
-        SpamRule.is_enabled == True,
-        SpamRule.rule_type == "promo_combo"
-    ).all()
-    
+
+    rules = db.query(SpamRule).filter(SpamRule.is_enabled.is_(True), SpamRule.rule_type == "promo_combo").all()
+
     t = text.replace("\n", " ")
-    
+
     for rule in rules:
         parts = rule.pattern.split("|")
         if len(parts) != 2:
             continue
         promo_list = [p.strip() for p in parts[0].split(",")]
         urgency_list = [u.strip() for u in parts[1].split(",")]
-        
+
         if any(p in t for p in promo_list) and any(u in t for u in urgency_list):
             logger.info(f"Promo spam filtered by DB rule: {rule.note or rule.pattern}")
             return True
-    
+
     return False
+
 
 def is_whitelisted(text: str) -> bool:
     """
     중요 알림 키워드 화이트리스트 (스팸 필터링 방지)
     """
     whitelist_keywords = [
-        "현재가", "시세", "주가지수", "코스피", "코스닥", 
-        "도착", "배송", "택배", "우체국", "AliExpress", 
-        "내역", "안내", "공지", "리포트"
+        "현재가",
+        "시세",
+        "주가지수",
+        "코스피",
+        "코스닥",
+        "도착",
+        "배송",
+        "택배",
+        "우체국",
+        "AliExpress",
+        "내역",
+        "안내",
+        "리포트",
+        # 배달 알림 보호 (중요!)
+        "배달이 시작",
+        "배달이 완료",
+        "배달 되었습니다",
+        "배달.*완료",
+        "주문.*배달",
+        "문앞.*배달",
+        "배달.*감사",
+        # 금융 거래
+        "매매 체결",
+        "접근 토큰",
+        "체결 안내",
+        # 결제 완료 (스팸 필터 우회용)
+        "결제가 완료되었어요",
+        "결제가 완료되었습니다",
+        "결제되었습니다",
+        "결제 내역",
+        "승인되었습니다",
+        # 웹소설/웹툰 업데이트 (사용자 관심사)
+        r"\d+화 업로드",
+        r"\d+화 업데이트",
+        r"\d+화가 업로드",
+        "새 연재",
+        "연재 업데이트",
+        "업로드 완료",
+        # 라이브 방송 시작
+        "라이브 시작",
+        "방송 시작",
+        "라이브가 시작",
     ]
-    
-    if "(광고)" in text:
+
+    # 광고/프로모션 키워드가 포함되어 있으면 절대 화이트리스트가 아님
+    promo_keywords = [
+        "(광고)", "[광고]", "((광고)", 
+        "무료 이용권", 
+        "캐시 뽑기", "무료 캐시", 
+        "포인트 뽑기", "포인트뽑기",
+        "추억을 알아보세요", "오늘의 포인트",
+        "이벤트", "당첨자", "당첨 안내", "응모",
+        "럭키박스", "득템", "사전예약", "쿠폰"
+    ]
+    if any(p in text for p in promo_keywords):
         return False
-        
-    if any(kw in text for kw in whitelist_keywords):
-        return True
-        
+
+    for kw in whitelist_keywords:
+        if re.search(kw, text):
+            return True
+
     return False
+
 
 def should_ignore(text: str) -> bool:
     """
     텔레그램으로 전달할 필요가 없는 메시지인지 확인한다.
     """
-    ignore_keywords = ["인증번호", "OTP", "인증 요청", "비밀번호 확인"]
-    if any(kw in text for kw in ignore_keywords):
+    ignore_keywords = [
+        "인증번호", "OTP", "인증 요청", "비밀번호 확인", 
+        "OneDrive", "Google Photos", "보안 알림", "새 로그인"
+    ]
+    if any(kw.lower() in text.lower() for kw in ignore_keywords):
         return True
     return False

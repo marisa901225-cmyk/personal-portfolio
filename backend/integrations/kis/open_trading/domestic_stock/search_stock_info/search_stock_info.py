@@ -13,11 +13,9 @@ from typing import Optional
 
 import pandas as pd
 
-sys.path.extend(['../..', '.'])
 import kis_auth as ka
 
-# 로깅 설정
-logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
+# 로깅 설정 (전역 설정 대신 모듈 로거 사용)
 logger = logging.getLogger(__name__)
 
 ##############################################################################################

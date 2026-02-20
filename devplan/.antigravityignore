@@ -1,0 +1,10 @@
+# --- AI & Agent Ignore Rules (Devplan) ---
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/.vscode
+**/.git
+**/.github
+**/*.xlsx
+**/*.zip
+**/*.gz

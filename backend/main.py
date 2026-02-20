@@ -2,27 +2,31 @@
 MyAsset Portfolio Backend - Main Application Entry Point
 
 이 파일의 책임:
-- FastAPI 앱 생성
-- 미들웨어 설정
+- FastAPI 앱 생성 (lifespan 관리)
+- 미들웨어 설정 (CORS, prefix fallback, GZip)
 - 라우터 등록
 - 헬스체크 및 루트 페이지
-
-비즈니스 로직은 services/에, API 엔드포인트는 routers/에 위치한다.
 """
 
 from __future__ import annotations
 
-from typing import Dict
-import logging
 import os
+import logging
+from typing import Dict
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.requests import Request
 
+from .core.logging_config import setup_global_logging
 from .core.db_migrations import ensure_schema
 from .core import auth, db
+from .core.config import settings
+from .services.alarm.llm_refiner import close_light_client
+
 from .routers.assets import router as assets_router
 from .routers.exchanges import router as exchanges_router
 from .routers.portfolio import router as portfolio_router
@@ -37,18 +41,63 @@ from .routers.market_data import router as market_data_router
 from .routers.spam_rules import router as spam_rules_router
 from .routers.news import router as news_router
 from .routers.telegram_webhook import router as telegram_webhook_router
+from .routers.memories import router as memories_router
+from .routers.memory_chat import router as memory_chat_router
+from .routers.scheduler_state import router as scheduler_state_router
+from .routers.naver_auth import router as naver_auth_router
 
-app = FastAPI(title="MyAsset Portfolio Backend")
 
-# Logging Configuration
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+# Logging Configuration (Sensitive Data Masking enabled)
+log_level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+setup_global_logging(getattr(logging, log_level_name, logging.INFO))
 
-ensure_schema()
 logger = logging.getLogger("myasset.startup")
 
+
+def _build_allowed_origins() -> list[str]:
+    """CORS 허용 목록을 구성합니다."""
+    raw = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()]
+    s = set(raw)
+
+    # Tailscale DNS 명칭 자동 추가 (tailnet 도메인은 env로)
+    tailnet = os.getenv("TAILSCALE_TAILNET_DOMAIN", "tail5c2348.ts.net").strip()
+    if tailnet:
+        try:
+            import socket
+            hostname = socket.gethostname()
+            if hostname and "." not in hostname:
+                s.add(f"http://{hostname}.{tailnet}")
+                s.add(f"https://{hostname}.{tailnet}")
+        except Exception:
+            pass
+
+    # Vercel Production 도메인 명시적 추가
+    s.add("https://personal-portfolio-blue-one-38.vercel.app")
+
+    # allow_credentials=True일 때 "*"는 브라우저에서 막힘
+    if "*" in s:
+        logger.warning("CORS allowed_origins에 '*'가 포함되어 있습니다. allow_credentials=True면 브라우저에서 차단될 수 있습니다.")
+
+    return sorted(list(s))
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """애플리케이션의 시작과 종료 라이프사이클을 관리합니다."""
+    # ✅ schema/migration을 import 시점이 아니라 startup에서 실행
+    ensure_schema()
+
+    logger.info("MyAsset Backend 시작")
+    logger.info("DB 확인: %s", db.DATABASE_URL)
+    logger.info("인증 모드: %s", "활성화" if auth.resolve_api_token() else "비활성화")
+    logger.info("Working Dir: %s", os.getcwd())
+
+    yield
+
+    logger.info("MyAsset Backend 종료 중...")
+    await close_light_client()
+
+app = FastAPI(title="MyAsset Portfolio Backend", lifespan=lifespan)
 
 # ============================================
 # Middleware
@@ -58,42 +107,30 @@ logger = logging.getLogger("myasset.startup")
 async def api_prefix_fallback(request: Request, call_next):
     """
     Reverse proxy(Tailscale Serve) 설정에 따라 /api prefix가 upstream에서 제거될 수 있다.
-    이 경우에도 프론트가 사용하는 /api/* 라우팅을 그대로 지원하기 위해,
     /api 로 시작하지 않는 요청을 내부적으로 /api/* 로 매핑한다.
     """
     path = request.scope.get("path") or ""
-    if (
-        path
-        and path not in ("/", "/health", "/openapi.json")
-        and not path.startswith(("/api", "/docs", "/redoc"))
-    ):
+
+    # ✅ 정적/메타 경로 예외를 조금 더 추가
+    passthrough_exact = {"/", "/health", "/openapi.json", "/favicon.ico", "/robots.txt"}
+    passthrough_prefix = ("/api", "/docs", "/redoc")
+
+    if path and (path not in passthrough_exact) and (not path.startswith(passthrough_prefix)):
         request.scope["path"] = f"/api{path}"
+
     return await call_next(request)
 
 
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+allowed_origins = _build_allowed_origins()
 app.add_middleware(
     CORSMiddleware,
-    # Backend는 Tailscale 등 사설 망 뒤에 두는 것을 전제로 하고,
-    # 프론트는 Vercel 등 다양한 도메인에서 올 수 있으므로 일단 전체 허용.
-    # 필요하면 추후 특정 도메인만 허용하도록 조정 가능.
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-# ============================================
-# Startup Log
-# ============================================
-
-@app.on_event("startup")
-def log_startup_info() -> None:
-    logger.info("MyAsset Backend 시작")
-    logger.info("DB 확인: %s", db.DATABASE_URL)
-    logger.info("인증 모드: %s", "활성화" if auth.resolve_api_token() else "비활성화")
-    logger.info("Working Dir: %s", os.getcwd())
-
 
 # ============================================
 # Router Registration
@@ -113,6 +150,10 @@ app.include_router(market_data_router)
 app.include_router(spam_rules_router)
 app.include_router(news_router)
 app.include_router(telegram_webhook_router)
+app.include_router(memories_router)
+app.include_router(memory_chat_router)
+app.include_router(scheduler_state_router)
+app.include_router(naver_auth_router)
 
 
 # ============================================
@@ -123,11 +164,14 @@ app.include_router(telegram_webhook_router)
 async def health() -> Dict[str, str]:
     return {"status": "ok"}
 
-
-@app.get("/api/health")
+@app.get("/api/health", include_in_schema=False)
 async def api_health() -> Dict[str, str]:
     return await health()
 
+# ✅ /api/openapi.json 별칭 추가 (프록시 환경 편차 대응)
+@app.get("/api/openapi.json", include_in_schema=False)
+async def openapi_alias():
+    return JSONResponse(app.openapi())
 
 @app.get("/", response_class=HTMLResponse)
 async def root() -> str:
@@ -266,7 +310,7 @@ async def root() -> str:
       <body>
         <div class="container">
           <header>
-            <h1>MyAsset Portfolio API</h1>
+            <h1>MyAsset Portfolio Backend</h1>
             <div class="status">시스템 정상 작동 중</div>
           </header>
 

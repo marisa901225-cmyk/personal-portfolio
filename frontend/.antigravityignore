@@ -1,0 +1,13 @@
+# --- AI & Agent Ignore Rules (Frontend) ---
+**/node_modules
+**/dist
+**/dist-ssr
+**/.next
+**/.vercel
+**/.vscode
+**/.git
+**/.github
+**/*.db
+**/.env
+**/.env.*
+**/*.token

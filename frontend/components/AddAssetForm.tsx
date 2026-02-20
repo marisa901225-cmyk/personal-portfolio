@@ -31,7 +31,7 @@ export const AddAssetForm: React.FC<AddAssetFormProps> = ({ onSave, onCancel, se
   const supportsTicker =
     formData.category === AssetCategory.STOCK_KR || formData.category === AssetCategory.STOCK_US;
 
-  const handleChange = (field: keyof Asset, value: any) => {
+  const handleChange = (field: keyof Asset, value: Asset[keyof Asset]) => {
     setFormData(prev => {
       const updated = { ...prev, [field]: value };
       // 티커 변경 시 카테고리 자동 추론

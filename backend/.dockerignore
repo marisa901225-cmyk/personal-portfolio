@@ -1,4 +1,5 @@
 .venv
+.env
 __pycache__
 *.pyc
 *.pyo
@@ -14,6 +15,6 @@ node_modules
 dist
 build
 storage/*
-data/gemma*
+data/*.gguf
 data/*.joblib
 !storage/db/portfolio.db
