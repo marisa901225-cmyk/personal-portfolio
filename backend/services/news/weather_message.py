@@ -162,7 +162,7 @@ async def generate_weather_message_with_llm(
             if os.path.exists(config_path):
                 with open(config_path, "r", encoding="utf-8") as f:
                     config = json.load(f)
-                active = config.get("active_persona", "애니 (Annie)")
+                active = config.get("active_persona") or "애니 (Annie)"
                 # personas 딕셔너리가 없거나 해당 캐릭터가 없어도 이름은 active로 사용
                 persona_data = config.get("personas", {}).get(active, {})
                 setting = persona_data.get("setting", "")  # 설정이 없으면 빈 문자열

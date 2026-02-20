@@ -242,7 +242,9 @@ def _ensure_auth() -> None:
         ka.auth()  # type: ignore[union-attr]  # 실전투자 기준, _cfg.my_prod 기반 계좌 선택
     except Exception as exc:  # pragma: no cover - 네트워크/환경 의존
         logger.exception("KIS 인증 실패: %s", exc)
-        raise RuntimeError("KIS authentication failed; 환경설정(kis_user.yaml)을 확인하세요.") from exc
+        raise RuntimeError(
+            "KIS authentication failed; KIS config not found in settings (환경변수 KIS_MY_APP...) or file (~/KIS/config/kis_user.yaml)"
+        ) from exc
 
 
 def _parse_overseas_ticker(ticker: str) -> tuple[str, str]:

@@ -86,7 +86,7 @@ def _load_kis_config() -> dict | None:
     except Exception as e:
         logger.warning(f"Failed to load KIS config from file: {e}")
 
-    logger.warning("KIS config not found in settings (KIS_MY_APP...) or file (~/KIS/config/kis_user.yaml)")
+    logger.warning("KIS config not found in settings (환경변수 KIS_MY_APP...) or file (~/KIS/config/kis_user.yaml)")
     return None
 
 
