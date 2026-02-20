@@ -79,11 +79,16 @@ def _format_match(match: Dict[str, Any], *, compact: bool = True) -> Optional[st
         score_b = score_map.get(team_b_id)
 
         if score_a is not None and score_b is not None:
+            # 스코어가 0-0인 경우는 아직 시작 전이거나 무효한 데이터일 가능성이 높으므로 스킵 처리 유도
+            if score_a == 0 and score_b == 0:
+                return None
             base = f"{team_a} {score_a}-{score_b} {team_b}"
         else:
-            base = match.get("name") or f"{team_a} vs {team_b}"
+            # 스코어가 없으면 요약에서 제외 (브리핑 품질 목적)
+            return None
     else:
-        base = match.get("name") or "경기 결과"
+        # 단일 상대거나 정보가 부족하면 제외
+        return None
 
     if not compact:
         time_src = match.get("end_at") or match.get("begin_at")
@@ -116,12 +121,13 @@ async def fetch_lec_results_summary(
     try:
         # 🌟 LO의 똑똑한 제안: /lol/matches/past 엔드포인트 사용
         # 이 엔드포인트는 이미 끝난 경기들만 최신순으로 반환하므로 훨씬 효율적임
+        # 하지만 간혹 0-0 상태의 경기가 섞여 나올 수 있으므로 필터링 필요
         matches = await _fetch(
             "/lol/matches/past",
             {
                 "filter[league_id]": league_id,
                 "sort": "-end_at", # 최근에 끝난 순서대로
-                "per_page": max(10, limit),
+                "per_page": max(10, limit * 2), # 필터링을 고려하여 넉넉하게 가져옴
             },
         )
     except Exception as e:
@@ -139,9 +145,10 @@ async def fetch_lec_results_summary(
         time_src = m.get("end_at") or m.get("begin_at")
         dt = _parse_iso(time_src)
         
-        # /past 엔드포인트이므로 status 체크는 보조적으로만 수행
+        # 48시간 이내 경기만 포함
         if dt and dt < cutoff:
             continue
+
         line = _format_match(m, compact=True)
         if line:
             lines.append(line)
@@ -151,7 +158,7 @@ async def fetch_lec_results_summary(
     if not lines:
         return ""
 
-    joined = " | ".join(lines)
+    joined = "최근 LEC 경기 결과: " + " | ".join(lines)
     if max_chars and len(joined) > max_chars:
         # Cut at a separator boundary if possible.
         truncated = joined[:max_chars]

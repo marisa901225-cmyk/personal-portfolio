@@ -32,6 +32,8 @@ class Settings:
         self.llm_api_key = settings.llm_api_key
         self.llm_timeout = settings.llm_timeout
 
+        self.open_api_key = settings.open_api_key
+
         # 유료 모델용
         self.ai_report_base_url = settings.ai_report_base_url
         self.ai_report_api_key = settings.ai_report_api_key

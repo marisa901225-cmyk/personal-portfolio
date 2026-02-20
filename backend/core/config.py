@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     api_token: Optional[str] = Field(default=None, validation_alias="API_TOKEN")
     
     # 외부 API 통합 (PandaScore, Naver 등)
+    open_api_key: Optional[str] = Field(default=None, validation_alias="OPEN_API_KEY")
     pandascore_api_key: Optional[str] = Field(default=None, validation_alias="PANDASCORE_API_KEY")
     naver_client_id: Optional[str] = Field(default=None, validation_alias="NAVER_CLIENT_ID")
     naver_client_secret: Optional[str] = Field(default=None, validation_alias="NAVER_CLIENT_SECRET")

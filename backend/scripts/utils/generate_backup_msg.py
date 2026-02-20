@@ -13,24 +13,40 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "../.."))
 from backend.services.llm_service import LLMService
 from backend.services.alarm.sanitizer import clean_exaone_tokens
 
-def generate_backup_message(file_size_mb: float, backup_time: str) -> str:
+def generate_backup_message(file_size_mb: float, backup_time: str, drive_success: bool = False, external_success: bool = False) -> str:
     """
     LLM을 사용하여 창의적인 DB 백업 완료 메시지 생성
     """
     llm = LLMService.get_instance()
+    
+    drive_status = "성공" if drive_success else "실패 또는 건너뜜"
+    external_status = "성공" if external_success else "실패 또는 건너뜜"
+    
     if not llm.is_loaded():
-        return f"📦 DB 백업 완료!\n- 파일 크기: {file_size_mb:.2f}MB\n- {backup_time} 기준"
+        d_emoji = "✅" if drive_success else "⚠️"
+        e_emoji = "✅" if external_success else "⚠️"
+        return (f"📦 DB 백업 완료!\n"
+                f"- 파일 크기: {file_size_mb:.2f}MB\n"
+                f"- 구글 드라이브: {d_emoji} {drive_status}\n"
+                f"- 외장하드: {e_emoji} {external_status}\n"
+                f"- {backup_time} 기준")
     
     # 모델 템플릿에 의존하지 않고 generate_chat 사용
     messages = [
         {
             "role": "user",
             "content": f"""
-DB 백업 완료! 용량: {file_size_mb:.2f}MB. 사용자한테 알려줄 짧은 메시지 만들어줘.
+DB 백업 완료! 
+- 용량: {file_size_mb:.2f}MB
+- 구글 드라이브 업로드: {drive_status}
+- 외장하드 백업(/mnt/one-touch/backups): {external_status}
+
+사용자한테 알려줄 짧은 메시지 만들어줘.
 
 [규칙]
 - 반말로 친근하게
 - 파일 크기({file_size_mb:.2f}MB) 반드시 포함
+- 저장소 결과들({drive_status}, {external_status})에 따라 칭찬하거나 아쉬워하는 뉘앙스 포함
 - 한두 문장으로 짧게
 - 안심시키거나 재미있는 코멘트 추가
 - 이모지 OK
@@ -60,7 +76,13 @@ DB 백업 완료! 용량: {file_size_mb:.2f}MB. 사용자한테 알려줄 짧은
         return final_msg
     except Exception as e:
         print(f"ERROR: LLM generation failed: {e}", file=sys.stderr)
-        return f"📦 DB 백업 완료!\n- 파일 크기: {file_size_mb:.2f}MB\n- {backup_time} 기준"
+        d_emoji = "✅" if drive_success else "⚠️"
+        e_emoji = "✅" if external_success else "⚠️"
+        return (f"📦 DB 백업 완료!\n"
+                f"- 파일 크기: {file_size_mb:.2f}MB\n"
+                f"- 구글 드라이브: {d_emoji} {drive_status}\n"
+                f"- 외장하드: {e_emoji} {external_status}\n"
+                f"- {backup_time} 기준")
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
