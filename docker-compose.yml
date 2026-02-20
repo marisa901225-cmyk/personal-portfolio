@@ -62,6 +62,7 @@ services:
       - ./backend/logs:/app/backend/logs
       - /home/dlckdgn/ai-models/myasset.env:/app/backend/.env:ro
       - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
+      - /mnt/one-touch/backups:/mnt/one-touch/backups
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
     environment:
       - LLM_BASE_URL=http://llama-server:8080
@@ -95,6 +96,7 @@ services:
       - ./backend/logs:/app/backend/logs
       - /home/dlckdgn/ai-models/myasset.env:/app/backend/.env:ro
       - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
+      - /mnt/one-touch/backups:/mnt/one-touch/backups
     command: python -m backend.scripts.manage run-collector --host 0.0.0.0 --port 8001
     environment:
       - PYTHONPATH=/app
@@ -128,12 +130,20 @@ services:
       - ./backend/logs:/app/backend/logs
       - /home/dlckdgn/ai-models/myasset.env:/app/backend/.env:ro
       - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
+      - /mnt/one-touch/backups:/mnt/one-touch/backups
     command: python -m backend.scripts.manage run-scheduler
     environment:
       - PYTHONPATH=/app
       - LLM_BASE_URL=http://llama-server:8080
       - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-abliterated-v1.Q8_0.gguf
       - TZ=Asia/Seoul
+      - TRADING_ENGINE_ENABLED=1
+      - TRADING_ENGINE_API_FACTORY=${TRADING_ENGINE_API_FACTORY:-backend.integrations.kis.trading_adapter:create_trading_api}
+      - TRADING_ENGINE_SCHEDULE_INTERVAL_MIN=${TRADING_ENGINE_SCHEDULE_INTERVAL_MIN:-4}
+      - TRADING_ENGINE_INCLUDE_ETF=${TRADING_ENGINE_INCLUDE_ETF:-1}
+      - TRADING_ENGINE_STATE_PATH=${TRADING_ENGINE_STATE_PATH:-backend/storage/trading_engine/state.json}
+      - TRADING_ENGINE_OUTPUT_DIR=${TRADING_ENGINE_OUTPUT_DIR:-backend/storage/trading_engine/output}
+      - TRADING_ENGINE_RUNLOG_PATH=${TRADING_ENGINE_RUNLOG_PATH:-backend/storage/trading_engine/runlog_current.log}
     env_file:
       - /home/dlckdgn/ai-models/myasset.env
     depends_on:
@@ -158,6 +168,7 @@ services:
       - ./backend/data:/app/backend/data
       - ./backend/logs:/app/backend/logs
       - /home/dlckdgn/ai-models/myasset.env:/app/backend/.env:ro
+      - /mnt/one-touch/backups:/mnt/one-touch/backups
     command: python -m backend.scripts.manage listen-esports
     environment:
       - PYTHONPATH=/app
@@ -183,6 +194,7 @@ services:
       - ./backend/logs:/app/backend/logs
       - /home/dlckdgn/ai-models/myasset.env:/app/backend/.env:ro
       - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
+      - /mnt/one-touch/backups:/mnt/one-touch/backups
     command: python -m backend.scripts.runners.run_sync_prices_scheduler
     environment:
       - PYTHONPATH=/app
