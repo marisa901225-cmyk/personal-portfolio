@@ -45,6 +45,14 @@ data_backup_reference/*
 *.gz
 삼성*.xlsx
 
+# Runtime Storage (DB and dynamic data - never track these)
+backend/storage/db/
+backend/storage/economy_snapshot/
+backend/storage/weather_cache/
+backend/storage/kis_config/
+backend/storage/trading_engine/
+backend/storage/market_sentiment/
+
 # Tokens & Sensitive Data
 token*.json
 *token
