@@ -195,12 +195,31 @@ class EsportsMonitor:
             match_id = m.get("id")
             if not match_id:
                 continue
-            running_ids.add(match_id)
+            
+            # [NEW] Apply same filtering as upcoming indexer to running matches
+            videogame = m.get("_videogame", m.get("videogame", {}).get("slug"))
+            league_name = (m.get("league") or {}).get("name") or ""
+            league_name_lower = league_name.lower()
+            
+            is_valid = False
+            if videogame == "league-of-legends":
+                allowed_lol = ['LCK', 'LPL', 'LEC', 'First Stand', 'First-Stand', 'MSI', 'Mid-Season Invitational', 'Worlds', 'World Championship', 'Esports World Cup', 'EWC']
+                is_valid = any(word in league_name for word in allowed_lol)
+            elif videogame == "valorant":
+                is_china = any(word in league_name_lower for word in ['cn', 'china', 'lpl'])
+                if 'challengers' in league_name_lower or 'vcl' in league_name_lower or is_china:
+                    is_valid = False
+                else:
+                    allowed_vct = ['vct', 'champions', 'masters']
+                    is_valid = any(word in league_name_lower for word in allowed_vct)
+            else:
+                is_valid = True # Default for other games
+                
+            if not is_valid:
+                logger.debug(f"Skipping running match {match_id} ({m.get('name')}) - filtered league: {league_name}")
+                continue
 
-            existing = db.query(EsportsMatch).filter(EsportsMatch.match_id == match_id).first()
-            game_cfg = GAME_REGISTRY.get((existing.videogame if existing else m.get("_videogame")) or "", {})
-            tagger = game_cfg.get("tagger")
-            league_tag = tagger(m) if tagger else "default"
+            running_ids.add(match_id)
             if existing:
                 # [FIXED] Idempotent start notification
                 if existing.status == "not_started" and not existing.start_notified_at:
@@ -350,13 +369,19 @@ class EsportsMonitor:
                             logger.info(f"Accepted LoL match: {m.get('name')} (League: {league_name})")
                         
                     elif match_game_slug == "valorant":
-                        # Block Tier 2
-                        if 'Challengers' in league_name or 'VCL' in league_name:
+                        # Block Tier 2 and Chinese leagues (LPL related Valorant)
+                        league_name_lower = league_name.lower()
+                        is_china_valorant = any(word in league_name_lower for word in ['cn', 'china', 'lpl'])
+                        
+                        if 'challengers' in league_name_lower or 'vcl' in league_name_lower or is_china_valorant:
                             is_valid_league = False
+                            logger.info(f"Filtered out Valorant match: {m.get('name')} (League: {league_name}) [CHINA/TIER2]")
                         else:
                             # Allow Tier 1
-                            allowed_vct = ['VCT', 'Champions', 'Masters']
-                            is_valid_league = any(word in league_name for word in allowed_vct)
+                            allowed_vct = ['vct', 'champions', 'masters']
+                            is_valid_league = any(word in league_name_lower for word in allowed_vct)
+                            if not is_valid_league:
+                                logger.debug(f"Filtered out Valorant match: {m.get('name')} (League: {league_name}) [NOT T1]")
                     else:
                         # Default fallback for other games (e.g. PUBG)
                         # Check exclude keywords from config

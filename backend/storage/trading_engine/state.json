@@ -1,0 +1,28 @@
+{
+  "trade_date": "20260220",
+  "week_id": "2026-W08",
+  "swing_entries_today": 0,
+  "swing_entries_week": 1,
+  "day_entries_today": 0,
+  "realized_pnl_today": 0.0,
+  "consecutive_losses_today": 0,
+  "blacklist_today": [],
+  "open_positions": {
+    "229200": {
+      "type": "S",
+      "entry_time": "2026-02-19T13:16:00+09:00",
+      "entry_price": 20242.0,
+      "qty": 46,
+      "highest_price": 20450.0,
+      "entry_date": "20260219",
+      "bars_held": 2
+    }
+  },
+  "last_run_timestamp": "2026-02-20T10:32:00+09:00",
+  "last_bar_date_seen": "20260220",
+  "pass_reasons_today": {
+    "MAX_SWING_POSITIONS": 27,
+    "ENTRY_WINDOW_CLOSED": 27
+  },
+  "pending_notifications": []
+}

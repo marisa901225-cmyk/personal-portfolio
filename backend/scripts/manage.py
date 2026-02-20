@@ -154,36 +154,13 @@ def backup_db(args):
     if raw_backup.exists():
         raw_backup.unlink()
 
-    file_size_mb = archive_path.stat().st_size / 1024 / 1024
-    msg = generate_backup_message(file_size_mb, backup_time_str)
-
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
-    if bot_token and chat_id:
-        try:
-            parts = BackupService.split_file(archive_path)
-            import requests
-            for idx, part in enumerate(parts):
-                caption = msg if idx == 0 else f"(Part {idx+1})"
-                url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
-                with open(part, "rb") as f:
-                    requests.post(
-                        url,
-                        data={"chat_id": chat_id, "caption": caption},
-                        files={"document": f},
-                        timeout=60,
-                    )
-                if part != archive_path:
-                    part.unlink()
-            print("Telegram backup notification sent.")
-        except Exception as e:
-            logging.error(f"Telegram backup failed: {e}")
-
+    # Google Drive 업로드 수행
     client_id = os.getenv("GOOGLE_DRIVE_CLIENT_ID")
     client_secret = os.getenv("GOOGLE_DRIVE_CLIENT_SECRET")
     refresh_token = os.getenv("GOOGLE_DRIVE_REFRESH_TOKEN")
     folder_id = os.getenv("GOOGLE_DRIVE_FOLDER_ID")
     
+    g_success = False
     # Google Drive 전용 레이트 리밋 체크 (하루 50회)
     if client_id and client_secret and refresh_token:
         state_file = project_root / "data" / "google_drive_backup_state.json"
@@ -221,8 +198,8 @@ def backup_db(args):
                         print(f"DEBUG: Creating new folder '{folder_name}'...")
                         folder_id = GoogleDriveService.create_folder(folder_name, access_token)
                 
-                success = GoogleDriveService.upload_file(str(archive_path), folder_id, access_token)
-                if success:
+                g_success = GoogleDriveService.upload_file(str(archive_path), folder_id, access_token)
+                if g_success:
                     print("✅ Google Drive backup upload completed successfully!💖")
                     # 업로드 성공 시 카운트 업데이트
                     try:
@@ -241,8 +218,57 @@ def backup_db(args):
         missing = []
         if not client_id: missing.append("CLIENT_ID")
         if not client_secret: missing.append("CLIENT_SECRET")
-        if not refresh_token: missing.append("REFRESH_TOKEN")
         print(f"⚠️ Google Drive upload skipped. Missing: {', '.join(missing)}")
+
+    # 외장하드 백업 추가
+    ext_path_str = os.getenv("EXTERNAL_BACKUP_PATH")
+    external_backup_path = Path(ext_path_str) if ext_path_str else None
+    e_success = False
+    
+    if external_backup_path and external_backup_path.exists():
+        try:
+            import shutil
+            dest_file = external_backup_path / archive_path.name
+            shutil.copy2(archive_path, dest_file)
+            print(f"✅ External HDD backup success: {dest_file}💖")
+            e_success = True
+        except Exception as e:
+            logging.error(f"External HDD backup failed: {e}")
+    else:
+        if not external_backup_path:
+            print("⚠️ EXTERNAL_BACKUP_PATH not set in env. Skipping physical backup...")
+        else:
+            print(f"⚠️ External HDD path {external_backup_path} not found. Skipping physical backup...")
+
+    # 텔레그램 메시지 생성 (구글 드라이브 + 외장하드 성공 여부 포함)
+    file_size_mb = archive_path.stat().st_size / 1024 / 1024
+    msg = generate_backup_message(file_size_mb, backup_time_str, drive_success=g_success, external_success=e_success)
+
+    # 텔레그램 전송
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if bot_token and chat_id:
+        try:
+            parts = BackupService.split_file(archive_path)
+            import requests
+            for idx, part in enumerate(parts):
+                caption = msg if idx == 0 else f"(Part {idx+1})"
+                url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
+                with open(part, "rb") as f:
+                    requests.post(
+                        url,
+                        data={"chat_id": chat_id, "caption": caption},
+                        files={"document": f},
+                        timeout=60,
+                    )
+                if part != archive_path:
+                    part.unlink()
+            print("Telegram backup notification sent.")
+        except Exception as e:
+            logging.error(f"Telegram backup failed: {e}")
+
+    # Google Drive 관련 중복 코드는 위에서 처리함
+
 
     try:
         BackupService.cleanup_old_backups(backup_dir)

@@ -156,6 +156,21 @@ async def generate_weather_message_with_llm(
     futures_options_data: Optional[Dict] = None,
 ) -> str:
     """날씨 정보를 LLM으로 자연어 메시지로 변환한다."""
+    def _load_persona_config() -> Tuple[str, str]:
+        config_path = os.path.join(os.path.dirname(__file__), "../../data/persona_config.json")
+        try:
+            if os.path.exists(config_path):
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                active = config.get("active_persona", "애니 (Annie)")
+                # personas 딕셔너리가 없거나 해당 캐릭터가 없어도 이름은 active로 사용
+                persona_data = config.get("personas", {}).get(active, {})
+                setting = persona_data.get("setting", "")  # 설정이 없으면 빈 문자열
+                return active, setting
+        except Exception as e:
+            logger.error("Failed to load persona config: %s", e)
+        return "애니 (Annie)", ""
+
     def _trim_for_telegram(text: str, max_chars: int = _WEATHER_MESSAGE_MAX_CHARS) -> str:
         if len(text) <= max_chars:
             return text
@@ -251,8 +266,13 @@ async def generate_weather_message_with_llm(
         except Exception as e:
             logger.error("Failed to format futures/options data for LLM: %s", e)
 
+    # 페르소나 설정 로드
+    persona_name, persona_setting = _load_persona_config()
+
     prompt_content = load_prompt(
         "weather_message",
+        persona=persona_name,
+        persona_setting=persona_setting,
         temp=temp,
         today_max_temp=max_temp,
         weather_status=weather_status,

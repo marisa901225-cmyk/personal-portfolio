@@ -13,6 +13,19 @@ LABEL_PATTERN = re.compile(r'^[-•*]\s*\[?([^\]]+)\]?:?')
 MAX_DROP_REASONS = 10
 SUMMARY_KEYWORDS = ['결제', '송금', '입금', '출금', '알림', '메시지', '카톡', '문자', '배송', '택배', '배달', '업데이트', '건', '도착', '완료', '기상청', '공지']
 
+
+def get_korean_ratio(text: str) -> float:
+    """텍스트의 한국어 비율을 계산한다. (한글 / 가독 문자 수)"""
+    if not text:
+        return 0
+    # URL 제거 후 계산
+    cleaned = re.sub(r'https?://[^\s]+', '', text)
+    korean_chars = len(re.findall(r'[가-힣]', cleaned))
+    meaningful_chars = len(re.findall(r'[가-힣a-zA-Z0-9]', cleaned))
+    if meaningful_chars == 0:
+        return 0
+    return korean_chars / meaningful_chars
+
 # URL 정규화용 구두점
 _TRAILING_PUNCT = '.,;:!?)]}>"\''
 
@@ -231,11 +244,21 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
     for it in original_items:
         original_apps.add(infer_source(it))
         a = (it.get("app_name") or it.get("sender") or "").strip()
-        if a:
+        if a and not a.startswith('%'):
             original_apps.add(a)
+
+        # LO 추천: app_title이나 conversation도 라벨의 근거가 될 수 있음 (예: "요금안내서")
+        for extra in ["app_title", "conversation"]:
+            val = (it.get(extra) or "").strip()
+            if val and not val.startswith('%'):
+                # 전체를 넣거나, 띄어쓰기 단위로 쪼개서 넣음
+                original_apps.add(val)
+                for word in re.findall(r'[가-힣A-Za-z0-9]{2,}', val):
+                    original_apps.add(word)
+
         # 발신자 이름 수집 (마스킹 포함)
         sender = (it.get("sender") or "").strip()
-        if sender:
+        if sender and not sender.startswith('%'):
             original_senders.add(sender)
             # 마스킹된 이름도 추가 (예: "홍길동" -> "홍*동")
             if len(sender) >= 2:
@@ -243,6 +266,7 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
         # text에서 발신자 이름 추출 (conversation 포함)
         for field in ['text', 'conversation', 'app_title']:
             text = (it.get(field) or "")
+            if text.startswith('%'): continue
             # "XXX님" 패턴 추출
             name_matches = re.findall(r'([가-힣A-Za-z0-9_*]{1,10})님', text)
             for name in name_matches:
@@ -369,27 +393,16 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
 
         # 메타 문장/설명 제거 (사족 필터링)
         meta_patterns = [
-            r'fits under', r'belongs to', r'classified as', r'notification type', 
-            r'요약하자면', r'포함시켰습니다',
-            # LLM 사고과정 패턴 (출력에 사고과정 포함된 경우)
-            r'요약\s*가능', r'같은\s*이벤트니까', r'처리했다는\s*건',
-            r'통합하여', r'하나로\s*묶', r'정리하면', r'분석하면',
+            r'(fits under|belongs to|classified as|notification type)',
+            r'(요약하자면|포함시켰습니다|요약\s*가능|정리하면|분석하면)',
         ]
         if any(re.search(p, line_cleaned, re.I) for p in meta_patterns):
-            if len(dropped_reasons) < MAX_DROP_REASONS:
-                dropped_reasons.append(f"drop(meta/explanation): {line_cleaned[:50]}...")
             continue
 
-        # 한글 비중 검사 (URL 제외하고 한글이 너무 적으면 메타 설명일 확률 높음)
-        text_only = URL_PATTERN.sub('', line_cleaned)
-        text_only = re.sub(r'[^\w\s]', '', text_only) # 특수문자 제거
-        if text_only.strip():
-            korean_chars = len(re.findall(r'[가-힣]', text_only))
-            total_chars = len(text_only.strip())
-            # 한글이 20% 미만이고 영어가 주인 경우 (요약문이 아닐 확률이 높음)
-            if korean_chars / total_chars < 0.2 and any(c.isalpha() for c in text_only):
-                if len(dropped_reasons) < MAX_DROP_REASONS:
-                    dropped_reasons.append(f"drop(too much english/meta): {line_cleaned[:50]}...")
+        # 한글 비중 검사 (한글이 너무 적으면 메타 설명일 확률 높음)
+        if get_korean_ratio(line_cleaned) < 0.2:
+            # 영문이 포함된 경우에만 드랍 (숫자/특수문자만 있는 경우는 유지)
+            if any(c.isalpha() for c in line_cleaned):
                 continue
 
         # URL 개별 제거 (정규화 기반 비교)

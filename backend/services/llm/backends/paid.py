@@ -116,7 +116,9 @@ class OpenAIPaidBackend(LLMBackend):
         # OpenAI 유료 모델용 시스템 프롬프트 자동 분리
         messages = self._convert_to_system_prompt(messages)
 
-        api_key = self.settings.ai_report_api_key
+        api_key = kwargs.get("api_key") or self.settings.ai_report_api_key
+        base_url = kwargs.get("base_url") or self.settings.ai_report_base_url
+
         if not api_key:
             self._last_error = "AI_REPORT_API_KEY is not set"
             return ""
@@ -125,7 +127,7 @@ class OpenAIPaidBackend(LLMBackend):
         service_tier = kwargs.get("service_tier")
         response_format = kwargs.get("response_format")
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        is_gpt5 = str(model).startswith("gpt-5")
+        is_gpt5 = str(model).startswith("gpt-5") or "gpt-5" in str(model)
 
         max_attempts = 5 if service_tier == "flex" else 1
         current_tier = service_tier
@@ -159,7 +161,7 @@ class OpenAIPaidBackend(LLMBackend):
             return False
 
         def _try_responses() -> str:
-            url = f"{self.settings.ai_report_base_url}/responses"
+            url = f"{base_url.rstrip('/')}/responses"
             responses_text_format = None
             if isinstance(response_format, dict):
                 rft = response_format.get("type")
@@ -231,7 +233,7 @@ class OpenAIPaidBackend(LLMBackend):
         for attempt in range(max_attempts):
             try:
                 # 1) Chat Completions 시도 (기본)
-                url = f"{self.settings.ai_report_base_url}/chat/completions"
+                url = f"{base_url.rstrip('/')}/chat/completions"
                 payload = {"model": model, "messages": messages}
                 if not is_gpt5:
                     payload["temperature"] = temperature

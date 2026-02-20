@@ -45,9 +45,9 @@ LEAGUE_ACTIVE_WINDOWS: Dict[str, List[Dict[str, Any]]] = {
     "lck": [
         {"weekday": i, "start": (16, 30), "end": (23, 0)} for i in range(2, 7)  # 수~일
     ],
-    # LPL: 매일 18:00
+    # LPL: 평일 15:00 기준 대응 (기사의 길 1경기 시작)
     "lpl": [
-        {"weekday": i, "start": (17, 30), "end": (25, 0)} for i in range(7)  # 매일
+        {"weekday": i, "start": (14, 30), "end": (25, 0)} for i in range(7)  # 매일
     ],
     # VCT Pacific: 17:00 KST (주말 중심)
     "vct": [

@@ -4,7 +4,7 @@ import logging
 import os
 import joblib
 from datetime import datetime
-from typing import List, Set
+from typing import List, Set, Optional
 from sqlalchemy.orm import Session
 
 from ...core.models import IncomingAlarm, Expense, SpamAlarm
@@ -44,7 +44,7 @@ def _get_nb_pipeline():
     return _nb_pipeline
 
 
-async def process_pending_alarms(db: Session):
+async def process_pending_alarms(db: Session, model_override: Optional[str] = None, **llm_kwargs):
     """
     수신된 알림들을 5분 배차로 처리한다.
     안정성: 배치 처리 (200개 제한) + 선점(processing 상태) + 에러 복구(try-finally)
@@ -204,11 +204,7 @@ async def process_pending_alarms(db: Session):
 
         # 4. 요약 처리 (가계부 리포트 비활성화)
 
-        llm_summary = None
-        if to_summarize_alarms:
-            llm_summary = await summarize_with_llm([a for a in to_summarize_alarms])
-        else:
-            logger.info("No non-expense alarms to summarize; skip random topic generation for expense report.")
+        llm_summary = await summarize_with_llm([a for a in to_summarize_alarms], model=model_override, **llm_kwargs)
         if llm_summary:
             safe_summary = escape_html_preserve_urls(llm_summary)
             if to_summarize_alarms:
