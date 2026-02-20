@@ -1,3 +1,4 @@
+/* eslint-disable no-undef */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiClient, ApiError, type BackendHealthResponse, type BackendPortfolioResponse } from '@/shared/api/client';
 
@@ -74,7 +75,7 @@ describe('ApiClient', () => {
     await client.fetchExpenses({ year: 2025, month: 1, category: 'Food', includeDeleted: true });
 
     const [url] = fetchMock.mock.calls[0];
-    expect(url).toContain('/api/expenses?');
+    expect(url).toContain('/api/expenses/?');
     expect(url).toContain('year=2025');
     expect(url).toContain('month=1');
     expect(url).toContain('category=Food');

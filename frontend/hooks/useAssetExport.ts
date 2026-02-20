@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback } from 'react';
 import { Asset, AssetCategory } from '../lib/types';
 import type { ImportedAssetSnapshot } from '@/shared/portfolio';
 import { validateImportedAssetSnapshotList } from '@/features/portfolio';

@@ -5,15 +5,16 @@ import unittest
 
 from fastapi.testclient import TestClient
 
-_temp_dir = tempfile.TemporaryDirectory()
-os.environ.setdefault("DATABASE_URL", f"sqlite:///{_temp_dir.name}/test.db")
+# DATABASE_URL is managed by conftest.py
 os.environ["API_TOKEN"] = "test-token"
 
 from backend.main import api_health, app, health, root  # noqa: E402
+from backend.core.db_migrations import ensure_schema # noqa: E402
 
 
 class MainHealthTests(unittest.TestCase):
     def setUp(self) -> None:
+        ensure_schema()
         os.environ["API_TOKEN"] = "test-token"
         self.headers = {"X-API-Token": os.environ["API_TOKEN"]}
 
@@ -55,3 +56,23 @@ class MainHealthTests(unittest.TestCase):
         payload = trade_response.json()
         self.assertEqual(payload["asset_id"], asset_id)
         self.assertEqual(payload["type"], "BUY")
+
+    def test_portfolio_excludes_soft_deleted_assets(self) -> None:
+        client = TestClient(app)
+
+        create_res = client.post(
+            "/api/assets",
+            headers=self.headers,
+            json={"name": "delete-me", "category": "TEST"},
+        )
+        self.assertEqual(create_res.status_code, 200)
+        asset_id = create_res.json()["id"]
+
+        delete_res = client.delete(f"/api/assets/{asset_id}", headers=self.headers)
+        self.assertEqual(delete_res.status_code, 200)
+
+        portfolio_res = client.get("/api/portfolio", headers=self.headers)
+        self.assertEqual(portfolio_res.status_code, 200)
+        payload = portfolio_res.json()
+        asset_ids = {asset["id"] for asset in payload["assets"]}
+        self.assertNotIn(asset_id, asset_ids)

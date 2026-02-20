@@ -1,3 +1,4 @@
+/* eslint-disable no-undef */
 import type { TradeType, FxTransactionType } from '@lib/types';
 import { NetworkError, ApiError } from './errors';
 import type {
@@ -20,6 +21,8 @@ import type {
     BackendReportResponse,
     BackendSavedAiReport,
     BackendNewsSearchResponse,
+    BackendAssetUpdatePayload,
+    BackendAssetCreatePayload,
 } from './types';
 import type { CreateHeadersFn, RequestFn } from './core';
 import { fetchPortfolio, restorePortfolio, fetchSnapshots, createSnapshot } from './portfolio';
@@ -65,6 +68,23 @@ import {
     updateExpense,
     uploadExpenseFile,
 } from './expenses';
+import {
+    fetchMemories,
+    getMemory,
+    createMemory,
+    updateMemory,
+    deleteMemory,
+    searchMemories,
+    cleanupExpiredMemories,
+    chatWithMemories,
+} from './memories';
+import {
+    MemoryResponse,
+    MemoryCreate,
+    MemoryUpdate,
+    MemorySearchRequest,
+    MemoryCategory,
+} from './types';
 
 export class ApiClient {
     private readonly baseUrl: string;
@@ -89,9 +109,13 @@ export class ApiClient {
         const headers: HeadersInit = withJson
             ? { 'Content-Type': 'application/json' }
             : {};
+
+        // 레거시 API 토큰 (쿠키 인증이 없을 때만 사용)
         if (this.apiToken) {
             headers['X-API-Token'] = this.apiToken;
+            headers['X-API-Key'] = this.apiToken;
         }
+
         return headers;
     }
 
@@ -110,7 +134,7 @@ export class ApiClient {
 
         let response: Response;
         try {
-            response = await fetch(url, { ...options, headers });
+            response = await fetch(url, { ...options, headers, credentials: 'include' });
         } catch (error) {
             // AbortError는 정상적인 요청 취소이므로 그대로 throw
             if (error instanceof Error && error.name === 'AbortError') {
@@ -174,7 +198,7 @@ export class ApiClient {
 
     // --- Assets ---
 
-    async createAsset(payload: any): Promise<BackendAsset> {
+    async createAsset(payload: BackendAssetCreatePayload): Promise<BackendAsset> {
         return createAsset(this.requestFn, payload);
     }
 
@@ -182,7 +206,7 @@ export class ApiClient {
         return deleteAsset(this.requestFn, assetId);
     }
 
-    async updateAsset(assetId: number, payload: any): Promise<BackendAsset> {
+    async updateAsset(assetId: number, payload: BackendAssetUpdatePayload): Promise<BackendAsset> {
         return updateAsset(this.requestFn, assetId, payload);
     }
 
@@ -190,8 +214,8 @@ export class ApiClient {
         return fetchPrices(this.requestFn, tickers);
     }
 
-    async fetchUsdKrwFxRate(): Promise<BackendFxRateResponse> {
-        return fetchUsdKrwFxRate(this.requestFn);
+    async fetchUsdKrwFxRate(fresh = false): Promise<BackendFxRateResponse> {
+        return fetchUsdKrwFxRate(this.requestFn, fresh);
     }
 
     async searchTicker(query: string): Promise<BackendTickerSearchResponse> {
@@ -418,4 +442,53 @@ export class ApiClient {
             method: 'GET',
         });
     }
+
+    // --- Memories ---
+
+    async fetchMemories(params: {
+        category?: MemoryCategory;
+        min_importance?: number;
+        include_expired?: boolean;
+        limit?: number;
+        offset?: number;
+    } = {}): Promise<MemoryResponse[]> {
+        return fetchMemories(this.requestFn, params);
+    }
+
+    async getMemory(id: number): Promise<MemoryResponse> {
+        return getMemory(this.requestFn, id);
+    }
+
+    async createMemory(payload: MemoryCreate): Promise<MemoryResponse> {
+        return createMemory(this.requestFn, payload);
+    }
+
+    async updateMemory(id: number, payload: MemoryUpdate): Promise<MemoryResponse> {
+        return updateMemory(this.requestFn, id, payload);
+    }
+
+    async deleteMemory(id: number): Promise<void> {
+        return deleteMemory(this.requestFn, id);
+    }
+
+    async searchMemories(params: MemorySearchRequest): Promise<MemoryResponse[]> {
+        return searchMemories(this.requestFn, params);
+    }
+
+    async cleanupExpiredMemories(): Promise<void> {
+        return cleanupExpiredMemories(this.requestFn);
+    }
+
+    async *chatWithMemories(params: {
+        messages: { role: string; content: string }[];
+        model?: string;
+        session_id?: string;
+    }): AsyncGenerator<string> {
+        yield* chatWithMemories(
+            params,
+            this.baseUrl,
+            (withJson) => this.createHeaders(withJson)
+        );
+    }
+
 }

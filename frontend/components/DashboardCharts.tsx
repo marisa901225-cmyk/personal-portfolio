@@ -1,15 +1,17 @@
 import React, { useMemo } from 'react';
 import { PortfolioSummary } from '../lib/types';
+import { ChartTooltipProps, ChartPayloadEntry } from '@/shared/api/client/types';
 import { formatCurrency } from '@/shared/portfolio';
 import {
     PieChart, Pie, Cell, ResponsiveContainer, AreaChart, Area,
     XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar, Legend
 } from 'recharts';
-import { TrendingUp, TrendingDown, AlertTriangle, PieChart as PieIcon, LineChart as LineIcon, BarChart3, ArrowUp, ArrowDown, Wallet } from 'lucide-react';
+import { TrendingUp, TrendingDown, PieChart as PieIcon, LineChart as LineIcon, BarChart3, ArrowUp, ArrowDown, Wallet } from 'lucide-react';
+import { usePortfolioCalculations } from '../src/hooks/usePortfolioCalculations';
+import { getCategoryLabel } from '@/shared/portfolio';
 
 interface DashboardChartsProps {
     summary: PortfolioSummary;
-    rebalanceNotices: string[];
     yearlyStats?: {
         year: string;
         deposit: number;
@@ -22,77 +24,43 @@ interface DashboardChartsProps {
     actualInvested?: number;
 }
 
-export const DashboardCharts: React.FC<DashboardChartsProps> = ({
+const DashboardChartsComponent: React.FC<DashboardChartsProps> = ({
     summary,
-    rebalanceNotices,
     yearlyStats,
     benchmarkName,
     benchmarkReturn,
     actualInvested,
 }) => {
-    // 수익률 및 총 손익 계산 (차트 센터 표시용)
-    const { totalProfit, profitRate, isPositive } = useMemo(() => {
-        const invested = actualInvested ?? summary.totalInvested;
-        const profit = summary.totalValue - invested;
-        const rate = invested > 0 ? (profit / invested) * 100 : 0;
-        return {
-            totalProfit: profit,
-            profitRate: rate,
-            isPositive: profit >= 0
-        };
-    }, [summary, actualInvested]);
-
-    const historyStats = useMemo(() => {
-        if (!summary.historyData || summary.historyData.length === 0) return null;
-        const data = summary.historyData;
-        const getValue = (item: typeof data[number]) =>
-            typeof item.stockValue === 'number' ? item.stockValue + (item.realEstateValue ?? 0) : item.value;
-        const start = getValue(data[0]);
-        const end = getValue(data[data.length - 1]);
-        const values = data.map(d => getValue(d));
-        const max = Math.max(...values);
-        const min = Math.min(...values);
-        const change = end - start;
-        const changeRate = start !== 0 ? (change / start) * 100 : 0;
-
-        return { start, end, max, min, change, changeRate };
-    }, [summary.historyData]);
-
-    const benchmarkDiff = useMemo(() => {
-        if (!historyStats) return null;
-        if (benchmarkReturn === undefined || !Number.isFinite(benchmarkReturn)) return null;
-
-        const baseReturn = (summary.xirr_rate !== undefined && summary.xirr_rate !== null)
-            ? summary.xirr_rate * 100
-            : historyStats.changeRate;
-
-        return baseReturn - benchmarkReturn;
-    }, [historyStats, benchmarkReturn, summary.xirr_rate]);
-
-    const showRealEstate = useMemo(
-        () => summary.historyData.some(item => (item.realEstateValue ?? 0) > 0),
-        [summary.historyData],
-    );
+    const {
+        profitStats: { profitRate, isPositive },
+        historyStats,
+        benchmarkDiff,
+        showRealEstate
+    } = usePortfolioCalculations({
+        summary,
+        actualInvested,
+        benchmarkReturn
+    });
 
     const benchmarkLabel = useMemo(() => {
         const base = benchmarkName?.trim()
-            ? `시장 (${benchmarkName.trim()}) 대비`
+            ? `시장(${benchmarkName.trim()}) 대비`
             : '시장 대비';
         return (summary.xirr_rate !== undefined && summary.xirr_rate !== null)
             ? `${base} (XIRR)`
             : base;
     }, [benchmarkName, summary.xirr_rate]);
 
-    const CustomTooltip = ({ active, payload, label }: any) => {
+    const CustomTooltip = ({ active, payload, label }: ChartTooltipProps) => {
         if (active && payload && payload.length) {
             return (
                 <div className="bg-slate-900/90 backdrop-blur-md p-3 rounded-xl border border-white/10 shadow-xl text-xs text-white z-50">
                     <p className="font-semibold mb-2 text-slate-300">{label}</p>
-                    {payload.map((entry: any, index: number) => (
+                    {payload.map((entry: ChartPayloadEntry, index: number) => (
                         <div key={index} className="flex items-center gap-3 mb-1 justify-between min-w-[120px]">
                             <div className="flex items-center gap-1.5">
                                 <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: entry.color }} />
-                                <span className="opacity-80">{entry.name}</span>
+                                <span className="opacity-80">{getCategoryLabel(entry.name)}</span>
                             </div>
                             <span className="font-bold font-mono">
                                 {formatCurrency(entry.value)}
@@ -107,28 +75,6 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
 
     return (
         <div className="space-y-6">
-            {/* Rebalance Warnings */}
-            {rebalanceNotices.length > 0 && (
-                <div className="animate-fade-in-up">
-                    <div className="bg-amber-50/50 backdrop-blur-sm border border-amber-100 rounded-2xl p-4 flex items-start gap-3 shadow-sm">
-                        <div className="p-2 bg-amber-100/50 rounded-xl text-amber-600 shrink-0">
-                            <AlertTriangle size={18} />
-                        </div>
-                        <div>
-                            <h4 className="text-sm font-semibold text-amber-800 mb-1">리밸런싱 점검 제안</h4>
-                            <ul className="text-xs text-amber-700 space-y-1">
-                                {rebalanceNotices.map((msg, idx) => (
-                                    <li key={idx} className="flex items-center gap-2">
-                                        <span className="w-1 h-1 bg-amber-400 rounded-full shrink-0" />
-                                        <span>{msg}</span>
-                                    </li>
-                                ))}
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
                 {/* 1. Allocation Chart (Visual-focused) */}
                 <div className="bg-white p-0 rounded-3xl shadow-sm hover:shadow-lg transition-shadow duration-300 border border-slate-100 flex flex-col h-full group relative overflow-hidden">
@@ -170,9 +116,9 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
                             </div>
 
                             <div className="flex flex-col items-center">
-                                <span className="text-[10px] text-slate-400 font-bold tracking-widest uppercase">Net Worth</span>
+                                <span className="text-[10px] text-slate-400 font-bold tracking-widest">금융 자산</span>
                                 <span className="text-2xl font-bold text-slate-900 tabular-nums tracking-tighter">
-                                    {formatCurrency(summary.totalValue)}
+                                    {formatCurrency(summary.categoryDistribution.reduce((sum, cat) => sum + cat.value, 0))}
                                 </span>
                             </div>
 
@@ -285,7 +231,7 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
                         ) : (
                             <div className="flex flex-col items-center justify-center h-full text-slate-300 gap-2">
                                 <TrendingUp size={32} className="opacity-20" />
-                                <span className="text-xs italic">Not Enough History Data</span>
+                                <span className="text-xs italic">히스토리 데이터 부족</span>
                             </div>
                         )}
                     </div>
@@ -295,7 +241,7 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-4">
                                     <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-100/50">
-                                        <div className="text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1">Total Variation</div>
+                                        <div className="text-[10px] tracking-wider text-slate-500 font-bold mb-1">총 변동</div>
                                         <div className={`text-xl font-bold tabular-nums ${historyStats.change >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
                                             {historyStats.change > 0 ? '+' : ''}{formatCurrency(historyStats.change)}
                                         </div>
@@ -307,30 +253,30 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
                                     {benchmarkDiff !== null ? (
                                         <div className="p-4 bg-indigo-50/40 rounded-2xl border border-indigo-100/30">
                                             <div className="text-[10px] uppercase tracking-wider text-indigo-500 font-bold mb-1 truncate" title={benchmarkLabel}>
-                                                Vs Benchmark
+                                                시장 대비
                                             </div>
                                             <div className={`text-xl font-bold tabular-nums ${benchmarkDiff >= 0 ? 'text-indigo-600' : 'text-blue-600'}`}>
                                                 {benchmarkDiff > 0 ? '+' : ''}{benchmarkDiff.toFixed(2)}%p
                                             </div>
                                             <div className="text-[11px] font-medium text-indigo-400">
-                                                Market: {benchmarkReturn?.toFixed(1)}%
+                                                시장: {benchmarkReturn?.toFixed(1)}%
                                             </div>
                                         </div>
                                     ) : (
                                         <div className="p-4 bg-slate-50/30 rounded-2xl border border-dashed border-slate-200 flex flex-col justify-center min-h-[85px]">
-                                            <span className="text-[10px] text-slate-400 font-semibold text-center italic">No Benchmark Set</span>
+                                            <span className="text-[10px] text-slate-400 font-semibold text-center italic">벤치마크 미설정</span>
                                         </div>
                                     )}
                                 </div>
 
                                 <div className="space-y-3">
-                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-1">Key Statistics</p>
+                                    <p className="text-[10px] font-bold text-slate-400 tracking-wider pl-1">핵심 통계</p>
                                     <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50/50 hover:bg-slate-50 transition-colors">
                                         <div className="flex items-center gap-2">
                                             <div className="p-1.5 bg-emerald-100/50 rounded-lg text-emerald-600">
                                                 <ArrowUp size={14} />
                                             </div>
-                                            <span className="text-xs font-semibold text-slate-500">Period High</span>
+                                            <span className="text-xs font-semibold text-slate-500">기간 최고</span>
                                         </div>
                                         <span className="text-xs font-bold text-slate-800 tabular-nums">{formatCurrency(historyStats.max)}</span>
                                     </div>
@@ -339,7 +285,7 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
                                             <div className="p-1.5 bg-rose-100/50 rounded-lg text-rose-500">
                                                 <ArrowDown size={14} />
                                             </div>
-                                            <span className="text-xs font-semibold text-slate-500">Period Low</span>
+                                            <span className="text-xs font-semibold text-slate-500">기간 최저</span>
                                         </div>
                                         <span className="text-xs font-bold text-slate-800 tabular-nums">{formatCurrency(historyStats.min)}</span>
                                     </div>
@@ -348,7 +294,7 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
                                             <div className="p-1.5 bg-indigo-100/50 rounded-lg text-indigo-500">
                                                 <TrendingUp size={14} />
                                             </div>
-                                            <span className="text-xs font-semibold text-slate-500">Ending Balance</span>
+                                            <span className="text-xs font-semibold text-slate-500">현재 잔고</span>
                                         </div>
                                         <span className="text-xs font-bold text-slate-800 tabular-nums">{formatCurrency(historyStats.end)}</span>
                                     </div>
@@ -410,3 +356,5 @@ export const DashboardCharts: React.FC<DashboardChartsProps> = ({
         </div>
     );
 };
+
+export const DashboardCharts = React.memo(DashboardChartsComponent);

@@ -5,6 +5,9 @@ from fastapi import HTTPException
 
 from ..core.models import Trade, Asset
 from ..core.schemas import TradeCreate
+from ..core.time_utils import utcnow
+
+ZERO_TOLERANCE = 1e-9
 
 
 def create_trade_with_sync(
@@ -23,7 +26,7 @@ def create_trade_with_sync(
     if item.type not in {"BUY", "SELL"}:
         raise HTTPException(status_code=400, detail="invalid trade type")
 
-    now = datetime.utcnow()
+    now = utcnow()
     timestamp = item.timestamp or now
 
     # 1. 자산 조회 with row lock
@@ -78,6 +81,7 @@ def _apply_trade_to_asset(asset: Asset, trade_type: str, quantity: float, price:
         asset.amount = new_qty
         asset.current_price = price  # 최근 거래가로 현재가 갱신
         asset.updated_at = now
+        asset.tags = "present"
         return None
 
     if trade_type == "SELL":
@@ -93,8 +97,79 @@ def _apply_trade_to_asset(asset: Asset, trade_type: str, quantity: float, price:
         asset.amount = new_qty
         asset.current_price = price
         asset.updated_at = now
-        if new_qty <= 0:
-            asset.deleted_at = now
+        if new_qty < ZERO_TOLERANCE:
+            asset.tags = "past"
+            # asset.deleted_at = now  <-- 태그로 관리하므로 소프트 삭제 해제
+        else:
+            asset.tags = "present"
         return realized_delta
 
     raise HTTPException(status_code=400, detail="invalid trade type")
+
+def get_trades(
+    db: Session,
+    user_id: int,
+    limit: int = 100,
+    before_id: int | None = None,
+    asset_id: int | None = None,
+) -> List[Trade]:
+    query = db.query(Trade).filter(Trade.user_id == user_id)
+    if asset_id is not None:
+        query = query.filter(Trade.asset_id == asset_id)
+    if before_id is not None:
+        query = query.filter(Trade.id < before_id)
+    return query.order_by(Trade.id.desc()).limit(limit).all()
+
+
+def get_recent_trades(
+    db: Session,
+    user_id: int,
+    limit: int = 20,
+) -> List[Trade]:
+    return (
+        db.query(Trade)
+        .filter(Trade.user_id == user_id)
+        .order_by(Trade.timestamp.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def update_trade(
+    db: Session,
+    user_id: int,
+    trade_id: int,
+    data: dict,
+) -> Trade:
+    db_item = db.query(Trade).filter(Trade.id == trade_id, Trade.user_id == user_id).first()
+    if not db_item:
+        raise HTTPException(status_code=404, detail="Trade not found")
+
+    for key, value in data.items():
+        setattr(db_item, key, value)
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(db_item)
+    return db_item
+
+
+def delete_trade(
+    db: Session,
+    user_id: int,
+    trade_id: int,
+) -> bool:
+    db_item = db.query(Trade).filter(Trade.id == trade_id, Trade.user_id == user_id).first()
+    if not db_item:
+        raise HTTPException(status_code=404, detail="Trade not found")
+
+    db.delete(db_item)
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    return True

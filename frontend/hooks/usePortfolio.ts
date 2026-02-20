@@ -2,7 +2,7 @@
 import { useMemo, useCallback, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Asset, AppSettings, AssetCategory, TradeType, TradeRecord } from '../lib/types';
-import { ApiClient, mapBackendAssetToFrontend, mapBackendTradesToFrontend, type BackendPortfolioResponse } from '@/shared/api/client';
+import { ApiClient, mapBackendAssetToFrontend, mapBackendTradesToFrontend, type BackendPortfolioResponse, type BackendAssetUpdatePayload, type BackendPortfolioSummary } from '@/shared/api/client';
 import { CmaConfig } from '@/shared/portfolio';
 import type { ImportedAssetSnapshot } from '@/shared/portfolio';
 import { syncPortfolioPrices, restorePortfolioFromBackup } from '@/features/portfolio';
@@ -27,14 +27,14 @@ export interface UsePortfolioResult {
   assets: Asset[];
   tradeHistory: TradeRecord[];
   historyData: HistoryPoint[];
-  summaryFromServer?: any;
+  summaryFromServer?: BackendPortfolioSummary;
   isSyncing: boolean;
   isManualSyncing: boolean;
   addAsset: (newAsset: Asset) => Promise<void>;
   deleteAsset: (id: string) => Promise<void>;
   tradeAsset: (id: string, type: TradeType, quantity: number, price: number) => Promise<void>;
   syncPrices: (options?: { createSnapshot?: boolean; onSuccess?: () => void }) => Promise<void>;
-  updateAsset: (id: string, updates: any) => Promise<void>;
+  updateAsset: (id: string, updates: Partial<Asset>) => Promise<void>;
   updateCashBalance: (id: string, newBalance: number, cmaConfig?: CmaConfig | null) => Promise<void>;
   restoreFromBackup: (snapshot: ImportedAssetSnapshot[]) => Promise<void>;
   yearlyCashflows: YearlyCashflowData[];
@@ -45,7 +45,9 @@ export interface UsePortfolioResult {
 export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
   const queryClient = useQueryClient();
   const [syncing, setSyncing] = useState(false);
-  const isRemoteEnabled = Boolean(settings.serverUrl && settings.apiToken);
+  const isRemoteEnabled = Boolean(
+    settings.serverUrl && (settings.apiToken || settings.cookieAuth)
+  );
   const apiClient = useMemo(
     () => new ApiClient(settings.serverUrl, settings.apiToken),
     [settings.serverUrl, settings.apiToken]
@@ -76,7 +78,7 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
         value: snap.total_value,
       }));
     },
-    enabled: isRemoteEnabled,
+    enabled: isRemoteEnabled && !!assetsQuery.data,
   });
 
   const cashflowsQuery = useQuery({
@@ -91,7 +93,7 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
         note: cf.note ?? undefined,
       }));
     },
-    enabled: isRemoteEnabled,
+    enabled: isRemoteEnabled && !!assetsQuery.data,
   });
 
   // === Mutations ===
@@ -134,8 +136,8 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
   });
 
   const updateAssetMutation = useMutation({
-    mutationFn: async ({ backendId, updates }: { backendId: number; updates: any }) => {
-      const payload: any = {};
+    mutationFn: async ({ backendId, updates }: { backendId: number; updates: Partial<Asset> }) => {
+      const payload: BackendAssetUpdatePayload = {};
       if (updates.name !== undefined) payload.name = updates.name;
       if (updates.ticker !== undefined) payload.ticker = updates.ticker || null;
       if (updates.indexGroup !== undefined) payload.index_group = updates.indexGroup || null;
@@ -174,7 +176,7 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
     ]);
   }, [queryClient]);
 
-  const handleUpdateAsset = useCallback(async (id: string, updates: any) => {
+  const handleUpdateAsset = useCallback(async (id: string, updates: Partial<Asset>) => {
     const target = assets.find(a => a.id === id);
     if (!target?.backendId || !isRemoteEnabled) return;
     await updateAssetMutation.mutateAsync({ backendId: target.backendId, updates });
@@ -188,7 +190,7 @@ export const usePortfolio = (settings: AppSettings): UsePortfolioResult => {
     const nextAmount = isCash ? 1 : target.amount > 0 ? target.amount : 1;
     const nextCurrentPrice = isCash ? newBalance : newBalance / nextAmount;
 
-    const payload: any = { current_price: nextCurrentPrice };
+    const payload: BackendAssetUpdatePayload = { current_price: nextCurrentPrice };
     if (isCash) {
       payload.amount = 1;
       payload.purchase_price = newBalance;

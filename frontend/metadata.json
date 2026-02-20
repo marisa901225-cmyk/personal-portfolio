@@ -1,5 +1,5 @@
 {
   "name": "MyAsset Portfolio",
-  "description": "개인 자산을 직관적으로 관리하고 포트폴리오 구성을 시각화하는 모바일 친화적 웹 애플리케이션입니다.",
+  "description": "로컬 AI가 지키고 스케줄러가 운영하는, 주인보다 부지런한 지능형 개인 포트폴리오 플랫폼.",
   "requestFramePermissions": []
 }

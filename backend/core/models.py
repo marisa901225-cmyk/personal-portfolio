@@ -16,7 +16,18 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
-from .models_misc import GameNews, IncomingAlarm, SpamRule
+from .models_misc import (
+    GameNews,
+    IncomingAlarm,
+    SpamRule,
+    SpamNews,
+    SpamAlarm,
+    SchedulerState,
+    EconRateState,
+    KrOptionBoardSnapshot,
+    EsportsMatch,
+)
+from .time_utils import utcnow
 
 
 class User(Base):
@@ -25,12 +36,12 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
         nullable=False,
     )
 
@@ -64,6 +75,9 @@ class User(Base):
     ai_reports: Mapped[List["AiReport"]] = relationship(
         "AiReport", back_populates="user", cascade="all, delete-orphan"
     )
+    memories: Mapped[List["UserMemory"]] = relationship(
+        "UserMemory", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Asset(Base):
@@ -82,16 +96,19 @@ class Asset(Base):
     purchase_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     realized_profit: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     index_group: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    market_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True) # KRX, NASDAQ, NYSE 등
     # 발행어음/CMA 세후 이자 자동 계산 설정 (JSON)
     cma_config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
 
+    tags: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)  # 'past' | 'present' etc
+
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
         nullable=False,
     )
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -113,18 +130,18 @@ class Trade(Base):
     quantity: Mapped[float] = mapped_column(Float, nullable=False)
     price: Mapped[float] = mapped_column(Float, nullable=False)
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, nullable=False
     )
     realized_delta: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
         nullable=False,
     )
 
@@ -148,12 +165,12 @@ class FxTransaction(Base):
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
         nullable=False,
     )
 
@@ -190,14 +207,23 @@ class Setting(Base):
     kis_token_expires_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
     )
+    # KIS 토큰 갱신 분산 락 (스탬피드 방지)
+    token_refresh_locked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
+    # KIS 서킷브레이커 상태
+    kis_auth_failure_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    kis_circuit_open_until: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
         nullable=False,
     )
 
@@ -211,7 +237,7 @@ class PortfolioSnapshot(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
 
     snapshot_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, nullable=False
     )
     total_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     total_invested: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
@@ -223,12 +249,12 @@ class PortfolioSnapshot(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
         nullable=False,
     )
 
@@ -248,12 +274,12 @@ class YearlyCashflow(Base):
     note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
         nullable=False,
     )
 
@@ -272,12 +298,12 @@ class ExternalCashflow(Base):
     account_info: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
         nullable=False,
     )
 
@@ -300,12 +326,12 @@ class Expense(Base):
     memo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # AI가 남기는 비고
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
         nullable=False,
     )
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -324,12 +350,12 @@ class MerchantPattern(Base):
     category: Mapped[str] = mapped_column(String(50), nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
         nullable=False,
     )
 
@@ -353,13 +379,39 @@ class AiReport(Base):
     generated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)  # AI 생성 시각
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow,
+        onupdate=utcnow,
         nullable=False,
     )
 
     user: Mapped[User] = relationship("User", back_populates="ai_reports")
+
+
+class UserMemory(Base):
+    """사용자가 기억해달라고 요청한 정보 (장기 기억)"""
+    __tablename__ = "user_memories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str] = mapped_column(String(50), default="general", nullable=False) # profile, preference, project, fact, general
+    key: Mapped[Optional[str]] = mapped_column(String(100), nullable=True) # 중복 시 최신본 유지를 위한 키워드
+    importance: Mapped[int] = mapped_column(Integer, default=1)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True) # TTL용
+    
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow,
+        onupdate=utcnow,
+        nullable=False,
+    )
+
+    user: Mapped[User] = relationship("User", back_populates="memories")

@@ -44,9 +44,9 @@ export const BrokerageSync: React.FC<BrokerageSyncProps> = ({ apiClient, onSyncC
             const res = await apiClient.uploadStatement(file);
             setResult(res);
             if (onSyncComplete) onSyncComplete();
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Sync failed:', err);
-            setError(err.message || '파일 업로드 및 동기화 중 오류가 발생했습니다.');
+            setError(err instanceof Error ? err.message : '파일 업로드 및 동기화 중 오류가 발생했습니다.');
         } finally {
             setLoading(false);
         }

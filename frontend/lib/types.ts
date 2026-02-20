@@ -11,6 +11,10 @@ export enum AssetCategory {
     STOCK_KR = '국내주식',
     STOCK_US = '해외주식',
     REAL_ESTATE = '부동산',
+    CRYPTO = '가상자산',
+    PENSION = '연금/IRP',
+    GOLD = '금/원자재',
+    LOAN = '부채',
     OTHER = '기타'
 }
 
@@ -32,6 +36,7 @@ export interface Asset {
     indexGroup?: string;
     /** 발행어음/CMA 세후 이자 자동 계산 설정 (선택) */
     cmaConfig?: CmaConfig;
+    tags?: string;
 }
 
 // --- Trade & FX ---
@@ -79,7 +84,14 @@ export interface DividendEntry {
 
 export interface AppSettings {
     serverUrl: string; // Tailscale URL e.g., http://100.x.y.z:8000
-    apiToken?: string;
+    apiToken?: string; // 레거시 API 토큰 (deprecated)
+    cookieAuth?: boolean; // HttpOnly 쿠키 기반 인증 상태
+    naverUser?: {
+        id: string;
+        email?: string;
+        nickname?: string;
+        name?: string;
+    };
     targetIndexAllocations?: TargetIndexAllocation[];
     /** 대략적인 환차익/환차손 계산용 기준 USD/KRW 환율 */
     usdFxBase?: number;
@@ -99,6 +111,7 @@ export interface AppSettings {
     /** 배경 흐림 강도 (0~20, 기본 8) */
     bgBlur?: number;
 }
+
 
 // --- Portfolio ---
 

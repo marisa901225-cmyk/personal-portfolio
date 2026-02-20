@@ -12,3 +12,5 @@ export { ExpensesPage } from './ExpensesPage';
 export { AiReportPage } from './AiReportPage';
 export { AddAssetPage } from './AddAssetPage';
 export { SettingsPage } from './SettingsPage';
+export { MemoriesPage } from './MemoriesPage';
+export { AuthCallbackPage } from './AuthCallbackPage';

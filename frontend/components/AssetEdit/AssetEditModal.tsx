@@ -12,7 +12,7 @@ export interface AssetEditModalProps {
     isOpen: boolean;
     onClose: () => void;
     asset: Asset | null;
-    onUpdateAsset: (id: string, updates: any) => void;
+    onUpdateAsset: (id: string, updates: Partial<Asset>) => void;
     onUpdateCash: (id: string, newBalance: number, cmaConfig?: CmaConfig | null) => void | Promise<void>;
     indexGroupOptions?: string[];
 }

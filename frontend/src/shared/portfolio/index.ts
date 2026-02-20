@@ -8,6 +8,22 @@ import { AssetCategory } from '@lib/types';
 
 // ==================== 타입 ====================
 
+export const CATEGORY_LABELS: Record<AssetCategory, string> = {
+    [AssetCategory.CASH]: '현금/CMA',
+    [AssetCategory.STOCK_KR]: '국내주식',
+    [AssetCategory.STOCK_US]: '해외주식',
+    [AssetCategory.CRYPTO]: '가상자산',
+    [AssetCategory.PENSION]: '연금/IRP',
+    [AssetCategory.REAL_ESTATE]: '부동산',
+    [AssetCategory.GOLD]: '금/원자재',
+    [AssetCategory.LOAN]: '부채',
+    [AssetCategory.OTHER]: '기타',
+};
+
+export const getCategoryLabel = (category: string | AssetCategory): string => {
+    return CATEGORY_LABELS[category as AssetCategory] || category;
+};
+
 export interface CmaConfig {
     /** 기준 잔액 (KRW) */
     principal: number;

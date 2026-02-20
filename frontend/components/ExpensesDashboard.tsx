@@ -1,14 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChartTooltipProps } from '@/shared/api/client/types';
 import {
   AlertCircle,
   Loader2,
-  TrendingUp,
-  TrendingDown,
-  CreditCard,
   Wallet,
   Receipt,
-  DollarSign,
-  ArrowUpRight,
   ArrowDownRight,
   Calendar,
   Filter
@@ -19,7 +15,6 @@ import {
   PieChart,
   ResponsiveContainer,
   Tooltip,
-  Bar
 } from 'recharts';
 import {
   ApiClient,
@@ -34,6 +29,7 @@ import { ExpenseRow, ExpenseUploadPanel } from './expenses';
 interface ExpensesDashboardProps {
   serverUrl: string;
   apiToken?: string;
+  cookieAuth?: boolean;
 }
 
 const COMMON_CATEGORIES = [
@@ -55,7 +51,7 @@ const parseYearMonth = (value: string) => {
   return { year, month };
 };
 
-export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl, apiToken }) => {
+export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl, apiToken, cookieAuth }) => {
   const [uploadResult, setUploadResult] = useState<BackendExpenseUploadResult | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -68,7 +64,7 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draftCategory, setDraftCategory] = useState('');
   const [draftAmount, setDraftAmount] = useState<number>(0);
-  const [saveError, setSaveError] = useState<string | null>(null);
+
   const [savingId, setSavingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [restoringId, setRestoringId] = useState<number | null>(null);
@@ -82,7 +78,7 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
   const hasMountedRef = useRef(false);
   const fallbackYearMonth = useMemo(() => ({ year: new Date().getFullYear(), month: new Date().getMonth() + 1 }), []);
 
-  const isRemoteEnabled = Boolean(serverUrl && apiToken);
+  const isRemoteEnabled = Boolean(serverUrl && (apiToken || cookieAuth));
   const apiClient = useMemo(() => new ApiClient(serverUrl, apiToken), [serverUrl, apiToken]);
   const selectedYearMonth = useMemo(() => parseYearMonth(selectedMonth) ?? fallbackYearMonth, [fallbackYearMonth, selectedMonth]);
   const yearOptions = useMemo(() => Array.from({ length: 7 }, (_, i) => fallbackYearMonth.year - 5 + i), [fallbackYearMonth.year]);
@@ -94,14 +90,10 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
     return Array.from(existing).sort();
   }, [expenses, globalCategories]);
 
-  // 표시할 내역 필터링: showDeleted가 false면 삭제되지 않은 것만
   const displayedExpenses = useMemo(() => {
     if (showDeleted) return expenses;
     return expenses.filter((e) => e.deleted_at == null);
   }, [expenses, showDeleted]);
-
-  // 통계는 삭제되지 않은 항목만으로 계산
-  const activeExpenses = useMemo(() => expenses.filter((e) => e.deleted_at == null), [expenses]);
 
   const loadExpenses = useCallback(async (year: number, month: number) => {
     if (!isRemoteEnabled) return;
@@ -111,12 +103,11 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
     setIsLoading(true);
     setLoadError(null);
     setSummaryError(null);
-    setSaveError(null);
+
     setEditingId(null);
     setDraftCategory('');
     setExpenseSummary(null);
     try {
-      // 항상 삭제된 항목도 포함해서 조회 (토글로 표시/숨김 처리)
       const data = await apiClient.fetchExpenses({ year, month, includeDeleted: true }, { signal: controller.signal });
       setExpenses(data);
 
@@ -164,7 +155,7 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
     setLoadError(null);
     setEditingId(null);
     setDraftCategory('');
-    setSaveError(null);
+
     setUploadError(null);
     setUploadResult(null);
     if (expensesAbortRef.current) {
@@ -179,8 +170,8 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
     const selectedFile = event.target.files?.[0];
     if (!selectedFile) return;
     const fileName = selectedFile.name.toLowerCase();
-    if (!['.xlsx', '.xls', '.csv'].some((ext) => fileName.endsWith(ext))) {
-      setUploadError('Excel(.xlsx/.xls) 또는 CSV(.csv) 파일만 업로드할 수 있습니다.');
+    if (!['.xlsx', '.xls', '.csv', '.txt'].some((ext) => fileName.endsWith(ext))) {
+      setUploadError('Excel(.xlsx/.xls), CSV(.csv), 또는 네이버페이 TXT(.txt) 파일만 업로드할 수 있습니다.');
       setUploadResult(null);
       event.target.value = '';
       return;
@@ -206,33 +197,33 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
     setEditingId(expense.id);
     setDraftCategory(expense.category ?? '');
     setDraftAmount(expense.amount);
-    setSaveError(null);
+
   };
 
   const cancelEdit = () => {
     setEditingId(null);
     setDraftCategory('');
     setDraftAmount(0);
-    setSaveError(null);
+
     setIsCustomCategoryMode(false);
   };
 
   const saveExpense = async (expenseId: number) => {
     if (!isRemoteEnabled || savingId === expenseId) return;
     const trimmedCategory = draftCategory.trim();
-    if (!trimmedCategory) { setSaveError('카테고리를 입력해주세요.'); return; }
+    if (!trimmedCategory) { return; }
     const current = expenses.find((e) => e.id === expenseId);
     if (!current) return;
     if (current.category === trimmedCategory && current.amount === draftAmount) { cancelEdit(); return; }
     setSavingId(expenseId);
-    setSaveError(null);
+
     try {
       const updated = await apiClient.updateExpense(expenseId, { category: trimmedCategory, amount: draftAmount });
       setExpenses((prev) => prev.map((e) => (e.id === expenseId ? { ...e, category: updated.category, amount: updated.amount } : e)));
       void fetchGlobalCategories();
       cancelEdit();
-    } catch (err) {
-      setSaveError(getUserErrorMessage(err, { default: '내역 수정에 실패했습니다.' }));
+    } catch {
+      // setSaveError(getUserErrorMessage(err, { default: '내역 수정에 실패했습니다.' }));
     } finally {
       setSavingId(null);
     }
@@ -241,15 +232,12 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
   const deleteExpense = async (expenseId: number) => {
     if (!isRemoteEnabled || deletingId === expenseId) return;
     setDeletingId(expenseId);
-    setSaveError(null);
+
     try {
-      const result = await apiClient.deleteExpense(expenseId);
-      // 로컬 상태 업데이트
-      setExpenses((prev) => prev.map((e) =>
-        e.id === expenseId ? { ...e, deleted_at: result.deleted_at ?? new Date().toISOString() } : e
-      ));
-    } catch (err) {
-      setSaveError(getUserErrorMessage(err, { default: '내역 삭제에 실패했습니다.' }));
+      await apiClient.deleteExpense(expenseId);
+      void loadExpenses(selectedYearMonth.year, selectedYearMonth.month);
+    } catch {
+      // setSaveError(getUserErrorMessage(err, { default: '내역 삭제에 실패했습니다.' }));
     } finally {
       setDeletingId(null);
     }
@@ -258,15 +246,12 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
   const restoreExpense = async (expenseId: number) => {
     if (!isRemoteEnabled || restoringId === expenseId) return;
     setRestoringId(expenseId);
-    setSaveError(null);
+
     try {
       await apiClient.restoreExpense(expenseId);
-      // 로컬 상태 업데이트
-      setExpenses((prev) => prev.map((e) =>
-        e.id === expenseId ? { ...e, deleted_at: null } : e
-      ));
-    } catch (err) {
-      setSaveError(getUserErrorMessage(err, { default: '내역 복구에 실패했습니다.' }));
+      void loadExpenses(selectedYearMonth.year, selectedYearMonth.month);
+    } catch {
+      // setSaveError(getUserErrorMessage(err, { default: '내역 복구에 실패했습니다.' }));
     } finally {
       setRestoringId(null);
     }
@@ -289,14 +274,14 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
     }
   };
 
-  const CustomTooltip = ({ active, payload, label }: any) => {
+  const CustomTooltip = ({ active, payload }: ChartTooltipProps) => {
     if (active && payload && payload.length) {
       return (
         <div className="bg-slate-900/90 backdrop-blur-md p-3 rounded-xl border border-white/10 shadow-xl text-xs text-white z-50">
           <p className="font-semibold mb-2 text-slate-300">{payload[0].name}</p>
           <div className="flex items-center gap-2">
             <span className="text-lg font-bold font-mono">
-              {formatCurrency(payload[0].value)}
+              {formatCurrency(payload[0].value as number)}
             </span>
           </div>
         </div>
@@ -307,7 +292,6 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
 
   return (
     <section className="space-y-6 pb-20">
-      {/* 1. Header & Controls */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 rounded-3xl border border-slate-100 shadow-sm">
         <div className="flex items-center gap-3">
           <div className="p-3 bg-indigo-50 rounded-2xl text-indigo-600">
@@ -361,10 +345,8 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
         </div>
       )}
 
-      {/* 2. Summary Cards (Bento Grid) */}
       {expenseSummary && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-fade-in-up">
-          {/* Net Income (Hero) */}
           <div className="bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-700 rounded-3xl p-6 text-white shadow-lg relative overflow-hidden md:col-span-1 flex flex-col justify-between group">
             <div className="absolute top-0 right-0 -mt-10 -mr-10 w-40 h-40 bg-white/10 rounded-full blur-3xl group-hover:scale-110 transition-transform duration-700"></div>
 
@@ -385,7 +367,6 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
             </div>
           </div>
 
-          {/* Income */}
           <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 flex flex-col justify-between hover:scale-[1.01] transition-transform duration-300">
             <div className="flex items-center justify-between">
               <div className="p-2.5 bg-emerald-50 rounded-xl text-emerald-600">
@@ -401,7 +382,6 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
             </div>
           </div>
 
-          {/* Expense */}
           <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 flex flex-col justify-between hover:scale-[1.01] transition-transform duration-300">
             <div className="flex items-center justify-between">
               <div className="p-2.5 bg-rose-50 rounded-xl text-rose-500">
@@ -423,7 +403,6 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
         </div>
       )}
 
-      {/* 3. Charts & Breakdown */}
       {expenseSummary && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-fade-in-up delay-75">
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex flex-col h-full hover:shadow-lg transition-shadow duration-300">
@@ -447,7 +426,7 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
-                          data={expenseSummary.category_breakdown as any[]}
+                          data={expenseSummary.category_breakdown as unknown as Array<{ category: string; amount: number;[key: string]: string | number }>}
                           dataKey="amount"
                           nameKey="category"
                           cx="50%"
@@ -515,7 +494,6 @@ export const ExpensesDashboard: React.FC<ExpensesDashboardProps> = ({ serverUrl,
         </div>
       )}
 
-      {/* 4. Transactions List (Styled Table) */}
       <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-6 animate-fade-in-up delay-100">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
           <div>

@@ -5,7 +5,7 @@
  */
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ApiClient, BackendTrade } from '@/shared/api/client';
+import { ApiClient } from '@/shared/api/client';
 import { TradeType } from '@lib/types';
 import { queryKeys } from '../queryKeys';
 

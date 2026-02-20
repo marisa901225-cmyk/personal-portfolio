@@ -1,23 +1,40 @@
 import path from 'path';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig(() => {
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
+  const proxyTarget = env.VITE_API_PROXY_TARGET || 'http://localhost:8000';
   return {
     server: {
       port: 3000,
       host: '0.0.0.0',
+      proxy: {
+        '/api': {
+          target: proxyTarget,
+          changeOrigin: true,
+          secure: false,
+        },
+      },
     },
     plugins: [react()],
     build: {
+      target: 'esnext',
+      cssMinify: true,
+      reportCompressedSize: true,
+      chunkSizeWarningLimit: 1000,
       rollupOptions: {
         output: {
           manualChunks: {
             // React 관련
-            'vendor-react': ['react', 'react-dom'],
-            // 차트 라이브러리
+            'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+            // 차트 라이브러리 (대용량)
             'vendor-charts': ['recharts'],
-            // 아이콘
+            // 데이터 쿼리
+            'vendor-query': ['@tanstack/react-query'],
+            // 마크다운 및 유틸
+            'vendor-markdown': ['react-markdown', 'remark-gfm'],
+            // 아이콘 및 기타
             'vendor-icons': ['lucide-react'],
           },
         },

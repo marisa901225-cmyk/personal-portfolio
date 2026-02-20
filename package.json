@@ -2,11 +2,21 @@
     "name": "personal-portfolio",
     "private": true,
     "version": "1.0.0",
+    "type": "module",
     "description": "MyAsset Portfolio Project (Frontend + Backend)",
     "scripts": {
         "dev:frontend": "npm run dev --prefix frontend",
-        "dev:backend": "cd backend && source .venv/bin/activate && uvicorn main:app --reload --port 8000",
+        "dev:backend": "bash backend/scripts/ensure_venv.sh && cd backend && . ../venv/bin/activate && uvicorn main:app --reload --port 8000",
         "test:frontend": "npm run test --prefix frontend",
-        "test:backend": "cd backend && source .venv/bin/activate && python -m unittest discover tests"
+        "test:backend": "bash backend/scripts/ensure_venv.sh && cd backend && . ../venv/bin/activate && PYTHONPATH=.. pytest tests/ -v"
+    },
+    "dependencies": {},
+    "devDependencies": {
+        "@eslint/js": "^9.39.2",
+        "@typescript-eslint/eslint-plugin": "^8.53.0",
+        "@typescript-eslint/parser": "^8.53.0",
+        "eslint": "^9.39.2",
+        "globals": "^17.0.0",
+        "typescript-eslint": "^8.53.0"
     }
 }

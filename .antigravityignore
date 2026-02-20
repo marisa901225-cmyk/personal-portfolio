@@ -1,0 +1,40 @@
+# --- AI & Agent Ignore Rules ---
+# Large binary files & AI Models
+**/*.gguf
+**/*.joblib
+**/backend/data/gemma*
+
+# Dependencies
+**/node_modules
+**/venv
+**/.venv
+**/__pycache__
+**/*.pyc
+
+# Build artifacts & Tool-generated
+**/dist
+**/dist-ssr
+**/.next
+**/.vercel
+**/.pytest_cache
+
+# Database & Storage
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/backend/backups/
+**/data_backup_reference/
+
+# Tokens & Secrets
+**/.env
+**/.env.*
+**/token*.json
+**/*.token
+
+# Others
+**/.vscode
+**/.git
+**/.github
+**/*.zip
+**/*.gz
+**/*.xlsx

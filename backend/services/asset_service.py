@@ -1,5 +1,4 @@
 from __future__ import annotations
-from datetime import datetime
 from typing import List
 
 from sqlalchemy.orm import Session
@@ -7,15 +6,21 @@ from fastapi import HTTPException
 
 from ..core.models import Asset, Trade
 from ..core.schemas import AssetCreate, AssetUpdate, TradeBase, TradeCreate
+from ..core.time_utils import utcnow
 from ..services.users import get_or_create_single_user
 from ..services.trade_service import create_trade_with_sync
 from ..services.portfolio import to_asset_read, to_trade_read
+
+ZERO_TOLERANCE = 1e-9
 
 
 def get_assets(db: Session) -> List[dict]:
     """자산 목록 조회"""
     user = get_or_create_single_user(db)
-    assets = db.query(Asset).filter(Asset.user_id == user.id).all()
+    assets = db.query(Asset).filter(
+        Asset.user_id == user.id, 
+        Asset.deleted_at.is_(None)
+    ).all()
     # Pydantic schema validation is better handled by caller or we return dicts
     # Retaining logic to return list of schemas dumped as dicts for consistency with standard service pattern
     return [to_asset_read(asset).model_dump() for asset in assets]
@@ -43,6 +48,7 @@ def create_asset(db: Session, payload: AssetCreate) -> dict:
         realized_profit=payload.realized_profit,
         index_group=payload.index_group,
         cma_config=payload.cma_config.model_dump() if payload.cma_config is not None else None,
+        tags="present" if payload.amount > ZERO_TOLERANCE else "past",
     )
     db.add(asset)
     db.flush()  # Ensure asset.id is assigned
@@ -60,7 +66,7 @@ def create_asset(db: Session, payload: AssetCreate) -> dict:
             type="BUY",
             quantity=payload.amount,
             price=trade_price,
-            timestamp=datetime.utcnow(),
+            timestamp=utcnow(),
             note="초기 자산 등록",
         )
         db.add(trade)
@@ -87,7 +93,14 @@ def update_asset(db: Session, asset_id: int, payload: AssetUpdate) -> dict:
     data = payload.model_dump(exclude_unset=True)
     for field, value in data.items():
         setattr(asset, field, value)
-    asset.updated_at = datetime.utcnow()
+    
+    # Auto-update tags based on amount
+    if abs(asset.amount) < ZERO_TOLERANCE:
+        asset.tags = "past"
+    elif asset.amount >= ZERO_TOLERANCE:
+        asset.tags = "present"
+
+    asset.updated_at = utcnow()
 
     try:
         db.commit()
@@ -132,8 +145,11 @@ def calibrate_asset_balance(
     asset.purchase_price = actual_avg_price
     
     # 잔고가 0이면 평단가도 의미가 없어지므로 처리 가능 (선택사항)
-    if actual_amount == 0:
+    if abs(actual_amount) < ZERO_TOLERANCE:
         asset.purchase_price = 0.0
+        asset.tags = "past"
+    else:
+        asset.tags = "present"
     
     # Caller is responsible for commit if not calling wrapper, 
     # but in this service method we are doing direct action, usually wrapped by calibrate_asset
@@ -174,7 +190,7 @@ def delete_asset(db: Session, asset_id: int) -> dict:
         raise HTTPException(status_code=404, detail="asset not found")
 
     # 소프트 삭제 - perform inside transaction
-    asset.deleted_at = datetime.utcnow()
+    asset.deleted_at = utcnow()
     try:
         db.commit()
     except Exception:

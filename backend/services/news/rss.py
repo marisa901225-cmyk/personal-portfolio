@@ -2,10 +2,13 @@ import logging
 import feedparser
 import re
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
 from sqlalchemy.orm import Session
 from urllib.parse import quote
 from ...core.models import GameNews
+from ...core.time_utils import utcnow
 from .core import calculate_simhash, GOOGLE_NEWS_MACRO_QUERIES
 
 logger = logging.getLogger(__name__)
@@ -24,10 +27,33 @@ def collect_rss(db: Session, feed_url: str, source_name: str):
             # HTML 태그 제거
             clean_desc = re.sub('<[^<]+?>', '', description)
             
-            # 중복 체크 (SimHash)
+            # 날짜 파싱 (RSS 파싱 결과 활용)
+            try:
+                from time import mktime
+                published_at = datetime.fromtimestamp(mktime(entry.published_parsed), tz=timezone.utc)
+            except Exception:
+                published_at = datetime.now(timezone.utc)
+
+            # 너무 오래된 기사 제외 (최근 14일)
+            if published_at < datetime.now(timezone.utc) - timedelta(days=14):
+                continue
+            
+            # 중복 체크 (강화된 하이브리드 방식)
             content_hash = calculate_simhash(title + clean_desc)
-            existing = db.query(GameNews).filter(GameNews.content_hash == content_hash).first()
-            if existing:
+            
+            # 1. DB 전체에서 정확히 일치하는 해시나 제목이 있는지 체크
+            exists = db.query(GameNews.id).filter(
+                (GameNews.content_hash == content_hash) | (GameNews.title == title)
+            ).first()
+            if exists:
+                continue
+            
+            # 최근 48시간 내의 뉴스들과 비교
+            recent_limit = datetime.now(timezone.utc) - timedelta(hours=48)
+            recent_news = db.query(GameNews).filter(GameNews.published_at >= recent_limit).all()
+            
+            from .core import is_duplicate_complex
+            if is_duplicate_complex(title, content_hash, recent_news):
                 continue
             
             # 메타데이터 추출 (간단한 예시)
@@ -45,7 +71,7 @@ def collect_rss(db: Session, feed_url: str, source_name: str):
                 title=title,
                 url=link,
                 full_content=clean_desc,
-                published_at=datetime.utcnow() # 실제로는 entry.published_parsed 파싱 필요
+                published_at=published_at
             )
             db.add(news)
             db.commit() # ID 생성을 위해 즉시 커밋
@@ -65,6 +91,11 @@ def collect_rss(db: Session, feed_url: str, source_name: str):
     except Exception as e:
         logger.error(f"Failed to collect RSS from {source_name}: {e}")
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    before_sleep=before_sleep_log(logger, logging.WARNING)
+)
 async def collect_google_news(db: Session, query: str, region: str = "US"):
     """
     구글 뉴스 RSS로 해외 뉴스 수집 (영문)
@@ -83,13 +114,22 @@ async def collect_google_news(db: Session, query: str, region: str = "US"):
     try:
         # feedparser는 동기 라이브러리이므로 블로킹 방지를 위해 run_in_executor 사용 고려 가능
         # 하지만 여기서는 간단히 호출
-        feed = feedparser.parse(feed_url)
+        async with httpx.AsyncClient() as client:
+            response = await client.get(feed_url, timeout=15.0)
+            response.raise_for_status()
+            feed = feedparser.parse(response.content)
+        
+        clean_desc = "" # Initialize here to prevent NameError
         count = 0
         
-        for entry in feed.entries[:10]:  # 쿼리당 최대 10개
+        for entry in feed.entries[:20]:  # 쿼리당 최대 20개
             title = entry.get("title", "")
             link = entry.get("link", "")
             published_str = entry.get("published", "")
+            
+            # 본문 추출 (RSS는 요약 정보만 제공하는 경우가 많음)
+            description = entry.get("summary", "") or entry.get("description", "")
+            clean_desc = re.sub('<[^<]+?>', '', description) if description else ""
             
             # 날짜 파싱
             try:
@@ -98,10 +138,26 @@ async def collect_google_news(db: Session, query: str, region: str = "US"):
             except Exception:
                 published_at = datetime.now(timezone.utc)
             
-            # 중복 체크 (SimHash)
-            content_hash = calculate_simhash(title)
-            existing = db.query(GameNews).filter(GameNews.content_hash == content_hash).first()
-            if existing:
+            # 너무 오래된 기사 제외 (최근 14일)
+            if published_at < datetime.now(timezone.utc) - timedelta(days=14):
+                continue
+            
+            # 중복 체크 (강화된 하이브리드 방식)
+            content_hash = calculate_simhash(title + clean_desc)
+            
+            # 1. DB 전체에서 정확히 일치하는 해시나 제목이 있는지 체크
+            exists = db.query(GameNews.id).filter(
+                (GameNews.content_hash == content_hash) | (GameNews.title == title)
+            ).first()
+            if exists:
+                continue
+            
+            # 최근 48시간 내의 뉴스들과 비교
+            recent_limit = datetime.now(timezone.utc) - timedelta(hours=48)
+            recent_news = db.query(GameNews).filter(GameNews.published_at >= recent_limit).all()
+            
+            from .core import is_duplicate_complex
+            if is_duplicate_complex(title, content_hash, recent_news):
                 continue
             
             # game_tag 설정

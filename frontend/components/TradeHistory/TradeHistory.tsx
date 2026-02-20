@@ -14,6 +14,7 @@ export interface TradeHistoryProps {
     assets: Asset[];
     serverUrl: string;
     apiToken?: string;
+    cookieAuth?: boolean;
     variant?: TradeHistoryVariant;
 }
 
@@ -21,6 +22,7 @@ export const TradeHistory: React.FC<TradeHistoryProps> = ({
     assets,
     serverUrl,
     apiToken,
+    cookieAuth,
     variant = 'page',
 }) => {
     const isCollapsible = variant === 'collapsible';
@@ -32,8 +34,8 @@ export const TradeHistory: React.FC<TradeHistoryProps> = ({
     const [yearFilter, setYearFilter] = useState<number | 'ALL'>('ALL');
     const [monthFilter, setMonthFilter] = useState<number | 'ALL'>('ALL');
 
-    const isRemoteEnabled = Boolean(serverUrl && apiToken);
-    const apiClient = useApiClient({ serverUrl, apiToken });
+    const isRemoteEnabled = Boolean(serverUrl && (apiToken || cookieAuth));
+    const apiClient = useApiClient({ serverUrl, apiToken, cookieAuth });
     const shouldFetch = isRemoteEnabled && (isOpen || !isCollapsible);
 
     // Use the new unified API hook

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Asset, AssetCategory, TradeType } from '../lib/types';
 import { formatCurrency } from '@/shared/portfolio';
 import { Trash2, Edit3 } from 'lucide-react';
+import { useToast } from '../src/contexts/ToastContext';
 
 interface AssetRowProps {
     asset: Asset;
@@ -20,6 +21,7 @@ export const AssetRow: React.FC<AssetRowProps> = ({
     onSelectNewsQuery,
     getDefaultFxRate,
 }) => {
+    const { showToast } = useToast();
     const [isTradeOpen, setIsTradeOpen] = useState(false);
     const [tradeType, setTradeType] = useState<TradeType>('BUY');
     const [tradeQuantity, setTradeQuantity] = useState<string>('');
@@ -73,11 +75,11 @@ export const AssetRow: React.FC<AssetRowProps> = ({
             const fxRate = tradeFxRate ? Number(tradeFxRate) : getDefaultFxRate();
 
             if (Number.isNaN(usdPrice) || usdPrice <= 0) {
-                alert('달러 단가를 올바르게 입력해주세요.');
+                showToast('달러 단가를 올바르게 입력해주세요.', 'error');
                 return;
             }
             if (fxRate <= 0) {
-                alert('환율을 입력하거나 설정에서 현재환율을 설정해주세요.');
+                showToast('환율을 입력하거나 설정에서 현재환율을 설정해주세요.', 'error');
                 return;
             }
 
@@ -87,15 +89,16 @@ export const AssetRow: React.FC<AssetRowProps> = ({
         }
 
         if (Number.isNaN(qty) || qty <= 0) {
-            alert('수량을 올바르게 입력해주세요.');
+            showToast('수량을 올바르게 입력해주세요.', 'error');
             return;
         }
         if (Number.isNaN(finalPrice) || finalPrice <= 0) {
-            alert('가격을 올바르게 입력해주세요.');
+            showToast('가격을 올바르게 입력해주세요.', 'error');
             return;
         }
 
         onTrade(asset.id, tradeType, qty, finalPrice);
+        showToast(`${asset.name} ${tradeType === 'BUY' ? '매수' : '매도'} 처리가 완료되었습니다.`, 'success');
         closeTrade();
     };
 

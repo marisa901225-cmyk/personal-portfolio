@@ -9,6 +9,7 @@ import {
     ArrowLeftRight,
     Wallet,
     Sparkles,
+    Brain,
     Bell,
     RefreshCw,
     AlertCircle,
@@ -20,7 +21,7 @@ import { formatCurrency } from '@/shared/portfolio';
 import { NotificationModal } from '@components/NotificationModal';
 import { InvestmentQuote } from '@components/InvestmentQuote';
 import { TradeRecord } from '@lib/types';
-import { APP_ERROR_EVENT } from '@/shared/errors';
+import { APP_ERROR_EVENT, AppErrorEvent } from '@/shared/errors';
 
 const navItems = [
     { to: '/dashboard', icon: LayoutDashboard, label: '대시보드' },
@@ -29,6 +30,7 @@ const navItems = [
     { to: '/exchange', icon: ArrowLeftRight, label: '환전 내역' },
     { to: '/expenses', icon: Wallet, label: '가계부' },
     { to: '/ai-report', icon: Sparkles, label: 'AI 리포트' },
+    { to: '/memories', icon: Brain, label: 'Annie와 대화' },
     { to: '/add-asset', icon: PlusCircle, label: '자산 추가' },
 ];
 
@@ -36,13 +38,10 @@ export const Layout: React.FC = () => {
     const location = useLocation();
     const { settings } = useSettings();
     const {
-        assets,
         tradeHistory,
         isSyncing,
         isManualSyncing,
         syncPrices,
-        reload,
-        apiClient
     } = usePortfolio(settings);
 
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -66,11 +65,10 @@ export const Layout: React.FC = () => {
             setHasUnreadHistory(true);
         }
     }, [tradeHistory.length, isHistoryOpen]);
-
     // 전역 에러 이벤트 핸들링
     useEffect(() => {
-        const handleAppError = (event: Event) => {
-            const detail = (event as CustomEvent<string>).detail;
+        const handleAppError = (event: AppErrorEvent) => {
+            const detail = event.detail;
             if (!detail) return;
             setAppError(detail);
             if (errorTimerRef.current !== null) {
@@ -81,9 +79,10 @@ export const Layout: React.FC = () => {
                 errorTimerRef.current = null;
             }, 8000);
         };
-        window.addEventListener(APP_ERROR_EVENT, handleAppError as EventListener);
+        const handler = handleAppError as (e: Event) => void;
+        window.addEventListener(APP_ERROR_EVENT, handler);
         return () => {
-            window.removeEventListener(APP_ERROR_EVENT, handleAppError as EventListener);
+            window.removeEventListener(APP_ERROR_EVENT, handler);
             if (errorTimerRef.current !== null) {
                 window.clearTimeout(errorTimerRef.current);
             }
@@ -336,6 +335,7 @@ function getPageTitle(pathname: string): string {
         '/exchange': '환전 내역',
         '/expenses': '가계부',
         '/ai-report': 'AI 리포트',
+        '/memories': 'Annie와 대화',
         '/add-asset': '자산 추가',
         '/settings': '서버 설정',
     };
@@ -350,6 +350,7 @@ function getPageDescription(pathname: string): string {
         '/exchange': '환전 기록 조회 및 수정',
         '/expenses': '월별 지출/수입 분석',
         '/ai-report': '가계부 + 투자 리포트 생성',
+        '/memories': '우리만의 소중한 장기 기억과 대화',
         '/add-asset': '새로운 자산 등록',
         '/settings': '연결 및 환경 설정',
     };

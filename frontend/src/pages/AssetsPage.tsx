@@ -16,8 +16,9 @@ import { restorePortfolioFromBackup } from '@/features/portfolio';
 import type { ImportedAssetSnapshot } from '@/shared/portfolio';
 import { useSettings } from '@hooks/useSettings';
 import type { CmaConfig } from '@/shared/portfolio';
-import { Asset, AssetCategory, TradeRecord } from '@lib/types';
+import { AssetCategory } from '@lib/types';
 import { Loader2 } from 'lucide-react';
+import { alertError, isApiErrorStatus } from '@/shared/errors';
 
 export const AssetsPage: React.FC = () => {
     const { settings } = useSettings();
@@ -25,9 +26,14 @@ export const AssetsPage: React.FC = () => {
     const apiClient = useApiClient({
         serverUrl: settings.serverUrl,
         apiToken: settings.apiToken,
+        cookieAuth: settings.cookieAuth,
     });
 
-    const enabled = isApiEnabled({ serverUrl: settings.serverUrl, apiToken: settings.apiToken });
+    const enabled = isApiEnabled({
+        serverUrl: settings.serverUrl,
+        apiToken: settings.apiToken,
+        cookieAuth: settings.cookieAuth,
+    });
 
     const assetsQuery = useAssetsQuery(apiClient, { enabled });
     const deleteAssetMutation = useDeleteAsset(apiClient);
@@ -57,22 +63,53 @@ export const AssetsPage: React.FC = () => {
 
     const assets = assetsQuery.data ?? [];
 
+    const refreshPortfolioForStaleId = async (error: unknown): Promise<void> => {
+        if (!isApiErrorStatus(error, 404)) return;
+        await queryClient.invalidateQueries({ queryKey: queryKeys.portfolio });
+        await queryClient.refetchQueries({ queryKey: queryKeys.portfolio });
+    };
+
     const handleDelete = (id: string) => {
         const asset = assets.find(a => a.id === id);
         if (!asset?.backendId) return;
         if (!window.confirm('정말 이 자산을 삭제하시겠습니까?')) return;
-        deleteAssetMutation.mutate(asset.backendId);
+        deleteAssetMutation.mutate(asset.backendId, {
+            onError: (error) => {
+                void refreshPortfolioForStaleId(error);
+                alertError('Delete asset error', error, {
+                    default: '자산 삭제에 실패했습니다.',
+                    unauthorized: '자산 삭제 권한이 없습니다. 다시 로그인 후 시도해주세요.',
+                    network: '서버 연결 문제로 자산 삭제에 실패했습니다.',
+                    clientError: '자산 삭제 요청이 거부되었습니다.',
+                    serverError: '서버 오류로 자산 삭제에 실패했습니다.',
+                });
+            },
+        });
     };
 
     const handleTrade = (id: string, type: 'BUY' | 'SELL', quantity: number, price: number) => {
         const asset = assets.find(a => a.id === id);
         if (!asset?.backendId) return;
-        createTradeMutation.mutate({
-            assetId: asset.backendId,
-            type,
-            quantity,
-            price,
-        });
+        createTradeMutation.mutate(
+            {
+                assetId: asset.backendId,
+                type,
+                quantity,
+                price,
+            },
+            {
+                onError: (error) => {
+                    void refreshPortfolioForStaleId(error);
+                    alertError('Create trade error', error, {
+                        default: '거래 처리에 실패했습니다.',
+                        unauthorized: '거래 처리 권한이 없습니다. 다시 로그인 후 시도해주세요.',
+                        network: '서버 연결 문제로 거래 처리에 실패했습니다.',
+                        clientError: '거래 요청이 거부되었습니다.',
+                        serverError: '서버 오류로 거래 처리에 실패했습니다.',
+                    });
+                },
+            },
+        );
     };
 
     const handleUpdateAsset = (
@@ -145,8 +182,8 @@ export const AssetsPage: React.FC = () => {
             snapshot,
             isRemoteEnabled: enabled,
             apiClient,
-            setAssets: (_next: React.SetStateAction<Asset[]>) => { },
-            setTradeHistory: (_next: React.SetStateAction<TradeRecord[]>) => { },
+            setAssets: () => { },
+            setTradeHistory: () => { },
             loadPortfolioFromServer: async () => {
                 await queryClient.refetchQueries({ queryKey: queryKeys.portfolio });
                 await queryClient.refetchQueries({ queryKey: queryKeys.trades });
