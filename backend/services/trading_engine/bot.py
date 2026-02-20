@@ -1,0 +1,359 @@
+from __future__ import annotations
+
+import logging
+import os
+import time
+from datetime import datetime
+from typing import Any
+
+from .config import TradeEngineConfig
+from .execution import enter_position, exit_position, handle_open_orders
+from .interfaces import TradingAPI
+from .journal import TradeJournal
+from .market_calendar import get_last_trading_day, is_trading_day
+from .notifier import BestEffortNotifier
+from .regime import get_regime
+from .risk import can_enter, should_exit_position
+from .state import TradeState, add_pass_reason, load_state, rollover_state_for_date, save_state
+from .strategy import build_candidates, fetch_quotes_subset, pick_daytrade, pick_swing
+from .utils import parse_numeric
+
+logger = logging.getLogger(__name__)
+
+_CORE_PASS_REASONS = {"RISK_OFF", "DAILY_MAX_LOSS", "HOLIDAY"}
+
+
+class HybridTradingBot:
+    """Hybrid swing/day-trade bot using injected KIS-compatible API interface."""
+
+    def __init__(
+        self,
+        api: TradingAPI,
+        *,
+        config: TradeEngineConfig | None = None,
+        notifier: BestEffortNotifier | None = None,
+    ) -> None:
+        self.api = api
+        self.config = config or TradeEngineConfig()
+        self.state: TradeState = load_state(self.config.state_path)
+        self.notifier = notifier or BestEffortNotifier(max_retry=self.config.telegram_retry_max)
+        self.journal: TradeJournal | None = None
+        self._run_started = False
+        self._last_notified_window_idx: int | None = None  # To prevent candidate spam
+
+    def run_once(self, now: datetime | None = None) -> dict[str, Any]:
+        now = now or datetime.now()
+        today = now.strftime("%Y%m%d")
+        self.state = rollover_state_for_date(self.state, today)
+        self._ensure_journal(today)
+
+        if not self._run_started:
+            self._journal("RUN_START", asof_date=today)
+            self._run_started = True
+            self._notify_text(f"[RUN_START] {today}")
+
+        try:
+            if not is_trading_day(self.api, today, config=self.config):
+                return self._pass_and_return("HOLIDAY", now, regime="N/A")
+
+            # 새 영업일 확인 시에만 bars_held 증가 (중복 증가 방지)
+            if self.state.last_bar_date_seen != today:
+                from .execution import increment_bars_held
+                increment_bars_held(self.state)
+                self.state.last_bar_date_seen = today
+                logger.info("New trading day confirmed: %s. Incremented bars_held.", today)
+
+            asof = today
+            if (now.hour, now.minute) < (9, 0):
+                asof = get_last_trading_day(self.api, today, config=self.config)
+
+            regime = get_regime(
+                self.api,
+                asof,
+                primary_code=self.config.market_proxy_code,
+                confirmation_code=self.config.kosdaq_proxy_code,
+                use_confirmation=self.config.use_kosdaq_confirmation,
+            )
+
+            candidates = build_candidates(self.api, asof, self.config)
+            self._journal(
+                "SCAN_DONE",
+                asof_date=today,
+                regime=regime,
+                candidates_count=int(len(candidates.merged)),
+                used_value_proxy=int(candidates.popular["used_value_proxy"].fillna(False).sum())
+                if not candidates.popular.empty
+                else 0,
+            )
+
+            handle_open_orders(self.api, timeout_sec=30, max_retry=0)
+            self.monitor_positions(now=now)
+
+            # --- Candidate Notification ---
+            self._maybe_notify_candidates(now, candidates, regime)
+            # ------------------------------
+
+            quotes = fetch_quotes_subset(self.api, candidates.quote_codes)
+            self._try_enter_swing(now=now, regime=regime, candidates=candidates, quotes=quotes)
+            self._try_enter_day(now=now, regime=regime, candidates=candidates, quotes=quotes)
+
+            self.force_exit_day_positions(now)
+            self.state.last_run_timestamp = now.isoformat(timespec="seconds")
+            save_state(self.config.state_path, self.state)
+            return {"status": "OK", "regime": regime, "asof": asof}
+        except Exception as exc:
+            logger.exception("bot run failed: %s", exc)
+            self._journal("ERROR", asof_date=today, reason=str(exc))
+            self._notify_text(f"[ERROR] {today} {str(exc)[:180]}")
+            save_state(self.config.state_path, self.state)
+            return {"status": "ERROR", "error": str(exc)}
+
+    def run_until_close(self, *, sleep_sec: int | None = None) -> None:
+        interval = sleep_sec or self.config.monitor_interval_sec
+        while True:
+            now = datetime.now()
+            self.run_once(now=now)
+            if now.hour > 15 or (now.hour == 15 and now.minute >= 30):
+                break
+            time.sleep(max(30, int(interval)))
+
+    def finalize_day(self) -> str | None:
+        if not self.journal:
+            return None
+
+        today = self.state.trade_date
+        self._journal(
+            "RUN_END",
+            asof_date=today,
+            realized_pnl=self.state.realized_pnl_today,
+            pass_reasons=self.state.pass_reasons_today,
+            open_positions=len(self.state.open_positions),
+        )
+        save_state(self.config.state_path, self.state)
+
+        zip_path = self.journal.make_backup_zip(
+            state_file=self.config.state_path,
+            runlog_file=self.config.runlog_path,
+        )
+        self.notifier.enqueue_file(zip_path, caption=f"trade backup {today}")
+
+        realized_pct = 0.0
+        if self.config.initial_capital > 0:
+            realized_pct = self.state.realized_pnl_today / self.config.initial_capital * 100.0
+        self._notify_text(
+            f"[END] trades={self.journal.total_events} realized={self.state.realized_pnl_today:,.0f}원 ({realized_pct:+.2f}%)"
+        )
+        self.notifier.flush(timeout_sec=2.0)
+        return zip_path
+
+    def close(self) -> None:
+        self.notifier.close(timeout_sec=2.0)
+
+    def monitor_positions(self, *, now: datetime | None = None) -> None:
+        now = now or datetime.now()
+        for code, pos in list(self.state.open_positions.items()):
+            try:
+                q = self.api.quote(code)
+            except Exception:
+                continue
+            price = parse_numeric(q.get("price"))
+            if price is None:
+                continue
+
+            exit_now, reason, pnl_pct = should_exit_position(pos, quote_price=price, now=now, config=self.config)
+            if not exit_now:
+                continue
+
+            result = exit_position(self.api, self.state, code=code, reason=reason, now=now)
+            if not result:
+                continue
+
+            self._journal(
+                "EXIT_FILL",
+                asof_date=self.state.trade_date,
+                code=code,
+                side="SELL",
+                qty=result.qty,
+                avg_price=result.avg_price,
+                pnl_pct=round(pnl_pct * 100.0, 4),
+                reason=reason,
+                strategy_type=pos.type,
+            )
+            self._notify_text(
+                f"[EXIT][{pos.type}][{reason}] {code} qty={result.qty} avg={result.avg_price:.0f} pnl={pnl_pct * 100:+.2f}%"
+            )
+
+    def force_exit_day_positions(self, now: datetime | None = None) -> None:
+        now = now or datetime.now()
+        force_h, force_m = map(int, self.config.day_force_exit_at.split(":"))
+        if (now.hour, now.minute) < (force_h, force_m):
+            return
+
+        for code, pos in list(self.state.open_positions.items()):
+            if pos.type != "T":
+                continue
+            result = exit_position(self.api, self.state, code=code, reason="FORCE", now=now)
+            if not result:
+                continue
+            self._journal(
+                "FORCE_EXIT",
+                asof_date=self.state.trade_date,
+                code=code,
+                side="SELL",
+                qty=result.qty,
+                avg_price=result.avg_price,
+                reason="FORCE",
+                strategy_type="T",
+            )
+
+    def _try_enter_swing(self, *, now: datetime, regime: str, candidates: Any, quotes: dict[str, Any]) -> None:
+        candidate_count = len(candidates.model) + len(candidates.etf)
+        ok, reason = can_enter(
+            "S",
+            self.state,
+            regime=regime,
+            candidates_count=candidate_count,
+            now=now,
+            config=self.config,
+            is_trading_day_value=True,
+        )
+        if not ok:
+            self._pass(reason, regime)
+            return
+
+        code = pick_swing(candidates, quotes, self.config)
+        if not code:
+            self._pass("NO_SWING_PICK", regime)
+            return
+
+        result = enter_position(
+            self.api,
+            self.state,
+            position_type="S",
+            code=code,
+            cash_ratio=self.config.swing_cash_ratio,
+            asof_date=self.state.trade_date,
+            now=now,
+        )
+        if not result:
+            self._pass("SWING_ENTRY_FAILED", regime)
+            return
+
+        self._journal(
+            "ENTRY_FILL",
+            asof_date=self.state.trade_date,
+            code=code,
+            side="BUY",
+            qty=result.qty,
+            avg_price=result.avg_price,
+            strategy_type="S",
+            regime=regime,
+        )
+        self._notify_text(f"[ENTRY][S] {code} qty={result.qty} avg={result.avg_price:.0f} regime={regime}")
+
+    def _try_enter_day(self, *, now: datetime, regime: str, candidates: Any, quotes: dict[str, Any]) -> None:
+        ok, reason = can_enter(
+            "T",
+            self.state,
+            regime=regime,
+            candidates_count=len(candidates.popular),
+            now=now,
+            config=self.config,
+            is_trading_day_value=True,
+        )
+        if not ok:
+            self._pass(reason, regime)
+            return
+
+        code = pick_daytrade(candidates, quotes, self.config)
+        if not code:
+            self._pass("NO_DAY_PICK", regime)
+            return
+
+        result = enter_position(
+            self.api,
+            self.state,
+            position_type="T",
+            code=code,
+            cash_ratio=self.config.day_cash_ratio,
+            asof_date=self.state.trade_date,
+            now=now,
+        )
+        if not result:
+            self._pass("DAY_ENTRY_FAILED", regime)
+            return
+
+        self._journal(
+            "ENTRY_FILL",
+            asof_date=self.state.trade_date,
+            code=code,
+            side="BUY",
+            qty=result.qty,
+            avg_price=result.avg_price,
+            strategy_type="T",
+            regime=regime,
+        )
+        self._notify_text(f"[ENTRY][T] {code} qty={result.qty} avg={result.avg_price:.0f} regime={regime}")
+
+    def _pass(self, reason: str, regime: str) -> None:
+        add_pass_reason(self.state, reason)
+        self._journal("PASS", asof_date=self.state.trade_date, reason=reason, regime=regime)
+        if (not self.config.notify_on_core_pass_only) or reason in _CORE_PASS_REASONS:
+            self._notify_text(f"[PASS] {reason} {self.state.trade_date}")
+
+    def _pass_and_return(self, reason: str, now: datetime, regime: str) -> dict[str, Any]:
+        self._pass(reason, regime)
+        self.state.last_run_timestamp = now.isoformat(timespec="seconds")
+        save_state(self.config.state_path, self.state)
+        return {"status": "PASS", "reason": reason}
+
+    def _ensure_journal(self, today: str) -> None:
+        os.makedirs(self.config.output_dir, exist_ok=True)
+        if self.journal and self.journal.asof_date == today:
+            return
+        self.journal = TradeJournal(output_dir=self.config.output_dir, asof_date=today)
+
+    def _journal(self, event: str, **fields: Any) -> None:
+        if not self.journal:
+            return
+        self.journal.log(event, **fields)
+
+    def _notify_text(self, msg: str) -> None:
+        self.notifier.enqueue_text(msg)
+
+    def _maybe_notify_candidates(self, now: datetime, candidates: Any, regime: str) -> None:
+        """진입 시간대에 후보 종목 리스트를 텔레그램으로 쏩니다 (윈도우당 1회)"""
+        if regime == "RISK_OFF" or candidates.merged.empty:
+            return
+
+        # 현재 어느 윈도우에 있는지 확인
+        current_window_idx: int | None = None
+        from .risk import _is_in_window
+        for i, (start, end) in enumerate(self.config.entry_windows):
+            if _is_in_window(now, start, end):
+                current_window_idx = i
+                break
+
+        if current_window_idx is None:
+            # 진입 시간대가 아니면 무시 (또는 필요시 정책에 따라 변경)
+            return
+
+        # 이미 이 윈도우에서 보냈으면 생략
+        if self._last_notified_window_idx == current_window_idx:
+            return
+
+        self._last_notified_window_idx = current_window_idx
+
+        # 상위 10개 포맷팅
+        top_10 = candidates.merged.head(10)
+        lines = [f"🎯 [Entry Window] Scanned Symbols ({regime})"]
+        for i, (_, row) in enumerate(top_10.iterrows(), 1):
+            code = row["code"]
+            name = row["name"]
+            val5 = parse_numeric(row.get("avg_value_5d")) or 0
+            val20 = parse_numeric(row.get("avg_value_20d")) or 0
+            val = max(val5, val20)
+            lines.append(f"{i}. {name}({code}) | {val/1e8:.1f}억")
+
+        self._notify_text("\n".join(lines))
+
