@@ -73,6 +73,7 @@ class LLMService:
         self._last_used_paid = False
         self._last_route = None
 
+        requested_model = kwargs.get("model")
         paid_kwargs = dict(kwargs)
         paid_kwargs.pop("model", None)  # model은 명시 인자로만 전달
 
@@ -98,7 +99,8 @@ class LLMService:
 
             # 2) 원격 실패 시 유료 백엔드 폴백 (가장 저렴한 모델 사용)
             if self.settings.is_paid_configured():
-                fallback_model = self.settings.ai_report_fallback_model  # 폴백용 (기본: gpt-5-nano)
+                # 명시 모델이 있으면 우선 사용하고, 없을 때만 저가 폴백 모델 사용
+                fallback_model = requested_model or self.settings.ai_report_fallback_model
                 out_paid = self.paid_backend.chat(
                     messages,
                     max_tokens=max_tokens,

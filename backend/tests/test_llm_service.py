@@ -76,11 +76,18 @@ class TestLLMService(unittest.TestCase):
                         [{"role": "user", "content": "hi"}],
                         stop=["STOP"],
                         seed=9,
+                        model="openai/gpt-5.1-chat",
+                        api_key="openrouter-key",
+                        base_url="https://openrouter.ai/api/v1",
                         service_tier="flex",
                         response_format=response_format,
                     )
                     self.assertEqual(out, "paid-ok")
                     self.assertIsNone(llm.get_last_error())
+                    _, called_kwargs = paid_chat.call_args
+                    self.assertEqual(called_kwargs.get("model"), "openai/gpt-5.1-chat")
+                    self.assertEqual(called_kwargs.get("api_key"), "openrouter-key")
+                    self.assertEqual(called_kwargs.get("base_url"), "https://openrouter.ai/api/v1")
 
     def test_no_backend_configured_returns_empty_and_sets_error(self):
         with patch("backend.services.llm.config.settings") as mock_settings:
@@ -140,6 +147,69 @@ class TestLLMService(unittest.TestCase):
             self.assertEqual(first_payload.get("seed"), 123)
             self.assertEqual(second_payload.get("seed"), 123)
             self.assertIsNone(second_payload.get("stop"))
+
+    def test_paid_backend_falls_back_to_responses_when_chat_content_empty(self):
+        env = {
+            "AI_REPORT_API_KEY": "test-key",
+            "AI_REPORT_BASE_URL": "https://api.openai.com/v1",
+            "AI_REPORT_MODEL": "gpt-5-nano",
+        }
+
+        class _Resp:
+            def __init__(self, status_code: int, json_data=None, text: str = ""):
+                self.status_code = status_code
+                self._json_data = json_data
+                self.text = text
+
+            def json(self):
+                if isinstance(self._json_data, Exception):
+                    raise self._json_data
+                return self._json_data
+
+        chat_ok_but_empty = _Resp(
+            200,
+            json_data={
+                "service_tier": "default",
+                "choices": [
+                    {
+                        "finish_reason": "length",
+                        "message": {"content": ""},
+                    }
+                ],
+                "usage": {
+                    "completion_tokens_details": {
+                        "reasoning_tokens": 512
+                    }
+                },
+            },
+        )
+        responses_ok = _Resp(
+            200,
+            json_data={
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {"type": "output_text", "text": "responses-from-empty-chat"}
+                        ],
+                    }
+                ]
+            },
+        )
+
+        with patch.dict(os.environ, env, clear=True):
+            backend = OpenAIPaidBackend(Settings())
+            backend._post = unittest.mock.Mock(side_effect=[chat_ok_but_empty, responses_ok])
+
+            out = backend.chat(
+                [{"role": "user", "content": "hi"}],
+                model="gpt-5-nano",
+            )
+            self.assertEqual(out, "responses-from-empty-chat")
+            self.assertIsNone(backend.get_last_error())
+
+            second_payload = backend._post.call_args_list[1].kwargs["payload"]
+            self.assertEqual(second_payload.get("reasoning"), {"effort": "minimal"})
 
 
 if __name__ == "__main__":

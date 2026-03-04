@@ -141,6 +141,7 @@ async def generate_with_main_llm_async(
     stop: List[str] | None = None,
     enable_thinking: bool | None = None,
     model: str | None = None,
+    **llm_kwargs,
 ) -> str:
     """메인 LLM 호출을 asyncio.to_thread로 감싸 비동기 이벤트 루프 블로킹을 방지한다."""
     llm_service = LLMService.get_instance()
@@ -152,6 +153,8 @@ async def generate_with_main_llm_async(
     if top_k is not None: kwargs["top_k"] = top_k
     if enable_thinking is not None: kwargs["enable_thinking"] = enable_thinking
     if model is not None: kwargs["model"] = model
+    if llm_kwargs:
+        kwargs.update(llm_kwargs)
 
     return await asyncio.to_thread(
         llm_service.generate_chat,

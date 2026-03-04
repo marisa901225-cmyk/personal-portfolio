@@ -8,6 +8,7 @@ from backend.services.trading_engine.bot import HybridTradingBot
 from backend.services.trading_engine.config import TradeEngineConfig
 from backend.services.trading_engine.market_calendar import get_last_trading_day, is_trading_day
 from backend.services.trading_engine.screeners import model_screener, popular_screener
+from backend.services.trading_engine.state import PositionState
 
 
 class FakeAPI:
@@ -144,3 +145,146 @@ def test_bot_passes_on_holiday_without_order(tmp_path) -> None:
     assert result["status"] == "PASS"
     assert result["reason"] == "HOLIDAY"
     assert api.order_calls == []
+
+
+def test_bot_holiday_is_checked_once_per_day(tmp_path) -> None:
+    class SpyNotifier:
+        def __init__(self) -> None:
+            self.texts: list[str] = []
+            self.files: list[tuple[str, str | None]] = []
+
+        def enqueue_text(self, text: str) -> None:
+            self.texts.append(text)
+
+        def enqueue_file(self, path: str, caption: str | None = None) -> None:
+            self.files.append((path, caption))
+
+        def flush(self, timeout_sec: float = 2.0) -> None:
+            del timeout_sec
+
+        def close(self, timeout_sec: float = 2.0) -> None:
+            del timeout_sec
+
+    class CountAPI(FakeAPI):
+        def __init__(self) -> None:
+            super().__init__()
+            self.daily_bars_calls = 0
+
+        def daily_bars(self, code: str, end: str, lookback: int) -> pd.DataFrame:
+            self.daily_bars_calls += 1
+            return super().daily_bars(code, end, lookback)
+
+    api = CountAPI()
+    api._bars[("069500", "20260214")] = pd.DataFrame(
+        [{"date": "20260213", "close": 100, "volume": 1}]
+    )
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+    )
+    notifier = SpyNotifier()
+    bot = HybridTradingBot(api, config=cfg, notifier=notifier)  # type: ignore[arg-type]
+
+    out1 = bot.run_once(now=datetime(2026, 2, 14, 8, 50))
+    out2 = bot.run_once(now=datetime(2026, 2, 14, 9, 0))
+
+    assert out1["status"] == "PASS"
+    assert out1["reason"] == "HOLIDAY"
+    assert out2["status"] == "PASS"
+    assert out2["reason"] == "HOLIDAY"
+    assert api.daily_bars_calls == 2
+    assert bot.state.pass_reasons_today.get("HOLIDAY") == 2
+
+    holiday_pass_msgs = [t for t in notifier.texts if t.startswith("[PASS] HOLIDAY")]
+    assert len(holiday_pass_msgs) == 1
+
+
+def test_bot_daily_max_loss_pass_notified_once_per_day(tmp_path) -> None:
+    class SpyNotifier:
+        def __init__(self) -> None:
+            self.texts: list[str] = []
+            self.files: list[tuple[str, str | None]] = []
+
+        def enqueue_text(self, text: str) -> None:
+            self.texts.append(text)
+
+        def enqueue_file(self, path: str, caption: str | None = None) -> None:
+            self.files.append((path, caption))
+
+        def flush(self, timeout_sec: float = 2.0) -> None:
+            del timeout_sec
+
+        def close(self, timeout_sec: float = 2.0) -> None:
+            del timeout_sec
+
+    api = FakeAPI()
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+    )
+    notifier = SpyNotifier()
+    bot = HybridTradingBot(api, config=cfg, notifier=notifier)  # type: ignore[arg-type]
+
+    bot._pass("DAILY_MAX_LOSS", regime="RISK_ON")
+    bot._pass("DAILY_MAX_LOSS", regime="RISK_ON")
+
+    assert bot.state.pass_reasons_today.get("DAILY_MAX_LOSS") == 2
+    daily_max_loss_msgs = [t for t in notifier.texts if t.startswith("[PASS] DAILY_MAX_LOSS")]
+    assert len(daily_max_loss_msgs) == 1
+
+
+def test_swing_stop_loss_requires_trend_break(tmp_path) -> None:
+    code = "111111"
+    asof = "20260216"
+    now = datetime(2026, 2, 16, 10, 0)
+
+    api = FakeAPI()
+    api._quotes[code] = {"price": 96, "change_pct": -4.0}
+    api._bars[(code, asof)] = pd.DataFrame(
+        [
+            {"date": "20260212", "close": 90, "volume": 1_000_000},
+            {"date": "20260213", "close": 95, "volume": 1_000_000},
+            {"date": "20260214", "close": 100, "volume": 1_000_000},
+        ]
+    )
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        swing_stop_loss_pct=-0.03,
+        swing_sl_requires_trend_break=True,
+        swing_trend_ma_window=3,
+        swing_trend_lookback_bars=5,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.open_positions[code] = PositionState(
+        type="S",
+        entry_time="2026-02-14T09:10:00",
+        entry_price=100.0,
+        qty=10,
+        highest_price=102.0,
+        entry_date="20260214",
+        bars_held=1,
+    )
+
+    # 손실률은 -4%지만, MA(=95) 위이므로 추세 훼손 아님 -> 즉시 손절 금지
+    bot.monitor_positions(now=now)
+    assert api.order_calls == []
+    assert code in bot.state.open_positions
+
+    # 동일 손실률에서 MA를 상회하지 못하게 만들어 추세 훼손 유도 -> 손절 실행
+    api._bars[(code, asof)] = pd.DataFrame(
+        [
+            {"date": "20260212", "close": 110, "volume": 1_000_000},
+            {"date": "20260213", "close": 108, "volume": 1_000_000},
+            {"date": "20260214", "close": 106, "volume": 1_000_000},
+        ]
+    )
+    bot.monitor_positions(now=now)
+
+    assert any(call["side"] == "SELL" and call["code"] == code for call in api.order_calls)
+    assert code not in bot.state.open_positions

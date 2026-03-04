@@ -264,10 +264,29 @@ async def send_weather_notification() -> None:
 
 if __name__ == "__main__":
     import asyncio
+    import logging
+
+    logging.basicConfig(level=logging.INFO, format="%(name)s | %(levelname)s | %(message)s")
 
     async def test():
         print("Testing KMA Short-term Forecast API...")
         msg = await fetch_weather_forecast()
+
+        # LLM 라우팅 정보 출력
+        from ...services.llm_service import LLMService
+        llm = LLMService.get_instance()
+        print(f"\n{'='*50}")
+        print(f"[LLM Route]     {llm.last_route()}")
+        print(f"[Used Paid?]    {llm.last_used_paid()}")
+        print(f"[Current Model] {llm.get_current_model()}")
+        print(f"[Settings Model]  remote_configured={llm.settings.is_remote_configured()}, paid_configured={llm.settings.is_paid_configured()}")
+        print(f"[AI Report Model] {llm.settings.ai_report_model}")
+        print(f"[Fallback Model]  {llm.settings.ai_report_fallback_model}")
+        print(f"[AI Report URL]   {llm.settings.ai_report_base_url}")
+        print(f"[LLM Base URL]    {llm.settings.llm_base_url}")
+        print(f"[Last Error]    {llm.get_last_error()}")
+        print(f"{'='*50}\n")
+
         print("-" * 50)
         print(msg if msg else "Failed to get weather message.")
         print("-" * 50)

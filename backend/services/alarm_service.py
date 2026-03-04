@@ -2,7 +2,7 @@
 # 모듈화된 alarm 처리 서비스 프록시
 # 실제 로직은 alarm/ 하위 모듈들에 구현됨
 import logging
-from typing import List
+from typing import Any, List, Optional
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -30,9 +30,14 @@ class AlarmService:
         return await summarize_expenses_with_llm(expenses)
     
     @classmethod
-    async def process_pending_alarms(cls, db: Session):
+    async def process_pending_alarms(
+        cls,
+        db: Session,
+        model_override: Optional[str] = None,
+        **llm_kwargs: Any,
+    ):
         """대기 중인 알람 처리 (필터링, 요약, 텔레그램 전송)"""
-        return await process_pending_alarms(db)
+        return await process_pending_alarms(db, model_override=model_override, **llm_kwargs)
 
     @classmethod
     async def generate_daily_catchphrases(cls):

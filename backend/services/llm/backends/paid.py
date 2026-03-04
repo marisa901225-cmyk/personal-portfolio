@@ -190,7 +190,8 @@ class OpenAIPaidBackend(LLMBackend):
             if responses_text_format:
                 payload["text"] = {"format": responses_text_format}
             if is_gpt5:
-                payload["reasoning"] = {"effort": "low"}
+                # GPT-5 계열은 low에서도 reasoning token만 소진되는 경우가 있어 minimal로 고정
+                payload["reasoning"] = {"effort": "minimal"}
             else:
                 payload["temperature"] = temperature
             if stop and not is_gpt5:
@@ -228,6 +229,28 @@ class OpenAIPaidBackend(LLMBackend):
 
             self._last_error = "OpenAI Responses API returned no output text"
             logger.error(self._last_error)
+            return ""
+
+        def _extract_chat_content(data: dict) -> str:
+            choices = data.get("choices") or []
+            first = choices[0] if choices else {}
+            msg = first.get("message") or {}
+            raw_content = msg.get("content")
+
+            if isinstance(raw_content, str):
+                return raw_content.strip()
+
+            if isinstance(raw_content, list):
+                parts = []
+                for part in raw_content:
+                    if not isinstance(part, dict):
+                        continue
+                    if part.get("type") in ("text", "output_text"):
+                        txt = part.get("text")
+                        if txt:
+                            parts.append(str(txt))
+                return "".join(parts).strip()
+
             return ""
 
         for attempt in range(max_attempts):
@@ -283,13 +306,38 @@ class OpenAIPaidBackend(LLMBackend):
                     return ""
 
                 # 성공 시 결과 처리
-                data = r.json()
-                content = data["choices"][0]["message"]["content"].strip()
+                data = r.json() or {}
+                content = _extract_chat_content(data)
                 actual_tier = data.get("service_tier", "standard") # 응답에서 실제 티어 확인
                 logger.info(f"OpenAI API Success. Model: {model}, Requested Tier: {current_tier}, Actual Tier: {actual_tier}")
-                
-                self._last_error = None
-                return content
+
+                if content:
+                    self._last_error = None
+                    return content
+
+                # GPT-5 계열에서 reasoning token만 소진되고 content가 비는 경우가 있어 Responses로 폴백
+                choices = data.get("choices") or []
+                first = choices[0] if choices else {}
+                finish_reason = first.get("finish_reason")
+                usage = data.get("usage") or {}
+                completion_details = usage.get("completion_tokens_details") or {}
+                reasoning_tokens = completion_details.get("reasoning_tokens")
+                logger.warning(
+                    "OpenAI Chat Completions returned empty content; trying Responses fallback "
+                    "(model=%s, finish_reason=%s, reasoning_tokens=%s)",
+                    model,
+                    finish_reason,
+                    reasoning_tokens,
+                )
+                out = _try_responses()
+                if out:
+                    return out
+                self._last_error = (
+                    "OpenAI Chat Completions returned empty content "
+                    f"(finish_reason={finish_reason}, reasoning_tokens={reasoning_tokens})"
+                )
+                logger.error(self._last_error)
+                return ""
 
             except Exception as e:
                 # 2) Chat Completions가 예외로 실패한 경우: 마지막 시도에서 Responses 폴백

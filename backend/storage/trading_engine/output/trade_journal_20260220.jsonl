@@ -79,3 +79,17 @@
 {"ts": "2026-02-20T10:32:16+09:00", "event": "SCAN_DONE", "asof_date": "20260220", "regime": "RISK_ON", "candidates_count": 10, "used_value_proxy": 0}
 {"ts": "2026-02-20T10:32:20+09:00", "event": "PASS", "asof_date": "20260220", "reason": "MAX_SWING_POSITIONS", "regime": "RISK_ON"}
 {"ts": "2026-02-20T10:32:20+09:00", "event": "PASS", "asof_date": "20260220", "reason": "ENTRY_WINDOW_CLOSED", "regime": "RISK_ON"}
+{"ts": "2026-02-20T15:16:17+09:00", "event": "SCAN_DONE", "asof_date": "20260220", "regime": "RISK_ON", "candidates_count": 10, "used_value_proxy": 0}
+{"ts": "2026-02-20T15:16:23+09:00", "event": "PASS", "asof_date": "20260220", "reason": "NO_NEW_ENTRY_AFTER", "regime": "RISK_ON"}
+{"ts": "2026-02-20T15:16:23+09:00", "event": "PASS", "asof_date": "20260220", "reason": "NO_NEW_ENTRY_AFTER", "regime": "RISK_ON"}
+{"ts": "2026-02-20T15:20:17+09:00", "event": "SCAN_DONE", "asof_date": "20260220", "regime": "RISK_ON", "candidates_count": 10, "used_value_proxy": 0}
+{"ts": "2026-02-20T15:20:21+09:00", "event": "PASS", "asof_date": "20260220", "reason": "NO_NEW_ENTRY_AFTER", "regime": "RISK_ON"}
+{"ts": "2026-02-20T15:20:21+09:00", "event": "PASS", "asof_date": "20260220", "reason": "NO_NEW_ENTRY_AFTER", "regime": "RISK_ON"}
+{"ts": "2026-02-20T15:24:00+09:00", "event": "RUN_START", "asof_date": "20260220"}
+{"ts": "2026-02-20T15:24:10+09:00", "event": "SCAN_DONE", "asof_date": "20260220", "regime": "RISK_ON", "candidates_count": 10, "used_value_proxy": 0}
+{"ts": "2026-02-20T15:24:14+09:00", "event": "PASS", "asof_date": "20260220", "reason": "NO_NEW_ENTRY_AFTER", "regime": "RISK_ON"}
+{"ts": "2026-02-20T15:24:14+09:00", "event": "PASS", "asof_date": "20260220", "reason": "NO_NEW_ENTRY_AFTER", "regime": "RISK_ON"}
+{"ts": "2026-02-20T15:28:12+09:00", "event": "SCAN_DONE", "asof_date": "20260220", "regime": "RISK_ON", "candidates_count": 10, "used_value_proxy": 0}
+{"ts": "2026-02-20T15:28:16+09:00", "event": "PASS", "asof_date": "20260220", "reason": "NO_NEW_ENTRY_AFTER", "regime": "RISK_ON"}
+{"ts": "2026-02-20T15:28:16+09:00", "event": "PASS", "asof_date": "20260220", "reason": "NO_NEW_ENTRY_AFTER", "regime": "RISK_ON"}
+{"ts": "2026-02-20T15:31:00+09:00", "event": "RUN_END", "asof_date": "20260220", "realized_pnl": 0.0, "pass_reasons": {"MAX_SWING_POSITIONS": 30, "ENTRY_WINDOW_CLOSED": 30, "NO_NEW_ENTRY_AFTER": 14}, "open_positions": 1}

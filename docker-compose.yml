@@ -70,9 +70,9 @@ services:
       - TZ=Asia/Seoul
     env_file:
       - /home/dlckdgn/ai-models/myasset.env
-    depends_on:
-      llama-server:
-        condition: service_healthy
+    # depends_on:
+    #   llama-server:
+    #     condition: service_healthy
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 30s
@@ -105,9 +105,9 @@ services:
       - TZ=Asia/Seoul
     env_file:
       - /home/dlckdgn/ai-models/myasset.env
-    depends_on:
-      llama-server:
-        condition: service_healthy
+    # depends_on:
+    #   llama-server:
+    #     condition: service_healthy
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8001/health" ]
       interval: 30s
@@ -146,9 +146,9 @@ services:
       - TRADING_ENGINE_RUNLOG_PATH=${TRADING_ENGINE_RUNLOG_PATH:-backend/storage/trading_engine/runlog_current.log}
     env_file:
       - /home/dlckdgn/ai-models/myasset.env
-    depends_on:
-      llama-server:
-        condition: service_healthy
+    # depends_on:
+    #   llama-server:
+    #     condition: service_healthy
     networks:
       - appnet
     # Resource limits: Crawler + scheduler (moderate CPU during scraping)
@@ -206,9 +206,10 @@ services:
       - TZ=Asia/Seoul
     env_file:
       - /home/dlckdgn/ai-models/myasset.env
+    # depends_on:
+    #   llama-server:
+    #     condition: service_healthy
     depends_on:
-      llama-server:
-        condition: service_healthy
       backend-api:
         condition: service_healthy
     networks:

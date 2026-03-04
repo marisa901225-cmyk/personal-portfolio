@@ -17,6 +17,7 @@ class TradeJournal:
     jsonl_path: str = field(init=False)
     csv_path: str | None = field(init=False, default=None)
     total_events: int = 0
+    event_counts: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         os.makedirs(self.output_dir, exist_ok=True)
@@ -36,6 +37,7 @@ class TradeJournal:
         if self.csv_path:
             self._append_csv_row(row)
         self.total_events += 1
+        self.event_counts[event] = self.event_counts.get(event, 0) + 1
 
     def _append_csv_row(self, row: dict[str, Any]) -> None:
         assert self.csv_path
@@ -45,6 +47,27 @@ class TradeJournal:
             if not exists:
                 writer.writeheader()
             writer.writerow(row)
+
+    def summary(self) -> str:
+        """이벤트별 카운트 요약 문자열 반환"""
+        # 알림에서 노이즈인 내부 이벤트는 제외
+        skip = {"RUN_START", "RUN_END", "SCAN_DONE"}
+        lines = []
+        scan = self.event_counts.get("SCAN_DONE", 0)
+        if scan:
+            lines.append(f"스캔: {scan}회")
+        for event, count in sorted(self.event_counts.items()):
+            if event in skip:
+                continue
+            label = {
+                "ENTER": "진입",
+                "EXIT": "청산",
+                "PASS": "패스",
+                "ERROR": "오류",
+                "OPEN_ORDERS": "미체결처리",
+            }.get(event, event)
+            lines.append(f"{label}: {count}회")
+        return " | ".join(lines) if lines else "이벤트 없음"
 
     def make_backup_zip(
         self,

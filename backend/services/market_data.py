@@ -2,6 +2,7 @@
 import logging
 from datetime import datetime
 from typing import Optional, Dict, Any
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend.core.db import SessionLocal
 from backend.core.models import Asset, PortfolioSnapshot
@@ -42,8 +43,20 @@ class MarketDataService:
         포트폴리오의 모든 자산 시세를 KIS를 통해 동기화합니다.
         (기존 sync_prices.sh의 로직을 파이썬으로 이식)
         """
-        # 1. 활성 티커 목록 추출
-        assets = db.query(Asset).filter(Asset.ticker.isnot(None)).all()
+        # 1. 실제 보유 중인 자산만 동기화 대상으로 추출
+        # - deleted_at IS NULL: 삭제되지 않은 자산
+        # - amount > 0: 현재 보유 수량이 있는 자산
+        # - ticker 유효값 존재: 공백/NULL 제외
+        assets = (
+            db.query(Asset)
+            .filter(
+                Asset.deleted_at.is_(None),
+                Asset.amount > 0,
+                Asset.ticker.isnot(None),
+                func.length(func.trim(Asset.ticker)) > 0,
+            )
+            .all()
+        )
         
         if not assets:
             logger.info("No assets found to sync.")
@@ -58,10 +71,10 @@ class MarketDataService:
                 asset.current_price = round(current * random.uniform(0.95, 1.05), 2)
                 asset.updated_at = datetime.now()
             db.commit()
-            return len(assets)
+            return len({a.ticker for a in assets if a.ticker})
 
         tickers = sorted({a.ticker for a in assets if a.ticker})
-        logger.info(f"Syncing prices for {len(tickers)} tickers...")
+        logger.info(f"Syncing prices for {len(tickers)} active holding tickers...")
         
         # 2. KIS 시세 및 환율 조회
         try:
@@ -90,8 +103,10 @@ class MarketDataService:
                     logger.info(f"USD/KRW rate updated: {rate}")
             
             db.commit()
-            logger.info(f"Successfully updated {updated_count} assets.")
-            return updated_count
+            # 실제로 시세 정보를 받아온 고유 종목(티커) 수 반환
+            actual_ticker_count = len(prices)
+            logger.info(f"Successfully updated {updated_count} asset rows for {actual_ticker_count} unique tickers.")
+            return actual_ticker_count
             
         except Exception as e:
             logger.error(f"Failed to sync prices: {e}")

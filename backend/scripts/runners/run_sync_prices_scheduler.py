@@ -71,7 +71,23 @@ async def run_alarm_processing():
     async with monitor_job_async("alarm_processing", db):
         logger.info("--- Starting Alarm Processing Job ---")
         try:
-            await AlarmService.process_pending_alarms(db)
+            now = datetime.now(KST)
+            llm_kwargs = {}
+
+            # 07:00 알림은 OpenRouter 지정 모델 경로를 우선 사용
+            if now.hour == 7 and now.minute == 0:
+                from backend.core.config import settings
+                if settings.open_api_key:
+                    llm_kwargs = {
+                        "model_override": "openai/gpt-5.1-chat",
+                        "api_key": settings.open_api_key,
+                        "base_url": "https://openrouter.ai/api/v1",
+                    }
+                    logger.info("07:00 KST OpenRouter override enabled for alarm processing.")
+                else:
+                    logger.warning("07:00 override skipped: OPEN_API_KEY is not set.")
+
+            await AlarmService.process_pending_alarms(db, **llm_kwargs)
             logger.info("Alarm processing completed successfully.")
         except Exception as e:
             logger.error(f"Alarm processing job failed: {e}")

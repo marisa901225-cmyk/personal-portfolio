@@ -122,8 +122,23 @@ def exit_position(
         logger.warning("exit_position: zero fill for %s", code)
         return None
 
-    avg_price_num = parse_numeric(resp.get("avg_price"))
-    avg_price = float(avg_price_num) if avg_price_num is not None else market_price
+    # 1순위: KIS 실현손익 API로 실제 체결 평단가 확정 (앱과 동일한 값)
+    avg_price: float | None = None
+    if hasattr(api, "get_today_sell_avg_price"):
+        try:
+            avg_price = api.get_today_sell_avg_price(code)
+        except Exception as exc:
+            logger.warning("exit_position: get_today_sell_avg_price failed code=%s err=%s", code, exc)
+
+    # 2순위: 주문 응답의 avg_price
+    if avg_price is None or avg_price <= 0:
+        avg_price_num = parse_numeric(resp.get("avg_price"))
+        avg_price = float(avg_price_num) if avg_price_num is not None else market_price
+
+    logger.info(
+        "exit_position: %s filled qty=%d avg_price=%.0f (market=%.0f)",
+        code, filled_qty, avg_price, market_price,
+    )
 
     pnl = (float(avg_price) - pos.entry_price) * filled_qty
     state.realized_pnl_today += pnl

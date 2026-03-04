@@ -72,6 +72,7 @@ def should_exit_position(
     quote_price: float,
     now: datetime,
     config: TradeEngineConfig,
+    swing_trend_broken: bool | None = None,
 ) -> tuple[bool, str, float]:
     if position.entry_price <= 0:
         return False, "", 0.0
@@ -80,7 +81,10 @@ def should_exit_position(
 
     if position.type == "S":
         if pnl_pct <= config.swing_stop_loss_pct:
-            return True, "SL", pnl_pct
+            if not config.swing_sl_requires_trend_break:
+                return True, "SL", pnl_pct
+            if bool(swing_trend_broken):
+                return True, "SL_TREND", pnl_pct
 
         if config.swing_take_profit_mode in {"fixed", "both"} and pnl_pct >= config.swing_take_profit_pct:
             return True, "TP", pnl_pct
