@@ -253,6 +253,7 @@ class KISTradingAPI:
             "low": int(out.get("stck_lwpr", 0)),
             "volume": int(out.get("acml_vol", 0)),
             "change_rate": float(out.get("prdy_ctrt", 0)),
+            "change_pct": float(out.get("prdy_ctrt", 0)),
             "market_cap": int(out.get("hts_avls", 0)),
         }
 
@@ -473,6 +474,67 @@ class KISTradingAPI:
         else:
             logger.error("[KIS 주문취소 실패] %s", result)
         return result
+
+    def inquire_realized_pnl(self) -> dict[str, Any]:
+        """
+        주식잔고조회_실현손익 [v1_국내주식-041].
+        GET /uapi/domestic-stock/v1/trading/inquire-balance-rlz-pl
+
+        오늘 체결 기준 실현손익 및 종목별 매도 평균단가를 반환한다.
+        (모의투자 미지원 - 실전 전용)
+        """
+        cano, acnt_prdt_cd = self._account()
+        params = {
+            "CANO": cano,
+            "ACNT_PRDT_CD": acnt_prdt_cd,
+            "AFHR_FLPR_YN": "N",
+            "OFL_YN": "",
+            "INQR_DVSN": "00",
+            "UNPR_DVSN": "01",
+            "FUND_STTL_ICLD_YN": "N",
+            "FNCG_AMT_AUTO_RDPT_YN": "N",
+            "PRCS_DVSN": "01",       # 01: 전일매매 미포함 (오늘만)
+            "COST_ICLD_YN": "Y",
+            "CTX_AREA_FK100": "",
+            "CTX_AREA_NK100": "",
+        }
+        data = self._get(
+            "/uapi/domestic-stock/v1/trading/inquire-balance-rlz-pl",
+            "TTTC8494R",
+            params,
+        )
+        if data.get("rt_cd") != "0":
+            logger.warning(
+                "[KIS 실현손익 조회 실패] msg=%s", data.get("msg1")
+            )
+        return data
+
+    def get_today_sell_avg_price(self, code: str) -> float | None:
+        """
+        오늘 매도한 특정 종목의 KIS 체결기준 실제 평균단가를 조회한다.
+        inquire_realized_pnl() output1에서 종목코드로 필터링.
+
+        Returns:
+            실제 체결 평균단가 (float), 없으면 None
+        """
+        try:
+            data = self.inquire_realized_pnl()
+            for row in data.get("output1", []):
+                if row.get("pdno", "").strip() != code.strip():
+                    continue
+                sll_qty = int(row.get("thdt_sll_qty", 0) or 0)
+                if sll_qty <= 0:
+                    continue
+                avg = float(row.get("pchs_avg_pric", 0) or 0)
+                if avg > 0:
+                    logger.info(
+                        "[KIS 실현손익] %s 오늘 매도 체결 평단가: %.0f (qty=%d)",
+                        code, avg, sll_qty,
+                    )
+                    return avg
+        except Exception as exc:
+            logger.warning("[KIS 실현손익 조회 예외] code=%s err=%s", code, exc)
+        return None
 
 
 # ──────────────────────────────────────────────

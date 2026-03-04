@@ -25,6 +25,10 @@ class TradeEngineConfig:
 
     # Swing exits
     swing_stop_loss_pct: float = -0.03
+    swing_sl_requires_trend_break: bool = True
+    swing_trend_ma_window: int = 20
+    swing_trend_lookback_bars: int = 60
+    swing_trend_break_buffer_pct: float = 0.0
     swing_take_profit_pct: float = 0.05
     swing_trail_start: float = 0.03
     swing_trail_gap: float = -0.02
@@ -57,6 +61,17 @@ class TradeEngineConfig:
     model_avg_value_20d_min: int = 500_000_000_000
     swing_etf_min_avg_value_20d: int = 100_000_000_000
     day_etf_min_avg_value_5d: int = 50_000_000_000
+    day_stock_prefer_threshold: float = 0.95
+    day_momentum_bonus_max: float = 20.0
+    day_momentum_bonus_cap_pct: float = 15.0
+    day_hard_drop_exclude_pct: float = -6.0
+    day_negative_penalty_per_pct: float = 3.0
+    day_negative_penalty_max: float = 30.0
+    swing_momentum_bonus_max: float = 12.0
+    swing_momentum_bonus_cap_pct: float = 8.0
+    swing_negative_penalty_max: float = 30.0
+    swing_hard_drop_exclude_pct: float = -6.0
+    swing_etf_fallback_min_change_pct: float = -1.0
     quote_score_limit: int = 30
     allow_etf_swing_fallback: bool = True
 
@@ -73,3 +88,14 @@ class TradeEngineConfig:
     # Notifications
     telegram_retry_max: int = 3
     notify_on_core_pass_only: bool = True
+
+    # News sentiment (market/sector auxiliary signal)
+    use_news_sentiment: bool = True
+    news_lookback_hours: int = 18
+    news_max_articles: int = 300
+    news_min_articles: int = 8
+    news_cache_ttl_sec: int = 300
+    news_day_weight: float = 6.0
+    news_swing_weight: float = 4.0
+    news_market_fallback_ratio: float = 0.4
+    news_sector_queries_path: str = "backend/data/trading_engine_sector_queries.json"

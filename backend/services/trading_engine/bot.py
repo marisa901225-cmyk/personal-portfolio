@@ -11,16 +11,18 @@ from .execution import enter_position, exit_position, handle_open_orders
 from .interfaces import TradingAPI
 from .journal import TradeJournal
 from .market_calendar import get_last_trading_day, is_trading_day
+from .news_sentiment import build_news_sentiment_signal
 from .notifier import BestEffortNotifier
 from .regime import get_regime
 from .risk import can_enter, should_exit_position
 from .state import TradeState, add_pass_reason, load_state, rollover_state_for_date, save_state
 from .strategy import build_candidates, fetch_quotes_subset, pick_daytrade, pick_swing
-from .utils import parse_numeric
+from .utils import compute_sma, parse_numeric
 
 logger = logging.getLogger(__name__)
 
 _CORE_PASS_REASONS = {"RISK_OFF", "DAILY_MAX_LOSS", "HOLIDAY"}
+_ONCE_PER_DAY_PASS_REASONS = {"HOLIDAY", "DAILY_MAX_LOSS"}
 
 
 class HybridTradingBot:
@@ -45,6 +47,7 @@ class HybridTradingBot:
         now = now or datetime.now()
         today = now.strftime("%Y%m%d")
         self.state = rollover_state_for_date(self.state, today)
+
         self._ensure_journal(today)
 
         if not self._run_started:
@@ -93,9 +96,30 @@ class HybridTradingBot:
             self._maybe_notify_candidates(now, candidates, regime)
             # ------------------------------
 
+            news_signal = build_news_sentiment_signal(self.config)
+            if news_signal is not None:
+                self._journal(
+                    "NEWS_SENTIMENT",
+                    asof_date=today,
+                    market_score=round(news_signal.market_score, 4),
+                    article_count=int(news_signal.article_count),
+                )
+
             quotes = fetch_quotes_subset(self.api, candidates.quote_codes)
-            self._try_enter_swing(now=now, regime=regime, candidates=candidates, quotes=quotes)
-            self._try_enter_day(now=now, regime=regime, candidates=candidates, quotes=quotes)
+            self._try_enter_swing(
+                now=now,
+                regime=regime,
+                candidates=candidates,
+                quotes=quotes,
+                news_signal=news_signal,
+            )
+            self._try_enter_day(
+                now=now,
+                regime=regime,
+                candidates=candidates,
+                quotes=quotes,
+                news_signal=news_signal,
+            )
 
             self.force_exit_day_positions(now)
             self.state.last_run_timestamp = now.isoformat(timespec="seconds")
@@ -122,6 +146,7 @@ class HybridTradingBot:
             return None
 
         today = self.state.trade_date
+
         self._journal(
             "RUN_END",
             asof_date=today,
@@ -141,7 +166,9 @@ class HybridTradingBot:
         if self.config.initial_capital > 0:
             realized_pct = self.state.realized_pnl_today / self.config.initial_capital * 100.0
         self._notify_text(
-            f"[END] trades={self.journal.total_events} realized={self.state.realized_pnl_today:,.0f}원 ({realized_pct:+.2f}%)"
+            f"[마감] {today}\n"
+            f"{self.journal.summary()}\n"
+            f"실현손익: {self.state.realized_pnl_today:,.0f}원 ({realized_pct:+.2f}%)"
         )
         self.notifier.flush(timeout_sec=2.0)
         return zip_path
@@ -160,7 +187,17 @@ class HybridTradingBot:
             if price is None:
                 continue
 
-            exit_now, reason, pnl_pct = should_exit_position(pos, quote_price=price, now=now, config=self.config)
+            swing_trend_broken: bool | None = None
+            if pos.type == "S" and self.config.swing_sl_requires_trend_break:
+                swing_trend_broken = self._is_swing_trend_broken(code=code, quote_price=price, now=now)
+
+            exit_now, reason, pnl_pct = should_exit_position(
+                pos,
+                quote_price=price,
+                now=now,
+                config=self.config,
+                swing_trend_broken=swing_trend_broken,
+            )
             if not exit_now:
                 continue
 
@@ -206,7 +243,15 @@ class HybridTradingBot:
                 strategy_type="T",
             )
 
-    def _try_enter_swing(self, *, now: datetime, regime: str, candidates: Any, quotes: dict[str, Any]) -> None:
+    def _try_enter_swing(
+        self,
+        *,
+        now: datetime,
+        regime: str,
+        candidates: Any,
+        quotes: dict[str, Any],
+        news_signal: Any | None = None,
+    ) -> None:
         candidate_count = len(candidates.model) + len(candidates.etf)
         ok, reason = can_enter(
             "S",
@@ -221,7 +266,7 @@ class HybridTradingBot:
             self._pass(reason, regime)
             return
 
-        code = pick_swing(candidates, quotes, self.config)
+        code = pick_swing(candidates, quotes, self.config, news_signal=news_signal)
         if not code:
             self._pass("NO_SWING_PICK", regime)
             return
@@ -251,7 +296,15 @@ class HybridTradingBot:
         )
         self._notify_text(f"[ENTRY][S] {code} qty={result.qty} avg={result.avg_price:.0f} regime={regime}")
 
-    def _try_enter_day(self, *, now: datetime, regime: str, candidates: Any, quotes: dict[str, Any]) -> None:
+    def _try_enter_day(
+        self,
+        *,
+        now: datetime,
+        regime: str,
+        candidates: Any,
+        quotes: dict[str, Any],
+        news_signal: Any | None = None,
+    ) -> None:
         ok, reason = can_enter(
             "T",
             self.state,
@@ -265,7 +318,7 @@ class HybridTradingBot:
             self._pass(reason, regime)
             return
 
-        code = pick_daytrade(candidates, quotes, self.config)
+        code = pick_daytrade(candidates, quotes, self.config, news_signal=news_signal)
         if not code:
             self._pass("NO_DAY_PICK", regime)
             return
@@ -296,9 +349,12 @@ class HybridTradingBot:
         self._notify_text(f"[ENTRY][T] {code} qty={result.qty} avg={result.avg_price:.0f} regime={regime}")
 
     def _pass(self, reason: str, regime: str) -> None:
+        prev_count = int(self.state.pass_reasons_today.get(reason, 0))
         add_pass_reason(self.state, reason)
         self._journal("PASS", asof_date=self.state.trade_date, reason=reason, regime=regime)
         if (not self.config.notify_on_core_pass_only) or reason in _CORE_PASS_REASONS:
+            if reason in _ONCE_PER_DAY_PASS_REASONS and prev_count > 0:
+                return
             self._notify_text(f"[PASS] {reason} {self.state.trade_date}")
 
     def _pass_and_return(self, reason: str, now: datetime, regime: str) -> dict[str, Any]:
@@ -306,6 +362,32 @@ class HybridTradingBot:
         self.state.last_run_timestamp = now.isoformat(timespec="seconds")
         save_state(self.config.state_path, self.state)
         return {"status": "PASS", "reason": reason}
+
+    def _is_swing_trend_broken(self, *, code: str, quote_price: float, now: datetime) -> bool:
+        ma_window = max(2, int(self.config.swing_trend_ma_window))
+        lookback = max(ma_window + 5, int(self.config.swing_trend_lookback_bars))
+        asof = now.strftime("%Y%m%d")
+        try:
+            bars = self.api.daily_bars(code, asof, lookback)
+        except Exception:
+            logger.debug("trend check daily_bars failed code=%s", code, exc_info=True)
+            return False
+
+        if bars is None or bars.empty or "close" not in bars.columns:
+            return False
+
+        close_s = bars["close"]
+        if len(close_s) < ma_window:
+            return False
+
+        ma_s = compute_sma(close_s, ma_window)
+        ma_value = parse_numeric(ma_s.iloc[-1]) if len(ma_s) else None
+        if ma_value is None or ma_value <= 0:
+            return False
+
+        buffer_pct = max(0.0, float(self.config.swing_trend_break_buffer_pct))
+        threshold = ma_value * (1.0 - buffer_pct)
+        return quote_price < threshold
 
     def _ensure_journal(self, today: str) -> None:
         os.makedirs(self.config.output_dir, exist_ok=True)
@@ -356,4 +438,3 @@ class HybridTradingBot:
             lines.append(f"{i}. {name}({code}) | {val/1e8:.1f}억")
 
         self._notify_text("\n".join(lines))
-

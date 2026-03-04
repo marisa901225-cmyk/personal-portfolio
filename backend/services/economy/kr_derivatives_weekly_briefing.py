@@ -41,6 +41,18 @@ def _to_float(value: Any) -> Optional[float]:
         return None
 
 
+def _next_month_yyyymm(yyyymm: str) -> str:
+    """YYYYMM 문자열의 다음 달(YYYYMM)을 반환한다."""
+    if len(yyyymm) != 6 or not yyyymm.isdigit():
+        now = datetime.now(KST)
+        yyyymm = now.strftime("%Y%m")
+    year = int(yyyymm[:4])
+    month = int(yyyymm[4:6])
+    if month == 12:
+        return f"{year + 1}01"
+    return f"{year}{month + 1:02d}"
+
+
 @dataclass
 class OptionBoardSnapshot:
     collected_at: str
@@ -279,6 +291,17 @@ def _append_snapshot(snapshot: OptionBoardSnapshot) -> None:
         db.commit()
 
 
+def _has_activity(snapshot: OptionBoardSnapshot) -> bool:
+    """콜/풋 호가 잔량 기준으로 유효 스냅샷인지 판정한다."""
+    total = (
+        snapshot.call_bid_total
+        + snapshot.call_ask_total
+        + snapshot.put_bid_total
+        + snapshot.put_ask_total
+    )
+    return total > 0
+
+
 def _load_snapshots(days: int = 35) -> list[OptionBoardSnapshot]:
     _migrate_legacy_file_cache_to_db_if_needed()
     cutoff = _to_kst_naive(datetime.now(KST)) - timedelta(days=max(days, 1))
@@ -335,7 +358,12 @@ def get_latest_option_snapshot_summary(
     if not candidates:
         return None
 
-    _, latest = max(candidates, key=lambda item: item[0])
+    # 최신 스냅샷이 전부 0인 경우가 있어, 유효 거래량이 있는 최신값을 우선 사용한다.
+    active_candidates = [(collected_at, snap) for collected_at, snap in candidates if _has_activity(snap)]
+    if active_candidates:
+        _, latest = max(active_candidates, key=lambda item: item[0])
+    else:
+        _, latest = max(candidates, key=lambda item: item[0])
     return {
         "source": "snapshot_db",
         "trading_date": latest.trading_date,
@@ -374,6 +402,39 @@ async def collect_option_board_snapshot(
         maturity_month=target_maturity,
         market_cls=market_cls,
     )
+
+    # 만기 지난 월(예: 2월 만기 후 202602) 조회 시 0행 데이터가 내려올 수 있어
+    # 기본값(당월) 조회가 비어 있으면 다음 달 만기월로 1회 재조회한다.
+    if maturity_month is None and not _has_activity(snapshot):
+        next_maturity = _next_month_yyyymm(target_maturity)
+        if next_maturity != target_maturity:
+            fallback_payload = await get_options_display_board(
+                maturity_month=next_maturity,
+                market_cls=market_cls,
+                call_put_cls="CO",
+            )
+            if fallback_payload and fallback_payload.get("rt_cd") == "0":
+                fallback_snapshot = _aggregate_option_board(
+                    fallback_payload,
+                    maturity_month=next_maturity,
+                    market_cls=market_cls,
+                )
+                if _has_activity(fallback_snapshot):
+                    logger.info(
+                        "Option board snapshot switched maturity: %s -> %s (primary empty)",
+                        target_maturity,
+                        next_maturity,
+                    )
+                    snapshot = fallback_snapshot
+
+    if not _has_activity(snapshot):
+        logger.warning(
+            "Option board snapshot skipped (empty totals): date=%s maturity=%s",
+            snapshot.trading_date,
+            snapshot.maturity_month,
+        )
+        return None
+
     _append_snapshot(snapshot)
     logger.info("Option board snapshot saved: date=%s pcr=%.3f", snapshot.trading_date, snapshot.put_call_bid_ratio)
     return snapshot
@@ -479,7 +540,7 @@ async def build_weekly_derivatives_briefing(now: Optional[datetime] = None) -> O
     else:
         base = base.astimezone(KST)
 
-    snapshots = _load_snapshots(days=45)
+    snapshots = [snap for snap in _load_snapshots(days=45) if _has_activity(snap)]
     if len(snapshots) < 5:
         return None
 

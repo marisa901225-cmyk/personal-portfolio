@@ -299,12 +299,36 @@ async def generate_weather_message_with_llm(
 
     messages = [{"role": "user", "content": prompt_content}]
     try:
-        creative_text = llm.generate_chat(
-            messages,
-            max_tokens=4096,
-            temperature=0.85,
-            stop=["Ok,", "사용자가", "지시사항"],
-        )
+        # 모닝브리핑은 오픈라우터(OPEN_API_KEY) 우선 사용
+        open_api_key = os.environ.get("OPEN_API_KEY")
+        creative_text = ""
+        _MORNING_MODEL = "google/gemini-3-flash-preview"
+        if open_api_key:
+            logger.info("모닝브리핑: 오픈라우터로 LLM 호출 시도 (model=%s)", _MORNING_MODEL)
+            creative_text = llm.generate_paid_chat(
+                messages,
+                max_tokens=4096,
+                temperature=0.85,
+                model=_MORNING_MODEL,
+                stop=["Ok,", "사용자가", "지시사항"],
+                api_key=open_api_key,
+                base_url="https://openrouter.ai/api/v1",
+            )
+            if creative_text:
+                logger.info("모닝브리핑: 오픈라우터 응답 성공 (len=%d)", len(creative_text))
+            else:
+                logger.warning("모닝브리핑: 오픈라우터 응답 실패, 로컬 LLM 폴백 시도. error=%s", llm.get_last_error())
+
+        # 오픈라우터 실패/미설정 시 기존 경로(remote -> paid) 폴백
+        if not creative_text:
+            logger.info("모닝브리핑: 기존 generate_chat 경로 폴백")
+            creative_text = llm.generate_chat(
+                messages,
+                max_tokens=4096,
+                temperature=0.85,
+                stop=["Ok,", "사용자가", "지시사항"],
+            )
+
         creative_text = clean_exaone_tokens(creative_text).strip()
         if not creative_text or len(creative_text) < 20:
             logger.warning("LLM generated empty/short weather message, using fallback")

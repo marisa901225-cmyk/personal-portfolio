@@ -24,6 +24,10 @@ timestamp() {
 
 case "$ACTION" in
   start)
+    if pgrep -f "upscale_.*\.sh" > /dev/null; then
+      echo "$(timestamp) [LLM-SCHEDULE] upscale process detected, skipping auto-start to avoid GPU contention" >> "$LOG_FILE"
+      exit 0
+    fi
     echo "$(timestamp) [LLM-SCHEDULE] starting llama services" >> "$LOG_FILE"
     run_compose up -d llama-server llama-server-light >> "$LOG_FILE" 2>&1
     echo "$(timestamp) [LLM-SCHEDULE] start done" >> "$LOG_FILE"

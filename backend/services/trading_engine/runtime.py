@@ -105,6 +105,67 @@ def _load_config_from_env() -> TradeEngineConfig:
 
     cfg.swing_cash_ratio = _env_float("TRADING_ENGINE_SWING_CASH_RATIO", cfg.swing_cash_ratio)
     cfg.day_cash_ratio = _env_float("TRADING_ENGINE_DAY_CASH_RATIO", cfg.day_cash_ratio)
+    cfg.day_hard_drop_exclude_pct = _env_float(
+        "TRADING_ENGINE_DAY_HARD_DROP_EXCLUDE_PCT",
+        cfg.day_hard_drop_exclude_pct,
+    )
+    cfg.day_negative_penalty_per_pct = _env_float(
+        "TRADING_ENGINE_DAY_NEGATIVE_PENALTY_PER_PCT",
+        cfg.day_negative_penalty_per_pct,
+    )
+    cfg.day_negative_penalty_max = _env_float(
+        "TRADING_ENGINE_DAY_NEGATIVE_PENALTY_MAX",
+        cfg.day_negative_penalty_max,
+    )
+    cfg.swing_momentum_bonus_max = _env_float(
+        "TRADING_ENGINE_SWING_MOMENTUM_BONUS_MAX",
+        cfg.swing_momentum_bonus_max,
+    )
+    cfg.swing_momentum_bonus_cap_pct = _env_float(
+        "TRADING_ENGINE_SWING_MOMENTUM_BONUS_CAP_PCT",
+        cfg.swing_momentum_bonus_cap_pct,
+    )
+    cfg.swing_negative_penalty_max = _env_float(
+        "TRADING_ENGINE_SWING_NEGATIVE_PENALTY_MAX",
+        cfg.swing_negative_penalty_max,
+    )
+    cfg.swing_hard_drop_exclude_pct = _env_float(
+        "TRADING_ENGINE_SWING_HARD_DROP_EXCLUDE_PCT",
+        cfg.swing_hard_drop_exclude_pct,
+    )
+    cfg.swing_etf_fallback_min_change_pct = _env_float(
+        "TRADING_ENGINE_SWING_ETF_FALLBACK_MIN_CHANGE_PCT",
+        cfg.swing_etf_fallback_min_change_pct,
+    )
+    cfg.swing_sl_requires_trend_break = _env_bool(
+        "TRADING_ENGINE_SWING_SL_REQUIRES_TREND_BREAK",
+        cfg.swing_sl_requires_trend_break,
+    )
+    cfg.swing_trend_ma_window = _env_int("TRADING_ENGINE_SWING_TREND_MA_WINDOW", cfg.swing_trend_ma_window)
+    cfg.swing_trend_lookback_bars = _env_int(
+        "TRADING_ENGINE_SWING_TREND_LOOKBACK_BARS",
+        cfg.swing_trend_lookback_bars,
+    )
+    cfg.swing_trend_break_buffer_pct = _env_float(
+        "TRADING_ENGINE_SWING_TREND_BREAK_BUFFER_PCT",
+        cfg.swing_trend_break_buffer_pct,
+    )
+    cfg.use_news_sentiment = _env_bool("TRADING_ENGINE_USE_NEWS_SENTIMENT", cfg.use_news_sentiment)
+    cfg.news_lookback_hours = _env_int("TRADING_ENGINE_NEWS_LOOKBACK_HOURS", cfg.news_lookback_hours)
+    cfg.news_max_articles = _env_int("TRADING_ENGINE_NEWS_MAX_ARTICLES", cfg.news_max_articles)
+    cfg.news_min_articles = _env_int("TRADING_ENGINE_NEWS_MIN_ARTICLES", cfg.news_min_articles)
+    cfg.news_cache_ttl_sec = _env_int("TRADING_ENGINE_NEWS_CACHE_TTL_SEC", cfg.news_cache_ttl_sec)
+    cfg.news_day_weight = _env_float("TRADING_ENGINE_NEWS_DAY_WEIGHT", cfg.news_day_weight)
+    cfg.news_swing_weight = _env_float("TRADING_ENGINE_NEWS_SWING_WEIGHT", cfg.news_swing_weight)
+    cfg.news_market_fallback_ratio = _env_float(
+        "TRADING_ENGINE_NEWS_MARKET_FALLBACK_RATIO",
+        cfg.news_market_fallback_ratio,
+    )
+    if os.getenv("TRADING_ENGINE_NEWS_SECTOR_QUERIES_PATH"):
+        cfg.news_sector_queries_path = os.getenv(
+            "TRADING_ENGINE_NEWS_SECTOR_QUERIES_PATH",
+            cfg.news_sector_queries_path,
+        )
 
     return cfg
 

@@ -147,7 +147,11 @@ async def process_pending_alarms(db: Session, model_override: Optional[str] = No
                         elif is_promo_spam(full_check_text, db):
                             is_spam_result, classification, discard_reason = True, "promo_rule", "Promotion rule match"
                         else:
-                            is_it_spam_llm, cls = is_spam_llm(full_check_text_llm)
+                            is_it_spam_llm, cls = is_spam_llm(
+                                full_check_text_llm,
+                                model=model_override,
+                                **llm_kwargs,
+                            )
                             if is_it_spam_llm:
                                 is_spam_result, classification, discard_reason = True, cls, "LLM spam classification"
                 
