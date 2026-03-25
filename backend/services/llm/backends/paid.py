@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     import httpx  # type: ignore
@@ -36,6 +36,270 @@ class OpenAIPaidBackend(LLMBackend):
         if self._use_httpx:
             return self._client.post(url, json=payload, headers=headers)
         return self._client.post(url, json=payload, headers=headers, timeout=self.settings.ai_report_timeout_sec)
+
+    @staticmethod
+    def _is_gpt5_model(model: Optional[str]) -> bool:
+        model_name = str(model or "")
+        return model_name.startswith("gpt-5") or "gpt-5" in model_name
+
+    @staticmethod
+    def _extract_message_text(content: Any) -> str:
+        if isinstance(content, str):
+            return content.strip()
+
+        if isinstance(content, list):
+            chunks: List[str] = []
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                text = part.get("text")
+                if text:
+                    chunks.append(str(text))
+            return "".join(chunks).strip()
+
+        return ""
+
+    def _safe_error_message(self, resp) -> str:
+        try:
+            data = resp.json() or {}
+            if isinstance(data, dict):
+                err = data.get("error") or {}
+                if isinstance(err, dict):
+                    msg = err.get("message")
+                    if msg:
+                        return str(msg)
+            return str(data)[:500]
+        except Exception:
+            return (getattr(resp, "text", "") or "").strip()[:500]
+
+    def _should_try_responses(self, status_code: int, error_msg: str, *, is_gpt5: bool) -> bool:
+        if not error_msg:
+            return False
+
+        msg = error_msg.lower()
+        if "responses" in msg:
+            return True
+        if "chat/completions" in msg and ("not supported" in msg or "does not support" in msg):
+            return True
+        if status_code in (404, 405) and "not found" in msg and "chat" in msg:
+            return True
+        if is_gpt5 and status_code in (400, 404) and ("model" in msg or "not supported" in msg):
+            return True
+        return False
+
+    @staticmethod
+    def _build_responses_text_format(response_format: Any) -> Optional[dict]:
+        if not isinstance(response_format, dict):
+            return None
+
+        response_type = response_format.get("type")
+        if response_type == "json_schema":
+            json_schema = response_format.get("json_schema")
+            if not isinstance(json_schema, dict):
+                return None
+
+            fmt: Dict[str, Any] = {"type": "json_schema"}
+            if "name" in json_schema:
+                fmt["name"] = json_schema["name"]
+            if "schema" in json_schema:
+                fmt["schema"] = json_schema["schema"]
+            if "strict" in json_schema:
+                fmt["strict"] = json_schema["strict"]
+            return fmt
+
+        if response_type == "json_object":
+            return {"type": "json_object"}
+
+        return None
+
+    def _build_chat_payload(
+        self,
+        *,
+        model: str,
+        messages: List[dict],
+        max_tokens: int,
+        temperature: float,
+        stop: Optional[list],
+        seed: Optional[int],
+        top_p: float,
+        response_format: Any,
+        current_tier: Optional[str],
+        is_gpt5: bool,
+    ) -> dict:
+        payload: Dict[str, Any] = {"model": model, "messages": messages}
+        if not is_gpt5:
+            payload["temperature"] = temperature
+        payload["max_completion_tokens" if is_gpt5 else "max_tokens"] = max_tokens
+        if stop:
+            payload["stop"] = stop
+        if seed is not None:
+            payload["seed"] = seed
+        if top_p is not None and not is_gpt5:
+            payload["top_p"] = top_p
+        if response_format:
+            payload["response_format"] = response_format
+        if current_tier:
+            payload["service_tier"] = current_tier
+        return payload
+
+    def _extract_chat_output(self, data: Any) -> str:
+        if not isinstance(data, dict):
+            return ""
+
+        choices = data.get("choices") or []
+        if not choices or not isinstance(choices[0], dict):
+            return ""
+
+        message = (choices[0].get("message") or {}) if isinstance(choices[0], dict) else {}
+        return self._extract_message_text(message.get("content"))
+
+    def _build_responses_payload(
+        self,
+        *,
+        model: str,
+        messages: List[dict],
+        max_tokens: int,
+        temperature: float,
+        stop: Optional[list],
+        seed: Optional[int],
+        current_tier: Optional[str],
+        response_format: Any,
+        is_gpt5: bool,
+    ) -> dict:
+        responses_max_tokens = max(int(max_tokens), 16)
+        payload: Dict[str, Any] = {
+            "model": model,
+            "input": [
+                {"role": msg["role"], "content": [{"type": "input_text", "text": str(msg["content"])}]}
+                for msg in messages
+            ],
+            # OpenAI Responses API는 매우 작은 값에서 400을 반환할 수 있어 하한을 맞춘다.
+            "max_output_tokens": responses_max_tokens,
+        }
+
+        responses_text_format = self._build_responses_text_format(response_format)
+        if responses_text_format:
+            payload["text"] = {"format": responses_text_format}
+
+        if is_gpt5:
+            payload["reasoning"] = {"effort": "minimal"}
+        else:
+            payload["temperature"] = temperature
+
+        if stop and not is_gpt5:
+            payload["stop"] = stop
+        if seed is not None:
+            payload["seed"] = seed
+        if current_tier:
+            payload["service_tier"] = current_tier
+
+        return payload
+
+    def _extract_responses_output(self, data: Any) -> str:
+        if not isinstance(data, dict):
+            return ""
+
+        output_text = data.get("output_text")
+        if output_text:
+            return str(output_text).strip()
+
+        chunks: List[str] = []
+        for item in (data.get("output") or []):
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            for part in (item.get("content") or []):
+                if not isinstance(part, dict):
+                    continue
+                if part.get("type") in ("text", "output_text") and part.get("text"):
+                    chunks.append(str(part["text"]))
+        return "".join(chunks).strip()
+
+    def _try_responses_api(
+        self,
+        *,
+        base_url: str,
+        headers: dict,
+        model: str,
+        messages: List[dict],
+        max_tokens: int,
+        temperature: float,
+        stop: Optional[list],
+        seed: Optional[int],
+        current_tier: Optional[str],
+        response_format: Any,
+        is_gpt5: bool,
+    ) -> str:
+        import random
+        import time
+
+        url = f"{base_url.rstrip('/')}/responses"
+        payload = self._build_responses_payload(
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            stop=stop,
+            seed=seed,
+            current_tier=current_tier,
+            response_format=response_format,
+            is_gpt5=is_gpt5,
+        )
+
+        max_attempts = 3
+        for attempt in range(max_attempts):
+            try:
+                response = self._post(url, payload=payload, headers=headers)
+            except Exception as exc:
+                if attempt < max_attempts - 1:
+                    wait_time = (2 ** attempt) + random.random()
+                    logger.warning(
+                        "OpenAI Responses request failed (attempt %s/%s). Retrying in %.2fs... error=%s",
+                        attempt + 1,
+                        max_attempts,
+                        wait_time,
+                        exc,
+                    )
+                    time.sleep(wait_time)
+                    continue
+                self._last_error = f"OpenAI Responses API request failed: {exc}"
+                logger.error(self._last_error)
+                return ""
+
+            if response.status_code >= 400:
+                error_msg = self._safe_error_message(response)
+                if response.status_code == 429 or response.status_code >= 500:
+                    if attempt < max_attempts - 1:
+                        wait_time = (2 ** attempt) + random.random()
+                        logger.warning(
+                            "OpenAI Responses API error %s (attempt %s/%s). Retrying in %.2fs...",
+                            response.status_code,
+                            attempt + 1,
+                            max_attempts,
+                            wait_time,
+                        )
+                        time.sleep(wait_time)
+                        continue
+                self._last_error = f"OpenAI Responses API error {response.status_code}: {error_msg}"
+                logger.error(self._last_error)
+                return ""
+
+            try:
+                data = response.json() or {}
+            except Exception as exc:
+                self._last_error = f"OpenAI Responses API returned invalid JSON: {exc}"
+                logger.error(self._last_error)
+                return ""
+
+            output = self._extract_responses_output(data)
+            if output:
+                self._last_error = None
+                return output
+
+            self._last_error = "OpenAI Responses API returned no output text"
+            logger.error(self._last_error)
+            return ""
+
+        return ""
 
     def generate(
         self,
@@ -127,227 +391,131 @@ class OpenAIPaidBackend(LLMBackend):
         service_tier = kwargs.get("service_tier")
         response_format = kwargs.get("response_format")
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        is_gpt5 = str(model).startswith("gpt-5") or "gpt-5" in str(model)
+        is_gpt5 = self._is_gpt5_model(model)
 
         max_attempts = 5 if service_tier == "flex" else 1
         current_tier = service_tier
-
-        def _safe_error_message(resp) -> str:
-            try:
-                data = resp.json() or {}
-                if isinstance(data, dict):
-                    err = data.get("error") or {}
-                    if isinstance(err, dict):
-                        msg = err.get("message")
-                        if msg:
-                            return str(msg)
-                return str(data)[:500]
-            except Exception:
-                return (getattr(resp, "text", "") or "").strip()[:500]
-
-        def _should_try_responses(status_code: int, error_msg: str) -> bool:
-            if not error_msg:
-                return False
-            msg = error_msg.lower()
-            if "responses" in msg:
-                return True
-            if "chat/completions" in msg and ("not supported" in msg or "does not support" in msg):
-                return True
-            if status_code in (404, 405) and "not found" in msg and "chat" in msg:
-                return True
-            # GPT-5 계열은 Chat Completions 미지원인 경우가 있으므로, 모델 오류면 Responses를 시도
-            if is_gpt5 and status_code in (400, 404) and ("model" in msg or "not supported" in msg):
-                return True
-            return False
-
-        def _try_responses() -> str:
-            url = f"{base_url.rstrip('/')}/responses"
-            responses_text_format = None
-            if isinstance(response_format, dict):
-                rft = response_format.get("type")
-                if rft == "json_schema":
-                    js = response_format.get("json_schema")
-                    if isinstance(js, dict):
-                        fmt = {"type": "json_schema"}
-                        if "name" in js:
-                            fmt["name"] = js["name"]
-                        if "schema" in js:
-                            fmt["schema"] = js["schema"]
-                        if "strict" in js:
-                            fmt["strict"] = js["strict"]
-                        responses_text_format = fmt
-                elif rft == "json_object":
-                    responses_text_format = {"type": "json_object"}
-
-            payload = {
-                "model": model,
-                "input": [
-                    {"role": m["role"], "content": [{"type": "input_text", "text": str(m["content"])}]}
-                    for m in messages
-                ],
-                "max_output_tokens": max_tokens,
-            }
-            if responses_text_format:
-                payload["text"] = {"format": responses_text_format}
-            if is_gpt5:
-                # GPT-5 계열은 low에서도 reasoning token만 소진되는 경우가 있어 minimal로 고정
-                payload["reasoning"] = {"effort": "minimal"}
-            else:
-                payload["temperature"] = temperature
-            if stop and not is_gpt5:
-                payload["stop"] = stop
-            if seed is not None:
-                payload["seed"] = seed
-            # Responses API does not support top_p in some cases, causing 400 error
-            # if top_p is not None:
-            #     payload["top_p"] = top_p
-            if current_tier:
-                payload["service_tier"] = current_tier
-
-            r = self._post(url, payload=payload, headers=headers)
-            if r.status_code >= 400:
-                error_msg = _safe_error_message(r)
-                self._last_error = f"OpenAI Responses API error {r.status_code}: {error_msg}"
-                logger.error(self._last_error)
-                return ""
-
-            data = r.json() or {}
-            if output := data.get("output_text"):
-                self._last_error = None
-                return str(output).strip()
-
-            chunks = []
-            for item in (data.get("output") or []):
-                if item.get("type") == "message":
-                    for part in (item.get("content") or []):
-                        if part.get("type") in ("text", "output_text"):
-                            chunks.append(part.get("text", ""))
-
-            if chunks:
-                self._last_error = None
-                return "".join(chunks).strip()
-
-            self._last_error = "OpenAI Responses API returned no output text"
-            logger.error(self._last_error)
-            return ""
-
-        def _extract_chat_content(data: dict) -> str:
-            choices = data.get("choices") or []
-            first = choices[0] if choices else {}
-            msg = first.get("message") or {}
-            raw_content = msg.get("content")
-
-            if isinstance(raw_content, str):
-                return raw_content.strip()
-
-            if isinstance(raw_content, list):
-                parts = []
-                for part in raw_content:
-                    if not isinstance(part, dict):
-                        continue
-                    if part.get("type") in ("text", "output_text"):
-                        txt = part.get("text")
-                        if txt:
-                            parts.append(str(txt))
-                return "".join(parts).strip()
-
-            return ""
+        last_exception: Optional[Exception] = None
 
         for attempt in range(max_attempts):
             try:
-                # 1) Chat Completions 시도 (기본)
                 url = f"{base_url.rstrip('/')}/chat/completions"
-                payload = {"model": model, "messages": messages}
-                if not is_gpt5:
-                    payload["temperature"] = temperature
-                payload["max_completion_tokens" if is_gpt5 else "max_tokens"] = max_tokens
-                if stop:
-                    payload["stop"] = stop
-                if seed is not None:
-                    payload["seed"] = seed
-                if top_p is not None and not is_gpt5:
-                    payload["top_p"] = top_p
-                if response_format:
-                    payload["response_format"] = response_format
-                
-                if current_tier:
-                    payload["service_tier"] = current_tier
+                payload = self._build_chat_payload(
+                    model=model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    stop=stop,
+                    seed=seed,
+                    top_p=top_p,
+                    response_format=response_format,
+                    current_tier=current_tier,
+                    is_gpt5=is_gpt5,
+                )
+                response = self._post(url, payload=payload, headers=headers)
 
-                r = self._post(url, payload=payload, headers=headers)
-                
-                # 에러 핸들링
-                if r.status_code >= 400:
-                    error_msg = _safe_error_message(r)
-                    
-                    # Flex 미가용 시 즉시 표준 티어로 폴백
+                if response.status_code >= 400:
+                    error_msg = self._safe_error_message(response)
+
                     if "is not available for this model" in error_msg and current_tier == "flex":
-                        logger.warning(f"Flex tier not available for {model}. Falling back to standard.")
+                        logger.warning("Flex tier not available for %s. Falling back to standard.", model)
                         current_tier = None
-                        # 폴백 시 바로 다음 루프에서 재시도
                         continue
 
-                    # 재시도 대상 에러 (429 Too Many Requests, 5xx Server Error)
-                    if r.status_code == 429 or r.status_code >= 500:
+                    if response.status_code == 429 or response.status_code >= 500:
                         if attempt < max_attempts - 1:
                             wait_time = (2 ** attempt) + random.random()
-                            logger.warning(f"OpenAI API error {r.status_code} (attempt {attempt+1}/{max_attempts}). Retrying in {wait_time:.2f}s...")
+                            logger.warning(
+                                "OpenAI API error %s (attempt %s/%s). Retrying in %.2fs...",
+                                response.status_code,
+                                attempt + 1,
+                                max_attempts,
+                                wait_time,
+                            )
                             time.sleep(wait_time)
                             continue
-                    
-                    if _should_try_responses(r.status_code, error_msg):
-                        out = _try_responses()
+
+                    if self._should_try_responses(response.status_code, error_msg, is_gpt5=is_gpt5):
+                        out = self._try_responses_api(
+                            base_url=base_url,
+                            headers=headers,
+                            model=model,
+                            messages=messages,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            stop=stop,
+                            seed=seed,
+                            current_tier=current_tier,
+                            response_format=response_format,
+                            is_gpt5=is_gpt5,
+                        )
                         if out:
                             return out
-                        # Responses도 실패했으면 last_error는 _try_responses에서 세팅됨
                         return ""
 
-                    self._last_error = f"OpenAI Chat Completions API error {r.status_code}: {error_msg}"
+                    self._last_error = f"OpenAI Chat Completions API error {response.status_code}: {error_msg}"
                     logger.error(self._last_error)
                     return ""
 
-                # 성공 시 결과 처리
-                data = r.json() or {}
-                content = _extract_chat_content(data)
-                actual_tier = data.get("service_tier", "standard") # 응답에서 실제 티어 확인
-                logger.info(f"OpenAI API Success. Model: {model}, Requested Tier: {current_tier}, Actual Tier: {actual_tier}")
-
+                data = response.json() or {}
+                content = self._extract_chat_output(data)
                 if content:
+                    actual_tier = data.get("service_tier", "standard")
+                    logger.info(
+                        "OpenAI API Success. Model: %s, Requested Tier: %s, Actual Tier: %s",
+                        model,
+                        current_tier,
+                        actual_tier,
+                    )
                     self._last_error = None
                     return content
 
-                # GPT-5 계열에서 reasoning token만 소진되고 content가 비는 경우가 있어 Responses로 폴백
-                choices = data.get("choices") or []
-                first = choices[0] if choices else {}
-                finish_reason = first.get("finish_reason")
-                usage = data.get("usage") or {}
-                completion_details = usage.get("completion_tokens_details") or {}
-                reasoning_tokens = completion_details.get("reasoning_tokens")
                 logger.warning(
-                    "OpenAI Chat Completions returned empty content; trying Responses fallback "
-                    "(model=%s, finish_reason=%s, reasoning_tokens=%s)",
+                    "OpenAI Chat Completions returned empty content for model=%s. Trying /responses fallback.",
                     model,
-                    finish_reason,
-                    reasoning_tokens,
                 )
-                out = _try_responses()
+                out = self._try_responses_api(
+                    base_url=base_url,
+                    headers=headers,
+                    model=model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    stop=stop,
+                    seed=seed,
+                    current_tier=current_tier,
+                    response_format=response_format,
+                    is_gpt5=is_gpt5,
+                )
                 if out:
                     return out
-                self._last_error = (
-                    "OpenAI Chat Completions returned empty content "
-                    f"(finish_reason={finish_reason}, reasoning_tokens={reasoning_tokens})"
-                )
-                logger.error(self._last_error)
+                self._last_error = self._last_error or "OpenAI Chat Completions returned empty content"
                 return ""
 
             except Exception as e:
-                # 2) Chat Completions가 예외로 실패한 경우: 마지막 시도에서 Responses 폴백
-                if attempt == max_attempts - 1:
-                    logger.debug("Chat completions totally failed, trying responses fallback: %s", e)
-                    out = _try_responses()
-                    if out:
-                        return out
-                    self._last_error = self._last_error or f"Paid LLM total failure: {e}"
-                    logger.error(self._last_error)
+                last_exception = e
+                if attempt < max_attempts - 1:
+                    continue
+
+        if last_exception is not None:
+            logger.debug("Chat completions totally failed, trying responses fallback: %s", last_exception)
+            out = self._try_responses_api(
+                base_url=base_url,
+                headers=headers,
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stop=stop,
+                seed=seed,
+                current_tier=current_tier,
+                response_format=response_format,
+                is_gpt5=is_gpt5,
+            )
+            if out:
+                return out
+            self._last_error = self._last_error or f"Paid LLM total failure: {last_exception}"
+            logger.error(self._last_error)
 
         return ""
 

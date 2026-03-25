@@ -1,6 +1,7 @@
 # backend/tests/test_llm_service.py
 import os
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from backend.services.llm.service import LLMService
@@ -88,6 +89,45 @@ class TestLLMService(unittest.TestCase):
                     self.assertEqual(called_kwargs.get("model"), "openai/gpt-5.1-chat")
                     self.assertEqual(called_kwargs.get("api_key"), "openrouter-key")
                     self.assertEqual(called_kwargs.get("base_url"), "https://openrouter.ai/api/v1")
+                    self.assertNotIn("top_k", called_kwargs)
+
+    def test_generate_chat_skips_paid_when_fallback_disabled(self):
+        with patch("backend.services.llm.config.settings") as mock_settings:
+            mock_settings.llm_base_url = "http://localhost:8080"
+            mock_settings.ai_report_api_key = "test-key"
+
+            with patch.object(RemoteLlamaBackend, "chat", return_value=""):
+                with patch.object(OpenAIPaidBackend, "chat", side_effect=AssertionError("paid should not be used")):
+                    llm = LLMService.get_instance()
+                    out = llm.generate_chat(
+                        [{"role": "user", "content": "hi"}],
+                        allow_paid_fallback=False,
+                    )
+                    self.assertEqual(out, "")
+                    self.assertEqual(llm.last_route(), "remote_failed_paid_disabled")
+
+    def test_generate_chat_sets_route_remote_failed_no_paid(self):
+        with patch("backend.services.llm.config.settings") as mock_settings:
+            mock_settings.llm_base_url = "http://localhost:8080"
+            mock_settings.ai_report_api_key = None
+
+            with patch.object(RemoteLlamaBackend, "chat", return_value=""):
+                llm = LLMService.get_instance()
+                out = llm.generate_chat([{"role": "user", "content": "hi"}])
+                self.assertEqual(out, "")
+                self.assertEqual(llm.last_route(), "remote_failed_no_paid")
+
+    def test_generate_chat_sets_route_paid_failed_when_paid_attempt_fails(self):
+        with patch("backend.services.llm.config.settings") as mock_settings:
+            mock_settings.llm_base_url = "http://localhost:8080"
+            mock_settings.ai_report_api_key = "test-key"
+
+            with patch.object(RemoteLlamaBackend, "chat", return_value=""):
+                with patch.object(OpenAIPaidBackend, "chat", return_value=""):
+                    llm = LLMService.get_instance()
+                    out = llm.generate_chat([{"role": "user", "content": "hi"}])
+                    self.assertEqual(out, "")
+                    self.assertEqual(llm.last_route(), "paid_failed")
 
     def test_no_backend_configured_returns_empty_and_sets_error(self):
         with patch("backend.services.llm.config.settings") as mock_settings:
@@ -98,14 +138,9 @@ class TestLLMService(unittest.TestCase):
             out = llm.generate_chat([{"role": "user", "content": "hi"}])
             self.assertEqual(out, "")
             self.assertIn("No LLM backend configured", llm.get_last_error())
+            self.assertEqual(llm.last_route(), "no_backend")
 
     def test_paid_backend_falls_back_to_responses_when_chat_completions_not_supported(self):
-        env = {
-            "AI_REPORT_API_KEY": "test-key",
-            "AI_REPORT_BASE_URL": "https://api.openai.com/v1",
-            "AI_REPORT_MODEL": "gpt-5.2",
-        }
-
         class _Resp:
             def __init__(self, status_code: int, json_data=None, text: str = ""):
                 self.status_code = status_code
@@ -127,7 +162,17 @@ class TestLLMService(unittest.TestCase):
         )
         ok_resp = _Resp(200, json_data={"output_text": "responses-ok"})
 
-        with patch.dict(os.environ, env, clear=True):
+        with patch("backend.services.llm.config.settings") as mock_settings:
+            mock_settings.llm_base_url = None
+            mock_settings.llm_api_key = None
+            mock_settings.llm_timeout = 30
+            mock_settings.open_api_key = None
+            mock_settings.ai_report_api_key = "test-key"
+            mock_settings.ai_report_base_url = "https://api.openai.com/v1"
+            mock_settings.ai_report_model = "gpt-5.2"
+            mock_settings.ai_report_fallback_model = "gpt-5-nano"
+            mock_settings.ai_report_timeout_sec = 30
+
             backend = OpenAIPaidBackend(Settings())
             backend._post = unittest.mock.Mock(side_effect=[error_resp, ok_resp])
 
@@ -149,12 +194,6 @@ class TestLLMService(unittest.TestCase):
             self.assertIsNone(second_payload.get("stop"))
 
     def test_paid_backend_falls_back_to_responses_when_chat_content_empty(self):
-        env = {
-            "AI_REPORT_API_KEY": "test-key",
-            "AI_REPORT_BASE_URL": "https://api.openai.com/v1",
-            "AI_REPORT_MODEL": "gpt-5-nano",
-        }
-
         class _Resp:
             def __init__(self, status_code: int, json_data=None, text: str = ""):
                 self.status_code = status_code
@@ -197,7 +236,17 @@ class TestLLMService(unittest.TestCase):
             },
         )
 
-        with patch.dict(os.environ, env, clear=True):
+        with patch("backend.services.llm.config.settings") as mock_settings:
+            mock_settings.llm_base_url = None
+            mock_settings.llm_api_key = None
+            mock_settings.llm_timeout = 30
+            mock_settings.open_api_key = None
+            mock_settings.ai_report_api_key = "test-key"
+            mock_settings.ai_report_base_url = "https://api.openai.com/v1"
+            mock_settings.ai_report_model = "gpt-5-nano"
+            mock_settings.ai_report_fallback_model = "gpt-5-nano"
+            mock_settings.ai_report_timeout_sec = 30
+
             backend = OpenAIPaidBackend(Settings())
             backend._post = unittest.mock.Mock(side_effect=[chat_ok_but_empty, responses_ok])
 
@@ -210,6 +259,84 @@ class TestLLMService(unittest.TestCase):
 
             second_payload = backend._post.call_args_list[1].kwargs["payload"]
             self.assertEqual(second_payload.get("reasoning"), {"effort": "minimal"})
+
+    def test_paid_backend_clamps_responses_max_output_tokens_minimum(self):
+        class _Resp:
+            def __init__(self, status_code: int, json_data=None, text: str = ""):
+                self.status_code = status_code
+                self._json_data = json_data
+                self.text = text
+
+            def json(self):
+                if isinstance(self._json_data, Exception):
+                    raise self._json_data
+                return self._json_data
+
+        chat_ok_but_empty = _Resp(
+            200,
+            json_data={"choices": [{"message": {"content": ""}}]},
+        )
+        responses_ok = _Resp(200, json_data={"output_text": "ok"})
+
+        with patch("backend.services.llm.config.settings") as mock_settings:
+            mock_settings.llm_base_url = None
+            mock_settings.llm_api_key = None
+            mock_settings.llm_timeout = 30
+            mock_settings.open_api_key = None
+            mock_settings.ai_report_api_key = "test-key"
+            mock_settings.ai_report_base_url = "https://api.openai.com/v1"
+            mock_settings.ai_report_model = "gpt-5-nano"
+            mock_settings.ai_report_fallback_model = "gpt-5-nano"
+            mock_settings.ai_report_timeout_sec = 30
+
+            backend = OpenAIPaidBackend(Settings())
+            backend._post = unittest.mock.Mock(side_effect=[chat_ok_but_empty, responses_ok])
+
+            out = backend.chat(
+                [{"role": "user", "content": "hi"}],
+                model="gpt-5-nano",
+                max_tokens=12,
+            )
+
+            self.assertEqual(out, "ok")
+            second_payload = backend._post.call_args_list[1].kwargs["payload"]
+            self.assertEqual(second_payload.get("max_output_tokens"), 16)
+
+    def test_remote_backend_caches_model_ids_per_base_url(self):
+        settings = SimpleNamespace(
+            llm_base_url="http://default-server:8080",
+            llm_api_key=None,
+            llm_timeout=30,
+        )
+        backend = RemoteLlamaBackend(settings)
+
+        try:
+            with patch.object(
+                backend,
+                "_request_json_with_retries",
+                side_effect=[
+                    {"data": [{"id": "openvino-model"}]},
+                    {"data": [{"id": "vulkan-model"}]},
+                ],
+            ) as mock_request:
+                first = backend._get_model_id("http://openvino-server:8082")
+                second = backend._get_model_id("http://llama-server-vulkan-huihui:8083")
+                cached = backend._get_model_id("http://openvino-server:8082")
+
+            self.assertEqual(first, "openvino-model")
+            self.assertEqual(second, "vulkan-model")
+            self.assertEqual(cached, "openvino-model")
+            self.assertEqual(mock_request.call_count, 2)
+            self.assertEqual(
+                mock_request.call_args_list[0].args,
+                ("GET", "http://openvino-server:8082/v1/models"),
+            )
+            self.assertEqual(
+                mock_request.call_args_list[1].args,
+                ("GET", "http://llama-server-vulkan-huihui:8083/v1/models"),
+            )
+        finally:
+            backend.close()
 
 
 if __name__ == "__main__":
