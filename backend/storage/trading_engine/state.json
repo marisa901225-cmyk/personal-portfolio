@@ -1,31 +1,28 @@
 {
-  "trade_date": "20260304",
-  "week_id": "2026-W10",
-  "swing_entries_today": 1,
-  "swing_entries_week": 2,
+  "trade_date": "20260326",
+  "week_id": "2026-W13",
+  "swing_entries_today": 0,
+  "swing_entries_week": 0,
   "day_entries_today": 0,
   "realized_pnl_today": 0.0,
   "consecutive_losses_today": 0,
-  "blacklist_today": [
-    "396500"
-  ],
+  "blacklist_today": [],
   "open_positions": {
-    "396500": {
-      "type": "S",
-      "entry_time": "2026-03-04T09:20:00+09:00",
-      "entry_price": 33075.0,
-      "qty": 23,
-      "highest_price": 33430.0,
-      "entry_date": "20260304",
+    "440650": {
+      "type": "P",
+      "entry_time": "2026-03-26T09:00:00+09:00",
+      "entry_price": 12435.0,
+      "qty": 56,
+      "highest_price": 12435.0,
+      "entry_date": "20260326",
       "bars_held": 0
     }
   },
-  "last_run_timestamp": "2026-03-04T09:44:00+09:00",
-  "last_bar_date_seen": "20260304",
+  "last_run_timestamp": "2026-03-26T14:12:00+09:00",
+  "last_bar_date_seen": "20260326",
+  "last_panic_date": "20260323",
   "pass_reasons_today": {
-    "ENTRY_WINDOW_CLOSED": 20,
-    "NO_SWING_PICK": 3,
-    "MAX_SWING_ENTRIES_DAY": 6
+    "RISK_OFF": 82
   },
   "pending_notifications": []
 }

@@ -3,8 +3,16 @@ MODEL_PATH_DEFAULT=${LLM_MODEL_PATH:-/data/EXAONE-4.0-1.2B-BF16.gguf}
 MODEL_PATH_FILE=${LLM_MODEL_PATH_FILE:-/data/llm_model_path.txt}
 EXAONE_TEMPLATE_PATH=/data/chat_template_exaone.jinja
 QWEN3_TEMPLATE_PATH=/data/chat_template_qwen3.jinja
+QWEN35_TEMPLATE_PATH=/data/chat_template_qwen3.5-9b-null-space-abliterated.jinja
 QWEN3VL_TEMPLATE_PATH=/data/chat_template_qwen3vl.jinja
 THREADS=${LLM_THREADS:-6}
+N_GPU_LAYERS=${LLM_N_GPU_LAYERS:-37}
+USE_MODEL_BUILTIN_TEMPLATE=${LLM_USE_MODEL_BUILTIN_TEMPLATE:-0}
+PORT=${LLM_SERVER_PORT:-8080}
+CTX_SIZE=${LLM_CTX_SIZE:-8192}
+PARALLEL=${LLM_PARALLEL:-1}
+DEVICE=${LLM_DEVICE:-}
+EXTRA_ARGS=${LLM_EXTRA_ARGS:-}
 
 resolve_model_path() {
     if [ -f "$MODEL_PATH_FILE" ]; then
@@ -49,6 +57,18 @@ get_template_args() {
         else
             echo "--chat-template chatml"
         fi
+    elif [[ "$model_name" == *"qwen3.5"* ]]; then
+        # Qwen3.5 null-space 계열: 전용 jinja 템플릿 우선
+        if [[ "$USE_MODEL_BUILTIN_TEMPLATE" == "1" ]]; then
+            # 모델 GGUF 내부 tokenizer.chat_template 사용
+            echo ""
+        elif [ -f "$QWEN35_TEMPLATE_PATH" ]; then
+            echo "--chat-template chatml --chat-template-file $QWEN35_TEMPLATE_PATH"
+        elif [ -f "$QWEN3_TEMPLATE_PATH" ]; then
+            echo "--chat-template chatml --chat-template-file $QWEN3_TEMPLATE_PATH"
+        else
+            echo "--chat-template chatml"
+        fi
     elif [[ "$model_name" == *"qwen3"* ]]; then
         # Qwen3 모델: 커스텀 jinja 템플릿 사용 (CoT 제어 지원)
         # 내장된 Hermes 템플릿 오토감지를 막기 위해 chatml을 명시적으로 함께 지정 시도
@@ -78,20 +98,30 @@ get_template_args() {
 while true; do
     MODEL_PATH=$(resolve_model_path)
     TEMPLATE_ARGS=$(get_template_args "$MODEL_PATH")
+    DEVICE_ARGS=""
+    if [ -n "$DEVICE" ]; then
+        DEVICE_ARGS="--device $DEVICE"
+    fi
     echo "Starting llama-server with model: $MODEL_PATH"
     echo "Using template args: $TEMPLATE_ARGS"
+    echo "Using n-gpu-layers: $N_GPU_LAYERS"
+    if [ -n "$DEVICE_ARGS" ]; then
+        echo "Using device args: $DEVICE_ARGS"
+    fi
     /app/llama-server \
         --model "$MODEL_PATH" \
         --host 0.0.0.0 \
-        --port 8080 \
+        --port "$PORT" \
         --threads "$THREADS" \
-        --ctx-size 8192 \
-        --n-gpu-layers 37 \
-        --parallel 1 \
+        --ctx-size "$CTX_SIZE" \
+        --n-gpu-layers "$N_GPU_LAYERS" \
+        --parallel "$PARALLEL" \
         --reasoning-budget 0 \
         --flash-attn off \
         --no-mmap \
         --jinja \
+        $DEVICE_ARGS \
+        $EXTRA_ARGS \
         $TEMPLATE_ARGS &
 
     SERVER_PID=$!

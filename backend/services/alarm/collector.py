@@ -1,4 +1,5 @@
 import logging
+import os
 import sqlite3
 import time
 from datetime import datetime
@@ -6,6 +7,14 @@ from typing import Optional
 from backend.services.alarm.filters import mask_sensitive_info
 
 logger = logging.getLogger("alarm_collector_service")
+
+
+def _dedupe_window_seconds() -> int:
+    """중복 알림 판정 윈도우(초). env로 조정 가능."""
+    try:
+        return max(3, int(os.getenv("ALARM_DEDUP_WINDOW_SECONDS", "1800")))
+    except Exception:
+        return 1800
 
 def get_db_connection(db_path: str, max_retries=5, retry_delay=1.0):
     for attempt in range(max_retries):
@@ -20,6 +29,38 @@ def get_db_connection(db_path: str, max_retries=5, retry_delay=1.0):
             else:
                 raise e
     raise sqlite3.OperationalError("Database is locked after multiple retries")
+
+
+def _parse_db_datetime(value: object) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    text = text.replace("T", " ")
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def get_latest_alarm_received_at(db_path: str) -> Optional[datetime]:
+    conn = get_db_connection(db_path)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT MAX(received_at) FROM incoming_alarms")
+        row = cursor.fetchone()
+        return _parse_db_datetime(row[0] if row else None)
+    finally:
+        conn.close()
 
 async def collect_alarm_logic(
     db_path: str,
@@ -44,21 +85,49 @@ async def collect_alarm_logic(
         except Exception:
             pass
 
-    # 2. 중복 체크 (3초 이내 동일 내용)
+    # 2. 중복 체크 (기본 30분 이내 동일 시그니처)
     try:
         conn = get_db_connection(db_path)
         cursor = conn.cursor()
-        
-        # 최근 3초 이내에 동일한 raw_text가 있는지 확인
+        dedupe_window_seconds = _dedupe_window_seconds()
+        dedupe_modifier = f"-{dedupe_window_seconds} seconds"
+
+        sender_norm = (sender or "").strip()
+        app_name_norm = (app_name or "").strip()
+        package_norm = (package or "").strip()
+        app_title_norm = (app_title or "").strip()
+        conversation_norm = (conversation or "").strip()
+
+        # 동일 알림 시그니처(raw/app/sender/title/conversation/package)가
+        # 최근 일정 시간 내 이미 수집됐으면 중복으로 간주한다.
         cursor.execute("""
             SELECT id FROM incoming_alarms 
-            WHERE raw_text = ? AND (sender = ? OR app_name = ?)
-            AND received_at > datetime('now', '-3 seconds')
+            WHERE raw_text = ?
+              AND IFNULL(sender, '') = ?
+              AND IFNULL(app_name, '') = ?
+              AND IFNULL(package, '') = ?
+              AND IFNULL(app_title, '') = ?
+              AND IFNULL(conversation, '') = ?
+              AND received_at >= datetime('now', ?)
+            ORDER BY id DESC
             LIMIT 1
-        """, (raw_text, sender, app_name))
+        """, (
+            raw_text,
+            sender_norm,
+            app_name_norm,
+            package_norm,
+            app_title_norm,
+            conversation_norm,
+            dedupe_modifier,
+        ))
         
         if cursor.fetchone():
-            logger.info("Duplicate alarm detected (within 3s). Skipping.")
+            logger.info(
+                "Duplicate alarm detected (within %ss). Skipping. app=%s sender=%s",
+                dedupe_window_seconds,
+                app_name_norm or "-",
+                sender_norm or "-",
+            )
             conn.close()
             return {"status": "skipped", "reason": "duplicate"}
             

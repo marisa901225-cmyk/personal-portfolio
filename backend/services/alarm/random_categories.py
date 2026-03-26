@@ -62,6 +62,8 @@ def _get_fallback_config() -> Dict:
     return {
         "space_keywords": ["우주", "천문", "행성"],
         "formats": ["질문형으로 시작해라", "팩트 단언형으로 시작해라"],
+        "openers": [],
+        "twists": [],
         "categories": {
             "우주/천문학": ["우주", "천문", "행성"],
             "기술/엔지니어링": ["기술", "로봇", "AI"],
@@ -107,6 +109,16 @@ def get_all_categories() -> List[str]:
 def get_voices() -> Dict[str, str]:
     """캐릭터 목소리 맵 반환 (이름: 규칙)"""
     return _load_config().get("voices", {})
+
+
+def get_openers() -> List[str]:
+    """랜덤 메시지 오프너 후보 반환"""
+    return _load_config().get("openers", [])
+
+
+def get_twists() -> List[str]:
+    """랜덤 메시지 트위스트 후보 반환"""
+    return _load_config().get("twists", [])
 
 
 def load_recent_categories() -> List[str]:
@@ -192,4 +204,3 @@ def has_category_anchor(text: str, category: str) -> bool:
         return True
     lowered = text.lower()
     return any(keyword.lower() in lowered for keyword in keywords)
-

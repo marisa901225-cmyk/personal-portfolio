@@ -1,31 +1,33 @@
 services:
-  llama-server:
-    image: ghcr.io/ggml-org/llama.cpp:server-intel
-    container_name: myasset-llm
-    restart: always
-    ports:
-      - "8080:8080"
-    volumes:
-      - /home/dlckdgn/ai-models:/data:ro
-      - ./backend/scripts/shell/run_llm_server.sh:/run.sh:ro
-    devices:
-      - /dev/dri:/dev/dri
-    environment:
-      - LLM_MODEL_PATH=/data/Josiefied-Qwen3-8B-abliterated-v1.Q6_K.gguf
-      - LLM_MODEL_PATH_FILE=/data/llm_model_path.txt
-      - LLM_THREADS=6
-      - GGML_SYCL_DEVICE=0
-      - GGML_SYCL_FORCE_MMQ=1
-      - ZES_ENABLE_SYSMAN=1
-    entrypoint: [ "/bin/bash", "/run.sh" ]
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
-    networks:
-      - appnet
+  # llama-server:
+  #   image: ghcr.io/ggml-org/llama.cpp:server-intel
+  #   container_name: myasset-llm
+  #   restart: always
+  #   ports:
+  #     - "8080:8080"
+  #   volumes:
+  #     - /home/dlckdgn/ai-models:/data:ro
+  #     - ./backend/scripts/shell/run_llm_server.sh:/run.sh:ro
+  #   devices:
+  #     - /dev/dri:/dev/dri
+  #   environment:
+  #     - LLM_MODEL_PATH=/data/Josiefied-Qwen3-8B-abliterated-v1.Q6_K.gguf
+  #     - LLM_MODEL_PATH_FILE=/data/llm_model_path.txt
+  #     - LLM_THREADS=6
+  #     - LLM_N_GPU_LAYERS=37
+  #     - LLM_USE_MODEL_BUILTIN_TEMPLATE=1
+  #     - GGML_SYCL_DEVICE=0
+  #     - GGML_SYCL_FORCE_MMQ=1
+  #     - ZES_ENABLE_SYSMAN=1
+  #   entrypoint: [ "/bin/bash", "/run.sh" ]
+  #   healthcheck:
+  #     test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 60s
+  #   networks:
+  #     - appnet
 
   llama-server-light:
     image: ghcr.io/ggml-org/llama.cpp:server
@@ -48,6 +50,64 @@ services:
     networks:
       - appnet
 
+  llama-server-vulkan-huihui:
+    image: ghcr.io/ggml-org/llama.cpp:server-vulkan
+    container_name: myasset-llm-vulkan-huihui
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+    volumes:
+      - /home/dlckdgn/ai-models:/data:ro
+      - ./backend/scripts/shell/run_llm_server.sh:/run.sh:ro
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      - TZ=Asia/Seoul
+      - LLM_MODEL_PATH=/data/Huihui-Qwen3.5-9B-Claude-4.6-Opus-abliterated.Q8_0.gguf
+      - LLM_MODEL_PATH_FILE=/data/__llama_server_vulkan_huihui__.txt
+      - LLM_THREADS=6
+      - LLM_N_GPU_LAYERS=all
+      - LLM_SERVER_PORT=8083
+      - LLM_CTX_SIZE=8192
+      - LLM_PARALLEL=1
+      - LLM_USE_MODEL_BUILTIN_TEMPLATE=1
+      - LLM_DEVICE=Vulkan0
+    entrypoint: [ "/bin/bash", "/run.sh" ]
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8083/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    networks:
+      - appnet
+
+  openvino-server:
+    build:
+      context: ./backend/openvino_server
+      dockerfile: Dockerfile
+    container_name: myasset-openvino-llm
+    restart: always
+    ports:
+      - "8082:8082"
+    volumes:
+      - /home/dlckdgn/ai-models/openvino/Josiefied-Qwen3-8B-int8:/models/Josiefied-Qwen3-8B-int8:ro
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      - OV_MODEL_DIR=/models/Josiefied-Qwen3-8B-int8
+      - OV_MODEL_ID=Josiefied-Qwen3-8B-int8
+      - OV_DEVICE=GPU
+      - TZ=Asia/Seoul
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8082/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    networks:
+      - appnet
+
   backend-api:
     build:
       context: ./backend
@@ -65,11 +125,12 @@ services:
       - /mnt/one-touch/backups:/mnt/one-touch/backups
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
     environment:
-      - LLM_BASE_URL=http://llama-server:8080
-      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-abliterated-v1.Q8_0.gguf
+      - LLM_BASE_URL=http://openvino-server:8082
+      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-int8
       - TZ=Asia/Seoul
     env_file:
       - /home/dlckdgn/ai-models/myasset.env
+      - ./backend/.env
     # depends_on:
     #   llama-server:
     #     condition: service_healthy
@@ -100,11 +161,12 @@ services:
     command: python -m backend.scripts.manage run-collector --host 0.0.0.0 --port 8001
     environment:
       - PYTHONPATH=/app
-      - LLM_BASE_URL=http://llama-server:8080
-      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-abliterated-v1.Q8_0.gguf
+      - LLM_BASE_URL=http://openvino-server:8082
+      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-int8
       - TZ=Asia/Seoul
     env_file:
       - /home/dlckdgn/ai-models/myasset.env
+      - ./backend/.env
     # depends_on:
     #   llama-server:
     #     condition: service_healthy
@@ -134,18 +196,20 @@ services:
     command: python -m backend.scripts.manage run-scheduler
     environment:
       - PYTHONPATH=/app
-      - LLM_BASE_URL=http://llama-server:8080
-      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-abliterated-v1.Q8_0.gguf
+      - LLM_BASE_URL=http://openvino-server:8082
+      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-int8
       - TZ=Asia/Seoul
       - TRADING_ENGINE_ENABLED=1
       - TRADING_ENGINE_API_FACTORY=${TRADING_ENGINE_API_FACTORY:-backend.integrations.kis.trading_adapter:create_trading_api}
       - TRADING_ENGINE_SCHEDULE_INTERVAL_MIN=${TRADING_ENGINE_SCHEDULE_INTERVAL_MIN:-4}
       - TRADING_ENGINE_INCLUDE_ETF=${TRADING_ENGINE_INCLUDE_ETF:-1}
+      - TRADING_ENGINE_REGIME_VOL_THRESHOLD=${TRADING_ENGINE_REGIME_VOL_THRESHOLD:-0.05}
       - TRADING_ENGINE_STATE_PATH=${TRADING_ENGINE_STATE_PATH:-backend/storage/trading_engine/state.json}
       - TRADING_ENGINE_OUTPUT_DIR=${TRADING_ENGINE_OUTPUT_DIR:-backend/storage/trading_engine/output}
       - TRADING_ENGINE_RUNLOG_PATH=${TRADING_ENGINE_RUNLOG_PATH:-backend/storage/trading_engine/runlog_current.log}
     env_file:
       - /home/dlckdgn/ai-models/myasset.env
+      - ./backend/.env
     # depends_on:
     #   llama-server:
     #     condition: service_healthy
@@ -199,10 +263,10 @@ services:
     environment:
       - PYTHONPATH=/app
       - BACKEND_URL=http://backend-api:8000
-      - LLM_BASE_URL=http://llama-server:8080
+      - LLM_BASE_URL=http://openvino-server:8082
       - AI_REPORT_MODEL=gpt-5.1
       - AI_REPORT_TIMEOUT_SEC=900
-      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-abliterated-v1.Q8_0.gguf
+      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-int8
       - TZ=Asia/Seoul
     env_file:
       - /home/dlckdgn/ai-models/myasset.env

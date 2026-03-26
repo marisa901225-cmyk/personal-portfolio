@@ -13,6 +13,7 @@ from backend.services.trading_engine.strategy import (
     build_candidates,
     pick_daytrade,
     pick_swing,
+    rank_daytrade_codes,
 )
 
 
@@ -120,6 +121,22 @@ class TradingStrategyTests(unittest.TestCase):
         picked = pick_daytrade(self._candidates_with_popular(pool), quotes={}, config=cfg)
         self.assertEqual(picked, "ETF01")
 
+    @patch("backend.services.trading_engine.strategy._score_day_row")
+    def test_rank_daytrade_codes_keeps_followup_candidates_for_fallback(self, mock_score) -> None:
+        pool = pd.DataFrame(
+            [
+                {"code": "EXPENSIVE", "name": "Expensive", "is_etf": False, "avg_value_5d": "90000000000", "change_pct": "6.0", "mock_score": 120.0},
+                {"code": "AFFORD01", "name": "Affordable", "is_etf": False, "avg_value_5d": "80000000000", "change_pct": "5.0", "mock_score": 110.0},
+                {"code": "ETF01", "name": "ETF", "is_etf": True, "avg_value_5d": "70000000000", "change_pct": "4.0", "mock_score": 100.0},
+            ]
+        )
+        mock_score.side_effect = lambda row, quotes, config: float(row["mock_score"])
+
+        cfg = TradeEngineConfig(include_etf=True, day_etf_min_avg_value_5d=50_000_000_000)
+        ranked = rank_daytrade_codes(self._candidates_with_popular(pool), quotes={}, config=cfg)
+
+        self.assertEqual(ranked, ["EXPENSIVE", "AFFORD01", "ETF01"])
+
     @patch("backend.services.trading_engine.strategy._score_day_row", return_value=80.0)
     def test_pick_daytrade_sorts_change_pct_as_numeric(self, _mock_score) -> None:
         pool = pd.DataFrame(
@@ -204,6 +221,38 @@ class TradingStrategyTests(unittest.TestCase):
 
         picked = pick_swing(candidates, quotes={}, config=cfg)
         self.assertEqual(picked, "ETF_OK")
+
+    def test_pick_swing_prefers_strict_model_setup_over_relaxed(self) -> None:
+        model_pool = pd.DataFrame(
+            [
+                {
+                    "code": "STRICT01",
+                    "name": "Strict",
+                    "avg_value_20d": 600_000_000_000,
+                    "ma20": 100,
+                    "ma60": 95,
+                    "close": 104,
+                    "change_pct": 1.5,
+                    "is_etf": False,
+                    "trend_tier": "strict",
+                },
+                {
+                    "code": "RELAX01",
+                    "name": "Relaxed",
+                    "avg_value_20d": 600_000_000_000,
+                    "ma20": 100,
+                    "ma60": 95,
+                    "close": 104,
+                    "change_pct": 1.5,
+                    "is_etf": False,
+                    "trend_tier": "relaxed",
+                },
+            ]
+        )
+        candidates = self._candidates_with_swing(model=model_pool, etf=pd.DataFrame())
+
+        picked = pick_swing(candidates, quotes={}, config=TradeEngineConfig())
+        self.assertEqual(picked, "STRICT01")
 
     def test_score_day_row_applies_sector_news_bonus(self) -> None:
         row = pd.Series(

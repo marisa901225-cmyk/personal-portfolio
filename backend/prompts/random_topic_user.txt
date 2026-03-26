@@ -3,10 +3,14 @@
 - 내용의 정확성보다는 재미와 창의적인 묘사에 집중할 것 (창작 대환영!).
 - 각 문장에 살을 붙여서 전체 분량을 130자 이상으로 꽉 채울 것.
 - 시스템 규칙(3문장, 본문만)을 절대적으로 준수할 것.
+- 첫 문장은 opener를 반영해 시작할 것.
+- 마지막 문장은 twist 지시를 반드시 반영할 것.
 
 [입력값]
 category={category}
 format={format}
+opener={opener}
+twist={twist}
 must_keywords={must_keywords}
 avoid_keywords={avoid_keywords}
 voice={voice}

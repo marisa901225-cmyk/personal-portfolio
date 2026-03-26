@@ -1,0 +1,19 @@
+{
+  "snapshot_mode": "current_only",
+  "updated_at": "2026-03-26 14:15:00",
+  "retention_days": 30,
+  "devices": {
+    "phone-main": {
+      "device_id": "phone-main",
+      "tailscale_name": "phone-main",
+      "ping_target": "100.110.172.108",
+      "last_heartbeat_at": "2026-03-26 14:15:00",
+      "received_at": "2026-03-26 05:15:00",
+      "battery": "77",
+      "charging": "%PACTIVE",
+      "network": "%NET",
+      "ping_ok": null,
+      "alert_sent": false
+    }
+  }
+}

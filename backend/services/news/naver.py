@@ -8,7 +8,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from sqlalchemy.orm import Session
 from ...core.config import settings
 from ...core.models import GameNews, SpamNews
-from .core import calculate_simhash, NAVER_NEWS_URL
+from .core import calculate_simhash, NAVER_NEWS_URL, determine_news_tags
 
 logger = logging.getLogger(__name__)
 
@@ -114,32 +114,13 @@ async def collect_naver_news(db: Session, query: str, category: str = "esports")
                 seen_in_batch.add(content_hash)
                 continue
             
-            # game_tag 및 category_tag 결정 (검색어 기반)
-            game_tag = "Esports" if category == "esports" else "Economy"
-            category_tag = "General"
-            
-            q_lower = query.lower()
-            if category == "esports":
-                if any(kw in q_lower for kw in ["lol", "롤", "lck", "월즈"]):
-                    game_tag = "LoL"
-                    category_tag = "LCK"
-                elif any(kw in q_lower for kw in ["vct", "발로", "퍼시픽"]):
-                    game_tag = "Valorant"
-                    category_tag = "VCT"
-                elif any(kw in q_lower for kw in ["챌린저스", "2군", "ck"]):
-                    game_tag = "LoL"
-                    category_tag = "LCK-CL"
-            else:
-                if any(kw in q_lower for kw in ["삼성", "반도체", "hbm", "nvidia", "엔비디아", "sk하이닉스"]):
-                    category_tag = "Tech/Semicon"
-                elif any(kw in q_lower for kw in ["환율", "달러", "금리", "한국은행"]):
-                    category_tag = "FX/Rates"
-                elif any(kw in q_lower for kw in ["fomc", "연준", "매크로", "인플레이션", "cpi"]):
-                    category_tag = "Macro"
-                elif any(kw in q_lower for kw in ["주식시장", "코스피", "코스닥", "나스닥", "s&p"]):
-                    category_tag = "Market"
-                elif any(kw in q_lower for kw in ["비트코인", "코인", "가상자산", "crypto"]):
-                    category_tag = "Crypto"
+            game_tag, category_tag, _is_international = determine_news_tags(
+                category=category,
+                query=query,
+                title=clean_title,
+                description=clean_desc,
+                gl="KR",
+            )
             
             # 광고 체크
             spam_reason = _is_ad(clean_title)

@@ -40,10 +40,7 @@ async def job_collect_news():
         async with monitor_job_async("collect_game_news", db):
             logger.info("Starting scheduled news collection job...")
             try:
-                feeds = [
-                    ("Inven LoL", "https://feeds.feedburner.com/inven/lol"),
-                ]
-                for source_name, url in feeds:
+                for source_name, url in NewsCollector.RSS_FEEDS.items():
                     sync_retry(NewsCollector.collect_rss)(db, url, source_name)
 
                 await async_retry(NewsCollector.collect_steamspy_rankings)(db)
@@ -55,6 +52,26 @@ async def job_collect_news():
                 raise e
             finally:
                 logger.info("News collection job finished.")
+
+
+async def job_collect_premarket_news():
+    """
+    매일 06:55 장전 브리핑 직전 시장 뉴스만 한 번 더 수집한다.
+
+    - 장전 브리핑 최신성 보강 목적
+    - 게임/RSS 수집은 제외하고 경제 뉴스만 실행
+    """
+    with SessionLocal() as db:
+        async with monitor_job_async("collect_premarket_news", db):
+            logger.info("Starting premarket news collection job...")
+            try:
+                await async_retry(NewsCollector.collect_all_naver_news)(db)
+                await async_retry(NewsCollector.collect_all_google_news)(db)
+            except Exception as e:
+                logger.error(f"Premarket news collection job failed: {e}", exc_info=True)
+                raise e
+            finally:
+                logger.info("Premarket news collection job finished.")
 
 
 async def job_prefetch_weather_05():
@@ -94,12 +111,13 @@ async def job_morning_briefing():
     매일 아침 7시 모닝 브리핑 (날씨 -> 알림 요약 순차 실행)
 
     날씨는 캐시 우선 (05시 프리페치 데이터 사용)
+    월요일 주간 파생심리 브리핑은 날씨 메시지 내부 컨텍스트로 함께 녹인다.
     """
     from backend.integrations.telegram import send_telegram_message
     from backend.services.alarm.processor import process_pending_alarms
     from backend.services.news.weather import fetch_weather_from_cache
 
-    logger.info("Starting Morning Briefing (Weather -> Weekly Derivatives -> Alarm Summary)...")
+    logger.info("Starting Morning Briefing (Weather with weekly derivatives context -> Alarm Summary)...")
 
     try:
         message = await fetch_weather_from_cache()
@@ -110,22 +128,6 @@ async def job_morning_briefing():
             logger.warning("Morning Briefing: Weather message was empty.")
     except Exception as e:
         logger.error(f"Morning Briefing: Weather notification failed: {e}", exc_info=True)
-
-    try:
-        now = datetime.now(KST)
-        if now.weekday() == 0:
-            from backend.services.economy.kr_derivatives_weekly_briefing import (
-                build_weekly_derivatives_briefing,
-            )
-
-            weekly_message = await build_weekly_derivatives_briefing(now=now)
-            if weekly_message:
-                await send_telegram_message(weekly_message)
-                logger.info("Morning Briefing: Weekly derivatives briefing sent.")
-            else:
-                logger.info("Morning Briefing: Weekly derivatives briefing skipped (not enough data).")
-    except Exception as e:
-        logger.error(f"Morning Briefing: Weekly derivatives briefing failed: {e}", exc_info=True)
 
     with SessionLocal() as db:
         try:
@@ -261,6 +263,14 @@ def start_scheduler():
             job_prefetch_economy_0620,
             CronTrigger(hour=6, minute=20),
             id="prefetch_economy_0620",
+            replace_existing=True,
+            max_instances=1,
+        )
+
+        scheduler.add_job(
+            job_collect_premarket_news,
+            CronTrigger(hour=6, minute=55),
+            id="collect_premarket_news",
             replace_existing=True,
             max_instances=1,
         )

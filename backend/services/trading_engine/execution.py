@@ -6,11 +6,22 @@ from datetime import datetime
 from typing import Any
 
 from .config import TradeEngineConfig
-from .interfaces import TradingAPI
+from .interfaces import BuyOrderInfoAPI, SellOrderInfoAPI, TradingAPI
 from .state import PositionState, TradeState
 from .utils import parse_numeric
 
 logger = logging.getLogger(__name__)
+
+_BUY_BUFFER_RATIO = 0.005
+_BUY_BUFFER_KRW = 5_000
+_BUY_RETRY_MAX = 1
+_INSUFFICIENT_CASH_MESSAGES = (
+    "주문가능금액",
+    "주문 가능 금액",
+    "초과",
+    "insufficient",
+    "not enough",
+)
 
 
 @dataclass(slots=True)
@@ -22,6 +33,18 @@ class FillResult:
     reason: str | None = None
     order_id: str | None = None
     raw: dict[str, Any] | None = None
+
+
+@dataclass(slots=True)
+class BuySizingSnapshot:
+    cash: float
+    price_now: float
+    max_qty: int | None = None
+
+
+@dataclass(slots=True)
+class SellSizingSnapshot:
+    max_qty: int | None = None
 
 
 
@@ -37,7 +60,12 @@ def enter_position(
     order_type: str = "MKT",
     price: int | None = None,
 ) -> FillResult | None:
-    if code in state.blacklist_today or code in state.open_positions:
+    existing_position = state.open_positions.get(code)
+    if code in state.blacklist_today:
+        return None
+    if existing_position is not None and not (
+        position_type == "P" and existing_position.type == "P"
+    ):
         return None
 
     quote = api.quote(code)
@@ -45,17 +73,87 @@ def enter_position(
     if price_now is None or price_now <= 0:
         return None
 
-    cash = float(api.cash_available())
-    budget = max(0.0, cash * cash_ratio)
-    qty = int(budget // price_now)
+    sizing = _resolve_buy_sizing(
+        api=api,
+        code=code,
+        order_type=order_type,
+        price=price,
+        fallback_cash=float(api.cash_available()),
+        fallback_price=float(price_now),
+    )
+    qty = _calc_buy_qty(cash=sizing.cash, cash_ratio=cash_ratio, price_now=sizing.price_now)
+    if sizing.max_qty is not None:
+        qty = min(qty, sizing.max_qty)
     if qty < 1:
         return None
 
-    resp = api.place_order(side="BUY", code=code, qty=qty, order_type=order_type, price=price)
+    attempted_qty = qty
+    resp: dict[str, Any] | None = None
+    for retry_idx in range(_BUY_RETRY_MAX + 1):
+        resp = api.place_order(
+            side="BUY",
+            code=code,
+            qty=attempted_qty,
+            order_type=order_type,
+            price=price,
+        )
+        if resp.get("success") is not False:
+            break
+
+        msg = str(resp.get("msg") or "")
+        if retry_idx >= _BUY_RETRY_MAX or not _is_insufficient_cash_rejection(msg):
+            logger.warning(
+                "enter_position: broker rejected order code=%s qty=%d msg=%s",
+                code,
+                attempted_qty,
+                msg,
+            )
+            return None
+
+        refreshed_sizing = _resolve_buy_sizing(
+            api=api,
+            code=code,
+            order_type=order_type,
+            price=price,
+            fallback_cash=float(api.cash_available()),
+            fallback_price=float(price_now),
+        )
+        next_qty = _calc_buy_qty(
+            cash=refreshed_sizing.cash,
+            cash_ratio=cash_ratio,
+            price_now=refreshed_sizing.price_now,
+            extra_buffer_ratio=_BUY_BUFFER_RATIO * (retry_idx + 2),
+            extra_buffer_krw=_BUY_BUFFER_KRW * (retry_idx + 2),
+        )
+        if refreshed_sizing.max_qty is not None:
+            next_qty = min(next_qty, refreshed_sizing.max_qty)
+        next_qty = min(next_qty, attempted_qty - 1)
+        if next_qty < 1:
+            logger.warning(
+                "enter_position: insufficient buying power after retry code=%s last_qty=%d cash=%.0f msg=%s",
+                code,
+                attempted_qty,
+                refreshed_sizing.cash,
+                msg,
+            )
+            return None
+
+        logger.warning(
+            "enter_position: reducing qty after insufficient cash code=%s qty=%d->%d cash=%.0f msg=%s",
+            code,
+            attempted_qty,
+            next_qty,
+            refreshed_sizing.cash,
+            msg,
+        )
+        attempted_qty = next_qty
+
+    if resp is None:
+        return None
 
     filled_qty_num = parse_numeric(resp.get("filled_qty"))
     if filled_qty_num is None:
-        filled_qty = qty
+        filled_qty = attempted_qty
     else:
         filled_qty = int(filled_qty_num)
 
@@ -67,21 +165,31 @@ def enter_position(
     avg_price = float(avg_price_num) if avg_price_num is not None else price_now
     order_id = _extract_order_id(resp)
 
-    state.open_positions[code] = PositionState(
-        type=position_type,
-        entry_time=now.isoformat(timespec="seconds"),
-        entry_price=float(avg_price),
-        qty=filled_qty,
-        highest_price=float(avg_price),
-        entry_date=asof_date,
-        bars_held=0,
-    )
-    state.blacklist_today.add(code)
+    if existing_position is not None and position_type == "P" and existing_position.type == "P":
+        total_qty = existing_position.qty + filled_qty
+        total_cost = (existing_position.entry_price * existing_position.qty) + (float(avg_price) * filled_qty)
+        existing_position.entry_time = now.isoformat(timespec="seconds")
+        existing_position.entry_price = total_cost / total_qty
+        existing_position.qty = total_qty
+        existing_position.highest_price = max(float(existing_position.highest_price or 0.0), float(avg_price))
+        existing_position.entry_date = asof_date
+    else:
+        state.open_positions[code] = PositionState(
+            type=position_type,
+            entry_time=now.isoformat(timespec="seconds"),
+            entry_price=float(avg_price),
+            qty=filled_qty,
+            highest_price=float(avg_price),
+            entry_date=asof_date,
+            bars_held=0,
+        )
+    if position_type != "P":
+        state.blacklist_today.add(code)
 
     if position_type == "S":
         state.swing_entries_today += 1
         state.swing_entries_week += 1
-    else:
+    elif position_type == "T":
         state.day_entries_today += 1
 
     return FillResult(
@@ -108,13 +216,36 @@ def exit_position(
     if not pos:
         return None
 
-    resp = api.place_order(side="SELL", code=code, qty=pos.qty, order_type=order_type, price=price)
+    sell_sizing = _resolve_sell_sizing(api=api, code=code)
+    requested_qty = pos.qty
+    if sell_sizing.max_qty is not None:
+        requested_qty = min(requested_qty, sell_sizing.max_qty)
+    if requested_qty < 1:
+        logger.warning("exit_position: no sellable quantity code=%s local_qty=%d", code, pos.qty)
+        return None
+    if requested_qty < pos.qty:
+        logger.warning(
+            "exit_position: capping sell qty by broker capacity code=%s local_qty=%d sellable_qty=%d",
+            code,
+            pos.qty,
+            requested_qty,
+        )
+
+    resp = api.place_order(side="SELL", code=code, qty=requested_qty, order_type=order_type, price=price)
+    if resp.get("success") is False:
+        logger.warning(
+            "exit_position: broker rejected order code=%s qty=%d msg=%s",
+            code,
+            requested_qty,
+            resp.get("msg"),
+        )
+        return None
     quote = api.quote(code)
     market_price = parse_numeric(quote.get("price")) or pos.entry_price
 
     filled_qty_num = parse_numeric(resp.get("filled_qty"))
     if filled_qty_num is None:
-        filled_qty = pos.qty
+        filled_qty = requested_qty
     else:
         filled_qty = int(filled_qty_num)
 
@@ -147,7 +278,11 @@ def exit_position(
     else:
         state.consecutive_losses_today = 0
 
-    state.open_positions.pop(code, None)
+    remaining_qty = pos.qty - filled_qty
+    if remaining_qty <= 0:
+        state.open_positions.pop(code, None)
+    else:
+        pos.qty = remaining_qty
 
     return FillResult(
         code=code,
@@ -164,12 +299,10 @@ def handle_open_orders(
     api: TradingAPI,
     *,
     timeout_sec: int = 30,
-    max_retry: int = 0,
 ) -> dict[str, int]:
     del timeout_sec  # open_orders schema is broker-specific; best-effort conservative handling.
 
     cancelled = 0
-    retried = 0
     for order in api.open_orders() or []:
         order_id = _extract_order_id(order)
         if not order_id:
@@ -186,18 +319,7 @@ def handle_open_orders(
             logger.warning("cancel_order failed order_id=%s error=%s", order_id, exc)
             continue
 
-        if max_retry > 0:
-            side = str(order.get("side") or order.get("sll_buy_dvsn_cd") or "").upper()
-            code = str(order.get("code") or order.get("pdno") or "")
-            qty = int(parse_numeric(order.get("qty")) or 0)
-            if side in {"BUY", "SELL"} and code and qty > 0:
-                try:
-                    api.place_order(side=side, code=code, qty=qty, order_type="MKT", price=None)
-                    retried += 1
-                except Exception as exc:
-                    logger.warning("retry place_order failed code=%s error=%s", code, exc)
-
-    return {"cancelled": cancelled, "retried": retried}
+    return {"cancelled": cancelled}
 
 
 def increment_bars_held(state: TradeState) -> None:
@@ -214,3 +336,101 @@ def _extract_order_id(payload: dict[str, Any] | None) -> str | None:
         if value:
             return str(value)
     return None
+
+
+def _resolve_buy_sizing(
+    *,
+    api: TradingAPI,
+    code: str,
+    order_type: str,
+    price: int | None,
+    fallback_cash: float,
+    fallback_price: float,
+) -> BuySizingSnapshot:
+    snapshot = BuySizingSnapshot(
+        cash=max(0.0, fallback_cash),
+        price_now=max(0.0, fallback_price),
+    )
+    if not isinstance(api, BuyOrderInfoAPI):
+        return snapshot
+
+    query_price = int(price or 0) or int(fallback_price)
+    try:
+        info = api.buy_order_capacity(
+            code=code,
+            order_type=order_type,
+            price=query_price,
+        )
+    except Exception as exc:
+        logger.warning(
+            "buy_order_capacity lookup failed code=%s type=%s price=%s error=%s",
+            code,
+            order_type,
+            query_price,
+            exc,
+        )
+        return snapshot
+
+    buyable_cash = parse_numeric(info.get("nrcvb_buy_amt"))
+    if buyable_cash is None or buyable_cash <= 0:
+        buyable_cash = parse_numeric(info.get("ord_psbl_cash"))
+    if buyable_cash is not None and buyable_cash > 0:
+        snapshot.cash = float(buyable_cash)
+
+    calc_price = parse_numeric(info.get("psbl_qty_calc_unpr"))
+    if calc_price is not None and calc_price > 0:
+        snapshot.price_now = float(calc_price)
+
+    max_qty = parse_numeric(info.get("nrcvb_buy_qty"))
+    if max_qty is None or max_qty <= 0:
+        max_qty = parse_numeric(info.get("max_buy_qty"))
+    if max_qty is not None and max_qty > 0:
+        snapshot.max_qty = int(max_qty)
+
+    return snapshot
+
+
+def _resolve_sell_sizing(
+    *,
+    api: TradingAPI,
+    code: str,
+) -> SellSizingSnapshot:
+    snapshot = SellSizingSnapshot()
+    if not isinstance(api, SellOrderInfoAPI):
+        return snapshot
+
+    try:
+        info = api.sell_order_capacity(code)
+    except Exception as exc:
+        logger.warning("sell_order_capacity lookup failed code=%s error=%s", code, exc)
+        return snapshot
+
+    sellable_qty = parse_numeric(info.get("ord_psbl_qty"))
+    if sellable_qty is not None and sellable_qty >= 0:
+        snapshot.max_qty = int(sellable_qty)
+    return snapshot
+
+
+def _calc_buy_qty(
+    *,
+    cash: float,
+    cash_ratio: float,
+    price_now: float,
+    extra_buffer_ratio: float = 0.0,
+    extra_buffer_krw: int = 0,
+) -> int:
+    budget = max(0.0, cash * cash_ratio)
+    buffer_cash = max(
+        extra_buffer_krw,
+        budget * extra_buffer_ratio,
+    )
+    usable_budget = max(0.0, budget - buffer_cash)
+    qty = int(usable_budget // price_now)
+    if qty < 1 and budget >= price_now:
+        return int(budget // price_now)
+    return qty
+
+
+def _is_insufficient_cash_rejection(message: str) -> bool:
+    lowered = message.lower()
+    return any(token.lower() in lowered for token in _INSUFFICIENT_CASH_MESSAGES)

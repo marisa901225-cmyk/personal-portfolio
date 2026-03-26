@@ -1,0 +1,5 @@
+fastapi==0.115.8
+uvicorn[standard]==0.34.0
+transformers==4.51.0
+optimum-intel==1.27.0
+openvino-genai==2026.0.0.0

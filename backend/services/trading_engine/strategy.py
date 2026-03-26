@@ -117,9 +117,19 @@ def pick_daytrade(
     config: TradeEngineConfig,
     news_signal: NewsSentimentSignal | None = None,
 ) -> str | None:
+    ranked_codes = rank_daytrade_codes(candidates, quotes, config, news_signal=news_signal)
+    return ranked_codes[0] if ranked_codes else None
+
+
+def rank_daytrade_codes(
+    candidates: Candidates,
+    quotes: dict[str, dict[str, Any]],
+    config: TradeEngineConfig,
+    news_signal: NewsSentimentSignal | None = None,
+) -> list[str]:
     pool = candidates.popular.copy()
     if pool.empty:
-        return None
+        return []
 
     if "is_etf" not in pool.columns:
         pool["is_etf"] = False
@@ -144,7 +154,7 @@ def pick_daytrade(
         pool = pool[~pool["_is_etf"]]
 
     if pool.empty:
-        return None
+        return []
 
     pool["_live_change_pct_num"] = pool.apply(lambda r: _resolve_change_pct(r, quotes), axis=1)
     pool = pool[
@@ -152,7 +162,7 @@ def pick_daytrade(
         | (pool["_live_change_pct_num"] > float(config.day_hard_drop_exclude_pct))
     ]
     if pool.empty:
-        return None
+        return []
 
     if news_signal is None:
         pool["score"] = pool.apply(lambda r: _score_day_row(r, quotes, config), axis=1)
@@ -164,24 +174,39 @@ def pick_daytrade(
         ascending=[False, False, False]
     )
     if pool.empty:
-        return None
+        return []
 
     stock_pool = pool[~pool["_is_etf"]]
     etf_pool = pool[pool["_is_etf"]]
 
-    best_stock = stock_pool.iloc[0] if not stock_pool.empty else None
-    best_etf = etf_pool.iloc[0] if not etf_pool.empty else None
+    ordered_codes: list[str] = []
 
-    if best_stock is not None and best_etf is not None:
+    if not stock_pool.empty and not etf_pool.empty:
+        best_stock = stock_pool.iloc[0]
+        best_etf = etf_pool.iloc[0]
         if best_stock["score"] >= best_etf["score"] * config.day_stock_prefer_threshold:
-            return str(best_stock["code"])
-        return str(best_etf["code"])
+            ordered_frames = [stock_pool, etf_pool]
+        else:
+            ordered_frames = [etf_pool, stock_pool]
+    elif not stock_pool.empty:
+        ordered_frames = [stock_pool]
+    elif not etf_pool.empty:
+        ordered_frames = [etf_pool]
+    else:
+        ordered_frames = []
 
-    if best_stock is not None:
-        return str(best_stock["code"])
-    if best_etf is not None:
-        return str(best_etf["code"])
-    return None
+    for frame in ordered_frames:
+        ordered_codes.extend([str(code) for code in frame["code"].tolist()])
+
+    deduped_codes: list[str] = []
+    seen: set[str] = set()
+    for code in ordered_codes:
+        if code in seen:
+            continue
+        seen.add(code)
+        deduped_codes.append(code)
+
+    return deduped_codes
 
 
 def _merge_candidates(popular: pd.DataFrame, model: pd.DataFrame, etf: pd.DataFrame) -> pd.DataFrame:
@@ -239,8 +264,9 @@ def _score_swing_row(
     avg20 = parse_numeric(row.get("avg_value_20d")) or 0.0
 
     score = 0.0
+    trend_tier = str(row.get("trend_tier") or "").strip().lower()
     if bool(row.get("source_model", False)):
-        score += 30.0
+        score += 30.0 if trend_tier == "strict" else 22.0
 
     if ma20 and close > ma20:
         score += 10.0

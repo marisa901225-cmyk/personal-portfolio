@@ -1,5 +1,10 @@
+from __future__ import annotations
+
 import logging
-from typing import List, Optional
+import random
+import socket
+import time
+from typing import Any, Dict, List, Optional
 
 try:
     import httpx  # type: ignore
@@ -7,6 +12,7 @@ except Exception:  # pragma: no cover
     httpx = None
 
 import requests
+from requests import exceptions as req_exc
 
 from .base import LLMBackend
 from ..config import Settings
@@ -17,66 +23,184 @@ logger = logging.getLogger(__name__)
 class RemoteLlamaBackend(LLMBackend):
     """
     llama-server (OpenAI 호환 API) 백엔드
+    - /v1/models 로 모델 id 자동 탐색(캐시)
+    - /v1/chat/completions 로 chat 호출
+    - 네트워크/타임아웃/일부 5xx/429 등에 대해 지수 백오프 재시도
     """
+
+    DEFAULT_MODEL_ID = "local-model"
+    MAX_ATTEMPTS = 3
+    RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
 
     def __init__(self, settings: Settings):
         self.settings = settings
         self._use_httpx = bool(httpx)
+
         if self._use_httpx:
             self._client = httpx.Client(timeout=settings.llm_timeout)  # type: ignore[union-attr]
         else:
             self._client = requests.Session()
-        self._model_id_cache: Optional[str] = None
+
+        self._model_id_cache: Dict[str, str] = {}
         self._last_error: Optional[str] = None
 
-    def _get(self, url: str, headers: dict):
-        if self._use_httpx:
-            return self._client.get(url, headers=headers)
-        return self._client.get(url, headers=headers, timeout=self.settings.llm_timeout)
+    def close(self) -> None:
+        """프로세스 종료나 테스트에서 명시적으로 닫고 싶을 때."""
+        try:
+            self._client.close()
+        except Exception:
+            pass
 
-    def _post(self, url: str, payload: dict, headers: dict):
-        if self._use_httpx:
-            return self._client.post(url, json=payload, headers=headers)
-        return self._client.post(url, json=payload, headers=headers, timeout=self.settings.llm_timeout)
+    def __del__(self) -> None:  # pragma: no cover
+        self.close()
 
     def get_last_error(self) -> Optional[str]:
         return self._last_error
 
-    def _base_url(self) -> Optional[str]:
-        if not self.settings.llm_base_url:
+    def reset(self) -> None:
+        """캐시/에러 상태 초기화."""
+        self._model_id_cache = {}
+        self._last_error = None
+
+    def is_loaded(self) -> bool:
+        return True
+
+    # -------------------------
+    # Internal helpers
+    # -------------------------
+
+    def _base_url(self, override: Optional[str] = None) -> Optional[str]:
+        base = (override or self.settings.llm_base_url or "").strip()
+        if not base:
             self._last_error = "LLM_BASE_URL is not set"
             return None
-        return self.settings.llm_base_url.rstrip("/")
+        return base.rstrip("/")
 
-    def _get_model_id(self) -> str:
-        if self._model_id_cache:
-            return self._model_id_cache
+    def _headers(self) -> Dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self.settings.llm_api_key:
+            headers["Authorization"] = f"Bearer {self.settings.llm_api_key}"
+        return headers
 
-        base_url = self._base_url()
-        if not base_url:
-            return "local-model"
+    def _request(self, method: str, url: str, *, payload: Optional[dict] = None) -> Any:
+        headers = self._headers()
+        if self._use_httpx:
+            # httpx.Client는 생성 시 timeout이 걸려있음
+            return self._client.request(method, url, headers=headers, json=payload)
+        # requests는 매 호출마다 timeout 지정
+        return self._client.request(method, url, headers=headers, json=payload, timeout=self.settings.llm_timeout)
 
+    def _is_retryable_exception(self, e: Exception) -> bool:
+        # DNS
+        if isinstance(e, socket.gaierror):
+            return True
+
+        # httpx 예외
+        if self._use_httpx and httpx is not None:
+            # RequestError: ConnectError/ReadError 등 네트워크 계열 포함
+            if isinstance(e, (httpx.TimeoutException, httpx.RequestError)):
+                return True
+
+        # requests 예외
+        if isinstance(e, (req_exc.Timeout, req_exc.ConnectionError)):
+            return True
+
+        return False
+
+    def _is_retryable_http_error(self, e: Exception) -> bool:
+        # httpx HTTPStatusError
+        if self._use_httpx and httpx is not None and isinstance(e, httpx.HTTPStatusError):
+            try:
+                return int(e.response.status_code) in self.RETRYABLE_STATUS
+            except Exception:
+                return False
+
+        # requests HTTPError
+        if isinstance(e, req_exc.HTTPError):
+            try:
+                if e.response is None:
+                    return False
+                return int(e.response.status_code) in self.RETRYABLE_STATUS
+            except Exception:
+                return False
+
+        return False
+
+    def _request_json_with_retries(self, method: str, url: str, *, payload: Optional[dict] = None) -> dict:
+        last_exc: Optional[Exception] = None
+
+        for attempt in range(self.MAX_ATTEMPTS):
+            is_last = (attempt == self.MAX_ATTEMPTS - 1)
+
+            try:
+                r = self._request(method, url, payload=payload)
+                r.raise_for_status()
+                data = r.json()
+                self._last_error = None
+                return data
+
+            except Exception as e:
+                last_exc = e
+                retryable = self._is_retryable_exception(e) or self._is_retryable_http_error(e)
+
+                if retryable and not is_last:
+                    wait = (2 ** attempt) + random.random()  # 지수 백오프 + 지터
+                    logger.warning(
+                        f"Remote LLM request error (attempt {attempt+1}/{self.MAX_ATTEMPTS}): {e}. "
+                        f"Retrying in {wait:.2f}s..."
+                    )
+                    time.sleep(wait)
+                    continue
+
+                # 마지막 실패
+                raise
+
+        # 이론상 도달하지 않지만, mypy/안전장치
+        raise RuntimeError(f"Remote request failed: {last_exc}")
+
+    def _get_model_id(self, base_url: Optional[str] = None) -> str:
+        resolved_base_url = (base_url or "").rstrip("/") if base_url else self._base_url()
+        if not resolved_base_url:
+            return self.DEFAULT_MODEL_ID
+
+        cached_model_id = self._model_id_cache.get(resolved_base_url)
+        if cached_model_id:
+            return cached_model_id
+
+        url = f"{resolved_base_url}/v1/models"
         try:
-            url = f"{base_url}/v1/models"
-            headers = {"Content-Type": "application/json"}
-            if self.settings.llm_api_key:
-                headers["Authorization"] = f"Bearer {self.settings.llm_api_key}"
-
-            r = self._get(url, headers=headers)
-            r.raise_for_status()
-            data = r.json()
+            data = self._request_json_with_retries("GET", url)
             items = data.get("data") or []
             if items and isinstance(items[0], dict):
                 model_id = items[0].get("id")
                 if model_id:
-                    self._model_id_cache = model_id
+                    self._model_id_cache[resolved_base_url] = str(model_id)
                     self._last_error = None
-                    return model_id
+                    return self._model_id_cache[resolved_base_url]
         except Exception as e:
             self._last_error = f"Failed to fetch model id from remote: {e}"
             logger.warning(self._last_error)
 
-        return "local-model"
+        return self.DEFAULT_MODEL_ID
+
+    def _extract_content(self, resp_json: dict) -> str:
+        """
+        OpenAI 호환 응답에서 content 추출.
+        서버/프록시가 변형해도 최대한 안전하게 처리.
+        """
+        try:
+            choices = resp_json.get("choices") or []
+            if not choices:
+                return ""
+            msg = (choices[0] or {}).get("message") or {}
+            content = (msg.get("content") or "").strip()
+            return content
+        except Exception:
+            return ""
+
+    # -------------------------
+    # Public API
+    # -------------------------
 
     def generate(
         self,
@@ -99,68 +223,53 @@ class RemoteLlamaBackend(LLMBackend):
         seed: Optional[int] = None,
         **kwargs,
     ) -> str:
-        import time
-        import random
-        
-        base_url = self._base_url()
+        base_url = self._base_url(kwargs.get("base_url_override"))
         if not base_url:
             return ""
 
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            try:
-                url = f"{base_url}/v1/chat/completions"
-                headers = {"Content-Type": "application/json"}
-                if self.settings.llm_api_key:
-                    headers["Authorization"] = f"Bearer {self.settings.llm_api_key}"
+        url = f"{base_url}/v1/chat/completions"
 
-                payload = {
-                    "model": kwargs.get("model") or self._get_model_id(),
-                    "messages": messages,
-                    "max_tokens": max_tokens,
-                    "temperature": temperature,
-                    "top_p": kwargs.get("top_p", 0.8),
-                    "top_k": kwargs.get("top_k", 20),
-                }
-                if stop:
-                    payload["stop"] = stop
+        model = kwargs.get("model") or self._get_model_id(base_url)
+        top_p = kwargs.get("top_p", 0.8)
+        top_k = kwargs.get("top_k", 20)
+        enable_thinking = bool(kwargs.get("enable_thinking", False))
 
-                # enable_thinking 처리 (명시적 True가 아니면 False로 설정하여 CoT 생성을 억제)
-                enable_thinking = kwargs.get("enable_thinking", False)
-                payload["chat_template_kwargs"] = {"enable_thinking": bool(enable_thinking)}
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": int(max_tokens),
+            "temperature": float(temperature),
+            "top_p": top_p,
+            "top_k": top_k,
+            # CoT 억제 목적: 명시적으로 True일 때만 켬
+            "chat_template_kwargs": {"enable_thinking": enable_thinking},
+        }
 
-                r = self._post(url, payload=payload, headers=headers)
-                r.raise_for_status()
+        if stop:
+            payload["stop"] = stop
+        if seed is not None:
+            payload["seed"] = int(seed)
+
+        # 필요 시 추가 OpenAI 호환 파라미터를 허용(안전한 것만)
+        passthrough_keys = ("presence_penalty", "frequency_penalty", "logit_bias", "response_format")
+        for k in passthrough_keys:
+            if k in kwargs:
+                payload[k] = kwargs[k]
+
+        try:
+            resp = self._request_json_with_retries("POST", url, payload=payload)
+            content = self._extract_content(resp)
+            if not content:
+                # 빈 content면 원인 추적용 에러만 남기고 반환은 빈 문자열 유지
+                self._last_error = f"Remote LLM returned empty content. resp_keys={list(resp.keys())}"
+                logger.warning(self._last_error)
+            else:
                 self._last_error = None
-                
-                resp_json = r.json()
-                content = resp_json["choices"][0]["message"].get("content", "").strip()
-                return content
-            except Exception as e:
-                # DNS 에러(socket.gaierror)나 연결 실패 시 재시도
-                is_last = (attempt == max_attempts - 1)
-                err_msg = str(e).lower()
-                
-                # 재시도 대상: DNS 에러(gaierror), 연결 에러, 타임아웃
-                retryable = any(x in err_msg for x in ["gaierror", "connection", "connect", "timeout"])
-                
-                if retryable and not is_last:
-                    wait_time = (2 ** attempt) + random.random()
-                    logger.warning(
-                        f"Remote LLM connection error (attempt {attempt+1}/{max_attempts}): {e}. "
-                        f"Retrying in {wait_time:.2f}s..."
-                    )
-                    time.sleep(wait_time)
-                    continue
-                    
-                self._last_error = f"Remote LLM request failed: {e}"
-                if "timeout" in err_msg:
-                    logger.error("🚨 타임아웃 타임아웃 🚨 : Remote LLM timed out")
-                logger.error(self._last_error)
-                return ""
-
-    def is_loaded(self) -> bool:
-        return True
-
-    def reset(self) -> None:
-        pass
+            return content
+        except Exception as e:
+            err_lower = str(e).lower()
+            self._last_error = f"Remote LLM request failed: {e}"
+            if "timeout" in err_lower:
+                logger.error("Remote LLM timed out.")
+            logger.error(self._last_error)
+            return ""

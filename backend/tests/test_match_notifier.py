@@ -7,6 +7,7 @@ from unittest.mock import patch, AsyncMock
 import types
 import sys
 
+from backend.services.alarm.catchphrase_constants import build_fallback_lines
 from backend.services.alarm.match_notifier import check_upcoming_matches, _filter_catchphrases
 
 
@@ -142,5 +143,6 @@ class TestMatchNotifier(unittest.TestCase):
 
         self.assertTrue(result)
         sent = stub_mod.send_telegram_message.call_args[0][0]
-        # 진짜 고퀄 폴백 문구가 포함되어 있는지 확인 (LOL_CATCHPHRASES 중 하나)
-        self.assertIn("지금이에요, 소환사님!", sent)
+        # 현재 JSON 기반 LoL fallback 풀 중 하나가 실제 알림에 사용되는지 확인
+        expected_phrase = build_fallback_lines(game_key="LoL")[0]
+        self.assertIn(expected_phrase, sent)

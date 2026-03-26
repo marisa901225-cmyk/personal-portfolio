@@ -69,12 +69,21 @@ async def _generate_weather_message(
     """수집된 원천 데이터로 최종 브리핑 메시지를 생성한다."""
     economic_snapshot = None
     dust_alarm = None
-    lec_results = None
+    culture_context = None
     futures_options_data = None
+    market_outlook_news = None
+    weekly_derivatives_briefing = None
     ultra_short_data = f"기온: {temp}°C | 하늘/강수: {weather_status} | 1시간 강수량: {rn1}mm | 습도: {reh}% | 풍속: {wsd}m/s"
 
     if include_briefing_context:
-        economic_snapshot, dust_alarm, lec_results, futures_options_data = await fetch_briefing_context()
+        (
+            economic_snapshot,
+            dust_alarm,
+            culture_context,
+            futures_options_data,
+            market_outlook_news,
+            weekly_derivatives_briefing,
+        ) = await fetch_briefing_context()
 
     # display_datetime이 있으면 해당 시간을 메시지 제목/표기용으로 사용
     # 없으면 base_date/base_time (예보 기준시각) 사용
@@ -91,8 +100,10 @@ async def _generate_weather_message(
         ultra_short_data=ultra_short_data,
         economic_snapshot=economic_snapshot,
         dust_alarm=dust_alarm,
-        lec_results=lec_results,
+        culture_context=culture_context,
         futures_options_data=futures_options_data,
+        market_outlook_news=market_outlook_news,
+        weekly_derivatives_briefing=weekly_derivatives_briefing,
     )
 
 

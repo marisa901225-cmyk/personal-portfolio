@@ -9,12 +9,31 @@
         "챌린저스 코리아 CK 2군리그"
     ],
     "economy": [
-        "코스피 코스닥 주식시장",
-        "환율 원달러",
+        "증시 전망 코스피 코스닥",
+        "환율 원달러 국채금리",
         "한국은행 금통위 기준금리",
-        "FOMC 연준 CPI PCE",
-        "삼성전자",
-        "ETF",
-        "반도체 HBM DRAM"
-    ]
+        "FOMC 연준 CPI PCE 물가",
+        "반도체 업황 HBM DRAM",
+        "2차전지 전기차 배터리",
+        "AI 반도체 데이터센터",
+        "조선 방산 수주",
+        "바이오 제약 임상",
+        "원유 가스 전력 원자력"
+    ],
+    "google_macro": {
+        "US": [
+            "S&P 500 futures market outlook",
+            "Nasdaq futures market outlook",
+            "Federal Reserve interest rate outlook",
+            "US CPI inflation market reaction",
+            "US Treasury yields market outlook",
+            "WTI oil prices inflation market"
+        ],
+        "EU": [
+            "ECB rate decision market outlook",
+            "Euro Stoxx 50 futures market",
+            "German DAX market outlook",
+            "FTSE 100 market outlook"
+        ]
+    }
 }

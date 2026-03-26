@@ -19,7 +19,7 @@ def _week_id(yyyymmdd: str) -> str:
 
 @dataclass(slots=True)
 class PositionState:
-    type: str  # S | T
+    type: str  # S | T | P
     entry_time: str
     entry_price: float
     qty: int
@@ -41,6 +41,7 @@ class TradeState:
     open_positions: dict[str, PositionState] = field(default_factory=dict)
     last_run_timestamp: str | None = None
     last_bar_date_seen: str | None = None
+    last_panic_date: str | None = None
     pass_reasons_today: dict[str, int] = field(default_factory=dict)
     pending_notifications: list[dict[str, Any]] = field(default_factory=list)
 
@@ -69,6 +70,7 @@ def load_state(path: str) -> TradeState:
         open_positions=_parse_open_positions(raw.get("open_positions", {})),
         last_run_timestamp=raw.get("last_run_timestamp"),
         last_bar_date_seen=raw.get("last_bar_date_seen"),
+        last_panic_date=raw.get("last_panic_date"),
         pass_reasons_today=dict(raw.get("pass_reasons_today", {})),
         pending_notifications=list(raw.get("pending_notifications", [])),
     )

@@ -19,6 +19,9 @@ from .utils import (
 
 logger = logging.getLogger(__name__)
 
+_MODEL_RELAXED_MIN_BARS = 60
+_MODEL_RELAXED_MAX_PREMIUM_TO_MA20 = 0.15
+
 
 def _rank_map(df: pd.DataFrame, rank_col: str) -> dict[str, int]:
     if df.empty or rank_col not in df.columns:
@@ -133,7 +136,14 @@ def model_screener(
     if mcap_df.empty:
         return _empty_model_df()
 
-    mcap_df = mcap_df[mcap_df["mcap"].fillna(0) >= cfg.model_mcap_min].copy()
+    has_numeric_mcap = mcap_df["mcap"].fillna(0).gt(0).any()
+    if has_numeric_mcap:
+        # Some KIS rank payloads omit market-cap numbers for otherwise valid large caps.
+        # When that happens we trust the market-cap-ranked universe and keep those rows.
+        mcap_df = mcap_df[
+            (mcap_df["mcap"].fillna(0) >= cfg.model_mcap_min)
+            | (mcap_df["mcap"].fillna(0) <= 0)
+        ].copy()
     if mcap_df.empty:
         return _empty_model_df()
 
@@ -153,18 +163,19 @@ def model_screener(
             logger.warning("model_screener bars failed code=%s error=%s", code, exc)
             continue
 
-        if bars is None or bars.empty or len(bars) < 120:
+        if bars is None or bars.empty or len(bars) < _MODEL_RELAXED_MIN_BARS:
             continue
 
         close_s = pd.to_numeric(bars.get("close"), errors="coerce")
         if close_s.dropna().empty:
             continue
 
+        close = parse_numeric(close_s.iloc[-1])
         ma5 = compute_sma(close_s, 5).iloc[-1]
         ma20 = compute_sma(close_s, 20).iloc[-1]
         ma60 = compute_sma(close_s, 60).iloc[-1]
-        ma120 = compute_sma(close_s, 120).iloc[-1]
-        if pd.isna(ma5) or pd.isna(ma20) or pd.isna(ma60) or pd.isna(ma120):
+        ma120 = compute_sma(close_s, 120).iloc[-1] if len(close_s) >= 120 else None
+        if close is None or pd.isna(ma5) or pd.isna(ma20) or pd.isna(ma60):
             continue
 
         avg20, used_proxy = compute_avg_value(bars, window=20)
@@ -172,26 +183,38 @@ def model_screener(
             continue
 
         pass_liquidity = avg20 >= cfg.model_avg_value_20d_min
-        # 정배열 조건 (120 < 60 < 20 < 5) 및 종가가 5일선 위에 위치
-        pass_ma = (ma120 < ma60 < ma20 < ma5) and (close_s.iloc[-1] > ma5)
-        if not (pass_liquidity and pass_ma):
+        pass_strict_ma = (
+            ma120 is not None
+            and not pd.isna(ma120)
+            and (ma120 < ma60 < ma20 < ma5)
+            and (close > ma5)
+        )
+        pass_relaxed_ma = (
+            len(close_s) >= _MODEL_RELAXED_MIN_BARS
+            and (close > ma20)
+            and (ma20 > ma60)
+            and (close <= ma20 * (1.0 + _MODEL_RELAXED_MAX_PREMIUM_TO_MA20))
+        )
+        trend_tier = "strict" if pass_strict_ma else "relaxed" if pass_relaxed_ma else ""
+        if not (pass_liquidity and trend_tier):
             continue
 
         rows.append(
             {
                 "code": code,
                 "name": row.get("name", ""),
-                "mcap": float(mcap),
+                "mcap": float(mcap) if mcap is not None else 0.0,
                 "avg_value_20d": float(avg20),
                 "ma5": float(ma5),
                 "ma20": float(ma20),
                 "ma60": float(ma60),
-                "ma120": float(ma120),
+                "ma120": float(ma120) if ma120 is not None and not pd.isna(ma120) else None,
                 "used_value_proxy": bool(used_proxy),
                 "asof_date": asof,
-                "close": parse_numeric(close_s.iloc[-1]),
+                "close": close,
                 "change_pct": parse_numeric(row.get("change_pct")),
                 "is_etf": False,
+                "trend_tier": trend_tier,
             }
         )
 
@@ -313,6 +336,7 @@ def _ensure_model_columns(df: pd.DataFrame) -> pd.DataFrame:
         "close",
         "change_pct",
         "is_etf",
+        "trend_tier",
     ]
     for col in cols:
         if col not in df.columns:

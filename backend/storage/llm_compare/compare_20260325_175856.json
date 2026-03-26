@@ -1,0 +1,205 @@
+{
+  "created_at": "2026-03-25T17:57:59",
+  "services": {
+    "openvino": {
+      "base_url": "http://openvino-server:8082",
+      "model_id": "Josiefied-Qwen3-8B-int8"
+    },
+    "llama-vulkan": {
+      "base_url": "http://llama-server-vulkan-huihui:8083",
+      "model_id": "Huihui-Qwen3.5-9B-Claude-4.6-Opus-abliterated.Q6_K.gguf"
+    }
+  },
+  "cases": [
+    {
+      "name": "alarm_summary",
+      "description": "실서비스 알림 요약 규칙 준수",
+      "expected_shape": "bullets",
+      "results": {
+        "openvino": {
+          "content": "- 카카오톡에서 [민수], [지훈] 등 메시지 2건  \n- 토스증권에서 삼성전자 10주 매수 체결 완료  \n- 배달의민족에서 [순살치킨] 배달 시작  \n- Gmail에서 보안 알림: 새 기기에서 계정 로그인 감지  \n- 쿠팡에서 광고 알림: 오늘만 특가 쿠폰 지급",
+          "elapsed_sec": 7.72,
+          "usage": {
+            "prompt_tokens": 1143,
+            "completion_tokens": 113,
+            "total_tokens": 1256
+          },
+          "timings": {
+            "predicted_per_second": 14.672465610486194,
+            "predicted_ms": 7701.500415802002
+          },
+          "quality_notes": [],
+          "line_count": 5
+        },
+        "llama-vulkan": {
+          "content": "- 카카오톡에서 [민수], [지훈] 등 가족방, 회사 단톡 등 메시지 2건\n- 토스증권에서 삼성전자 10주 매수 체결 완료\n- 배달의민족에서 [순살치킨] 배달 시작\n- Gmail에서 새 기기 로그인 감지 보안 알림 도착",
+          "elapsed_sec": 11.38,
+          "usage": {
+            "completion_tokens": 73,
+            "prompt_tokens": 973,
+            "total_tokens": 1046,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 973,
+            "prompt_ms": 4548.204,
+            "prompt_per_token_ms": 4.674413155190133,
+            "prompt_per_second": 213.9305976600874,
+            "predicted_n": 73,
+            "predicted_ms": 6816.277,
+            "predicted_per_token_ms": 93.37365753424658,
+            "predicted_per_second": 10.70965865970529
+          },
+          "quality_notes": [],
+          "line_count": 4
+        }
+      }
+    },
+    {
+      "name": "refine_alarm_summary",
+      "description": "메타/사고과정 제거와 중복 정리",
+      "expected_shape": "bullets",
+      "results": {
+        "openvino": {
+          "content": "- 카카오톡에서 가족방, 회사 단톡 메시지 2건  \n- 토스증권에서 삼성전자 10주 매수 체결 완료  \n- 배달의민족에서 [순살치킨] 배달 시작",
+          "elapsed_sec": 3.02,
+          "usage": {
+            "prompt_tokens": 375,
+            "completion_tokens": 66,
+            "total_tokens": 441
+          },
+          "timings": {
+            "predicted_per_second": 21.87876267383924,
+            "predicted_ms": 3016.6239738464355
+          },
+          "quality_notes": [],
+          "line_count": 3
+        },
+        "llama-vulkan": {
+          "content": "- 카카오톡에서 가족방, 회사 단톡 메시지 2건\n- 토스증권에서 삼성전자 10주 매수 체결 완료\n- 배달의민족에서 [순살치킨] 배달 시작",
+          "elapsed_sec": 5.78,
+          "usage": {
+            "completion_tokens": 51,
+            "prompt_tokens": 313,
+            "total_tokens": 364,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 313,
+            "prompt_ms": 528.579,
+            "prompt_per_token_ms": 1.6887507987220445,
+            "prompt_per_second": 592.1536799608006,
+            "predicted_n": 51,
+            "predicted_ms": 4156.093,
+            "predicted_per_token_ms": 81.49201960784313,
+            "predicted_per_second": 12.271140227131587
+          },
+          "quality_notes": [],
+          "line_count": 3
+        }
+      }
+    },
+    {
+      "name": "memory_chat_summary",
+      "description": "대화 메모리 요약 안정성",
+      "expected_shape": "plain",
+      "results": {
+        "openvino": {
+          "content": "- 사용자는 한국 주식 자동매매와 가계부 앱을 함께 관리 중입니다.  \n- 트레이딩엔진 주문 가능 수량 로직을 최근 수정했습니다.  \n- 내일 장 시작 시 파킹 주문이 실제 매수가능수량 기준으로 실행되는지 확인할 예정입니다.  \n- Codex fast 모드는 사용하지 않을 계획이며, 설정 파일에서 service_tier를 제거하면 됩니다.  \n- 답변은 군더더기 없이 빠르게 받는 편을 선호합니다.",
+          "elapsed_sec": 4.84,
+          "usage": {
+            "prompt_tokens": 285,
+            "completion_tokens": 128,
+            "total_tokens": 413
+          },
+          "timings": {
+            "predicted_per_second": 26.464617270535296,
+            "predicted_ms": 4836.646556854248
+          },
+          "quality_notes": [],
+          "line_count": 5
+        },
+        "llama-vulkan": {
+          "content": "사용자는 내일 장 시작 시 파킹 주문이 매수가능수량 기준인지 확인하고, Codex fast 모드를 끄려 합니다.\n답변은 군더더기 없이 빠르게 받는 편을 선호합니다.\n현재 주식 자동매매와 가계부 앱 관리를 함께 진행 중입니다.\n미완료 질문은 파킹 주문 수량 기준과 Codex 모드 끄기 방법입니다.",
+          "elapsed_sec": 8.6,
+          "usage": {
+            "completion_tokens": 88,
+            "prompt_tokens": 235,
+            "total_tokens": 323,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 235,
+            "prompt_ms": 392.464,
+            "prompt_per_token_ms": 1.670059574468085,
+            "prompt_per_second": 598.7810346936279,
+            "predicted_n": 88,
+            "predicted_ms": 7225.24,
+            "predicted_per_token_ms": 82.105,
+            "predicted_per_second": 12.17952621643018
+          },
+          "quality_notes": [],
+          "line_count": 4
+        }
+      }
+    },
+    {
+      "name": "general_finance",
+      "description": "일반 한국어 설명 품질",
+      "expected_shape": "plain",
+      "results": {
+        "openvino": {
+          "content": "1. **미국 금리 동향**: 연방준비제도(Fed)의 금리 인상 여부는 달러 강세를 결정하며, 이는 한국 반도체 수출에 부정적인 영향을 줄 수 있다.  \n2. **반도체 수출 수치**: 한국의 반도체 수출량은 원/달러 환율 변동에 따라 수익에 직접적인 영향을 미치므로 주목해야 한다.  \n3. **미국 소비자 물가지수(CPI)**: 미국 경제 성장과 소비자 신뢰를 반영하며, 이는",
+          "elapsed_sec": 4.85,
+          "usage": {
+            "prompt_tokens": 66,
+            "completion_tokens": 140,
+            "total_tokens": 206
+          },
+          "timings": {
+            "predicted_per_second": 28.915159834102948,
+            "predicted_ms": 4841.750860214233
+          },
+          "quality_notes": [],
+          "line_count": 3
+        },
+        "llama-vulkan": {
+          "content": "원/달러 환율이 급등할 때 한국 반도체주 투자자가 확인해야 할 핵심 지표는 다음과 같습니다:\n\n1. **달러/원 환율** - 환율 상승폭이 반도체 장비 및 소재 수입 비용 증가를 반영합니다.\n\n2. **반도체 장비/소재 수출 실적** - 환율 상승으로 해외 매출이 달러 기준 증가하면 실적 개선 효과가 나타납니다.\n\n3. **반도체 주가 수익률** - 환율 상승과 반도체 주가 상승이 동시에 발생하면 투자 수익률이 극대화됩니다.",
+          "elapsed_sec": 10.84,
+          "usage": {
+            "completion_tokens": 114,
+            "prompt_tokens": 48,
+            "total_tokens": 162,
+            "prompt_tokens_details": {
+              "cached_tokens": 0
+            }
+          },
+          "timings": {
+            "cache_n": 0,
+            "prompt_n": 48,
+            "prompt_ms": 532.483,
+            "prompt_per_token_ms": 11.093395833333332,
+            "prompt_per_second": 90.14372289819582,
+            "predicted_n": 114,
+            "predicted_ms": 9372.061,
+            "predicted_per_token_ms": 82.21106140350877,
+            "predicted_per_second": 12.163813274369428
+          },
+          "quality_notes": [
+            "meta_leak"
+          ],
+          "line_count": 4
+        }
+      }
+    }
+  ]
+}
