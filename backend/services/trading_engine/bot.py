@@ -13,16 +13,16 @@ from .journal import TradeJournal
 from .market_calendar import get_last_trading_day, is_trading_day
 from .news_sentiment import build_news_sentiment_signal
 from .notifier import BestEffortNotifier
-from .regime import get_regime
+from .regime import detect_intraday_circuit_breaker, get_regime
 from .risk import can_enter, should_exit_position
 from .state import TradeState, add_pass_reason, load_state, rollover_state_for_date, save_state
-from .strategy import build_candidates, fetch_quotes_subset, pick_daytrade, pick_swing
-from .utils import compute_sma, parse_numeric
+from .strategy import build_candidates, fetch_quotes_subset, pick_swing, rank_daytrade_codes
+from .utils import compute_sma, parse_hhmm, parse_numeric
 
 logger = logging.getLogger(__name__)
 
 _CORE_PASS_REASONS = {"RISK_OFF", "DAILY_MAX_LOSS", "HOLIDAY"}
-_ONCE_PER_DAY_PASS_REASONS = {"HOLIDAY", "DAILY_MAX_LOSS"}
+_ONCE_PER_DAY_PASS_REASONS = {"HOLIDAY", "DAILY_MAX_LOSS", "RISK_OFF"}
 
 
 class HybridTradingBot:
@@ -70,13 +70,59 @@ class HybridTradingBot:
             if (now.hour, now.minute) < (9, 0):
                 asof = get_last_trading_day(self.api, today, config=self.config)
 
-            regime = get_regime(
+            regime, detected_panic_date = get_regime(
                 self.api,
                 asof,
                 primary_code=self.config.market_proxy_code,
                 confirmation_code=self.config.kosdaq_proxy_code,
                 use_confirmation=self.config.use_kosdaq_confirmation,
+                last_panic_date=self.state.last_panic_date,
+                vol_threshold=self.config.regime_vol_threshold,
             )
+
+            if (
+                self.config.use_intraday_circuit_breaker
+                and regime != "RISK_OFF"
+                and (9, 0) <= (now.hour, now.minute) <= (15, 30)
+            ):
+                triggered, cb_meta = detect_intraday_circuit_breaker(
+                    self.api,
+                    asof=today,
+                    code=self.config.market_proxy_code,
+                    one_bar_drop_pct=self.config.intraday_cb_1bar_drop_pct,
+                    window_minutes=self.config.intraday_cb_window_minutes,
+                    window_drop_pct=self.config.intraday_cb_window_drop_pct,
+                    day_change_pct=self.config.intraday_cb_day_change_pct,
+                )
+                if triggered:
+                    regime = "RISK_OFF"
+                    detected_panic_date = today
+                    logger.warning(
+                        "INTRADAY CB TRIGGERED date=%s code=%s meta=%s",
+                        today,
+                        self.config.market_proxy_code,
+                        cb_meta,
+                    )
+                    self._journal(
+                        "INTRADAY_CB",
+                        asof_date=today,
+                        code=self.config.market_proxy_code,
+                        reason=cb_meta.get("reason"),
+                        day_change_pct=cb_meta.get("day_change_pct"),
+                        last_bar_drop_pct=cb_meta.get("last_bar_drop_pct"),
+                        window_drop_pct=cb_meta.get("window_drop_pct"),
+                        window_minutes=cb_meta.get("window_minutes"),
+                    )
+
+            if detected_panic_date:
+                current_panic_date = self.state.last_panic_date
+                if current_panic_date is None or detected_panic_date > current_panic_date:
+                    logger.warning(
+                        "PANIC DETECTED asof=%s panic_date=%s. Setting last_panic_date.",
+                        asof,
+                        detected_panic_date,
+                    )
+                    self.state.last_panic_date = detected_panic_date
 
             candidates = build_candidates(self.api, asof, self.config)
             self._journal(
@@ -89,12 +135,20 @@ class HybridTradingBot:
                 else 0,
             )
 
-            handle_open_orders(self.api, timeout_sec=30, max_retry=0)
+            handle_open_orders(self.api, timeout_sec=30)
+            self._reconcile_state_with_broker_positions()
             self.monitor_positions(now=now)
+            self._manage_risk_off_parking(now=now, regime=regime)
 
             # --- Candidate Notification ---
             self._maybe_notify_candidates(now, candidates, regime)
             # ------------------------------
+
+            if regime == "RISK_OFF":
+                self._pass("RISK_OFF", regime)
+                self.state.last_run_timestamp = now.isoformat(timespec="seconds")
+                save_state(self.config.state_path, self.state)
+                return {"status": "OK", "regime": regime, "asof": asof}
 
             news_signal = build_news_sentiment_signal(self.config)
             if news_signal is not None:
@@ -176,6 +230,47 @@ class HybridTradingBot:
     def close(self) -> None:
         self.notifier.close(timeout_sec=2.0)
 
+    def _reconcile_state_with_broker_positions(self) -> None:
+        try:
+            broker_positions = self.api.positions() or []
+        except Exception as exc:
+            logger.warning("positions reconcile skipped: failed to load broker positions: %s", exc)
+            return
+
+        broker_codes: set[str] = set()
+        for item in broker_positions:
+            code = str(item.get("code") or item.get("pdno") or "").strip()
+            qty = int(parse_numeric(item.get("qty") or item.get("hldg_qty")) or 0)
+            if code and qty > 0:
+                broker_codes.add(code)
+
+        stale_codes = [
+            code
+            for code in self.state.open_positions
+            if code not in broker_codes
+        ]
+        for code in stale_codes:
+            pos = self.state.open_positions.pop(code, None)
+            if not pos:
+                continue
+            logger.warning(
+                "state reconcile dropped stale position code=%s type=%s qty=%s",
+                code,
+                pos.type,
+                pos.qty,
+            )
+            self._journal(
+                "STATE_RECONCILE_DROP",
+                asof_date=self.state.trade_date,
+                code=code,
+                qty=pos.qty,
+                reason="BROKER_POSITION_MISSING",
+                strategy_type=pos.type,
+            )
+            self._notify_text(
+                f"[STATE_SYNC][DROP] {code} local_qty={pos.qty} broker_qty=0"
+            )
+
     def monitor_positions(self, *, now: datetime | None = None) -> None:
         now = now or datetime.now()
         for code, pos in list(self.state.open_positions.items()):
@@ -243,6 +338,103 @@ class HybridTradingBot:
                 strategy_type="T",
             )
 
+    def _manage_risk_off_parking(self, *, now: datetime, regime: str) -> None:
+        parking_codes = self._parking_position_codes()
+        parking_code = str(self.config.risk_off_parking_code).strip()
+        parking_enabled = bool(self.config.risk_off_parking_enabled and parking_code)
+        existing_parking = self.state.open_positions.get(parking_code)
+
+        if regime != "RISK_OFF" or not parking_enabled:
+            if not parking_codes or not self._is_regular_market_open(now):
+                return
+            reason = "RISK_ON" if regime != "RISK_OFF" else "PARKING_DISABLED"
+            self._exit_risk_off_parking_positions(now=now, reason=reason)
+            return
+
+        if parking_codes and parking_code not in parking_codes and self._is_regular_market_open(now):
+            self._exit_risk_off_parking_positions(now=now, reason="PARKING_ROTATE")
+            parking_codes = self._parking_position_codes()
+            if parking_codes:
+                return
+
+        if not self._can_enter_risk_off_parking(now):
+            return
+        if existing_parking is None and len(self.state.open_positions) >= self.config.max_total_positions:
+            return
+
+        result = enter_position(
+            self.api,
+            self.state,
+            position_type="P",
+            code=parking_code,
+            cash_ratio=self.config.risk_off_parking_cash_ratio,
+            asof_date=self.state.trade_date,
+            now=now,
+            order_type=self.config.risk_off_parking_order_type,
+        )
+        if not result:
+            return
+
+        self._journal(
+            "ENTRY_FILL",
+            asof_date=self.state.trade_date,
+            code=parking_code,
+            side="BUY",
+            qty=result.qty,
+            avg_price=result.avg_price,
+            strategy_type="P",
+            regime=regime,
+        )
+        self._notify_text(
+            f"[ENTRY][P][RISK_OFF] {parking_code} qty={result.qty} avg={result.avg_price:.0f}"
+        )
+
+    def _exit_risk_off_parking_positions(self, *, now: datetime, reason: str) -> None:
+        for code in list(self._parking_position_codes()):
+            pos = self.state.open_positions.get(code)
+            if not pos:
+                continue
+
+            entry_price = float(pos.entry_price or 0.0)
+            result = exit_position(self.api, self.state, code=code, reason=reason, now=now)
+            if not result:
+                continue
+
+            pnl_pct = 0.0
+            if entry_price > 0:
+                pnl_pct = (result.avg_price / entry_price - 1.0) * 100.0
+
+            self._journal(
+                "EXIT_FILL",
+                asof_date=self.state.trade_date,
+                code=code,
+                side="SELL",
+                qty=result.qty,
+                avg_price=result.avg_price,
+                pnl_pct=round(pnl_pct, 4),
+                reason=reason,
+                strategy_type="P",
+            )
+            self._notify_text(
+                f"[EXIT][P][{reason}] {code} qty={result.qty} avg={result.avg_price:.0f} pnl={pnl_pct:+.2f}%"
+            )
+
+    def _parking_position_codes(self) -> list[str]:
+        return [
+            code
+            for code, pos in self.state.open_positions.items()
+            if pos.type == "P"
+        ]
+
+    def _is_regular_market_open(self, now: datetime) -> bool:
+        return (9, 0) <= (now.hour, now.minute) <= (15, 30)
+
+    def _can_enter_risk_off_parking(self, now: datetime) -> bool:
+        if not self._is_regular_market_open(now):
+            return False
+        close_h, close_m = parse_hhmm(self.config.no_new_entry_after)
+        return (now.hour, now.minute) < (close_h, close_m)
+
     def _try_enter_swing(
         self,
         *,
@@ -279,6 +471,7 @@ class HybridTradingBot:
             cash_ratio=self.config.swing_cash_ratio,
             asof_date=self.state.trade_date,
             now=now,
+            order_type=self.config.swing_entry_order_type,
         )
         if not result:
             self._pass("SWING_ENTRY_FAILED", regime)
@@ -318,20 +511,28 @@ class HybridTradingBot:
             self._pass(reason, regime)
             return
 
-        code = pick_daytrade(candidates, quotes, self.config, news_signal=news_signal)
-        if not code:
+        ranked_codes = rank_daytrade_codes(candidates, quotes, self.config, news_signal=news_signal)
+        if not ranked_codes:
             self._pass("NO_DAY_PICK", regime)
             return
 
-        result = enter_position(
-            self.api,
-            self.state,
-            position_type="T",
-            code=code,
-            cash_ratio=self.config.day_cash_ratio,
-            asof_date=self.state.trade_date,
-            now=now,
-        )
+        result = None
+        code = ""
+        for ranked_code in ranked_codes:
+            attempt = enter_position(
+                self.api,
+                self.state,
+                position_type="T",
+                code=ranked_code,
+                cash_ratio=self.config.day_cash_ratio,
+                asof_date=self.state.trade_date,
+                now=now,
+                order_type=self.config.day_entry_order_type,
+            )
+            if attempt:
+                result = attempt
+                code = ranked_code
+                break
         if not result:
             self._pass("DAY_ENTRY_FAILED", regime)
             return
@@ -405,7 +606,7 @@ class HybridTradingBot:
 
     def _maybe_notify_candidates(self, now: datetime, candidates: Any, regime: str) -> None:
         """진입 시간대에 후보 종목 리스트를 텔레그램으로 쏩니다 (윈도우당 1회)"""
-        if regime == "RISK_OFF" or candidates.merged.empty:
+        if candidates.merged.empty:
             return
 
         # 현재 어느 윈도우에 있는지 확인
@@ -429,6 +630,10 @@ class HybridTradingBot:
         # 상위 10개 포맷팅
         top_10 = candidates.merged.head(10)
         lines = [f"🎯 [Entry Window] Scanned Symbols ({regime})"]
+        if regime == "RISK_OFF":
+            lines.append("※ RISK_OFF 상태: 후보 관찰 전용 (공격적 신규 진입 차단)")
+            if self.config.risk_off_parking_enabled and self.config.risk_off_parking_code:
+                lines.append(f"※ 여유 현금 파킹 대상: {self.config.risk_off_parking_code}")
         for i, (_, row) in enumerate(top_10.iterrows(), 1):
             code = row["code"]
             name = row["name"]

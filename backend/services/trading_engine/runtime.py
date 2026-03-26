@@ -105,6 +105,34 @@ def _load_config_from_env() -> TradeEngineConfig:
 
     cfg.swing_cash_ratio = _env_float("TRADING_ENGINE_SWING_CASH_RATIO", cfg.swing_cash_ratio)
     cfg.day_cash_ratio = _env_float("TRADING_ENGINE_DAY_CASH_RATIO", cfg.day_cash_ratio)
+    if os.getenv("TRADING_ENGINE_SWING_ENTRY_ORDER_TYPE"):
+        cfg.swing_entry_order_type = os.getenv(
+            "TRADING_ENGINE_SWING_ENTRY_ORDER_TYPE",
+            cfg.swing_entry_order_type,
+        ).strip()
+    if os.getenv("TRADING_ENGINE_DAY_ENTRY_ORDER_TYPE"):
+        cfg.day_entry_order_type = os.getenv(
+            "TRADING_ENGINE_DAY_ENTRY_ORDER_TYPE",
+            cfg.day_entry_order_type,
+        ).strip()
+    cfg.risk_off_parking_enabled = _env_bool(
+        "TRADING_ENGINE_RISK_OFF_PARKING_ENABLED",
+        cfg.risk_off_parking_enabled,
+    )
+    cfg.risk_off_parking_cash_ratio = _env_float(
+        "TRADING_ENGINE_RISK_OFF_PARKING_CASH_RATIO",
+        cfg.risk_off_parking_cash_ratio,
+    )
+    if os.getenv("TRADING_ENGINE_RISK_OFF_PARKING_ORDER_TYPE"):
+        cfg.risk_off_parking_order_type = os.getenv(
+            "TRADING_ENGINE_RISK_OFF_PARKING_ORDER_TYPE",
+            cfg.risk_off_parking_order_type,
+        ).strip()
+    if os.getenv("TRADING_ENGINE_RISK_OFF_PARKING_CODE"):
+        cfg.risk_off_parking_code = os.getenv(
+            "TRADING_ENGINE_RISK_OFF_PARKING_CODE",
+            cfg.risk_off_parking_code,
+        ).strip()
     cfg.day_hard_drop_exclude_pct = _env_float(
         "TRADING_ENGINE_DAY_HARD_DROP_EXCLUDE_PCT",
         cfg.day_hard_drop_exclude_pct,
@@ -149,6 +177,30 @@ def _load_config_from_env() -> TradeEngineConfig:
     cfg.swing_trend_break_buffer_pct = _env_float(
         "TRADING_ENGINE_SWING_TREND_BREAK_BUFFER_PCT",
         cfg.swing_trend_break_buffer_pct,
+    )
+    cfg.regime_vol_threshold = _env_float(
+        "TRADING_ENGINE_REGIME_VOL_THRESHOLD",
+        cfg.regime_vol_threshold,
+    )
+    cfg.use_intraday_circuit_breaker = _env_bool(
+        "TRADING_ENGINE_USE_INTRADAY_CB",
+        cfg.use_intraday_circuit_breaker,
+    )
+    cfg.intraday_cb_day_change_pct = _env_float(
+        "TRADING_ENGINE_INTRADAY_CB_DAY_CHANGE_PCT",
+        cfg.intraday_cb_day_change_pct,
+    )
+    cfg.intraday_cb_1bar_drop_pct = _env_float(
+        "TRADING_ENGINE_INTRADAY_CB_1BAR_DROP_PCT",
+        cfg.intraday_cb_1bar_drop_pct,
+    )
+    cfg.intraday_cb_window_minutes = _env_int(
+        "TRADING_ENGINE_INTRADAY_CB_WINDOW_MINUTES",
+        cfg.intraday_cb_window_minutes,
+    )
+    cfg.intraday_cb_window_drop_pct = _env_float(
+        "TRADING_ENGINE_INTRADAY_CB_WINDOW_DROP_PCT",
+        cfg.intraday_cb_window_drop_pct,
     )
     cfg.use_news_sentiment = _env_bool("TRADING_ENGINE_USE_NEWS_SENTIMENT", cfg.use_news_sentiment)
     cfg.news_lookback_hours = _env_int("TRADING_ENGINE_NEWS_LOOKBACK_HOURS", cfg.news_lookback_hours)

@@ -22,6 +22,14 @@ class TradeEngineConfig:
     # Sizing
     swing_cash_ratio: float = 0.75
     day_cash_ratio: float = 0.20
+    swing_entry_order_type: str = "best"
+    day_entry_order_type: str = "best"
+
+    # Risk-off cash parking
+    risk_off_parking_enabled: bool = True
+    risk_off_parking_code: str = "440650"
+    risk_off_parking_cash_ratio: float = 0.95
+    risk_off_parking_order_type: str = "best"
 
     # Swing exits
     swing_stop_loss_pct: float = -0.03
@@ -50,7 +58,7 @@ class TradeEngineConfig:
     )
     no_new_entry_after: str = "15:00"
     monitor_interval_sec: int = 240
-    day_entry_only_second_window: bool = True
+    day_entry_window_index: int = 0
 
     # Scanner knobs
     popular_volume_top_n: int = 100
@@ -79,6 +87,12 @@ class TradeEngineConfig:
     market_proxy_code: str = "069500"
     kosdaq_proxy_code: str = "229200"
     use_kosdaq_confirmation: bool = False
+    regime_vol_threshold: float = 0.05
+    use_intraday_circuit_breaker: bool = True
+    intraday_cb_day_change_pct: float = -3.0
+    intraday_cb_1bar_drop_pct: float = -1.2
+    intraday_cb_window_minutes: int = 5
+    intraday_cb_window_drop_pct: float = -2.0
 
     # Paths
     state_path: str = "backend/storage/trading_engine/state.json"

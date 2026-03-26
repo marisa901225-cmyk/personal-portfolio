@@ -1,0 +1,847 @@
+{
+  "created_at": "2026-03-25T19:15:28",
+  "fairness": {
+    "warmup_runs_per_case": 1,
+    "measured_runs_per_case": 3,
+    "temperature": 0.0,
+    "top_p": 1.0,
+    "notes": [
+      "same prompts/cases for both services",
+      "deterministic decoding for lower run-to-run variance",
+      "warmup runs excluded from measured averages",
+      "measured runs retain per-run details for auditability"
+    ]
+  },
+  "services": {
+    "openvino": {
+      "base_url": "http://127.0.0.1:8082",
+      "model_id": "Josiefied-Qwen3-8B-int8"
+    },
+    "llama-vulkan-q8": {
+      "base_url": "http://127.0.0.1:8083",
+      "model_id": "Huihui-Qwen3.5-9B-Claude-4.6-Opus-abliterated.Q8_0.gguf"
+    }
+  },
+  "cases": [
+    {
+      "name": "alarm_summary",
+      "description": "실서비스 알림 요약 규칙 준수",
+      "expected_shape": "bullets",
+      "results": {
+        "openvino": {
+          "content": "- 카카오톡에서 [민수], [지훈] 등 메시지 2건  \n- 토스증권에서 삼성전자 10주 매수 체결 완료  \n- 배달의민족에서 [순살치킨] 배달 시작  \n- Gmail에서 보안 알림: 새 기기에서 계정 로그인 감지  \n- 쿠팡에서 광고 알림: 오늘만 특가 쿠폰 지급",
+          "elapsed_sec": 3.68,
+          "elapsed_sec_avg": 3.68,
+          "elapsed_sec_median": 3.68,
+          "usage_avg": {
+            "prompt_tokens": 1143.0,
+            "completion_tokens": 113.0,
+            "total_tokens": 1256.0
+          },
+          "predicted_per_second_avg": 30.73,
+          "quality_notes": [],
+          "line_count": 5,
+          "output_variants": 1,
+          "runs": [
+            {
+              "content": "- 카카오톡에서 [민수], [지훈] 등 메시지 2건  \n- 토스증권에서 삼성전자 10주 매수 체결 완료  \n- 배달의민족에서 [순살치킨] 배달 시작  \n- Gmail에서 보안 알림: 새 기기에서 계정 로그인 감지  \n- 쿠팡에서 광고 알림: 오늘만 특가 쿠폰 지급",
+              "elapsed_sec": 3.68,
+              "usage": {
+                "prompt_tokens": 1143,
+                "completion_tokens": 113,
+                "total_tokens": 1256
+              },
+              "timings": {
+                "predicted_per_second": 30.751232384782394,
+                "predicted_ms": 3674.649477005005
+              },
+              "quality_notes": [],
+              "line_count": 5
+            },
+            {
+              "content": "- 카카오톡에서 [민수], [지훈] 등 메시지 2건  \n- 토스증권에서 삼성전자 10주 매수 체결 완료  \n- 배달의민족에서 [순살치킨] 배달 시작  \n- Gmail에서 보안 알림: 새 기기에서 계정 로그인 감지  \n- 쿠팡에서 광고 알림: 오늘만 특가 쿠폰 지급",
+              "elapsed_sec": 3.68,
+              "usage": {
+                "prompt_tokens": 1143,
+                "completion_tokens": 113,
+                "total_tokens": 1256
+              },
+              "timings": {
+                "predicted_per_second": 30.762543348999444,
+                "predicted_ms": 3673.2983589172363
+              },
+              "quality_notes": [],
+              "line_count": 5
+            },
+            {
+              "content": "- 카카오톡에서 [민수], [지훈] 등 메시지 2건  \n- 토스증권에서 삼성전자 10주 매수 체결 완료  \n- 배달의민족에서 [순살치킨] 배달 시작  \n- Gmail에서 보안 알림: 새 기기에서 계정 로그인 감지  \n- 쿠팡에서 광고 알림: 오늘만 특가 쿠폰 지급",
+              "elapsed_sec": 3.69,
+              "usage": {
+                "prompt_tokens": 1143,
+                "completion_tokens": 113,
+                "total_tokens": 1256
+              },
+              "timings": {
+                "predicted_per_second": 30.671087075016676,
+                "predicted_ms": 3684.251546859741
+              },
+              "quality_notes": [],
+              "line_count": 5
+            }
+          ],
+          "warmup_runs": [
+            {
+              "content": "- 카카오톡에서 [민수], [지훈] 등 메시지 2건  \n- 토스증권에서 삼성전자 10주 매수 체결 완료  \n- 배달의민족에서 [순살치킨] 배달 시작  \n- Gmail에서 보안 알림: 새 기기에서 계정 로그인 감지  \n- 쿠팡에서 광고 알림: 오늘만 특가 쿠폰 지급",
+              "elapsed_sec": 4.89,
+              "usage": {
+                "prompt_tokens": 1143,
+                "completion_tokens": 113,
+                "total_tokens": 1256
+              },
+              "timings": {
+                "predicted_per_second": 23.13430751079066,
+                "predicted_ms": 4884.520530700684
+              },
+              "quality_notes": [],
+              "line_count": 5
+            }
+          ]
+        },
+        "llama-vulkan-q8": {
+          "content": "- 카카오톡에서 [민수], [지훈] 등 가족방, 회사 단톡 메시지 2건\n- 토스증권에서 삼성전자 10주 매수 체결 완료\n- 배달의민족에서 [순살치킨] 배달 시작\n- Gmail에서 새 기기 로그인 보안 알림 1건",
+          "elapsed_sec": 5.72,
+          "elapsed_sec_avg": 5.72,
+          "elapsed_sec_median": 5.72,
+          "usage_avg": {
+            "prompt_tokens": 973.0,
+            "completion_tokens": 72.0,
+            "total_tokens": 1045.0
+          },
+          "predicted_per_second_avg": 12.81,
+          "quality_notes": [],
+          "line_count": 4,
+          "output_variants": 1,
+          "runs": [
+            {
+              "content": "- 카카오톡에서 [민수], [지훈] 등 가족방, 회사 단톡 메시지 2건\n- 토스증권에서 삼성전자 10주 매수 체결 완료\n- 배달의민족에서 [순살치킨] 배달 시작\n- Gmail에서 새 기기 로그인 보안 알림 1건",
+              "elapsed_sec": 5.72,
+              "usage": {
+                "completion_tokens": 72,
+                "prompt_tokens": 973,
+                "total_tokens": 1045,
+                "prompt_tokens_details": {
+                  "cached_tokens": 969
+                }
+              },
+              "timings": {
+                "cache_n": 969,
+                "prompt_n": 4,
+                "prompt_ms": 89.66,
+                "prompt_per_token_ms": 22.415,
+                "prompt_per_second": 44.612982377871965,
+                "predicted_n": 72,
+                "predicted_ms": 5622.387,
+                "predicted_per_token_ms": 78.08870833333333,
+                "predicted_per_second": 12.80594879007795
+              },
+              "quality_notes": [],
+              "line_count": 4
+            },
+            {
+              "content": "- 카카오톡에서 [민수], [지훈] 등 가족방, 회사 단톡 메시지 2건\n- 토스증권에서 삼성전자 10주 매수 체결 완료\n- 배달의민족에서 [순살치킨] 배달 시작\n- Gmail에서 새 기기 로그인 보안 알림 1건",
+              "elapsed_sec": 5.72,
+              "usage": {
+                "completion_tokens": 72,
+                "prompt_tokens": 973,
+                "total_tokens": 1045,
+                "prompt_tokens_details": {
+                  "cached_tokens": 969
+                }
+              },
+              "timings": {
+                "cache_n": 969,
+                "prompt_n": 4,
+                "prompt_ms": 89.52,
+                "prompt_per_token_ms": 22.38,
+                "prompt_per_second": 44.68275245755139,
+                "predicted_n": 72,
+                "predicted_ms": 5622.77,
+                "predicted_per_token_ms": 78.09402777777778,
+                "predicted_per_second": 12.80507650143968
+              },
+              "quality_notes": [],
+              "line_count": 4
+            },
+            {
+              "content": "- 카카오톡에서 [민수], [지훈] 등 가족방, 회사 단톡 메시지 2건\n- 토스증권에서 삼성전자 10주 매수 체결 완료\n- 배달의민족에서 [순살치킨] 배달 시작\n- Gmail에서 새 기기 로그인 보안 알림 1건",
+              "elapsed_sec": 5.72,
+              "usage": {
+                "completion_tokens": 72,
+                "prompt_tokens": 973,
+                "total_tokens": 1045,
+                "prompt_tokens_details": {
+                  "cached_tokens": 969
+                }
+              },
+              "timings": {
+                "cache_n": 969,
+                "prompt_n": 4,
+                "prompt_ms": 89.71,
+                "prompt_per_token_ms": 22.4275,
+                "prompt_per_second": 44.58811726674841,
+                "predicted_n": 72,
+                "predicted_ms": 5622.578,
+                "predicted_per_token_ms": 78.09136111111111,
+                "predicted_per_second": 12.805513769662243
+              },
+              "quality_notes": [],
+              "line_count": 4
+            }
+          ],
+          "warmup_runs": [
+            {
+              "content": "- 카카오톡에서 [민수], [지훈] 등 가족방, 회사 단톡 메시지 2건\n- 토스증권에서 삼성전자 10주 매수 체결 완료\n- 배달의민족에서 [순살치킨] 배달 시작\n- Gmail에서 새 기기 로그인 보안 알림 1건",
+              "elapsed_sec": 7.04,
+              "usage": {
+                "completion_tokens": 72,
+                "prompt_tokens": 973,
+                "total_tokens": 1045,
+                "prompt_tokens_details": {
+                  "cached_tokens": 969
+                }
+              },
+              "timings": {
+                "cache_n": 969,
+                "prompt_n": 4,
+                "prompt_ms": 89.64,
+                "prompt_per_token_ms": 22.41,
+                "prompt_per_second": 44.62293618920125,
+                "predicted_n": 72,
+                "predicted_ms": 5621.052,
+                "predicted_per_token_ms": 78.07016666666667,
+                "predicted_per_second": 12.808990203257327
+              },
+              "quality_notes": [],
+              "line_count": 4
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "refine_alarm_summary",
+      "description": "메타/사고과정 제거와 중복 정리",
+      "expected_shape": "bullets",
+      "results": {
+        "openvino": {
+          "content": "- 카카오톡에서 가족방, 회사 단톡 메시지 2건  \n- 토스증권에서 삼성전자 10주 매수 체결 완료  \n- 배달의민족에서 [순살치킨] 배달 시작",
+          "elapsed_sec": 1.91,
+          "elapsed_sec_avg": 1.91,
+          "elapsed_sec_median": 1.91,
+          "usage_avg": {
+            "prompt_tokens": 375.0,
+            "completion_tokens": 66.0,
+            "total_tokens": 441.0
+          },
+          "predicted_per_second_avg": 34.67,
+          "quality_notes": [],
+          "line_count": 3,
+          "output_variants": 1,
+          "runs": [
+            {
+              "content": "- 카카오톡에서 가족방, 회사 단톡 메시지 2건  \n- 토스증권에서 삼성전자 10주 매수 체결 완료  \n- 배달의민족에서 [순살치킨] 배달 시작",
+              "elapsed_sec": 1.91,
+              "usage": {
+                "prompt_tokens": 375,
+                "completion_tokens": 66,
+                "total_tokens": 441
+              },
+              "timings": {
+                "predicted_per_second": 34.66335256389467,
+                "predicted_ms": 1904.0281772613525
+              },
+              "quality_notes": [],
+              "line_count": 3
+            },
+            {
+              "content": "- 카카오톡에서 가족방, 회사 단톡 메시지 2건  \n- 토스증권에서 삼성전자 10주 매수 체결 완료  \n- 배달의민족에서 [순살치킨] 배달 시작",
+              "elapsed_sec": 1.91,
+              "usage": {
+                "prompt_tokens": 375,
+                "completion_tokens": 66,
+                "total_tokens": 441
+              },
+              "timings": {
+                "predicted_per_second": 34.622115079759645,
+                "predicted_ms": 1906.2960147857666
+              },
+              "quality_notes": [],
+              "line_count": 3
+            },
+            {
+              "content": "- 카카오톡에서 가족방, 회사 단톡 메시지 2건  \n- 토스증권에서 삼성전자 10주 매수 체결 완료  \n- 배달의민족에서 [순살치킨] 배달 시작",
+              "elapsed_sec": 1.9,
+              "usage": {
+                "prompt_tokens": 375,
+                "completion_tokens": 66,
+                "total_tokens": 441
+              },
+              "timings": {
+                "predicted_per_second": 34.71787207977594,
+                "predicted_ms": 1901.0381698608398
+              },
+              "quality_notes": [],
+              "line_count": 3
+            }
+          ],
+          "warmup_runs": [
+            {
+              "content": "- 카카오톡에서 가족방, 회사 단톡 메시지 2건  \n- 토스증권에서 삼성전자 10주 매수 체결 완료  \n- 배달의민족에서 [순살치킨] 배달 시작",
+              "elapsed_sec": 3.18,
+              "usage": {
+                "prompt_tokens": 375,
+                "completion_tokens": 66,
+                "total_tokens": 441
+              },
+              "timings": {
+                "predicted_per_second": 20.748996444494814,
+                "predicted_ms": 3180.8767318725586
+              },
+              "quality_notes": [],
+              "line_count": 3
+            }
+          ]
+        },
+        "llama-vulkan-q8": {
+          "content": "- 카카오톡에서 가족방, 회사 단톡 메시지 2건\n- 토스증권에서 삼성전자 10주 매수 체결 완료\n- 배달의민족에서 [순살치킨] 배달 시작",
+          "elapsed_sec": 4.05,
+          "elapsed_sec_avg": 4.05,
+          "elapsed_sec_median": 4.05,
+          "usage_avg": {
+            "prompt_tokens": 313.0,
+            "completion_tokens": 51.0,
+            "total_tokens": 364.0
+          },
+          "predicted_per_second_avg": 12.9,
+          "quality_notes": [],
+          "line_count": 3,
+          "output_variants": 1,
+          "runs": [
+            {
+              "content": "- 카카오톡에서 가족방, 회사 단톡 메시지 2건\n- 토스증권에서 삼성전자 10주 매수 체결 완료\n- 배달의민족에서 [순살치킨] 배달 시작",
+              "elapsed_sec": 4.05,
+              "usage": {
+                "completion_tokens": 51,
+                "prompt_tokens": 313,
+                "total_tokens": 364,
+                "prompt_tokens_details": {
+                  "cached_tokens": 309
+                }
+              },
+              "timings": {
+                "cache_n": 309,
+                "prompt_n": 4,
+                "prompt_ms": 88.294,
+                "prompt_per_token_ms": 22.0735,
+                "prompt_per_second": 45.303191609848916,
+                "predicted_n": 51,
+                "predicted_ms": 3953.093,
+                "predicted_per_token_ms": 77.51162745098038,
+                "predicted_per_second": 12.901290204910435
+              },
+              "quality_notes": [],
+              "line_count": 3
+            },
+            {
+              "content": "- 카카오톡에서 가족방, 회사 단톡 메시지 2건\n- 토스증권에서 삼성전자 10주 매수 체결 완료\n- 배달의민족에서 [순살치킨] 배달 시작",
+              "elapsed_sec": 4.05,
+              "usage": {
+                "completion_tokens": 51,
+                "prompt_tokens": 313,
+                "total_tokens": 364,
+                "prompt_tokens_details": {
+                  "cached_tokens": 309
+                }
+              },
+              "timings": {
+                "cache_n": 309,
+                "prompt_n": 4,
+                "prompt_ms": 88.304,
+                "prompt_per_token_ms": 22.076,
+                "prompt_per_second": 45.2980612429788,
+                "predicted_n": 51,
+                "predicted_ms": 3952.121,
+                "predicted_per_token_ms": 77.49256862745098,
+                "predicted_per_second": 12.904463198368672
+              },
+              "quality_notes": [],
+              "line_count": 3
+            },
+            {
+              "content": "- 카카오톡에서 가족방, 회사 단톡 메시지 2건\n- 토스증권에서 삼성전자 10주 매수 체결 완료\n- 배달의민족에서 [순살치킨] 배달 시작",
+              "elapsed_sec": 4.05,
+              "usage": {
+                "completion_tokens": 51,
+                "prompt_tokens": 313,
+                "total_tokens": 364,
+                "prompt_tokens_details": {
+                  "cached_tokens": 309
+                }
+              },
+              "timings": {
+                "cache_n": 309,
+                "prompt_n": 4,
+                "prompt_ms": 88.548,
+                "prompt_per_token_ms": 22.137,
+                "prompt_per_second": 45.17323937299544,
+                "predicted_n": 51,
+                "predicted_ms": 3951.736,
+                "predicted_per_token_ms": 77.48501960784313,
+                "predicted_per_second": 12.905720422619325
+              },
+              "quality_notes": [],
+              "line_count": 3
+            }
+          ],
+          "warmup_runs": [
+            {
+              "content": "- 카카오톡에서 가족방, 회사 단톡 메시지 2건\n- 토스증권에서 삼성전자 10주 매수 체결 완료\n- 배달의민족에서 [순살치킨] 배달 시작",
+              "elapsed_sec": 5.46,
+              "usage": {
+                "completion_tokens": 51,
+                "prompt_tokens": 313,
+                "total_tokens": 364,
+                "prompt_tokens_details": {
+                  "cached_tokens": 309
+                }
+              },
+              "timings": {
+                "cache_n": 309,
+                "prompt_n": 4,
+                "prompt_ms": 89.537,
+                "prompt_per_token_ms": 22.38425,
+                "prompt_per_second": 44.67426873806359,
+                "predicted_n": 51,
+                "predicted_ms": 3951.398,
+                "predicted_per_token_ms": 77.47839215686275,
+                "predicted_per_second": 12.90682436950163
+              },
+              "quality_notes": [],
+              "line_count": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "memory_chat_summary",
+      "description": "대화 메모리 요약 안정성",
+      "expected_shape": "plain",
+      "results": {
+        "openvino": {
+          "content": "- 사용자는 한국 주식 자동매매와 가계부 앱을 함께 관리 중입니다.  \n- 트레이딩엔진 주문 가능 수량 로직을 최근 수정했습니다.  \n- 내일 장 시작 시 파킹 주문이 실제 매수가능수량 기준으로 적용되는지 확인할 예정입니다.  \n- Codex fast 모드는 사용하지 않을 계획이며, 설정 파일에서 service_tier를 제거하면 됩니다.  \n- 답변은 군더더기 없이 빠르게 받는 편을 선호합니다.",
+          "elapsed_sec": 3.41,
+          "elapsed_sec_avg": 3.42,
+          "elapsed_sec_median": 3.41,
+          "usage_avg": {
+            "prompt_tokens": 285.0,
+            "completion_tokens": 128.0,
+            "total_tokens": 413.0
+          },
+          "predicted_per_second_avg": 37.44,
+          "quality_notes": [],
+          "line_count": 5,
+          "output_variants": 1,
+          "runs": [
+            {
+              "content": "- 사용자는 한국 주식 자동매매와 가계부 앱을 함께 관리 중입니다.  \n- 트레이딩엔진 주문 가능 수량 로직을 최근 수정했습니다.  \n- 내일 장 시작 시 파킹 주문이 실제 매수가능수량 기준으로 적용되는지 확인할 예정입니다.  \n- Codex fast 모드는 사용하지 않을 계획이며, 설정 파일에서 service_tier를 제거하면 됩니다.  \n- 답변은 군더더기 없이 빠르게 받는 편을 선호합니다.",
+              "elapsed_sec": 3.41,
+              "usage": {
+                "prompt_tokens": 285,
+                "completion_tokens": 128,
+                "total_tokens": 413
+              },
+              "timings": {
+                "predicted_per_second": 37.52371390968799,
+                "predicted_ms": 3411.1762046813965
+              },
+              "quality_notes": [],
+              "line_count": 5
+            },
+            {
+              "content": "- 사용자는 한국 주식 자동매매와 가계부 앱을 함께 관리 중입니다.  \n- 트레이딩엔진 주문 가능 수량 로직을 최근 수정했습니다.  \n- 내일 장 시작 시 파킹 주문이 실제 매수가능수량 기준으로 적용되는지 확인할 예정입니다.  \n- Codex fast 모드는 사용하지 않을 계획이며, 설정 파일에서 service_tier를 제거하면 됩니다.  \n- 답변은 군더더기 없이 빠르게 받는 편을 선호합니다.",
+              "elapsed_sec": 3.41,
+              "usage": {
+                "prompt_tokens": 285,
+                "completion_tokens": 128,
+                "total_tokens": 413
+              },
+              "timings": {
+                "predicted_per_second": 37.516765151472796,
+                "predicted_ms": 3411.8080139160156
+              },
+              "quality_notes": [],
+              "line_count": 5
+            },
+            {
+              "content": "- 사용자는 한국 주식 자동매매와 가계부 앱을 함께 관리 중입니다.  \n- 트레이딩엔진 주문 가능 수량 로직을 최근 수정했습니다.  \n- 내일 장 시작 시 파킹 주문이 실제 매수가능수량 기준으로 적용되는지 확인할 예정입니다.  \n- Codex fast 모드는 사용하지 않을 계획이며, 설정 파일에서 service_tier를 제거하면 됩니다.  \n- 답변은 군더더기 없이 빠르게 받는 편을 선호합니다.",
+              "elapsed_sec": 3.43,
+              "usage": {
+                "prompt_tokens": 285,
+                "completion_tokens": 128,
+                "total_tokens": 413
+              },
+              "timings": {
+                "predicted_per_second": 37.29187757793463,
+                "predicted_ms": 3432.382822036743
+              },
+              "quality_notes": [],
+              "line_count": 5
+            }
+          ],
+          "warmup_runs": [
+            {
+              "content": "- 사용자는 한국 주식 자동매매와 가계부 앱을 함께 관리 중입니다.  \n- 트레이딩엔진 주문 가능 수량 로직을 최근 수정했습니다.  \n- 내일 장 시작 시 파킹 주문이 실제 매수가능수량 기준으로 적용되는지 확인할 예정입니다.  \n- Codex fast 모드는 사용하지 않을 계획이며, 설정 파일에서 service_tier를 제거하면 됩니다.  \n- 답변은 군더더기 없이 빠르게 받는 편을 선호합니다.",
+              "elapsed_sec": 4.63,
+              "usage": {
+                "prompt_tokens": 285,
+                "completion_tokens": 128,
+                "total_tokens": 413
+              },
+              "timings": {
+                "predicted_per_second": 27.663939078118972,
+                "predicted_ms": 4626.962184906006
+              },
+              "quality_notes": [],
+              "line_count": 5
+            }
+          ]
+        },
+        "llama-vulkan-q8": {
+          "content": "- 사용자는 한국 주식 자동매매와 가계부 앱을 함께 관리 중입니다.\n- 최근에는 트레이딩엔진 주문 가능 수량 로직을 수정했습니다.\n- 내일 장 시작 시 파킹 주문이 매수가능수량 기준인지 확인할 예정입니다.\n- Codex fast 모드를 끄고 답변은 군더더기 없이 빠르게 받는 편을 선호합니다.",
+          "elapsed_sec": 6.66,
+          "elapsed_sec_avg": 6.66,
+          "elapsed_sec_median": 6.66,
+          "usage_avg": {
+            "prompt_tokens": 235.0,
+            "completion_tokens": 84.0,
+            "total_tokens": 319.0
+          },
+          "predicted_per_second_avg": 12.8,
+          "quality_notes": [],
+          "line_count": 4,
+          "output_variants": 1,
+          "runs": [
+            {
+              "content": "- 사용자는 한국 주식 자동매매와 가계부 앱을 함께 관리 중입니다.\n- 최근에는 트레이딩엔진 주문 가능 수량 로직을 수정했습니다.\n- 내일 장 시작 시 파킹 주문이 매수가능수량 기준인지 확인할 예정입니다.\n- Codex fast 모드를 끄고 답변은 군더더기 없이 빠르게 받는 편을 선호합니다.",
+              "elapsed_sec": 6.66,
+              "usage": {
+                "completion_tokens": 84,
+                "prompt_tokens": 235,
+                "total_tokens": 319,
+                "prompt_tokens_details": {
+                  "cached_tokens": 231
+                }
+              },
+              "timings": {
+                "cache_n": 231,
+                "prompt_n": 4,
+                "prompt_ms": 87.996,
+                "prompt_per_token_ms": 21.999,
+                "prompt_per_second": 45.45661166416656,
+                "predicted_n": 84,
+                "predicted_ms": 6565.108,
+                "predicted_per_token_ms": 78.15604761904763,
+                "predicted_per_second": 12.79491517885159
+              },
+              "quality_notes": [],
+              "line_count": 4
+            },
+            {
+              "content": "- 사용자는 한국 주식 자동매매와 가계부 앱을 함께 관리 중입니다.\n- 최근에는 트레이딩엔진 주문 가능 수량 로직을 수정했습니다.\n- 내일 장 시작 시 파킹 주문이 매수가능수량 기준인지 확인할 예정입니다.\n- Codex fast 모드를 끄고 답변은 군더더기 없이 빠르게 받는 편을 선호합니다.",
+              "elapsed_sec": 6.66,
+              "usage": {
+                "completion_tokens": 84,
+                "prompt_tokens": 235,
+                "total_tokens": 319,
+                "prompt_tokens_details": {
+                  "cached_tokens": 231
+                }
+              },
+              "timings": {
+                "cache_n": 231,
+                "prompt_n": 4,
+                "prompt_ms": 88.016,
+                "prompt_per_token_ms": 22.004,
+                "prompt_per_second": 45.44628249409198,
+                "predicted_n": 84,
+                "predicted_ms": 6562.005,
+                "predicted_per_token_ms": 78.11910714285715,
+                "predicted_per_second": 12.800965558544988
+              },
+              "quality_notes": [],
+              "line_count": 4
+            },
+            {
+              "content": "- 사용자는 한국 주식 자동매매와 가계부 앱을 함께 관리 중입니다.\n- 최근에는 트레이딩엔진 주문 가능 수량 로직을 수정했습니다.\n- 내일 장 시작 시 파킹 주문이 매수가능수량 기준인지 확인할 예정입니다.\n- Codex fast 모드를 끄고 답변은 군더더기 없이 빠르게 받는 편을 선호합니다.",
+              "elapsed_sec": 6.66,
+              "usage": {
+                "completion_tokens": 84,
+                "prompt_tokens": 235,
+                "total_tokens": 319,
+                "prompt_tokens_details": {
+                  "cached_tokens": 231
+                }
+              },
+              "timings": {
+                "cache_n": 231,
+                "prompt_n": 4,
+                "prompt_ms": 87.987,
+                "prompt_per_token_ms": 21.99675,
+                "prompt_per_second": 45.4612613226954,
+                "predicted_n": 84,
+                "predicted_ms": 6566.406,
+                "predicted_per_token_ms": 78.1715,
+                "predicted_per_second": 12.792385971869544
+              },
+              "quality_notes": [],
+              "line_count": 4
+            }
+          ],
+          "warmup_runs": [
+            {
+              "content": "- 사용자는 한국 주식 자동매매와 가계부 앱을 함께 관리 중입니다.\n- 최근에는 트레이딩엔진 주문 가능 수량 로직을 수정했습니다.\n- 내일 장 시작 시 파킹 주문이 매수가능수량 기준인지 확인할 예정입니다.\n- Codex fast 모드를 끄고 답변은 군더더기 없이 빠르게 받는 편을 선호합니다.",
+              "elapsed_sec": 7.98,
+              "usage": {
+                "completion_tokens": 84,
+                "prompt_tokens": 235,
+                "total_tokens": 319,
+                "prompt_tokens_details": {
+                  "cached_tokens": 231
+                }
+              },
+              "timings": {
+                "cache_n": 231,
+                "prompt_n": 4,
+                "prompt_ms": 88.607,
+                "prompt_per_token_ms": 22.15175,
+                "prompt_per_second": 45.143160246933085,
+                "predicted_n": 84,
+                "predicted_ms": 6565.17,
+                "predicted_per_token_ms": 78.15678571428572,
+                "predicted_per_second": 12.794794346528727
+              },
+              "quality_notes": [],
+              "line_count": 4
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "general_finance",
+      "description": "일반 한국어 설명 품질",
+      "expected_shape": "plain",
+      "results": {
+        "openvino": {
+          "content": "1. **미국 금리 동향**: 연방준비제도(Fed)의 금리 인상 여부는 달러 강세를 결정하며, 이는 한국 반도체 수출에 부정적인 영향을 줄 수 있다.  \n2. **반도체 수출 수치**: 한국의 반도체 수출량은 원/달러 환율 변동에 따라 수익에 직접적인 영향을 미치므로 주목해야 한다.  \n3. **미국 경제 지표**: GDP, 고용 보고서 등 미국 경제 성장 여부는 달러 가치와 반도체",
+          "elapsed_sec": 3.58,
+          "elapsed_sec_avg": 3.58,
+          "elapsed_sec_median": 3.58,
+          "usage_avg": {
+            "prompt_tokens": 66.0,
+            "completion_tokens": 140.0,
+            "total_tokens": 206.0
+          },
+          "predicted_per_second_avg": 39.07,
+          "quality_notes": [],
+          "line_count": 3,
+          "output_variants": 1,
+          "runs": [
+            {
+              "content": "1. **미국 금리 동향**: 연방준비제도(Fed)의 금리 인상 여부는 달러 강세를 결정하며, 이는 한국 반도체 수출에 부정적인 영향을 줄 수 있다.  \n2. **반도체 수출 수치**: 한국의 반도체 수출량은 원/달러 환율 변동에 따라 수익에 직접적인 영향을 미치므로 주목해야 한다.  \n3. **미국 경제 지표**: GDP, 고용 보고서 등 미국 경제 성장 여부는 달러 가치와 반도체",
+              "elapsed_sec": 3.59,
+              "usage": {
+                "prompt_tokens": 66,
+                "completion_tokens": 140,
+                "total_tokens": 206
+              },
+              "timings": {
+                "predicted_per_second": 38.98247681575098,
+                "predicted_ms": 3591.3572311401367
+              },
+              "quality_notes": [],
+              "line_count": 3
+            },
+            {
+              "content": "1. **미국 금리 동향**: 연방준비제도(Fed)의 금리 인상 여부는 달러 강세를 결정하며, 이는 한국 반도체 수출에 부정적인 영향을 줄 수 있다.  \n2. **반도체 수출 수치**: 한국의 반도체 수출량은 원/달러 환율 변동에 따라 수익에 직접적인 영향을 미치므로 주목해야 한다.  \n3. **미국 경제 지표**: GDP, 고용 보고서 등 미국 경제 성장 여부는 달러 가치와 반도체",
+              "elapsed_sec": 3.58,
+              "usage": {
+                "prompt_tokens": 66,
+                "completion_tokens": 140,
+                "total_tokens": 206
+              },
+              "timings": {
+                "predicted_per_second": 39.08363388618818,
+                "predicted_ms": 3582.062005996704
+              },
+              "quality_notes": [],
+              "line_count": 3
+            },
+            {
+              "content": "1. **미국 금리 동향**: 연방준비제도(Fed)의 금리 인상 여부는 달러 강세를 결정하며, 이는 한국 반도체 수출에 부정적인 영향을 줄 수 있다.  \n2. **반도체 수출 수치**: 한국의 반도체 수출량은 원/달러 환율 변동에 따라 수익에 직접적인 영향을 미치므로 주목해야 한다.  \n3. **미국 경제 지표**: GDP, 고용 보고서 등 미국 경제 성장 여부는 달러 가치와 반도체",
+              "elapsed_sec": 3.58,
+              "usage": {
+                "prompt_tokens": 66,
+                "completion_tokens": 140,
+                "total_tokens": 206
+              },
+              "timings": {
+                "predicted_per_second": 39.140186111040194,
+                "predicted_ms": 3576.8864154815674
+              },
+              "quality_notes": [],
+              "line_count": 3
+            }
+          ],
+          "warmup_runs": [
+            {
+              "content": "1. **미국 금리 동향**: 연방준비제도(Fed)의 금리 인상 여부는 달러 강세를 결정하며, 이는 한국 반도체 수출에 부정적인 영향을 줄 수 있다.  \n2. **반도체 수출 수치**: 한국의 반도체 수출량은 원/달러 환율 변동에 따라 수익에 직접적인 영향을 미치므로 주목해야 한다.  \n3. **미국 경제 지표**: GDP, 고용 보고서 등 미국 경제 성장 여부는 달러 가치와 반도체",
+              "elapsed_sec": 4.62,
+              "usage": {
+                "prompt_tokens": 66,
+                "completion_tokens": 140,
+                "total_tokens": 206
+              },
+              "timings": {
+                "predicted_per_second": 30.28921327000137,
+                "predicted_ms": 4622.10750579834
+              },
+              "quality_notes": [],
+              "line_count": 3
+            }
+          ]
+        },
+        "llama-vulkan-q8": {
+          "content": "1. **원/달러 환율**: 반도체 수출 비중이 높은 기업일수록 환율 상승 시 수익이 더 크게 증가합니다.\n\n2. **수출 물량**: 환율 상승과 함께 수출 물량이 늘어나면 매출과 이익이 동시에 성장할 수 있습니다.\n\n3. **재고 회전율**: 재고가 적절히 관리되어 회전율이 높으면 환율 상승 시 이익이 더 빠르게 실현됩니다.",
+          "elapsed_sec": 7.58,
+          "elapsed_sec_avg": 7.52,
+          "elapsed_sec_median": 7.58,
+          "usage_avg": {
+            "prompt_tokens": 48.0,
+            "completion_tokens": 90.33,
+            "total_tokens": 138.33
+          },
+          "predicted_per_second_avg": 12.44,
+          "quality_notes": [],
+          "line_count": 3,
+          "output_variants": 2,
+          "runs": [
+            {
+              "content": "1. **원/달러 환율**: 반도체 수출 비중이 높은 기업일수록 환율 상승 시 수익이 더 크게 증가합니다.\n\n2. **수출 물량**: 환율 상승과 함께 수출 물량이 증가하면 매출과 이익이 동시에 성장합니다.\n\n3. **재고 회전율**: 재고가 적절히 관리되어 회전율이 높으면 환율 상승 시 이익이 더 빠르게 실현됩니다.",
+              "elapsed_sec": 7.41,
+              "usage": {
+                "completion_tokens": 89,
+                "prompt_tokens": 48,
+                "total_tokens": 137,
+                "prompt_tokens_details": {
+                  "cached_tokens": 0
+                }
+              },
+              "timings": {
+                "cache_n": 0,
+                "prompt_n": 48,
+                "prompt_ms": 254.306,
+                "prompt_per_token_ms": 5.298041666666667,
+                "prompt_per_second": 188.7489874403278,
+                "predicted_n": 89,
+                "predicted_ms": 7155.25,
+                "predicted_per_token_ms": 80.39606741573034,
+                "predicted_per_second": 12.438419342440866
+              },
+              "quality_notes": [],
+              "line_count": 3
+            },
+            {
+              "content": "1. **원/달러 환율**: 반도체 수출 비중이 높은 기업일수록 환율 상승 시 수익이 더 크게 증가합니다.\n\n2. **수출 물량**: 환율 상승과 함께 수출 물량이 늘어나면 매출과 이익이 동시에 성장할 수 있습니다.\n\n3. **재고 회전율**: 재고가 적절히 관리되어 회전율이 높으면 환율 상승 시 이익이 더 빠르게 실현됩니다.",
+              "elapsed_sec": 7.58,
+              "usage": {
+                "completion_tokens": 91,
+                "prompt_tokens": 48,
+                "total_tokens": 139,
+                "prompt_tokens_details": {
+                  "cached_tokens": 0
+                }
+              },
+              "timings": {
+                "cache_n": 0,
+                "prompt_n": 48,
+                "prompt_ms": 254.352,
+                "prompt_per_token_ms": 5.299,
+                "prompt_per_second": 188.71485185884129,
+                "predicted_n": 91,
+                "predicted_ms": 7317.94,
+                "predicted_per_token_ms": 80.41692307692307,
+                "predicted_per_second": 12.435193510742094
+              },
+              "quality_notes": [],
+              "line_count": 3
+            },
+            {
+              "content": "1. **원/달러 환율**: 반도체 수출 비중이 높은 기업일수록 환율 상승 시 수익이 더 크게 증가합니다.\n\n2. **수출 물량**: 환율 상승과 함께 수출 물량이 늘어나면 매출과 이익이 동시에 성장할 수 있습니다.\n\n3. **재고 회전율**: 재고가 적절히 관리되어 회전율이 높으면 환율 상승 시 이익이 더 빠르게 실현됩니다.",
+              "elapsed_sec": 7.58,
+              "usage": {
+                "completion_tokens": 91,
+                "prompt_tokens": 48,
+                "total_tokens": 139,
+                "prompt_tokens_details": {
+                  "cached_tokens": 0
+                }
+              },
+              "timings": {
+                "cache_n": 0,
+                "prompt_n": 48,
+                "prompt_ms": 254.439,
+                "prompt_per_token_ms": 5.3008125,
+                "prompt_per_second": 188.65032483227807,
+                "predicted_n": 91,
+                "predicted_ms": 7317.507,
+                "predicted_per_token_ms": 80.41216483516483,
+                "predicted_per_second": 12.435929340416076
+              },
+              "quality_notes": [],
+              "line_count": 3
+            }
+          ],
+          "warmup_runs": [
+            {
+              "content": "1. **원/달러 환율**: 반도체 수출 비중이 높은 기업일수록 환율 상승 시 수익이 더 크게 증가합니다.\n\n2. **수출 물량**: 환율 급등 시에도 실제 반도체 판매량이 늘고 있다면 기업 실적은 더욱 호전될 것입니다.\n\n3. **재고 회전율**: 재고가 빠르게 순환하는 기업은 환율 상승 시 더 많은 매출을 기록할 수 있습니다.",
+              "elapsed_sec": 8.93,
+              "usage": {
+                "completion_tokens": 92,
+                "prompt_tokens": 48,
+                "total_tokens": 140,
+                "prompt_tokens_details": {
+                  "cached_tokens": 0
+                }
+              },
+              "timings": {
+                "cache_n": 0,
+                "prompt_n": 48,
+                "prompt_ms": 255.781,
+                "prompt_per_token_ms": 5.3287708333333335,
+                "prompt_per_second": 187.66053772563248,
+                "predicted_n": 92,
+                "predicted_ms": 7400.795,
+                "predicted_per_token_ms": 80.44342391304347,
+                "predicted_per_second": 12.431096929451499
+              },
+              "quality_notes": [],
+              "line_count": 3
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

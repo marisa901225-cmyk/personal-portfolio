@@ -1,13 +1,196 @@
 import logging
 import httpx
 import asyncio
-from datetime import datetime, timezone
+import re
+import sqlite3
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo
 from sqlalchemy.orm import Session
 from ...core.models import GameNews
 from ..llm_service import LLMService
 from .core import calculate_simhash, STEAMSPY_URL
+from ..duckdb_refine_config import get_db_path
 
 logger = logging.getLogger(__name__)
+_KST = ZoneInfo("Asia/Seoul")
+_STEAM_RANKING_TITLE_RE = re.compile(r"^\[Steam Ranking\]\s*(?P<name>.+)$")
+_STEAM_RANK_RE = re.compile(r"(?im)^Rank:\s*(?P<rank>\d+)\s*$")
+_STEAM_OWNERS_RE = re.compile(r"(?im)^Owners:\s*(?P<owners>.+)\s*$")
+
+
+def _extract_game_name(title: str) -> str:
+    match = _STEAM_RANKING_TITLE_RE.match(str(title or "").strip())
+    if match:
+        return match.group("name").strip()
+    return str(title or "").strip()
+
+
+def _extract_rank(content: str) -> int | None:
+    match = _STEAM_RANK_RE.search(str(content or ""))
+    if not match:
+        return None
+    try:
+        return int(match.group("rank"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_owners(content: str) -> str:
+    match = _STEAM_OWNERS_RE.search(str(content or ""))
+    if not match:
+        return ""
+    return match.group("owners").strip()
+
+
+def _parse_dt(value: str | None) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            dt = datetime.strptime(raw[:19], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_KST)
+
+
+def load_monthly_steam_ranking_summary(
+    *,
+    db_path: str | None = None,
+    now: datetime | None = None,
+    lookback_days: int = 30,
+    top_games: int = 5,
+) -> str:
+    """
+    최근 SteamSpy 랭킹 스냅샷을 월간 맥락으로 압축한다.
+
+    최근 30일 데이터가 없으면 가장 최신 스냅샷을 참고용으로 반환한다.
+    """
+    db_file = db_path or get_db_path()
+    if not db_file or not Path(db_file).exists():
+        return ""
+
+    now_kst = now or datetime.now(_KST)
+    if now_kst.tzinfo is None:
+        now_kst = now_kst.replace(tzinfo=_KST)
+    else:
+        now_kst = now_kst.astimezone(_KST)
+
+    since_kst = now_kst - timedelta(days=max(1, int(lookback_days)))
+    since_str = since_kst.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+    until_str = now_kst.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+    limit = max(3, int(top_games))
+
+    month_sql = """
+        SELECT title, full_content, published_at
+        FROM game_news
+        WHERE source_name = 'SteamSpy'
+          AND source_type = 'news'
+          AND datetime(published_at) >= datetime(?)
+          AND datetime(published_at) <= datetime(?)
+        ORDER BY datetime(published_at) DESC, id ASC
+        LIMIT 5000
+    """
+    latest_sql = """
+        SELECT title, full_content, published_at
+        FROM game_news
+        WHERE source_name = 'SteamSpy'
+          AND source_type = 'news'
+        ORDER BY datetime(published_at) DESC, id ASC
+        LIMIT 300
+    """
+
+    try:
+        with sqlite3.connect(db_file) as conn:
+            cur = conn.cursor()
+            rows = list(cur.execute(month_sql, (since_str, until_str)))
+            is_fallback = False
+            if not rows:
+                rows = list(cur.execute(latest_sql))
+                is_fallback = True
+    except Exception as exc:
+        logger.error("Failed to load Steam monthly ranking summary: %s", exc, exc_info=True)
+        return ""
+
+    if not rows:
+        return ""
+
+    stats: dict[str, dict[str, object]] = {}
+    snapshot_days: set[str] = set()
+    latest_dt: datetime | None = None
+
+    for title, full_content, published_at in rows:
+        game_name = _extract_game_name(title)
+        if not game_name:
+            continue
+
+        published_dt = _parse_dt(published_at)
+        if published_dt:
+            snapshot_days.add(published_dt.strftime("%Y-%m-%d"))
+            if latest_dt is None or published_dt > latest_dt:
+                latest_dt = published_dt
+
+        item = stats.setdefault(
+            game_name,
+            {
+                "count": 0,
+                "latest_dt": None,
+                "latest_rank": None,
+                "owners": "",
+            },
+        )
+        item["count"] = int(item["count"]) + 1
+
+        rank = _extract_rank(full_content)
+        owners = _extract_owners(full_content)
+        prev_latest = item.get("latest_dt")
+        if published_dt and (prev_latest is None or published_dt >= prev_latest):
+            item["latest_dt"] = published_dt
+            item["latest_rank"] = rank
+            item["owners"] = owners
+
+    if not stats:
+        return ""
+
+    ranked_games = sorted(
+        stats.items(),
+        key=lambda pair: (
+            -int(pair[1]["count"]),
+            10_000 if pair[1]["latest_rank"] is None else int(pair[1]["latest_rank"]),
+            pair[0].lower(),
+        ),
+    )
+
+    lines: list[str] = []
+    for game_name, meta in ranked_games[:limit]:
+        details: list[str] = [f"{int(meta['count'])}회 포착"]
+        if meta.get("latest_rank") is not None:
+            details.append(f"최신 #{int(meta['latest_rank'])}")
+        owners = str(meta.get("owners") or "").strip()
+        if owners:
+            details.append(f"보유자 {owners}")
+        lines.append(f"{game_name}({', '.join(details)})")
+
+    latest_label = latest_dt.strftime("%Y-%m-%d %H:%M KST") if latest_dt else "시각미상"
+    snapshot_count = max(1, len(snapshot_days))
+
+    if is_fallback:
+        return (
+            f"최근 {max(1, int(lookback_days))}일 Steam 월간 데이터는 비어 있음. "
+            f"최신 Steam 인기게임 스냅샷({latest_label}, 참고용): "
+            + "; ".join(lines)
+        )
+
+    return (
+        f"최근 {max(1, int(lookback_days))}일 Steam 인기게임 월간 흐름"
+        f"(수집일 {snapshot_count}회, 최신 {latest_label}): "
+        + "; ".join(lines)
+    )
 
 async def collect_steamspy_rankings(db: Session):
     """
@@ -22,7 +205,14 @@ async def collect_steamspy_rankings(db: Session):
             data = response.json()
 
         count = 0
-        for appid, info in data.items():
+        now_utc = datetime.now(timezone.utc)
+        kst_now = now_utc.astimezone(_KST)
+        day_start_kst = kst_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end_kst = day_start_kst + timedelta(days=1)
+        day_start_utc = day_start_kst.astimezone(timezone.utc)
+        day_end_utc = day_end_kst.astimezone(timezone.utc)
+
+        for rank, (appid, info) in enumerate(data.items(), start=1):
             name = info.get("name", "Unknown Game")
             owners = info.get("total_owners", info.get("owners", "Unknown Owners"))
             price = info.get("price", "0")
@@ -32,11 +222,23 @@ async def collect_steamspy_rankings(db: Session):
                 price_str = f"${float(price)/100:.2f}"
 
             title = f"[Steam Ranking] {name}"
-            content = f"Game: {name}\nAppID: {appid}\nDeveloper: {info.get('developer')}\nPublisher: {info.get('publisher')}\nPrice: {price_str}\nOwners: {owners}\nPositive/Negative: {info.get('positive')}/{info.get('negative')}"
+            content = (
+                f"Rank: {rank}\n"
+                f"Game: {name}\n"
+                f"AppID: {appid}\n"
+                f"Developer: {info.get('developer')}\n"
+                f"Publisher: {info.get('publisher')}\n"
+                f"Price: {price_str}\n"
+                f"Owners: {owners}\n"
+                f"Positive/Negative: {info.get('positive')}/{info.get('negative')}"
+            )
             
             content_hash = calculate_simhash(title + content)
             existing = db.query(GameNews.id).filter(
-                (GameNews.content_hash == content_hash) | (GameNews.title == title)
+                GameNews.source_name == "SteamSpy",
+                GameNews.title == title,
+                GameNews.published_at >= day_start_utc,
+                GameNews.published_at < day_end_utc,
             ).first()
             if existing:
                 continue
@@ -49,7 +251,7 @@ async def collect_steamspy_rankings(db: Session):
                 title=title,
                 url=f"https://store.steampowered.com/app/{appid}",
                 full_content=content,
-                published_at=datetime.now(timezone.utc)
+                published_at=now_utc,
             )
             db.add(news)
             count += 1
@@ -134,5 +336,3 @@ async def collect_steam_new_trends(db: Session):
         
     except Exception as e:
         logger.error(f"Failed to collect Steam trends: {e}")
-
-

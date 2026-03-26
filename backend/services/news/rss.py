@@ -2,6 +2,7 @@ import logging
 import feedparser
 import re
 import asyncio
+import sqlite3
 from datetime import datetime, timezone, timedelta
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, before_sleep_log
@@ -10,8 +11,80 @@ from urllib.parse import quote
 from ...core.models import GameNews
 from ...core.time_utils import utcnow
 from .core import calculate_simhash, GOOGLE_NEWS_MACRO_QUERIES
+from ..duckdb_refine_config import get_db_path
 
 logger = logging.getLogger(__name__)
+
+
+def _infer_rss_metadata(source_name: str, title: str) -> tuple[str, str | None]:
+    source = str(source_name or "").lower()
+    normalized_title = str(title or "").lower()
+
+    if "inven lol" in source or any(keyword in normalized_title for keyword in ("롤", "lol", "lck", "lec", "lpl")):
+        return "LoL", "Esports"
+    if "review" in source or "리뷰" in source:
+        return "Gaming", "Review"
+    if "ranking" in source or "순위" in source or "분석" in source:
+        return "Gaming", "Ranking"
+    if "intro" in source or "소개" in source:
+        return "Gaming", "Preview"
+    return "General", None
+
+
+def load_recent_inven_game_digest(
+    *,
+    db_path: str | None = None,
+    now: datetime | None = None,
+    lookback_days: int = 7,
+    limit: int = 4,
+) -> str:
+    """최근 Inven 게임소개/리뷰/순위분석 기사를 브리핑용으로 압축한다."""
+    db_file = db_path or get_db_path()
+    if not db_file:
+        return ""
+
+    base = now or datetime.now(timezone.utc)
+    if base.tzinfo is None:
+        base = base.replace(tzinfo=timezone.utc)
+    since = base - timedelta(days=max(1, int(lookback_days)))
+    since_str = since.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+    until_str = base.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+
+    sql = """
+        SELECT source_name, title, published_at
+        FROM game_news
+        WHERE source_type = 'news'
+          AND source_name IN ('Inven Game Intro', 'Inven Game Review', 'Inven Ranking Analysis')
+          AND datetime(published_at) >= datetime(?)
+          AND datetime(published_at) <= datetime(?)
+        ORDER BY datetime(published_at) DESC, id DESC
+        LIMIT ?
+    """
+
+    try:
+        with sqlite3.connect(db_file) as conn:
+            rows = list(conn.execute(sql, (since_str, until_str, max(1, int(limit)))))
+    except Exception as exc:
+        logger.error("Failed to load recent Inven game digest: %s", exc, exc_info=True)
+        return ""
+
+    if not rows:
+        return ""
+
+    label_map = {
+        "Inven Game Intro": "소개",
+        "Inven Game Review": "리뷰",
+        "Inven Ranking Analysis": "순위분석",
+    }
+    items: list[str] = []
+    for source_name, title, published_at in rows:
+        label = label_map.get(str(source_name or "").strip(), "게임기사")
+        time_label = str(published_at or "").strip()[:16].replace("T", " ")
+        prefix = f"{time_label} " if time_label else ""
+        items.append(f"{prefix}[{label}] {title}")
+
+    return "최근 Inven 게임 기사: " + " | ".join(items)
+
 
 def collect_rss(db: Session, feed_url: str, source_name: str):
     """
@@ -56,18 +129,18 @@ def collect_rss(db: Session, feed_url: str, source_name: str):
             if is_duplicate_complex(title, content_hash, recent_news):
                 continue
             
-            # 메타데이터 추출 (간단한 예시)
-            game_tag = "General"
-            if "롤" in title or "LoL" in title:
-                game_tag = "LoL"
-            elif "발로란트" in title:
+            game_tag, category_tag = _infer_rss_metadata(source_name, title)
+            if "발로란트" in title:
                 game_tag = "Valorant"
+                category_tag = "Esports"
             
             # DB 저장
             news = GameNews(
                 content_hash=content_hash,
                 game_tag=game_tag,
+                category_tag=category_tag,
                 source_name=source_name,
+                source_type="news",
                 title=title,
                 url=link,
                 full_content=clean_desc,

@@ -7,7 +7,7 @@ from datetime import datetime
 # 프로젝트 루트 경로 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from backend.services.alarm.llm_logic import summarize_with_llm
+from backend.services.alarm.llm_logic_v2 import summarize_with_llm
 from backend.services.llm import LLMService
 from integrations.telegram import send_telegram_message
 
@@ -19,7 +19,7 @@ async def test_random_messages():
     logger.info("Starting random message robust test...")
     
     # 10분 체크 우회를 위해 상태 파일 조작
-    from backend.services.alarm.llm_logic import _RANDOM_TOPIC_STATE_FILE
+    from backend.services.alarm.random_categories import _RANDOM_TOPIC_STATE_FILE
     import json
     from datetime import datetime, timedelta
     
@@ -29,7 +29,7 @@ async def test_random_messages():
         past = (datetime.now() - timedelta(minutes=20)).isoformat(timespec="seconds")
         json.dump({"last_sent_at": past}, f)
     
-    from backend.services.alarm.llm_logic import summarize_with_llm
+    from backend.services.alarm.llm_logic_v2 import summarize_with_llm
     from backend.services.alarm.llm_refiner import dump_llm_draft
     
     try:

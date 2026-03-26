@@ -1,0 +1,8 @@
+아래 랜덤 메시지 본문에 어울리는 제목을 한 줄만 만들어라.
+
+[입력값]
+voice={voice}
+category={category}
+opener={opener}
+twist={twist}
+body={body}

@@ -12,6 +12,7 @@ API 참고:
 """
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import logging
 import time
@@ -21,6 +22,12 @@ import pandas as pd
 import requests
 
 logger = logging.getLogger(__name__)
+
+_KIS_HTTP_CONNECT_TIMEOUT_SEC = 3.05
+_KIS_HTTP_READ_TIMEOUT_SEC = 10.0
+_KIS_HTTP_GET_MAX_ATTEMPTS = 3
+_KIS_HTTP_RETRY_BACKOFF_SEC = 0.35
+_KIS_HTTP_RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
 
 
 class KISTradingAPI:
@@ -34,6 +41,10 @@ class KISTradingAPI:
 
         self._core = core
         self._ka = core.ka  # kis_auth module reference
+        import kis_auth_rest  # type: ignore
+
+        self._session = requests.Session()
+        self._rest_throttle = kis_auth_rest._throttle_rest
         logger.info("[KIS TradingAPI] 어댑터 초기화 완료")
 
     # ──────────────────────────────────────────────
@@ -57,21 +68,119 @@ class KISTradingAPI:
         acct = self._ka.getTREnv().my_acct
         return acct[:8], acct[8:10] if len(acct) >= 10 else "01"
 
+    def _throttle_rest(self) -> None:
+        throttle = getattr(self, "_rest_throttle", None)
+        if callable(throttle):
+            throttle()
+            return
+        # Fallback for partially initialized test doubles.
+        time.sleep(0.05)
+
+    @staticmethod
+    def _normalize_yyyymmdd(value: str) -> str:
+        raw = str(value or "").strip()
+        if "-" in raw:
+            raw = raw.replace("-", "")
+        return raw[:8]
+
+    @staticmethod
+    def _to_int(value: Any) -> int:
+        text = str(value or "").replace(",", "").strip()
+        if not text:
+            return 0
+        try:
+            return int(float(text))
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _to_float(value: Any) -> float:
+        text = str(value or "").replace(",", "").strip()
+        if not text:
+            return 0.0
+        try:
+            return float(text)
+        except (TypeError, ValueError):
+            return 0.0
+
+    @staticmethod
+    def _is_retryable_get_exception(exc: requests.exceptions.RequestException) -> bool:
+        if isinstance(exc, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
+            return True
+
+        if isinstance(exc, requests.exceptions.HTTPError):
+            response = getattr(exc, "response", None)
+            status_code = getattr(response, "status_code", None)
+            return status_code in _KIS_HTTP_RETRYABLE_STATUS
+
+        return False
+
+    @staticmethod
+    def _get_retry_delay_seconds(attempt: int) -> float:
+        return _KIS_HTTP_RETRY_BACKOFF_SEC * (2 ** max(0, attempt - 1))
+
+    @staticmethod
+    def _order_division_code(order_type: str) -> str:
+        order_kind = str(order_type or "").strip().lower()
+        ord_dvsn_map = {
+            "limit": "00",       # 지정가
+            "market": "01",      # 시장가
+            "mkt": "01",         # 시장가 (alias)
+            "conditional": "02", # 조건부지정가
+            "best": "03",        # 최유리지정가
+            "priority": "04",    # 최우선지정가
+        }
+        return ord_dvsn_map.get(order_kind, "00")
+
     def _get(self, path: str, tr_id: str, params: dict, tr_cont: str = "") -> dict:
         """GET 요청 래퍼."""
-        self._core._ensure_auth()
         url = f"{self._base_url()}{path}"
-        headers = self._headers(tr_id, tr_cont)
-        # rate limit
-        time.sleep(0.05)
-        res = requests.get(url, headers=headers, params=params)
-        res.raise_for_status()
-        data = res.json()
-        if data.get("rt_cd") != "0":
-            logger.error(
-                "[KIS API] GET 실패: tr_id=%s msg=%s", tr_id, data.get("msg1")
-            )
-        return data
+        for attempt in range(1, _KIS_HTTP_GET_MAX_ATTEMPTS + 1):
+            self._core._ensure_auth()
+            headers = self._headers(tr_id, tr_cont)
+            self._throttle_rest()
+            try:
+                res = self._session.get(
+                    url,
+                    headers=headers,
+                    params=params,
+                    timeout=(_KIS_HTTP_CONNECT_TIMEOUT_SEC, _KIS_HTTP_READ_TIMEOUT_SEC),
+                )
+                res.raise_for_status()
+                data = res.json()
+                if data.get("rt_cd") != "0":
+                    logger.error(
+                        "[KIS API] GET 실패: tr_id=%s msg=%s", tr_id, data.get("msg1")
+                    )
+                return data
+            except requests.exceptions.RequestException as exc:
+                is_last_attempt = attempt >= _KIS_HTTP_GET_MAX_ATTEMPTS
+                retryable = self._is_retryable_get_exception(exc)
+                if not retryable or is_last_attempt:
+                    logger.warning(
+                        "[KIS API] GET 요청 실패: tr_id=%s path=%s attempt=%s/%s retryable=%s error=%s",
+                        tr_id,
+                        path,
+                        attempt,
+                        _KIS_HTTP_GET_MAX_ATTEMPTS,
+                        retryable,
+                        exc,
+                    )
+                    raise
+
+                delay = self._get_retry_delay_seconds(attempt)
+                logger.warning(
+                    "[KIS API] GET 재시도 예정: tr_id=%s path=%s attempt=%s/%s backoff=%.2fs error=%s",
+                    tr_id,
+                    path,
+                    attempt,
+                    _KIS_HTTP_GET_MAX_ATTEMPTS,
+                    delay,
+                    exc,
+                )
+                time.sleep(delay)
+
+        raise RuntimeError(f"unreachable KIS GET retry flow: tr_id={tr_id} path={path}")
 
     def _post(self, path: str, tr_id: str, body: dict) -> dict:
         """POST 요청 래퍼."""
@@ -80,8 +189,22 @@ class KISTradingAPI:
         headers = self._headers(tr_id)
         # hashkey 설정
         self._ka.set_order_hash_key(headers, body)
-        time.sleep(0.05)
-        res = requests.post(url, headers=headers, data=json.dumps(body))
+        self._throttle_rest()
+        try:
+            res = self._session.post(
+                url,
+                headers=headers,
+                data=json.dumps(body),
+                timeout=(_KIS_HTTP_CONNECT_TIMEOUT_SEC, _KIS_HTTP_READ_TIMEOUT_SEC),
+            )
+        except requests.exceptions.RequestException as exc:
+            logger.warning(
+                "[KIS API] POST 전송 실패: tr_id=%s path=%s error=%s",
+                tr_id,
+                path,
+                exc,
+            )
+            raise
         res.raise_for_status()
         data = res.json()
         if data.get("rt_cd") != "0":
@@ -101,6 +224,7 @@ class KISTradingAPI:
         거래량 랭킹 조회 [v1_국내주식-047].
         GET /uapi/domestic-stock/v1/quotations/volume-rank
         """
+        del asof
         params = {
             "FID_COND_MRKT_DIV_CODE": "J",  # 주식
             "FID_COND_SCR_DIV_CODE": "20171",
@@ -114,11 +238,20 @@ class KISTradingAPI:
             "FID_VOL_CNT": "0",
             "FID_INPUT_DATE_1": "",
         }
-        data = self._get(
-            "/uapi/domestic-stock/v1/quotations/volume-rank",
-            "FHPST01710000",
-            params,
-        )
+        try:
+            data = self._get(
+                "/uapi/domestic-stock/v1/quotations/volume-rank",
+                "FHPST01710000",
+                params,
+            )
+        except requests.exceptions.RequestException as exc:
+            logger.warning(
+                "volume_rank request failed kind=%s top_n=%s error=%s",
+                kind,
+                top_n,
+                exc,
+            )
+            return []
         rows = data.get("output", [])
         result = []
         for r in rows[:top_n]:
@@ -141,6 +274,7 @@ class KISTradingAPI:
         시가총액 기준 상위 종목 조회.
         volume_rank API를 시가총액 기준 정렬로 활용.
         """
+        del asof
         params = {
             "FID_COND_MRKT_DIV_CODE": "J",
             "FID_COND_SCR_DIV_CODE": "20171",
@@ -154,11 +288,15 @@ class KISTradingAPI:
             "FID_VOL_CNT": "0",
             "FID_INPUT_DATE_1": "",
         }
-        data = self._get(
-            "/uapi/domestic-stock/v1/quotations/volume-rank",
-            "FHPST01710000",
-            params,
-        )
+        try:
+            data = self._get(
+                "/uapi/domestic-stock/v1/quotations/volume-rank",
+                "FHPST01710000",
+                params,
+            )
+        except requests.exceptions.RequestException as exc:
+            logger.warning("market_cap_rank request failed top_k=%s error=%s", top_k, exc)
+            return []
         rows = data.get("output", [])
         # 시가총액 기준 정렬
         sorted_rows = sorted(
@@ -229,6 +367,136 @@ class KISTradingAPI:
             return df
         df = df.sort_values("date").tail(lookback).reset_index(drop=True)
         return df
+
+    def _parse_intraday_rows(self, rows: list[dict[str, Any]]) -> pd.DataFrame:
+        records: list[dict[str, Any]] = []
+        for r in rows or []:
+            date = self._normalize_yyyymmdd(r.get("stck_bsop_date", ""))
+            hhmmss = str(r.get("stck_cntg_hour", "")).strip().zfill(6)
+            if not date or not hhmmss:
+                continue
+            records.append(
+                {
+                    "date": date,
+                    "time": hhmmss,
+                    "timestamp": f"{date}{hhmmss}",
+                    "open": self._to_int(r.get("stck_oprc")),
+                    "high": self._to_int(r.get("stck_hgpr")),
+                    "low": self._to_int(r.get("stck_lwpr")),
+                    "close": self._to_int(r.get("stck_prpr")),
+                    "volume": self._to_int(r.get("cntg_vol")),
+                    "value": self._to_int(r.get("acml_tr_pbmn")),
+                    "change_pct": self._to_float(r.get("prdy_ctrt")),
+                    "prev_close": self._to_int(r.get("stck_prdy_clpr")),
+                }
+            )
+        return pd.DataFrame(records)
+
+    def time_itemchart_bars(
+        self,
+        code: str,
+        *,
+        hour: str | None = None,
+        include_past: bool = True,
+        market_div_code: str = "J",
+    ) -> pd.DataFrame:
+        """
+        주식당일분봉조회 [v1_국내주식-022].
+        GET /uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice
+        """
+        input_hour = str(hour or datetime.now().strftime("%H%M%S")).zfill(6)
+        params = {
+            "FID_COND_MRKT_DIV_CODE": market_div_code,
+            "FID_INPUT_ISCD": code,
+            "FID_INPUT_HOUR_1": input_hour,
+            "FID_PW_DATA_INCU_YN": "Y" if include_past else "N",
+            "FID_ETC_CLS_CODE": "",
+        }
+        data = self._get(
+            "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
+            "FHKST03010200",
+            params,
+        )
+        return self._parse_intraday_rows(data.get("output2", []))
+
+    def time_dailychart_bars(
+        self,
+        code: str,
+        *,
+        date: str,
+        hour: str | None = None,
+        include_past: bool = True,
+        include_fake_tick: bool = False,
+        market_div_code: str = "J",
+    ) -> pd.DataFrame:
+        """
+        주식일별분봉조회 [v1_국내주식-213].
+        GET /uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice
+        """
+        input_hour = str(hour or datetime.now().strftime("%H%M%S")).zfill(6)
+        params = {
+            "FID_COND_MRKT_DIV_CODE": market_div_code,
+            "FID_INPUT_ISCD": code,
+            "FID_INPUT_HOUR_1": input_hour,
+            "FID_INPUT_DATE_1": self._normalize_yyyymmdd(date),
+            "FID_PW_DATA_INCU_YN": "Y" if include_past else "N",
+            "FID_FAKE_TICK_INCU_YN": "Y" if include_fake_tick else "",
+        }
+        data = self._get(
+            "/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice",
+            "FHKST03010230",
+            params,
+        )
+        return self._parse_intraday_rows(data.get("output2", []))
+
+    def intraday_bars(self, code: str, asof: str, lookback: int = 120) -> pd.DataFrame:
+        """
+        장중 급락 감지를 위한 통합 분봉.
+        - 당일분봉(inquire-time-itemchartprice)
+        - 일별분봉(inquire-time-dailychartprice)
+        """
+        asof_day = self._normalize_yyyymmdd(asof)
+        input_hour = datetime.now().strftime("%H%M%S")
+
+        frames: list[pd.DataFrame] = []
+        try:
+            frames.append(
+                self.time_itemchart_bars(
+                    code,
+                    hour=input_hour,
+                    include_past=True,
+                    market_div_code="J",
+                )
+            )
+        except Exception as exc:
+            logger.warning("time_itemchart_bars failed code=%s error=%s", code, exc)
+
+        try:
+            frames.append(
+                self.time_dailychart_bars(
+                    code,
+                    date=asof_day,
+                    hour=input_hour,
+                    include_past=True,
+                    include_fake_tick=False,
+                    market_div_code="J",
+                )
+            )
+        except Exception as exc:
+            logger.warning("time_dailychart_bars failed code=%s error=%s", code, exc)
+
+        non_empty = [f for f in frames if f is not None and not f.empty]
+        if not non_empty:
+            return pd.DataFrame()
+
+        merged = pd.concat(non_empty, ignore_index=True)
+        if "timestamp" in merged.columns:
+            merged = merged.sort_values("timestamp", ascending=True)
+            merged = merged.drop_duplicates(subset=["timestamp"], keep="last")
+        else:
+            merged = merged.sort_values(["date", "time"], ascending=True)
+            merged = merged.drop_duplicates(subset=["date", "time"], keep="last")
+        return merged.tail(max(1, int(lookback))).reset_index(drop=True)
 
     def quote(self, code: str) -> dict[str, Any]:
         """
@@ -332,6 +600,94 @@ class KISTradingAPI:
             return int(row.get("prvs_rcdl_excc_amt", 0))
         return 0
 
+    def buy_order_capacity(
+        self,
+        code: str,
+        order_type: str,
+        price: int | None,
+    ) -> dict[str, Any]:
+        """
+        종목별 매수가능조회.
+
+        잔고조회 예수금이 아니라 KIS의 주문 심사 기준에 맞춘
+        주문가능현금/미수없는매수금액/매수수량을 반환한다.
+        """
+        cano, acnt_prdt_cd = self._account()
+        query_price = self._to_int(price)
+        ord_dvsn = self._order_division_code(order_type)
+        params = {
+            "CANO": cano,
+            "ACNT_PRDT_CD": acnt_prdt_cd,
+            "PDNO": code,
+            "ORD_UNPR": str(query_price),
+            "ORD_DVSN": ord_dvsn,
+            "CMA_EVLU_AMT_ICLD_YN": "N",
+            "OVRS_ICLD_YN": "N",
+        }
+        data = self._get(
+            "/uapi/domestic-stock/v1/trading/inquire-psbl-order",
+            "TTTC8908R",
+            params,
+        )
+        output = data.get("output", {})
+        row = output[0] if isinstance(output, list) and output else output
+        if not isinstance(row, dict):
+            row = {}
+
+        result = {
+            "ord_psbl_cash": self._to_int(row.get("ord_psbl_cash")),
+            "nrcvb_buy_amt": self._to_int(row.get("nrcvb_buy_amt")),
+            "nrcvb_buy_qty": self._to_int(row.get("nrcvb_buy_qty")),
+            "max_buy_amt": self._to_int(row.get("max_buy_amt")),
+            "max_buy_qty": self._to_int(row.get("max_buy_qty")),
+            "psbl_qty_calc_unpr": self._to_int(row.get("psbl_qty_calc_unpr")),
+        }
+        logger.info(
+            "[KIS 매수가능조회] code=%s type=%s price=%s cash=%s nrcvb_amt=%s nrcvb_qty=%s calc_price=%s",
+            code,
+            order_type,
+            query_price,
+            result["ord_psbl_cash"],
+            result["nrcvb_buy_amt"],
+            result["nrcvb_buy_qty"],
+            result["psbl_qty_calc_unpr"],
+        )
+        return result
+
+    def sell_order_capacity(self, code: str) -> dict[str, Any]:
+        """
+        종목별 매도가능수량조회.
+
+        보유수량과 별개로 현재 주문 가능한 실제 매도 수량을 반환한다.
+        """
+        cano, acnt_prdt_cd = self._account()
+        params = {
+            "CANO": cano,
+            "ACNT_PRDT_CD": acnt_prdt_cd,
+            "PDNO": code,
+        }
+        data = self._get(
+            "/uapi/domestic-stock/v1/trading/inquire-psbl-sell",
+            "TTTC8408R",
+            params,
+        )
+        output = data.get("output", {})
+        row = output[0] if isinstance(output, list) and output else output
+        if not isinstance(row, dict):
+            row = {}
+
+        result = {
+            "ord_psbl_qty": self._to_int(row.get("ord_psbl_qty")),
+            "hldg_qty": self._to_int(row.get("hldg_qty")),
+        }
+        logger.info(
+            "[KIS 매도가능조회] code=%s sellable_qty=%s holding_qty=%s",
+            code,
+            result["ord_psbl_qty"],
+            result["hldg_qty"],
+        )
+        return result
+
     def place_order(
         self,
         side: str,
@@ -359,16 +715,7 @@ class KISTradingAPI:
         else:
             tr_id = "TTTC0012U"
 
-        # 주문구분 코드
-        ord_dvsn_map = {
-            "limit": "00",       # 지정가
-            "market": "01",      # 시장가
-            "mkt": "01",         # 시장가 (alias)
-            "conditional": "02", # 조건부지정가
-            "best": "03",        # 최유리지정가
-            "priority": "04",    # 최우선지정가
-        }
-        ord_dvsn = ord_dvsn_map.get(order_type.lower(), "00")
+        ord_dvsn = self._order_division_code(order_type)
 
         body = {
             "CANO": cano,

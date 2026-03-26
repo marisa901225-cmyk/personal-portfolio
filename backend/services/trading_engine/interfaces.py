@@ -45,6 +45,27 @@ class TradingAPI(Protocol):
 
 
 @runtime_checkable
+class BuyOrderInfoAPI(Protocol):
+    """Optional interface for broker-native buyable cash/qty lookup."""
+
+    def buy_order_capacity(
+        self,
+        code: str,
+        order_type: str,
+        price: int | None,
+    ) -> dict[str, Any]:
+        ...
+
+
+@runtime_checkable
+class SellOrderInfoAPI(Protocol):
+    """Optional interface for broker-native sellable quantity lookup."""
+
+    def sell_order_capacity(self, code: str) -> dict[str, Any]:
+        ...
+
+
+@runtime_checkable
 class TradingDayAPI(Protocol):
     """Optional interface for direct exchange holiday lookup."""
 

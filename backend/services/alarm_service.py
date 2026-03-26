@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 # 모듈에서 함수 임포트
-from .alarm.llm_logic import summarize_with_llm, summarize_expenses_with_llm
+from .alarm.llm_logic_v2 import summarize_with_llm, summarize_expenses_with_llm
 from .alarm.processor import process_pending_alarms
 from .alarm.filters import mask_sensitive_info
 from .alarm.sanitizer import escape_html_preserve_urls, clean_exaone_tokens

@@ -26,7 +26,7 @@ class LLMService:
         self.paid_backend = OpenAIPaidBackend(self.settings)
         self._last_error: Optional[str] = None
         self._last_used_paid: bool = False  # 이번 호출이 유료였나
-        self._last_route: Optional[str] = None  # "remote" | "paid" | None
+        self._last_route: Optional[str] = None  # "remote" | "paid" | "remote_failed_no_paid" | "paid_failed" | "no_backend" | "remote_failed_paid_disabled" | "paid_disabled" | None
         LLMService._instance = self
 
     @classmethod
@@ -67,6 +67,7 @@ class LLMService:
         top_k: int = 20,
         stop: Optional[list] = None,
         seed: Optional[int] = None,
+        allow_paid_fallback: bool = True,
         **kwargs,
     ) -> str:
         # 호출 시작 시 라우팅 상태 초기화
@@ -95,6 +96,11 @@ class LLMService:
                 return out
 
             remote_error = getattr(self.backend, "_last_error", None) or "Remote LLM failed"
+            if not allow_paid_fallback:
+                logger.warning("Remote LLM failed; paid fallback disabled: %s", remote_error)
+                self._last_error = remote_error
+                self._last_route = "remote_failed_paid_disabled"
+                return ""
             logger.warning("Remote LLM failed, trying paid backend: %s", remote_error)
 
             # 2) 원격 실패 시 유료 백엔드 폴백 (가장 저렴한 모델 사용)
@@ -106,7 +112,6 @@ class LLMService:
                     max_tokens=max_tokens,
                     temperature=temperature,
                     top_p=top_p,
-                    top_k=top_k,
                     model=fallback_model,
                     stop=stop,
                     seed=seed,
@@ -120,12 +125,19 @@ class LLMService:
 
                 paid_error = getattr(self.paid_backend, "_last_error", None) or "Paid LLM failed"
                 self._last_error = f"{remote_error} | {paid_error}"
+                self._last_route = "paid_failed"
                 return ""
 
             self._last_error = remote_error
+            self._last_route = "remote_failed_no_paid"
             return ""
 
         # 원격 미구성: 유료 백엔드만 사용
+        if not allow_paid_fallback:
+            self._last_error = "Paid fallback disabled"
+            self._last_route = "paid_disabled"
+            return ""
+
         if self.settings.is_paid_configured():
             paid_model = kwargs.get("model")
             out_paid = self.paid_backend.chat(
@@ -143,9 +155,11 @@ class LLMService:
                 self._last_route = "paid"
                 return out_paid
             self._last_error = getattr(self.paid_backend, "_last_error", None) or "Paid LLM failed"
+            self._last_route = "paid_failed"
             return ""
 
         self._last_error = "No LLM backend configured (set LLM_BASE_URL or AI_REPORT_API_KEY)"
+        self._last_route = "no_backend"
         return ""
 
     def generate_paid_chat(
@@ -154,7 +168,6 @@ class LLMService:
         max_tokens: int = 1024,
         temperature: float = 0.5,
         top_p: float = 0.8,
-        top_k: int = 20,
         model: Optional[str] = None,
         stop: Optional[list] = None,
         seed: Optional[int] = None,
@@ -168,6 +181,7 @@ class LLMService:
             messages,
             max_tokens=max_tokens,
             temperature=temperature,
+            top_p=top_p,
             model=model,
             stop=stop,
             seed=seed,
@@ -179,6 +193,7 @@ class LLMService:
             self._last_route = "paid"
             return out
         self._last_error = getattr(self.paid_backend, "_last_error", None) or "Paid LLM failed"
+        self._last_route = "paid_failed"
         return ""
 
     def switch_model(self, model_path: str) -> bool:
@@ -225,5 +240,5 @@ class LLMService:
         return bool(self._last_used_paid)
 
     def last_route(self) -> Optional[str]:
-        """이번 호출의 라우팅 경로 반환 ('remote' | 'paid' | None)"""
+        """이번 호출의 라우팅 경로 반환."""
         return self._last_route

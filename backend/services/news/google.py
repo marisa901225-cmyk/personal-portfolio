@@ -16,7 +16,12 @@ from xml.etree import ElementTree
 from urllib.parse import quote
 from sqlalchemy.orm import Session
 from ...core.models import GameNews, SpamNews
-from .core import calculate_simhash, GOOGLE_NEWS_MACRO_QUERIES
+from .core import (
+    calculate_simhash,
+    GOOGLE_NEWS_MACRO_QUERIES,
+    determine_news_tags,
+    is_blocked_google_source,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,34 +97,6 @@ def _is_english_content(text: str) -> bool:
     return korean_chars / max(total_chars, 1) < 0.1
 
 
-def _determine_tags(query: str) -> tuple[str, str, bool]:
-    """쿼리 기반 tags 결정 (game_tag, category_tag, is_international)"""
-    q_lower = query.lower()
-    
-    game_tag = "Economy"
-    category_tag = "General"
-    is_international = False
-
-    # 1. Tech/Semiconductor
-    if any(kw in q_lower for kw in ["nvidia", "semiconductor", "chip", "amd", "반도체", "hbm"]):
-        category_tag = "Tech/Semicon"
-    # 2. EV/Auto
-    elif any(kw in q_lower for kw in ["tesla", "ev", "electric vehicle", "전기차"]):
-        category_tag = "EV/Auto"
-    # 3. Macro
-    elif any(kw in q_lower for kw in ["fed", "fomc", "interest rate", "금리", "inflation", "cpi"]):
-        category_tag = "Macro"
-        is_international = "us" in q_lower or "eu" in q_lower or "fed" in q_lower
-    # 4. Market
-    elif any(kw in q_lower for kw in ["s&p", "nasdaq", "dow", "stock", "주식시장", "market"]):
-        category_tag = "Market"
-    # 5. Crypto
-    elif any(kw in q_lower for kw in ["crypto", "bitcoin", "ethereum", "비트코인"]):
-        category_tag = "Crypto"
-        
-    return game_tag, category_tag, is_international
-
-
 async def collect_google_news(
     db: Session, 
     query: str, 
@@ -170,7 +147,6 @@ async def collect_google_news(
         seen_in_batch = set()
         
         count = 0
-        game_tag, category_tag, is_international = _determine_tags(query)
         
         for item in items:
             title_elem = item.find("title")
@@ -184,9 +160,19 @@ async def collect_google_news(
             description = description_elem.text if description_elem is not None else ""
             source_name = source_elem.text if source_elem is not None else "Google News"
             pub_date_str = pub_date_elem.text if pub_date_elem is not None else ""
+
+            if is_blocked_google_source(source_name):
+                continue
             
             # HTML 태그 제거 (description에서)
             clean_desc = re.sub(r'<[^>]+>', '', description) if description else ""
+            game_tag, category_tag, is_international = determine_news_tags(
+                category=category,
+                query=query,
+                title=title,
+                description=clean_desc,
+                gl=gl,
+            )
             
             # 날짜 파싱 (RFC 2822 형식)
             try:

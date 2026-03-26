@@ -1,6 +1,7 @@
 import logging
 from .core import calculate_simhash, calculate_importance_score, RSS_FEEDS, NAVER_ESPORTS_QUERIES, NAVER_ECONOMY_QUERIES, GOOGLE_NEWS_MACRO_QUERIES
-from .rss import collect_rss, collect_google_news, collect_all_google_news
+from .rss import collect_rss
+from .google import collect_google_news as collect_google_news_v2, collect_all_google_macro_news
 from .naver import collect_naver_news, collect_all_naver_news
 from .steam import collect_steamspy_rankings, collect_steam_new_trends
 from .refiner import refine_schedules_with_duckdb, refine_news_with_duckdb, refine_economy_news_with_duckdb, refine_game_trends_with_duckdb
@@ -31,11 +32,12 @@ class NewsCollector:
 
     @staticmethod
     async def collect_google_news(db, query: str, region: str = "US"):
-        return await collect_google_news(db, query, region)
+        gl = "GB" if region == "EU" else "US"
+        return await collect_google_news_v2(db, query, category="economy", hl="en", gl=gl)
 
     @staticmethod
     async def collect_all_google_news(db):
-        return await collect_all_google_news(db)
+        return await collect_all_google_macro_news(db)
 
     @staticmethod
     async def collect_naver_news(db, query: str, category: str = "esports"):

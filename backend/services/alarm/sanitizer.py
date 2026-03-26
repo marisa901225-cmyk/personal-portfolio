@@ -4,6 +4,8 @@ import logging
 import urllib.parse
 from typing import List, Set
 
+from .alarm_keywords import GENERIC_PREFIXES_TO_IGNORE, SUMMARY_GROUNDING_KEYWORDS
+
 logger = logging.getLogger(__name__)
 
 # 정규식 패턴 상수
@@ -11,7 +13,6 @@ URL_PATTERN = re.compile(r'https?://[^\s\)\]<>"]+')
 TOKEN_PATTERN = re.compile(r'[가-힣A-Za-z0-9_*]+')
 LABEL_PATTERN = re.compile(r'^[-•*]\s*\[?([^\]]+)\]?:?')
 MAX_DROP_REASONS = 10
-SUMMARY_KEYWORDS = ['결제', '송금', '입금', '출금', '알림', '메시지', '카톡', '문자', '배송', '택배', '배달', '업데이트', '건', '도착', '완료', '기상청', '공지']
 
 
 def get_korean_ratio(text: str) -> float:
@@ -272,7 +273,6 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
             for name in name_matches:
                 original_senders.add(name)
 
-    COMMON_PREFIXES = ('배달', '완료', '알림', '메시지', '확인', '오늘', '내일', '어제', '전송')
     def _extract_strong_tokens(text: str) -> Set[str]:
         """
         텍스트에서 의미 있는 '강한 토큰' (주로 명사, 고유대명사 등) 추출.
@@ -289,8 +289,11 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
         # 영무/숫자: 3자 이상
         en_tokens = set(re.findall(r'[a-zA-Z0-9]{3,}', text))
         
-        # 흔한 단어(COMMON_PREFIXES)는 근거에서 제외
-        filtered_tokens = {tok for tok in (ko_tokens | en_tokens) if not tok.startswith(COMMON_PREFIXES)}
+        # 흔한 단어 접두어는 근거에서 제외
+        filtered_tokens = {
+            tok for tok in (ko_tokens | en_tokens)
+            if not tok.startswith(GENERIC_PREFIXES_TO_IGNORE)
+        }
         
         return filtered_tokens
 
@@ -367,7 +370,7 @@ def sanitize_llm_output(original_items: List[dict], llm_output: str) -> str:
         if original_strong_tokens:
             has_sender = any(s and s.lower() in line.lower() for s in original_senders)
             has_original_url = any(normalize_url(u) in original_urls_norm for u in URL_PATTERN.findall(line))
-            has_summary_keyword = any(k in line for k in SUMMARY_KEYWORDS)
+            has_summary_keyword = any(keyword in line for keyword in SUMMARY_GROUNDING_KEYWORDS)
             
             if not has_sender and not has_original_url and not has_summary_keyword:
                 line_tokens = _extract_strong_tokens(line)

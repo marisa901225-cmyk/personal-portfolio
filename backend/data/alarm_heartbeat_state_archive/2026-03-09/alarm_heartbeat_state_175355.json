@@ -1,0 +1,14 @@
+{
+  "devices": {
+    "phone-main": {
+      "device_id": "phone-main",
+      "tailscale_name": "phone-main",
+      "ping_target": "100.110.172.108",
+      "last_heartbeat_at": "2026-03-09 17:50:00",
+      "battery": "87",
+      "charging": "%PACTIVE",
+      "network": "%NET",
+      "alert_sent": false
+    }
+  }
+}

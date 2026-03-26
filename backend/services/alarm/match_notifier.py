@@ -59,8 +59,6 @@ except Exception:  # pragma: no cover
 from .catchphrase_selector import choose_phrase
 from .catchphrase_constants import (
     build_fallback_lines,
-    LOL_CATCHPHRASES,
-    VALORANT_CATCHPHRASES,
 )
 
 logger = logging.getLogger(__name__)
@@ -299,12 +297,9 @@ async def check_upcoming_matches(db: Session, catchphrases_file: str, window_min
     # 캐치프레이즈 도출 (Constants 중심)
     selected_phrases = []
     
-    # 1. catchphrase_constants.py의 상수 리스트 사용 (가장 고퀄리티/안정적)
+    # 1. JSON 기반 캐치프레이즈 풀 사용
     for game in games_involved:
-        if game == "LoL":
-            selected_phrases.extend(LOL_CATCHPHRASES)
-        elif game == "Valorant":
-            selected_phrases.extend(VALORANT_CATCHPHRASES)
+        selected_phrases.extend(build_fallback_lines(game_key=game))
 
     # 2. JSON 파일 로드 (보조용/동적 업데이트용이나, 현재는 fallbacks가 주력)
     if not selected_phrases:

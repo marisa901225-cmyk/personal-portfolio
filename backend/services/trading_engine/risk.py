@@ -79,6 +79,9 @@ def should_exit_position(
 
     pnl_pct = (quote_price / position.entry_price) - 1.0
 
+    if position.type == "P":
+        return False, "", pnl_pct
+
     if position.type == "S":
         if pnl_pct <= config.swing_stop_loss_pct:
             if not config.swing_sl_requires_trend_break:
@@ -119,8 +122,14 @@ def _is_entry_window_open(entry_type: str, now: datetime, cfg: TradeEngineConfig
     if not windows:
         return False
 
-    if entry_type == "T" and cfg.day_entry_only_second_window and len(windows) >= 2:
-        return _is_in_window(now, windows[1][0], windows[1][1])
+    if entry_type == "T":
+        try:
+            window_index = int(getattr(cfg, "day_entry_window_index", 0))
+        except (TypeError, ValueError):
+            window_index = 0
+        if 0 <= window_index < len(windows):
+            return _is_in_window(now, windows[window_index][0], windows[window_index][1])
+        return False
 
     return any(_is_in_window(now, start, end) for start, end in windows)
 

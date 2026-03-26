@@ -2,9 +2,10 @@
 # 420줄 alarm_service.py에서 추출한 알람 처리 로직
 import logging
 import os
+import re
 import joblib
 from datetime import datetime
-from typing import List, Set, Optional
+from typing import Dict, List, Optional, Set, Tuple
 from sqlalchemy.orm import Session
 
 from ...core.models import IncomingAlarm, Expense, SpamAlarm
@@ -20,7 +21,7 @@ from .filters import (
 )
 from .parsers import parse_card_approval
 from .sanitizer import escape_html_preserve_urls
-from .llm_logic import summarize_with_llm
+from .llm_logic_v2 import generate_random_message_payload, summarize_with_llm
 from .match_notifier import check_upcoming_matches
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,56 @@ MODEL_PATH = os.path.join(os.path.dirname(__file__), "../../data/expense_model.j
 
 # NB 모델 싱글톤 캐싱
 _nb_pipeline = None
+_RE_MAIL_BATCH_SENDER = re.compile(r"^\s*새\s*메일\s*\d+\s*개\s*$")
+_ROUTE_ENV_KEYS = {
+    "summary": {
+        "base_url": "ALARM_SUMMARY_LLM_BASE_URL",
+        "model": "ALARM_SUMMARY_MODEL_OVERRIDE",
+    },
+    "random": {
+        "base_url": "ALARM_RANDOM_LLM_BASE_URL",
+        "model": "ALARM_RANDOM_MODEL_OVERRIDE",
+    },
+}
+
+
+def _env_optional(key: str) -> Optional[str]:
+    value = (os.getenv(key) or "").strip()
+    return value or None
+
+
+def _sanitize_shared_llm_kwargs(llm_kwargs: dict) -> dict:
+    return {
+        key: value
+        for key, value in llm_kwargs.items()
+        if not key.startswith("summary_") and not key.startswith("random_")
+    }
+
+
+def _resolve_alarm_llm_route(
+    route: str,
+    model_override: Optional[str],
+    llm_kwargs: dict,
+) -> tuple[Optional[str], dict]:
+    if route not in _ROUTE_ENV_KEYS:
+        raise ValueError(f"Unknown alarm LLM route: {route}")
+
+    shared_kwargs = _sanitize_shared_llm_kwargs(llm_kwargs)
+    route_prefix = f"{route}_"
+    route_base_url = llm_kwargs.get(f"{route_prefix}base_url_override") or _env_optional(
+        _ROUTE_ENV_KEYS[route]["base_url"]
+    )
+    route_model = llm_kwargs.get(f"{route_prefix}model_override") or _env_optional(
+        _ROUTE_ENV_KEYS[route]["model"]
+    )
+
+    if route_base_url:
+        shared_kwargs["base_url_override"] = route_base_url
+
+    # endpoint를 명시적으로 갈라 태울 때는 공용 model_override를 그대로 넘기지 않고,
+    # route별 model이 없으면 해당 endpoint의 /v1/models 자동 탐색을 사용한다.
+    resolved_model = route_model if route_model else (None if route_base_url else model_override)
+    return resolved_model, shared_kwargs
 
 
 def _get_nb_pipeline():
@@ -42,6 +93,31 @@ def _get_nb_pipeline():
         except Exception as e:
             logger.warning(f"Failed to load NB model: {e}")
     return _nb_pipeline
+
+
+def _collapse_mail_batch_notifications(items: List[dict]) -> Tuple[List[dict], List[dict]]:
+    """
+    동일 앱의 '새 메일 N개' 배치 알림은 최신 1개만 남긴다.
+    (예: Gmail의 2개/3개/5개 카운트가 연속 수집될 때 중복 합산 방지)
+    """
+    latest_by_app: Dict[str, dict] = {}
+    dropped: List[dict] = []
+    kept_non_batch: List[dict] = []
+
+    for item in items:
+        sender = (item.get("sender") or "").strip()
+        app_name = (item.get("app_name") or "").strip().lower()
+        if app_name and _RE_MAIL_BATCH_SENDER.match(sender):
+            prev = latest_by_app.get(app_name)
+            if prev is not None:
+                dropped.append(prev)
+            latest_by_app[app_name] = item
+            continue
+        kept_non_batch.append(item)
+
+    kept = kept_non_batch + list(latest_by_app.values())
+    kept.sort(key=lambda x: int(getattr(x.get("db_obj"), "id", 0)))
+    return kept, dropped
 
 
 async def process_pending_alarms(db: Session, model_override: Optional[str] = None, **llm_kwargs):
@@ -83,6 +159,8 @@ async def process_pending_alarms(db: Session, model_override: Optional[str] = No
         summaries: List[str] = []
         to_summarize_alarms: List[dict] = []
         senders: Set[str] = set()
+        summary_model, summary_llm_kwargs = _resolve_alarm_llm_route("summary", model_override, llm_kwargs)
+        random_model, random_llm_kwargs = _resolve_alarm_llm_route("random", model_override, llm_kwargs)
         
         filtered_count = 0
         filtered_reasons = {"광고/프로모션": 0, "OTP/보안": 0, "플레이스홀더": 0}
@@ -149,8 +227,8 @@ async def process_pending_alarms(db: Session, model_override: Optional[str] = No
                         else:
                             is_it_spam_llm, cls = is_spam_llm(
                                 full_check_text_llm,
-                                model=model_override,
-                                **llm_kwargs,
+                                model=summary_model,
+                                **summary_llm_kwargs,
                             )
                             if is_it_spam_llm:
                                 is_spam_result, classification, discard_reason = True, cls, "LLM spam classification"
@@ -206,12 +284,32 @@ async def process_pending_alarms(db: Session, model_override: Optional[str] = No
                 db.rollback()
                 # 개별 알람 실패 시 다음 알람으로 진행 (해당 알람은 processing 상태 유지되어 finally에서 복구됨)
 
-        # 4. 요약 처리 (가계부 리포트 비활성화)
+        # 4. 요약 전 배치 메일 카운트 알림 압축(최신 1건만 유지)
+        if to_summarize_alarms:
+            to_summarize_alarms, dropped_mail_batches = _collapse_mail_batch_notifications(to_summarize_alarms)
+            if dropped_mail_batches:
+                logger.info("Collapsed mail batch notifications: dropped=%s", len(dropped_mail_batches))
+                for item in dropped_mail_batches:
+                    db_obj = item.get("db_obj")
+                    if not db_obj:
+                        continue
+                    db_obj.status = "processed"
+                    db_obj.classification = "merged_mail_batch"
+                    if db_obj in processing_alarms:
+                        processing_alarms.remove(db_obj)
+            # 실제 요약 대상으로 남은 sender만 헤더에 반영
+            senders = {str(item["sender"]) for item in to_summarize_alarms if item.get("sender")}
 
-        llm_summary = await summarize_with_llm([a for a in to_summarize_alarms], model=model_override, **llm_kwargs)
-        if llm_summary:
-            safe_summary = escape_html_preserve_urls(llm_summary)
-            if to_summarize_alarms:
+        # 5. 요약 처리 (가계부 리포트 비활성화)
+        random_payload = None
+        if to_summarize_alarms:
+            llm_summary = await summarize_with_llm(
+                [a for a in to_summarize_alarms],
+                model=summary_model,
+                **summary_llm_kwargs,
+            )
+            if llm_summary:
+                safe_summary = escape_html_preserve_urls(llm_summary)
                 summaries.append("\n<b>[주요 알림 요약]</b>\n" + safe_summary)
                 # 요약 성공 시에만 대상 알람들 완료 처리
                 for item in to_summarize_alarms:
@@ -219,20 +317,26 @@ async def process_pending_alarms(db: Session, model_override: Optional[str] = No
                     item["db_obj"].classification = "llm"
                     if item["db_obj"] in processing_alarms:
                         processing_alarms.remove(item["db_obj"])
-            else:
-                summaries.append(safe_summary)
+        else:
+            random_payload = await generate_random_message_payload(
+                model=random_model,
+                **random_llm_kwargs,
+            )
+            if random_payload and random_payload.get("body"):
+                summaries.append(escape_html_preserve_urls(random_payload["body"]))
         
         db.commit() # 요약 결과 최종 커밋
 
-        # 5. 텔레그램 전송
+        # 6. 텔레그램 전송
         if summaries:
-            if to_summarize_alarms: title = "알림 리포트"
+            if to_summarize_alarms:
+                title = "알림 리포트"
             else:
-                random_titles = ["랜덤 토픽", "잡학사전", "브레이크 타임", "오늘의 TMI", "잠깐 쉬어가기", "심심풀이 지식"]
-                title = random_titles[(datetime.now().minute // 10) % len(random_titles)]
+                title = (random_payload or {}).get("title") or "오늘의 브리핑"
+            safe_title = escape_html_preserve_urls(title)
 
             sender_info = f" ({', '.join(list(senders)[:3])}{'...' if len(senders) > 3 else ''})" if senders else ""
-            header = f"<b>[{title}]{sender_info}</b>\n\n"
+            header = f"<b>[{safe_title}]{sender_info}</b>\n\n"
             
             if filtered_count > 0 and to_summarize_alarms:
                 details = [f"{r} {c}개" for r, c in filtered_reasons.items() if c > 0]
@@ -252,7 +356,7 @@ async def process_pending_alarms(db: Session, model_override: Optional[str] = No
         db.rollback()
         raise
     finally:
-        # 6. 복구: 여전히 processing 상태인 알람들(에러 등으로 누락된 것)을 다시 pending으로
+        # 7. 복구: 여전히 processing 상태인 알람들(에러 등으로 누락된 것)을 다시 pending으로
         if processing_alarms:
             logger.info(f"Recovering {len(processing_alarms)} alarms back to pending")
             for alarm in processing_alarms:

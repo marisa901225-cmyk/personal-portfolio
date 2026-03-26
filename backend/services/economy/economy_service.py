@@ -1,17 +1,98 @@
 import logging
 import asyncio
 import json
-from datetime import datetime
+import re
+import sqlite3
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any
 from zoneinfo import ZoneInfo
 from backend.integrations.fred.fred_client import fred_client
 from .ecos_client import ecos_client
 from backend.core.config import settings
+from ..duckdb_refine_config import get_db_path
+from ..news.core import determine_news_tags, is_blocked_google_source
 
 logger = logging.getLogger(__name__)
 KST = ZoneInfo("Asia/Seoul")
 SNAPSHOT_CACHE_PATH = Path(__file__).resolve().parents[2] / "storage" / "economy_snapshot" / "morning_0620.json"
+_PREMARKET_PRIMARY_KEYWORDS = (
+    "증시",
+    "코스피",
+    "코스닥",
+    "주식시장",
+    "환율",
+    "원달러",
+    "원/달러",
+    "원·달러",
+    "금리",
+    "국채",
+    "채권",
+    "연준",
+    "fomc",
+    "fed",
+    "cpi",
+    "pce",
+    "inflation",
+    "인플레이션",
+    "물가",
+    "유가",
+    "oil",
+    "treasury",
+    "yield",
+    "외국인",
+    "수급",
+    "s&p",
+    "nasdaq",
+    "dow",
+    "stock futures",
+    "interest rate",
+    "federal reserve",
+    "futures",
+    "ftse",
+    "dax",
+    "stoxx",
+)
+_PREMARKET_CONTEXT_KEYWORDS = (
+    "전망",
+    "장전",
+    "개장전",
+    "개장 전",
+    "전략",
+    "시황",
+    "관전",
+    "관전 포인트",
+    "체크포인트",
+    "브리핑",
+    "outlook",
+    "ahead of",
+    "before",
+    "opening bell",
+    "market watch",
+    "market wrap",
+)
+_PREMARKET_EXCLUDE_KEYWORDS = (
+    "주주총회",
+    "주총",
+    "아파트",
+    "분양",
+    "세금",
+    "할증료",
+    "채권투자",
+    "브랜드평판",
+    "맛집",
+    "쿠폰",
+)
+_PREMARKET_CRYPTO_KEYWORDS = (
+    "crypto",
+    "bitcoin",
+    "ethereum",
+    "xrp",
+    "비트코인",
+    "이더리움",
+    "가상자산",
+    "코인",
+)
 
 class EconomyService:
     """
@@ -159,20 +240,17 @@ class EconomyService:
             return None
 
     @staticmethod
-    def _extract_latest_daily(daily_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _extract_recent_daily_rows(
+        daily_payload: Dict[str, Any],
+        limit: int = 2,
+    ) -> list[Dict[str, Any]]:
         output2 = daily_payload.get("output2") or []
-        if not isinstance(output2, list) or not output2:
-            return None
-        latest = None
-        latest_date = ""
-        for row in output2:
-            if not isinstance(row, dict):
-                continue
-            date = str(row.get("stck_bsop_date") or "")
-            if date > latest_date:
-                latest_date = date
-                latest = row
-        return latest
+        if not isinstance(output2, list) or limit <= 0:
+            return []
+
+        rows = [row for row in output2 if isinstance(row, dict)]
+        rows.sort(key=lambda row: str(row.get("stck_bsop_date") or ""), reverse=True)
+        return rows[:limit]
 
     @staticmethod
     def _apply_sign(sign_code: Any, value: Optional[float]) -> Optional[float]:
@@ -186,7 +264,251 @@ class EconomyService:
         return value
 
     @staticmethod
-    def format_snapshot_for_llm(snapshot: Dict[str, Any]) -> str:
+    def _format_daily_index_lines(label: str, daily_payload: Dict[str, Any]) -> list[str]:
+        rows = EconomyService._extract_recent_daily_rows(daily_payload, limit=2)
+        if not rows:
+            return []
+
+        lines: list[str] = []
+        for row in rows:
+            date = row.get("stck_bsop_date")
+            close = EconomyService._safe_float(row.get("bstp_nmix_prpr"))
+            delta = EconomyService._safe_float(row.get("bstp_nmix_prdy_vrss"))
+            pct = EconomyService._safe_float(row.get("bstp_nmix_prdy_ctrt"))
+            sign = row.get("prdy_vrss_sign")
+            delta = EconomyService._apply_sign(sign, delta)
+            pct = EconomyService._apply_sign(sign, pct)
+
+            if close is None:
+                continue
+
+            detail = []
+            if delta is not None:
+                detail.append(f"전일대비 {delta:+.2f}")
+            if pct is not None:
+                detail.append(f"{pct:+.2f}%")
+            detail_str = f" ({', '.join(detail)})" if detail else ""
+            date_label = str(date).strip() if date else "날짜미상"
+            lines.append(f"- {label}({date_label}): <b>{close:.2f}</b>{detail_str}")
+
+        return lines
+
+    @staticmethod
+    def _format_market_outlook_rows(
+        rows: list[tuple[str, str, str, str | None]],
+        section_title: str,
+    ) -> list[str]:
+        if not rows:
+            return []
+
+        lines = [section_title]
+        for source_name, category_tag, title, published_at in rows:
+            source = str(source_name or "").strip()
+            if source == "GoogleNews" or source.startswith("Google/"):
+                source = "Google"
+            elif not source:
+                source = "Unknown"
+
+            label = str(category_tag or "").strip() or "General"
+            time_label = ""
+            published_str = str(published_at or "").strip()
+            if published_str:
+                time_label = published_str[:16].replace("T", " ")
+            prefix = f"- {time_label} | " if time_label else "- "
+            lines.append(f"{prefix}[{source}/{label}] {title}")
+        return lines
+
+    @staticmethod
+    def _normalize_topic_text(*parts: Any) -> str:
+        text = " ".join(str(part or "") for part in parts).lower()
+        text = text.replace("&", " and ")
+        text = text.replace("·", "").replace("/", "")
+        text = re.sub(r"[-_]+", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
+    @staticmethod
+    def _parse_db_datetime(value: Any) -> datetime:
+        if isinstance(value, datetime):
+            return value
+        raw = str(value or "").strip()
+        if not raw:
+            return datetime.min
+        normalized = raw.replace("T", " ")
+        try:
+            return datetime.fromisoformat(normalized)
+        except ValueError:
+            try:
+                return datetime.strptime(normalized[:19], "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                return datetime.min
+
+    @staticmethod
+    def _market_outlook_score(
+        source_name: str,
+        category_tag: str,
+        title: str,
+        content: str | None = None,
+    ) -> int:
+        if not title:
+            return -99
+
+        if source_name.startswith("Google/") and is_blocked_google_source(source_name.removeprefix("Google/")):
+            return -99
+
+        text = EconomyService._normalize_topic_text(title, content or "")
+        if any(keyword in text for keyword in _PREMARKET_CRYPTO_KEYWORDS):
+            return -99
+
+        score = 0
+        if category_tag in {"Market", "Macro", "FX/Rates"}:
+            score += 3
+        elif category_tag in {"Tech/Semicon", "EV/Auto"}:
+            score += 1
+        elif category_tag == "General":
+            score -= 1
+
+        primary_hits = sum(1 for keyword in _PREMARKET_PRIMARY_KEYWORDS if keyword in text)
+        context_hits = sum(1 for keyword in _PREMARKET_CONTEXT_KEYWORDS if keyword in text)
+        exclude_hits = sum(1 for keyword in _PREMARKET_EXCLUDE_KEYWORDS if keyword in text)
+
+        score += primary_hits * 2
+        score += context_hits
+        score -= exclude_hits * 4
+
+        if category_tag in {"Tech/Semicon", "EV/Auto", "General"} and primary_hits < 2 and context_hits <= 0:
+            score -= 2
+
+        return score
+
+    @staticmethod
+    def _select_market_outlook_rows(
+        rows: list[tuple[str, str, str, str | None, str | None]],
+        *,
+        limit: int,
+    ) -> list[tuple[str, str, str, str | None]]:
+        scored: list[tuple[int, datetime, tuple[str, str, str, str | None]]] = []
+        seen_titles: set[str] = set()
+
+        for source_name, category_tag, title, published_at, full_content in rows:
+            normalized_title = EconomyService._normalize_topic_text(title)
+            if not normalized_title or normalized_title in seen_titles:
+                continue
+
+            _game_tag, normalized_category, _is_international = determine_news_tags(
+                category="economy",
+                query="",
+                title=str(title or ""),
+                description=str(full_content or ""),
+                gl="KR" if str(source_name or "") == "Naver" else "US",
+            )
+
+            score = EconomyService._market_outlook_score(
+                str(source_name or ""),
+                normalized_category,
+                str(title or ""),
+                full_content,
+            )
+            if score < 3:
+                continue
+
+            seen_titles.add(normalized_title)
+            scored.append(
+                (
+                    score,
+                    EconomyService._parse_db_datetime(published_at),
+                    (source_name, normalized_category, title, published_at),
+                )
+            )
+
+        scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return [row for _score, _published_at, row in scored[:limit]]
+
+    @staticmethod
+    def load_market_outlook_news_context(
+        *,
+        db_path: Optional[str] = None,
+        now: Optional[datetime] = None,
+        lookback_hours: int = 12,
+        limit_per_source: int = 3,
+    ) -> str:
+        """장전 브리핑용 시장전망 뉴스를 DB에서 읽어온다."""
+        now_kst = (now or datetime.now(KST))
+        if now_kst.tzinfo is None:
+            now_kst = now_kst.replace(tzinfo=KST)
+        else:
+            now_kst = now_kst.astimezone(KST)
+
+        db_file = db_path or get_db_path()
+        if not db_file or not Path(db_file).exists():
+            return "데이터 없음"
+
+        since = now_kst.replace(tzinfo=None) - timedelta(hours=max(1, lookback_hours))
+        until = now_kst.replace(tzinfo=None)
+        since_str = since.strftime("%Y-%m-%d %H:%M:%S")
+        until_str = until.strftime("%Y-%m-%d %H:%M:%S")
+        limit = max(1, int(limit_per_source))
+        fetch_limit = max(limit * 8, 40)
+
+        domestic_sql = """
+            SELECT
+                COALESCE(source_name, '') AS source_name,
+                COALESCE(category_tag, '') AS category_tag,
+                title,
+                COALESCE(published_at, created_at) AS published_at,
+                COALESCE(full_content, '') AS full_content
+            FROM game_news
+            WHERE source_type = 'news'
+              AND COALESCE(source_name, '') = 'Naver'
+              AND datetime(COALESCE(published_at, created_at)) >= datetime(?)
+              AND datetime(COALESCE(published_at, created_at)) <= datetime(?)
+            ORDER BY datetime(COALESCE(published_at, created_at)) DESC
+            LIMIT ?
+        """
+        global_sql = """
+            SELECT
+                COALESCE(source_name, '') AS source_name,
+                COALESCE(category_tag, '') AS category_tag,
+                title,
+                COALESCE(published_at, created_at) AS published_at,
+                COALESCE(full_content, '') AS full_content
+            FROM game_news
+            WHERE source_type = 'news'
+              AND datetime(COALESCE(published_at, created_at)) >= datetime(?)
+              AND datetime(COALESCE(published_at, created_at)) <= datetime(?)
+              AND (
+                    COALESCE(source_name, '') = 'GoogleNews' OR
+                    COALESCE(source_name, '') LIKE 'Google/%' OR
+                    COALESCE(game_tag, '') LIKE 'GlobalMacro-%' OR
+                    COALESCE(is_international, 0) = 1
+              )
+            ORDER BY datetime(COALESCE(published_at, created_at)) DESC
+            LIMIT ?
+        """
+
+        try:
+            with sqlite3.connect(db_file) as conn:
+                cur = conn.cursor()
+                domestic_rows = list(cur.execute(domestic_sql, (since_str, until_str, fetch_limit)))
+                global_rows = list(cur.execute(global_sql, (since_str, until_str, fetch_limit)))
+        except Exception as exc:
+            logger.error("Failed to load market outlook news context: %s", exc, exc_info=True)
+            return "데이터 없음"
+
+        domestic_rows = EconomyService._select_market_outlook_rows(domestic_rows, limit=limit)
+        global_rows = EconomyService._select_market_outlook_rows(global_rows, limit=limit)
+
+        lines: list[str] = []
+        lines.extend(EconomyService._format_market_outlook_rows(domestic_rows, "[국내 시장전망 뉴스]"))
+        lines.extend(EconomyService._format_market_outlook_rows(global_rows, "[해외 시장전망 뉴스]"))
+        return "\n".join(lines).strip() or "데이터 없음"
+
+    @staticmethod
+    def format_snapshot_for_llm(
+        snapshot: Dict[str, Any],
+        *,
+        include_intraday_kr_indices: bool = True,
+    ) -> str:
         """
         스냅샷 데이터를 LLM 프롬프트용 텍스트로 변환합니다.
         """
@@ -204,51 +526,17 @@ class EconomyService:
             lines.append("[한국 시장]")
             if kr_data.get("usd_krw") is not None: 
                 lines.append(f"- 원/달러 환율: <b>{kr_data['usd_krw']:.2f}원</b>")
-            if kr_data.get("kospi") is not None: 
+            if include_intraday_kr_indices and kr_data.get("kospi") is not None:
                 lines.append(f"- 코스피: <b>{kr_data['kospi']:.2f}</b>")
-            if kr_data.get("kosdaq") is not None: 
+            if include_intraday_kr_indices and kr_data.get("kosdaq") is not None:
                 lines.append(f"- 코스닥: <b>{kr_data['kosdaq']:.2f}</b>")
 
             kospi_daily = kr_data.get("kospi_daily")
             if isinstance(kospi_daily, dict):
-                latest = EconomyService._extract_latest_daily(kospi_daily)
-                if latest:
-                    date = latest.get("stck_bsop_date")
-                    close = EconomyService._safe_float(latest.get("bstp_nmix_prpr"))
-                    delta = EconomyService._safe_float(latest.get("bstp_nmix_prdy_vrss"))
-                    pct = EconomyService._safe_float(latest.get("bstp_nmix_prdy_ctrt"))
-                    sign = latest.get("prdy_vrss_sign")
-                    delta = EconomyService._apply_sign(sign, delta)
-                    pct = EconomyService._apply_sign(sign, pct)
-                    if close is not None:
-                        detail = []
-                        if delta is not None:
-                            detail.append(f"전일대비 {delta:+.2f}")
-                        if pct is not None:
-                            detail.append(f"{pct:+.2f}%")
-                        detail_str = f" ({', '.join(detail)})" if detail else ""
-                        date_str = f"{date} " if date else ""
-                        lines.append(f"- 코스피(일자별 {date_str}): <b>{close:.2f}</b>{detail_str}")
+                lines.extend(EconomyService._format_daily_index_lines("코스피", kospi_daily))
 
             kosdaq_daily = kr_data.get("kosdaq_daily")
             if isinstance(kosdaq_daily, dict):
-                latest = EconomyService._extract_latest_daily(kosdaq_daily)
-                if latest:
-                    date = latest.get("stck_bsop_date")
-                    close = EconomyService._safe_float(latest.get("bstp_nmix_prpr"))
-                    delta = EconomyService._safe_float(latest.get("bstp_nmix_prdy_vrss"))
-                    pct = EconomyService._safe_float(latest.get("bstp_nmix_prdy_ctrt"))
-                    sign = latest.get("prdy_vrss_sign")
-                    delta = EconomyService._apply_sign(sign, delta)
-                    pct = EconomyService._apply_sign(sign, pct)
-                    if close is not None:
-                        detail = []
-                        if delta is not None:
-                            detail.append(f"전일대비 {delta:+.2f}")
-                        if pct is not None:
-                            detail.append(f"{pct:+.2f}%")
-                        detail_str = f" ({', '.join(detail)})" if detail else ""
-                        date_str = f"{date} " if date else ""
-                        lines.append(f"- 코스닥(일자별 {date_str}): <b>{close:.2f}</b>{detail_str}")
+                lines.extend(EconomyService._format_daily_index_lines("코스닥", kosdaq_daily))
         
         return "\n".join(lines).strip()
