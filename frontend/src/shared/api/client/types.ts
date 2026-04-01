@@ -73,46 +73,6 @@ export interface AssetCalibration {
     actual_avg_price: number;
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Memories
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-export type MemoryCategory = 'profile' | 'preference' | 'project' | 'fact' | 'general';
-
-export interface MemoryCreate {
-    content: string;
-    category?: MemoryCategory;
-    key?: string | null;
-    importance?: number;
-    ttl_days?: number;
-}
-
-export interface MemoryUpdate {
-    content?: string;
-    category?: MemoryCategory;
-    key?: string | null;
-    importance?: number;
-    ttl_days?: number;
-}
-
-export interface MemoryResponse {
-    id: number;
-    content: string;
-    category: MemoryCategory;
-    key: string | null;
-    importance: number;
-    expires_at: string | null;
-    created_at: string;
-    updated_at: string;
-}
-
-export interface MemorySearchRequest {
-    query?: string;
-    category?: MemoryCategory;
-    min_importance?: number;
-    limit?: number;
-}
-
 export interface BackendAssetUpdatePayload {
     name?: string;
     ticker?: string | null;

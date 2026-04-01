@@ -5,11 +5,9 @@ Expense Analytics
 """
 from __future__ import annotations
 
-from sqlalchemy import extract
 from sqlalchemy.orm import Session
 
-from ...core.models import Expense
-from ...services.users import get_or_create_single_user
+from .expense_query import build_user_expense_query
 
 
 def get_expense_summary(
@@ -18,16 +16,11 @@ def get_expense_summary(
     month: int | None = None,
 ) -> dict:
     """소비 내역 요약을 생성한다."""
-    user = get_or_create_single_user(db)
-
-    query = db.query(Expense).filter(Expense.user_id == user.id, Expense.deleted_at.is_(None))
-
-    if year is not None:
-        query = query.filter(extract("year", Expense.date) == year)
-        if month is not None:
-            query = query.filter(extract("month", Expense.date) == month)
-
-    expenses = query.all()
+    expenses = build_user_expense_query(
+        db,
+        year=year,
+        month=month,
+    ).all()
 
     total_expense = sum(e.amount for e in expenses if e.amount < 0)
     total_income = sum(e.amount for e in expenses if e.amount >= 0)

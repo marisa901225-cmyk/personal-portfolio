@@ -1,5 +1,17 @@
 import unittest
-from backend.services.news.core import _normalize_text, calculate_simhash, get_jaccard_similarity, is_duplicate_complex
+from datetime import datetime, timezone
+from unittest.mock import MagicMock
+
+from backend.services.news.core import (
+    _normalize_text,
+    calculate_simhash,
+    detect_ad_keyword,
+    get_jaccard_similarity,
+    prepare_news_ingest_record,
+    persist_news_record,
+    is_duplicate_complex,
+)
+from backend.services.news.deduplication import compute_simhash_for_text, is_duplicate
 
 class MockNews:
     def __init__(self, title, content_hash):
@@ -46,6 +58,55 @@ class TestNewsDedup(unittest.TestCase):
         
         # 제목 기반 자카드 유사도(0.8 이상)로 걸러져야 함
         self.assertTrue(is_duplicate_complex(title2, hash2, recent_news))
+
+    def test_detect_ad_keyword(self):
+        self.assertEqual(detect_ad_keyword("T1 팬미팅 이벤트 안내"), "이벤트")
+        self.assertIsNone(detect_ad_keyword("T1 결승 진출"))
+
+    def test_legacy_dedup_wrappers_use_core_simhash(self):
+        text = "삼성전자 하반기 실적 전망 맑음"
+        content_hash = calculate_simhash(text)
+        self.assertEqual(compute_simhash_for_text(text), int(content_hash))
+        self.assertTrue(is_duplicate(text, (content_hash,)))
+
+    def test_prepare_news_ingest_record_skips_seen_in_batch(self):
+        db = MagicMock()
+        expected_hash = calculate_simhash("T1 결승 진출본문")
+        content_hash, recent_news, should_skip = prepare_news_ingest_record(
+            db,
+            title="T1 결승 진출",
+            content="본문",
+            published_at=datetime.now(timezone.utc),
+            recent_window_hours=48,
+            seen_in_batch={expected_hash},
+        )
+        self.assertTrue(should_skip)
+        self.assertEqual(recent_news, [])
+        self.assertEqual(content_hash, expected_hash)
+        db.query.assert_not_called()
+
+    def test_persist_news_record_adds_model(self):
+        db = MagicMock()
+        db.add = MagicMock()
+
+        class _DummyNews:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+        record = persist_news_record(
+            db,
+            model_cls=_DummyNews,
+            content_hash="hash",
+            game_tag="LoL",
+            category_tag="Esports",
+            source_name="Naver",
+            title="title",
+            url="url",
+            full_content="content",
+            published_at=datetime.now(timezone.utc),
+        )
+        self.assertEqual(record.kwargs["title"], "title")
+        db.add.assert_called_once()
 
 if __name__ == '__main__':
     unittest.main()

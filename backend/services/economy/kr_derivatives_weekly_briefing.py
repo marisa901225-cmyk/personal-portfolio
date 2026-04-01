@@ -6,7 +6,6 @@ import logging
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from statistics import mean
 from typing import Any, Dict, Optional
 from zoneinfo import ZoneInfo
 
@@ -14,6 +13,12 @@ from sqlalchemy.orm import Session
 
 from ...core.db import SessionLocal
 from ...core.models_misc import KrOptionBoardSnapshot
+from .kr_derivatives_weekly_analysis import (
+    _build_weekly_briefing_lines,
+    _build_weekly_comparison,
+    _has_activity,
+    _score_week,
+)
 
 logger = logging.getLogger(__name__)
 KST = ZoneInfo("Asia/Seoul")
@@ -21,6 +26,7 @@ KST = ZoneInfo("Asia/Seoul")
 SNAPSHOT_DIR = Path(__file__).resolve().parents[2] / "storage" / "market_sentiment"
 SNAPSHOT_FILE = SNAPSHOT_DIR / "kr_option_board_snapshots.jsonl"
 _LEGACY_MIGRATION_DONE = False
+_WEEKLY_BRIEFING_LOOKBACK_DAYS = 45
 
 
 def _to_int(value: Any) -> int:
@@ -91,15 +97,25 @@ class OptionBoardSnapshot:
         return asdict(self)
 
 
+
 def _ensure_snapshot_dir() -> None:
     SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _as_kst(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=KST)
+    return dt.astimezone(KST)
+
+
+def _normalize_reference_time(value: Optional[datetime] = None) -> datetime:
+    base = value or datetime.now(KST)
+    return _as_kst(base)
+
+
 def _to_kst_naive(dt: datetime) -> datetime:
     """datetime을 KST naive로 정규화한다."""
-    if dt.tzinfo is None:
-        return dt
-    return dt.astimezone(KST).replace(tzinfo=None)
+    return _as_kst(dt).replace(tzinfo=None)
 
 
 def _parse_snapshot_collected_at(value: str) -> datetime:
@@ -107,20 +123,19 @@ def _parse_snapshot_collected_at(value: str) -> datetime:
     try:
         dt = datetime.fromisoformat(value)
     except ValueError:
-        dt = datetime.now(KST)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=KST)
-    else:
-        dt = dt.astimezone(KST)
-    return dt.replace(tzinfo=None)
+        return _normalize_reference_time().replace(tzinfo=None)
+    return _as_kst(dt).replace(tzinfo=None)
+
+
+def _snapshot_collected_at_for_compare(snapshot: OptionBoardSnapshot) -> Optional[datetime]:
+    try:
+        return _as_kst(datetime.fromisoformat(snapshot.collected_at))
+    except ValueError:
+        return None
 
 
 def _row_to_snapshot(row: KrOptionBoardSnapshot) -> OptionBoardSnapshot:
-    collected_at = row.collected_at
-    if collected_at.tzinfo is None:
-        collected_at = collected_at.replace(tzinfo=KST)
-    else:
-        collected_at = collected_at.astimezone(KST)
+    collected_at = _as_kst(row.collected_at)
 
     return OptionBoardSnapshot(
         collected_at=collected_at.isoformat(),
@@ -225,48 +240,50 @@ def _migrate_legacy_file_cache_to_db_if_needed() -> None:
         logger.error("Failed to migrate legacy option snapshot cache: %s", e)
 
 
-def _week_key(trading_date: str) -> Optional[tuple[int, int]]:
-    if len(trading_date) != 8:
-        return None
-    try:
-        dt = datetime.strptime(trading_date, "%Y%m%d").replace(tzinfo=KST)
-    except ValueError:
-        return None
-    iso = dt.isocalendar()
-    return (iso.year, iso.week)
+def _normalize_option_rows(rows: Any) -> list[Dict[str, Any]]:
+    if isinstance(rows, dict):
+        rows = [rows]
+    if not isinstance(rows, list):
+        return []
+    return [item for item in rows if isinstance(item, dict)]
 
 
-def _week_label(key: tuple[int, int]) -> str:
-    year, week = key
-    return f"{year}년 {week}주차"
+def _sum_option_value(rows: list[Dict[str, Any]], field: str) -> int:
+    return sum(_to_int(item.get(field)) for item in rows)
+
+
+def _calculate_bid_pressure(call_bid_total: int, put_bid_total: int) -> float:
+    bid_total = call_bid_total + put_bid_total
+    if bid_total == 0:
+        return 0.0
+    return (call_bid_total - put_bid_total) / bid_total
+
+
+def _calculate_oi_pressure(call_oi_change_total: int, put_oi_change_total: int) -> float:
+    oi_total = abs(call_oi_change_total) + abs(put_oi_change_total)
+    if oi_total == 0:
+        return 0.0
+    return (call_oi_change_total - put_oi_change_total) / oi_total
+
+
+def _calculate_put_call_bid_ratio(call_bid_total: int, put_bid_total: int) -> float:
+    if call_bid_total > 0:
+        return put_bid_total / call_bid_total
+    return 999.0 if put_bid_total > 0 else 1.0
 
 
 def _aggregate_option_board(payload: Dict[str, Any], *, maturity_month: str, market_cls: str) -> OptionBoardSnapshot:
-    calls = payload.get("output1")
-    puts = payload.get("output2")
-    if isinstance(calls, dict):
-        calls = [calls]
-    if isinstance(puts, dict):
-        puts = [puts]
-    if not isinstance(calls, list):
-        calls = []
-    if not isinstance(puts, list):
-        puts = []
+    calls = _normalize_option_rows(payload.get("output1"))
+    puts = _normalize_option_rows(payload.get("output2"))
 
-    call_bid_total = sum(_to_int(item.get("total_bidp_rsqn")) for item in calls if isinstance(item, dict))
-    call_ask_total = sum(_to_int(item.get("total_askp_rsqn")) for item in calls if isinstance(item, dict))
-    put_bid_total = sum(_to_int(item.get("total_bidp_rsqn")) for item in puts if isinstance(item, dict))
-    put_ask_total = sum(_to_int(item.get("total_askp_rsqn")) for item in puts if isinstance(item, dict))
-    call_oi_change_total = sum(_to_int(item.get("otst_stpl_qty_icdc")) for item in calls if isinstance(item, dict))
-    put_oi_change_total = sum(_to_int(item.get("otst_stpl_qty_icdc")) for item in puts if isinstance(item, dict))
+    call_bid_total = _sum_option_value(calls, "total_bidp_rsqn")
+    call_ask_total = _sum_option_value(calls, "total_askp_rsqn")
+    put_bid_total = _sum_option_value(puts, "total_bidp_rsqn")
+    put_ask_total = _sum_option_value(puts, "total_askp_rsqn")
+    call_oi_change_total = _sum_option_value(calls, "otst_stpl_qty_icdc")
+    put_oi_change_total = _sum_option_value(puts, "otst_stpl_qty_icdc")
 
-    bid_total = call_bid_total + put_bid_total
-    bid_pressure = 0.0 if bid_total == 0 else (call_bid_total - put_bid_total) / bid_total
-    oi_total = abs(call_oi_change_total) + abs(put_oi_change_total)
-    oi_pressure = 0.0 if oi_total == 0 else (call_oi_change_total - put_oi_change_total) / oi_total
-    put_call_bid_ratio = (put_bid_total / call_bid_total) if call_bid_total > 0 else (999.0 if put_bid_total > 0 else 1.0)
-
-    now = datetime.now(KST)
+    now = _normalize_reference_time()
     return OptionBoardSnapshot(
         collected_at=now.isoformat(),
         trading_date=now.strftime("%Y%m%d"),
@@ -278,9 +295,9 @@ def _aggregate_option_board(payload: Dict[str, Any], *, maturity_month: str, mar
         put_ask_total=put_ask_total,
         call_oi_change_total=call_oi_change_total,
         put_oi_change_total=put_oi_change_total,
-        bid_pressure=bid_pressure,
-        oi_pressure=oi_pressure,
-        put_call_bid_ratio=put_call_bid_ratio,
+        bid_pressure=_calculate_bid_pressure(call_bid_total, put_bid_total),
+        oi_pressure=_calculate_oi_pressure(call_oi_change_total, put_oi_change_total),
+        put_call_bid_ratio=_calculate_put_call_bid_ratio(call_bid_total, put_bid_total),
     )
 
 
@@ -291,20 +308,13 @@ def _append_snapshot(snapshot: OptionBoardSnapshot) -> None:
         db.commit()
 
 
-def _has_activity(snapshot: OptionBoardSnapshot) -> bool:
-    """콜/풋 호가 잔량 기준으로 유효 스냅샷인지 판정한다."""
-    total = (
-        snapshot.call_bid_total
-        + snapshot.call_ask_total
-        + snapshot.put_bid_total
-        + snapshot.put_ask_total
-    )
-    return total > 0
-
-
-def _load_snapshots(days: int = 35) -> list[OptionBoardSnapshot]:
+def _load_snapshots(
+    days: int = 35,
+    *,
+    reference_time: Optional[datetime] = None,
+) -> list[OptionBoardSnapshot]:
     _migrate_legacy_file_cache_to_db_if_needed()
-    cutoff = _to_kst_naive(datetime.now(KST)) - timedelta(days=max(days, 1))
+    cutoff = _to_kst_naive(_normalize_reference_time(reference_time)) - timedelta(days=max(days, 1))
 
     try:
         with SessionLocal() as db:
@@ -320,6 +330,46 @@ def _load_snapshots(days: int = 35) -> list[OptionBoardSnapshot]:
         return []
 
 
+def _select_latest_snapshot_before(
+    snapshots: list[OptionBoardSnapshot],
+    base: datetime,
+) -> Optional[OptionBoardSnapshot]:
+    candidates: list[tuple[datetime, OptionBoardSnapshot]] = []
+    for snap in snapshots:
+        collected_at = _snapshot_collected_at_for_compare(snap)
+        if collected_at is None:
+            continue
+        if collected_at <= base:
+            candidates.append((collected_at, snap))
+
+    if not candidates:
+        return None
+
+    active_candidates = [
+        (collected_at, snap) for collected_at, snap in candidates if _has_activity(snap)
+    ]
+    selection_pool = active_candidates or candidates
+    _, latest = max(selection_pool, key=lambda item: item[0])
+    return latest
+
+
+def _snapshot_summary_payload(snapshot: OptionBoardSnapshot) -> Dict[str, Any]:
+    return {
+        "source": "snapshot_db",
+        "trading_date": snapshot.trading_date,
+        "maturity_month": snapshot.maturity_month,
+        "call_bid_total": snapshot.call_bid_total,
+        "call_ask_total": snapshot.call_ask_total,
+        "put_bid_total": snapshot.put_bid_total,
+        "put_ask_total": snapshot.put_ask_total,
+        "call_oi_change_total": snapshot.call_oi_change_total,
+        "put_oi_change_total": snapshot.put_oi_change_total,
+        "put_call_bid_ratio": snapshot.put_call_bid_ratio,
+        "bid_pressure": snapshot.bid_pressure,
+        "oi_pressure": snapshot.oi_pressure,
+    }
+
+
 def get_latest_option_snapshot_summary(
     now: Optional[datetime] = None,
     *,
@@ -330,54 +380,16 @@ def get_latest_option_snapshot_summary(
 
     모닝 브리핑(07:00)에서 실시간 전광판 대신 전일 장마감 수치를 쓰기 위한 용도.
     """
-    base = now or datetime.now(KST)
-    if base.tzinfo is None:
-        base = base.replace(tzinfo=KST)
-    else:
-        base = base.astimezone(KST)
+    base = _normalize_reference_time(now)
 
-    snapshots = _load_snapshots(days=max(days, 1))
+    snapshots = _load_snapshots(days=max(days, 1), reference_time=base)
     if not snapshots:
         return None
 
-    candidates: list[tuple[datetime, OptionBoardSnapshot]] = []
-    for snap in snapshots:
-        try:
-            collected_at = datetime.fromisoformat(snap.collected_at)
-        except ValueError:
-            continue
-
-        if collected_at.tzinfo is None:
-            collected_at = collected_at.replace(tzinfo=KST)
-        else:
-            collected_at = collected_at.astimezone(KST)
-
-        if collected_at <= base:
-            candidates.append((collected_at, snap))
-
-    if not candidates:
+    latest = _select_latest_snapshot_before(snapshots, base)
+    if latest is None:
         return None
-
-    # 최신 스냅샷이 전부 0인 경우가 있어, 유효 거래량이 있는 최신값을 우선 사용한다.
-    active_candidates = [(collected_at, snap) for collected_at, snap in candidates if _has_activity(snap)]
-    if active_candidates:
-        _, latest = max(active_candidates, key=lambda item: item[0])
-    else:
-        _, latest = max(candidates, key=lambda item: item[0])
-    return {
-        "source": "snapshot_db",
-        "trading_date": latest.trading_date,
-        "maturity_month": latest.maturity_month,
-        "call_bid_total": latest.call_bid_total,
-        "call_ask_total": latest.call_ask_total,
-        "put_bid_total": latest.put_bid_total,
-        "put_ask_total": latest.put_ask_total,
-        "call_oi_change_total": latest.call_oi_change_total,
-        "put_oi_change_total": latest.put_oi_change_total,
-        "put_call_bid_ratio": latest.put_call_bid_ratio,
-        "bid_pressure": latest.bid_pressure,
-        "oi_pressure": latest.oi_pressure,
-    }
+    return _snapshot_summary_payload(latest)
 
 
 async def collect_option_board_snapshot(
@@ -386,46 +398,39 @@ async def collect_option_board_snapshot(
 ) -> Optional[OptionBoardSnapshot]:
     from backend.integrations.kis.kis_client import get_options_display_board
 
-    now = datetime.now(KST)
-    target_maturity = maturity_month or now.strftime("%Y%m")
-    payload = await get_options_display_board(
-        maturity_month=target_maturity,
-        market_cls=market_cls,
-        call_put_cls="CO",
-    )
-    if not payload or payload.get("rt_cd") != "0":
-        logger.warning("Option board snapshot collection failed: %s", (payload or {}).get("msg1"))
-        return None
+    async def _fetch_snapshot(target_maturity: str) -> Optional[OptionBoardSnapshot]:
+        payload = await get_options_display_board(
+            maturity_month=target_maturity,
+            market_cls=market_cls,
+            call_put_cls="CO",
+        )
+        if not payload or payload.get("rt_cd") != "0":
+            logger.warning("Option board snapshot collection failed: %s", (payload or {}).get("msg1"))
+            return None
+        return _aggregate_option_board(
+            payload,
+            maturity_month=target_maturity,
+            market_cls=market_cls,
+        )
 
-    snapshot = _aggregate_option_board(
-        payload,
-        maturity_month=target_maturity,
-        market_cls=market_cls,
-    )
+    target_maturity = maturity_month or _normalize_reference_time().strftime("%Y%m")
+    snapshot = await _fetch_snapshot(target_maturity)
+    if snapshot is None:
+        return None
 
     # 만기 지난 월(예: 2월 만기 후 202602) 조회 시 0행 데이터가 내려올 수 있어
     # 기본값(당월) 조회가 비어 있으면 다음 달 만기월로 1회 재조회한다.
     if maturity_month is None and not _has_activity(snapshot):
         next_maturity = _next_month_yyyymm(target_maturity)
         if next_maturity != target_maturity:
-            fallback_payload = await get_options_display_board(
-                maturity_month=next_maturity,
-                market_cls=market_cls,
-                call_put_cls="CO",
-            )
-            if fallback_payload and fallback_payload.get("rt_cd") == "0":
-                fallback_snapshot = _aggregate_option_board(
-                    fallback_payload,
-                    maturity_month=next_maturity,
-                    market_cls=market_cls,
+            fallback_snapshot = await _fetch_snapshot(next_maturity)
+            if fallback_snapshot and _has_activity(fallback_snapshot):
+                logger.info(
+                    "Option board snapshot switched maturity: %s -> %s (primary empty)",
+                    target_maturity,
+                    next_maturity,
                 )
-                if _has_activity(fallback_snapshot):
-                    logger.info(
-                        "Option board snapshot switched maturity: %s -> %s (primary empty)",
-                        target_maturity,
-                        next_maturity,
-                    )
-                    snapshot = fallback_snapshot
+                snapshot = fallback_snapshot
 
     if not _has_activity(snapshot):
         logger.warning(
@@ -438,59 +443,6 @@ async def collect_option_board_snapshot(
     _append_snapshot(snapshot)
     logger.info("Option board snapshot saved: date=%s pcr=%.3f", snapshot.trading_date, snapshot.put_call_bid_ratio)
     return snapshot
-
-
-def _week_stats(snaps: list[OptionBoardSnapshot]) -> Dict[str, Any]:
-    if not snaps:
-        return {
-            "count": 0,
-            "avg_pcr": 1.0,
-            "avg_bid_pressure": 0.0,
-            "avg_oi_pressure": 0.0,
-            "sum_call_oi_change": 0,
-            "sum_put_oi_change": 0,
-            "sum_call_bid": 0,
-            "sum_put_bid": 0,
-        }
-
-    return {
-        "count": len(snaps),
-        "avg_pcr": mean(s.put_call_bid_ratio for s in snaps),
-        "avg_bid_pressure": mean(s.bid_pressure for s in snaps),
-        "avg_oi_pressure": mean(s.oi_pressure for s in snaps),
-        "sum_call_oi_change": sum(s.call_oi_change_total for s in snaps),
-        "sum_put_oi_change": sum(s.put_oi_change_total for s in snaps),
-        "sum_call_bid": sum(s.call_bid_total for s in snaps),
-        "sum_put_bid": sum(s.put_bid_total for s in snaps),
-    }
-
-
-def _score_week(stats: Dict[str, Any]) -> Dict[str, Any]:
-    pcr = float(stats.get("avg_pcr", 1.0))
-    bid_pressure = float(stats.get("avg_bid_pressure", 0.0))
-    oi_pressure = float(stats.get("avg_oi_pressure", 0.0))
-
-    pcr_component = max(min((1.0 - pcr) * 40.0, 25.0), -25.0)
-    bid_component = max(min(bid_pressure * 30.0, 20.0), -20.0)
-    oi_component = max(min(oi_pressure * 30.0, 20.0), -20.0)
-    score = max(min(pcr_component + bid_component + oi_component, 100.0), -100.0)
-
-    if score >= 25:
-        regime = "상승 우위"
-    elif score <= -25:
-        regime = "하락 우위"
-    else:
-        regime = "중립"
-
-    return {
-        "score": round(score, 2),
-        "regime": regime,
-        "components": {
-            "pcr": round(pcr_component, 2),
-            "bid": round(bid_component, 2),
-            "oi": round(oi_component, 2),
-        },
-    }
 
 
 def _parse_kospi_close(row: Dict[str, Any]) -> Optional[float]:
@@ -534,81 +486,14 @@ async def _fetch_kospi_week_returns(week_windows: list[tuple[str, str]]) -> Dict
 
 
 async def build_weekly_derivatives_briefing(now: Optional[datetime] = None) -> Optional[str]:
-    base = now or datetime.now(KST)
-    if base.tzinfo is None:
-        base = base.replace(tzinfo=KST)
-    else:
-        base = base.astimezone(KST)
-
-    snapshots = [snap for snap in _load_snapshots(days=45) if _has_activity(snap)]
-    if len(snapshots) < 5:
+    base = _normalize_reference_time(now)
+    snapshots = _load_snapshots(days=_WEEKLY_BRIEFING_LOOKBACK_DAYS, reference_time=base)
+    comparison = _build_weekly_comparison(snapshots, base=base)
+    if comparison is None:
         return None
 
-    grouped: dict[tuple[int, int], list[OptionBoardSnapshot]] = {}
-    for snap in snapshots:
-        key = _week_key(snap.trading_date)
-        if key is None:
-            continue
-        grouped.setdefault(key, []).append(snap)
-
-    if len(grouped) < 2:
-        return None
-
-    current_key = base.isocalendar()[:2]
-    complete_weeks = sorted(k for k in grouped.keys() if k != current_key)
-    if len(complete_weeks) < 2:
-        return None
-
-    last_week_key = complete_weeks[-1]
-    prev_week_key = complete_weeks[-2]
-    last_week_snaps = sorted(grouped[last_week_key], key=lambda item: item.trading_date)
-    prev_week_snaps = sorted(grouped[prev_week_key], key=lambda item: item.trading_date)
-
-    last_week_stats = _week_stats(last_week_snaps)
-    prev_week_stats = _week_stats(prev_week_snaps)
-    last_week_score = _score_week(last_week_stats)
-    prev_week_score = _score_week(prev_week_stats)
-
-    last_window = (last_week_snaps[0].trading_date, last_week_snaps[-1].trading_date)
-    prev_window = (prev_week_snaps[0].trading_date, prev_week_snaps[-1].trading_date)
-    returns = await _fetch_kospi_week_returns([last_window, prev_window])
-
-    score_diff = float(last_week_score["score"]) - float(prev_week_score["score"])
-    pcr_diff = float(last_week_stats["avg_pcr"]) - float(prev_week_stats["avg_pcr"])
-    oi_gap_last = int(last_week_stats["sum_put_oi_change"]) - int(last_week_stats["sum_call_oi_change"])
-    oi_gap_prev = int(prev_week_stats["sum_put_oi_change"]) - int(prev_week_stats["sum_call_oi_change"])
-
-    def _fmt_date(raw: str) -> str:
-        if len(raw) != 8:
-            return raw
-        return f"{raw[:4]}-{raw[4:6]}-{raw[6:8]}"
-
-    lines = [
-        "<b>[주간 국내 파생심리 브리핑]</b>",
-        f"- 지난주({ _week_label(last_week_key) }): 점수 {last_week_score['score']} / {last_week_score['regime']}",
-        f"- 전주({ _week_label(prev_week_key) }): 점수 {prev_week_score['score']} / {prev_week_score['regime']}",
-        f"- 점수 변화: {score_diff:+.2f}p",
-        (
-            f"- Put/Call(매수잔량) 평균: {last_week_stats['avg_pcr']:.2f} "
-            f"(전주 대비 {pcr_diff:+.2f})"
-        ),
-        (
-            f"- 풋-콜 OI증감 격차: {oi_gap_last:+,} "
-            f"(전주 {oi_gap_prev:+,})"
-        ),
-        (
-            f"- 관측 구간: 지난주 {_fmt_date(last_window[0])}~{_fmt_date(last_window[1])}, "
-            f"전주 {_fmt_date(prev_window[0])}~{_fmt_date(prev_window[1])}"
-        ),
-    ]
-
-    ret_last = returns.get(last_window)
-    ret_prev = returns.get(prev_window)
-    if ret_last is not None:
-        lines.append(f"- 코스피 수익률: 지난주 {ret_last:+.2f}%")
-    if ret_prev is not None:
-        lines.append(f"- 코스피 수익률: 전주 {ret_prev:+.2f}%")
-
+    returns = await _fetch_kospi_week_returns([comparison.last_window, comparison.prev_window])
+    lines = _build_weekly_briefing_lines(comparison, returns)
     return "\n".join(lines)
 
 

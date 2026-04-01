@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
+from types import SimpleNamespace
 from unittest import IsolatedAsyncioTestCase
 from unittest.mock import AsyncMock, patch
 
@@ -62,3 +63,27 @@ class TestEsportsNotifierLeagueTag(IsolatedAsyncioTestCase):
             )
             self.assertTrue(ok)
             send_mock.assert_awaited_once()
+
+    async def test_notify_match_finished_sends_even_outside_active_window(self) -> None:
+        match = SimpleNamespace(
+            match_id=1384019,
+            finished_notified_at=None,
+            videogame="league-of-legends",
+            name="GEN vs JDG",
+        )
+        api_data = {
+            "league": {"name": "First Stand 2026"},
+            "winner": {"name": "GEN"},
+        }
+
+        with patch.object(
+            esports_notifier,
+            "now_kst",
+            return_value=datetime(2026, 3, 18, 2, 25, tzinfo=KST),
+        ), patch.object(
+            esports_notifier, "send_telegram_message", new=AsyncMock()
+        ) as send_mock:
+            ok = await esports_notifier.notify_match_finished(match, api_data)
+            self.assertTrue(ok)
+            send_mock.assert_awaited_once()
+            self.assertIsNotNone(match.finished_notified_at)

@@ -1,6 +1,7 @@
 # backend/tests/test_scheduler_monitor.py
+import asyncio
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend.services import scheduler_monitor
 
@@ -65,6 +66,27 @@ class TestSchedulerMonitor(unittest.TestCase):
         # Should not call db.add for existing state
         db.add.assert_not_called()
         self.assertEqual(existing.status, "success")
+
+    def test_monitor_job_async_failure_marks_failure_and_notifies(self):
+        async def _run():
+            db = self._build_db(existing_state=None)
+
+            with patch.object(scheduler_monitor, "SchedulerState", _FakeSchedulerState):
+                with patch.object(
+                    scheduler_monitor,
+                    "send_telegram_message",
+                    new=AsyncMock(return_value=True),
+                ) as mock_send:
+                    with self.assertRaises(ValueError):
+                        async with scheduler_monitor.monitor_job_async("job-async", db):
+                            raise ValueError("async-boom")
+
+            state = db.add.call_args[0][0]
+            self.assertEqual(state.status, "failure")
+            self.assertEqual(state.message, "async-boom")
+            mock_send.assert_awaited_once()
+
+        asyncio.run(_run())
 
 
 if __name__ == "__main__":

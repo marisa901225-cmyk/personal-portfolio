@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from ..core.models import Trade, Asset
 from ..core.schemas import TradeCreate
 from ..core.time_utils import utcnow
+from .crud_helpers import commit_or_rollback, commit_with_refresh, get_owned_row_or_404
 
 ZERO_TOLERANCE = 1e-9
 
@@ -141,20 +142,10 @@ def update_trade(
     trade_id: int,
     data: dict,
 ) -> Trade:
-    db_item = db.query(Trade).filter(Trade.id == trade_id, Trade.user_id == user_id).first()
-    if not db_item:
-        raise HTTPException(status_code=404, detail="Trade not found")
-
+    db_item = get_owned_row_or_404(db, Trade, trade_id, user_id, detail="Trade not found")
     for key, value in data.items():
         setattr(db_item, key, value)
-
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    db.refresh(db_item)
-    return db_item
+    return commit_with_refresh(db, db_item)
 
 
 def delete_trade(
@@ -162,14 +153,7 @@ def delete_trade(
     user_id: int,
     trade_id: int,
 ) -> bool:
-    db_item = db.query(Trade).filter(Trade.id == trade_id, Trade.user_id == user_id).first()
-    if not db_item:
-        raise HTTPException(status_code=404, detail="Trade not found")
-
+    db_item = get_owned_row_or_404(db, Trade, trade_id, user_id, detail="Trade not found")
     db.delete(db_item)
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
+    commit_or_rollback(db)
     return True

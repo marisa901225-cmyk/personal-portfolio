@@ -51,6 +51,7 @@ POLL_INTERVAL_ACTIVE = 60      # During active windows or match imminent
 POLL_INTERVAL_IDLE = 600       # 10 minutes when idle
 POLL_INTERVAL_THROTTLED = 180  # When rate limit is low
 UPCOMING_INDEX_INTERVAL = 600   # 10 minutes for upcoming indexer (reduced API calls)
+MATCH_START_GRACE_MINUTES = 30  # Keep watching briefly after scheduled start to catch live transition
 
 # Rate limit thresholds
 RATE_LIMIT_WARN_THRESHOLD = 100   # Start being careful
@@ -96,22 +97,32 @@ class EsportsMonitor:
         return False
 
     def _has_imminent_match(self, db: Session) -> bool:
-        """Check if there's a match starting within 30 minutes"""
+        """Check if there's a match starting soon or just past scheduled start."""
         now = utcnow()
+        window_start = now - timedelta(minutes=MATCH_START_GRACE_MINUTES)
         threshold = now + timedelta(minutes=30)
         imminent = db.query(EsportsMatch).filter(
             EsportsMatch.status == "not_started",
             EsportsMatch.scheduled_at.isnot(None),
-            EsportsMatch.scheduled_at >= now,  # [FIXED] Prevent past matches from triggering
+            EsportsMatch.scheduled_at >= window_start,
             EsportsMatch.scheduled_at <= threshold
         ).first()
         return imminent is not None
+
+    def _has_running_match(self, db: Session) -> bool:
+        """Check if we are currently tracking a live match."""
+        running = db.query(EsportsMatch.match_id).filter(
+            EsportsMatch.status == "running"
+        ).first()
+        return running is not None
 
     def _get_poll_interval(self, db: Session) -> int:
         """Determine current polling interval based on context"""
         current_kst = now_kst()
         base = POLL_INTERVAL_ACTIVE if (
-            self._is_in_active_window(current_kst) or self._has_imminent_match(db)
+            self._is_in_active_window(current_kst)
+            or self._has_imminent_match(db)
+            or self._has_running_match(db)
         ) else POLL_INTERVAL_IDLE
 
         # rate limit: 절대 더 빨라지지 않게 max()로만 느리게
@@ -220,6 +231,12 @@ class EsportsMonitor:
                 continue
 
             running_ids.add(match_id)
+            existing = db.query(EsportsMatch).filter(
+                EsportsMatch.match_id == match_id
+            ).first()
+            game_config = get_game_config(videogame) or {}
+            tagger = game_config.get("tagger")
+            league_tag = tagger(m) if tagger else "default"
             if existing:
                 # [FIXED] Idempotent start notification
                 if existing.status == "not_started" and not existing.start_notified_at:
@@ -238,7 +255,6 @@ class EsportsMonitor:
                 existing.missing_count = 0
             else:
                 # New running match discovered
-                videogame = m.get("_videogame", m.get("videogame", {}).get("slug"))
                 name = m.get("name")
                 new_match = EsportsMatch(
                     match_id=match_id,
@@ -459,7 +475,11 @@ class EsportsMonitor:
                 # Determine interval
                 interval = self._get_poll_interval(db)
                 current_kst = now_kst()
-                is_active = self._is_in_active_window(current_kst) or self._has_imminent_match(db)
+                is_active = (
+                    self._is_in_active_window(current_kst)
+                    or self._has_imminent_match(db)
+                    or self._has_running_match(db)
+                )
                 logger.debug(f"Active Window: {is_active}, Polling Interval: {interval}s")
 
                 # [FIXED] Only monitor running matches during active windows or when a match is imminent

@@ -2,10 +2,13 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 from simhash import Simhash
+from sqlalchemy.orm import Session
+
+from ...core.models import GameNews, SpamNews
 
 # Constants
 RSS_FEEDS = {
@@ -58,6 +61,16 @@ DEFAULT_GOOGLE_NEWS_MACRO_QUERIES = {
         "FTSE 100 market outlook",
     ],
 }
+
+_AD_TITLE_KEYWORDS: tuple[str, ...] = (
+    "이벤트",
+    "세미나",
+    "기획전",
+    "가이드북",
+    "서포터즈",
+    "참가자 모집",
+    "수강생 모집",
+)
 
 _ECONOMY_CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "Crypto": (
@@ -305,6 +318,98 @@ def determine_news_tags(
 def is_blocked_google_source(source_name: str | None) -> bool:
     source = (source_name or "").strip().lower()
     return any(blocked in source for blocked in _GOOGLE_SOURCE_BLOCKLIST)
+
+
+def detect_ad_keyword(title: str | None) -> str | None:
+    """제목에 포함된 광고성 키워드를 반환한다."""
+    normalized = (title or "").strip()
+    for keyword in _AD_TITLE_KEYWORDS:
+        if keyword in normalized:
+            return keyword
+    return None
+
+
+def prepare_news_ingest_record(
+    db: Session,
+    *,
+    title: str,
+    content: str,
+    published_at: datetime,
+    recent_window_hours: int,
+    recent_news: list[GameNews] | None = None,
+    seen_in_batch: set[str] | None = None,
+) -> tuple[str, list[GameNews], bool]:
+    """뉴스 수집 전 공통 중복 검사를 수행한다.
+
+    Returns:
+        (content_hash, recent_news, should_skip)
+    """
+    content_hash = calculate_simhash(title + content)
+
+    if seen_in_batch is not None and content_hash in seen_in_batch:
+        return content_hash, [], True
+
+    recent_candidates = recent_news
+    if recent_candidates is None:
+        recent_limit = datetime.now(timezone.utc) - timedelta(hours=recent_window_hours)
+        recent_candidates = db.query(GameNews).filter(GameNews.published_at >= recent_limit).all()
+
+    exists = db.query(GameNews.id).filter(
+        (GameNews.content_hash == content_hash) | (GameNews.title == title)
+    ).first()
+    if exists:
+        if seen_in_batch is not None:
+            seen_in_batch.add(content_hash)
+        return content_hash, recent_candidates, True
+
+    if is_duplicate_complex(title, content_hash, recent_candidates):
+        if seen_in_batch is not None:
+            seen_in_batch.add(content_hash)
+        return content_hash, recent_candidates, True
+
+    return content_hash, recent_candidates, False
+
+
+def persist_news_record(
+    db: Session,
+    *,
+    model_cls: Any,
+    content_hash: str,
+    game_tag: str,
+    category_tag: str,
+    source_name: str,
+    title: str,
+    url: str,
+    full_content: str,
+    published_at: datetime,
+    is_international: bool | None = None,
+    summary: str | None = None,
+    spam_reason: str | None = None,
+    rule_version: int | None = None,
+) -> GameNews | SpamNews:
+    kwargs: dict[str, object] = {
+        "content_hash": content_hash,
+        "game_tag": game_tag,
+        "category_tag": category_tag,
+        "source_name": source_name,
+        "source_type": "news",
+        "title": title,
+        "url": url,
+        "full_content": full_content,
+        "published_at": published_at,
+    }
+    if is_international is not None:
+        kwargs["is_international"] = is_international
+    if summary is not None:
+        kwargs["summary"] = summary
+    if spam_reason is not None:
+        kwargs["spam_reason"] = spam_reason
+    if rule_version is not None:
+        kwargs["rule_version"] = rule_version
+
+    news = model_cls(**kwargs)
+    db.add(news)
+    return news
 
 # 출처별 가중치 (안정적인 점수 분포를 위해)
 SOURCE_WEIGHT = {

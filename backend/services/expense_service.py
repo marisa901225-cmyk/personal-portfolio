@@ -10,7 +10,6 @@ from datetime import datetime, timezone
 from typing import List
 
 from fastapi import HTTPException
-from sqlalchemy import extract
 from sqlalchemy.orm import Session
 
 from ..core.models import Expense, MerchantPattern
@@ -25,6 +24,7 @@ from .expenses.expense_classifier import (
     build_review_info as _build_review_info,
     learn_patterns_from_history,
 )
+from .expenses.expense_query import build_user_expense_query
 
 # Re-export for backward compatibility
 __all__ = [
@@ -64,19 +64,13 @@ def get_expenses_with_review(
 ) -> List[dict]:
     """소비 내역 조회 및 AI 리뷰 정보 부착."""
     user = get_or_create_single_user(db)
-
-    query = db.query(Expense).filter(Expense.user_id == user.id)
-    if not include_deleted:
-        query = query.filter(Expense.deleted_at.is_(None))
-
-    if year is not None:
-        query = query.filter(extract("year", Expense.date) == year)
-        if month is not None:
-            query = query.filter(extract("month", Expense.date) == month)
-
-    if category is not None:
-        query = query.filter(Expense.category == category)
-
+    query = build_user_expense_query(
+        db,
+        include_deleted=include_deleted,
+        year=year,
+        month=month,
+        category=category,
+    )
     expenses = query.order_by(Expense.date.desc()).all()
 
     # AI Model & Patterns Preparation
@@ -224,4 +218,3 @@ def restore_expense(db: Session, expense_id: int) -> Expense:
         raise
     db.refresh(expense)
     return expense
-

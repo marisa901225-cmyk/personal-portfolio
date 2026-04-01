@@ -17,17 +17,20 @@ class TestAlarmRandomTopicFallback(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(llm_logic, "LLMService") as MockLLM,
             patch.object(llm_logic, "datetime") as mock_datetime,
-            patch.object(llm_logic, "load_last_random_topic_sent_at", return_value=real_datetime(2025, 1, 1, 12, 10)),
+            patch.object(llm_logic, "load_last_random_topic_sent_at", return_value=real_datetime(2025, 1, 2, 12, 10)),
         ):
             instance = MockLLM.get_instance.return_value
             instance.is_loaded.return_value = True
-            mock_datetime.now.return_value = real_datetime(2025, 1, 1, 12, 12)
+            mock_datetime.now.return_value = real_datetime(2025, 1, 2, 12, 12)
 
             result = await llm_logic.summarize_with_llm([])
             self.assertIsNone(result)
 
     async def test_random_topic_catches_up_when_missed_slot(self) -> None:
-        anchored = "역사 이야기를 툭 던져요! 조선 시대 기록은 꽤 촘촘해서, 한 번 보면 오히려 숨이 턱 막힌다더라요. 아무튼 이런 얘기 꺼내면 괜히 고개가 끄덕끄덕!"
+        anchored = (
+            "역사 이야기를 툭 던져요! 조선 시대 기록은 꽤 촘촘해서, 한 번 보면 오히려 숨이 턱 막힌다더라요. "
+            "아무튼 이런 얘기 꺼내면 괜히 고개가 끄덕끄덕! 그래서 오늘은 지나간 흔적 하나쯤 천천히 들여다보자는 말도 같이 남겨 두고 싶어요."
+        )
 
         save_category_mock = MagicMock()
         save_last_sent_mock = MagicMock()
@@ -35,9 +38,10 @@ class TestAlarmRandomTopicFallback(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(llm_logic, "LLMService") as MockLLM,
             patch.object(llm_logic, "datetime") as mock_datetime,
+            patch.object(llm_logic, "get_all_categories", return_value=["역사/문화"]),
             patch.object(llm_logic, "load_recent_categories", return_value=[]),
             patch.object(llm_logic, "save_recent_category", save_category_mock),
-            patch.object(llm_logic, "load_last_random_topic_sent_at", return_value=real_datetime(2025, 1, 1, 12, 0)),
+            patch.object(llm_logic, "load_last_random_topic_sent_at", return_value=real_datetime(2025, 1, 2, 12, 0)),
             patch.object(llm_logic, "save_last_random_topic_sent_at", save_last_sent_mock),
             patch.object(llm_logic.random, "choice", side_effect=lambda seq: "역사/문화" if "역사/문화" in seq else seq[0]),
             patch.object(llm_logic.random, "shuffle", return_value=None),
@@ -46,7 +50,7 @@ class TestAlarmRandomTopicFallback(unittest.IsolatedAsyncioTestCase):
             instance = MockLLM.get_instance.return_value
             instance.is_loaded.return_value = True
             instance.reset_context.return_value = None
-            mock_datetime.now.return_value = real_datetime(2025, 1, 1, 12, 15)
+            mock_datetime.now.return_value = real_datetime(2025, 1, 2, 12, 15)
 
             result = await llm_logic.summarize_with_llm([])
             self.assertIsInstance(result, str)
@@ -56,12 +60,16 @@ class TestAlarmRandomTopicFallback(unittest.IsolatedAsyncioTestCase):
             save_last_sent_mock.assert_called()
 
     async def test_random_topic_forwards_model_and_provider_kwargs(self) -> None:
-        anchored = "역사 이야기를 툭 던져요! 조선 시대 기록은 꽤 촘촘해서, 한 번 보면 오히려 숨이 턱 막힌다더라요. 아무튼 이런 얘기 꺼내면 괜히 고개가 끄덕끄덕!"
+        anchored = (
+            "역사 이야기를 툭 던져요! 조선 시대 기록은 꽤 촘촘해서, 한 번 보면 오히려 숨이 턱 막힌다더라요. "
+            "아무튼 이런 얘기 꺼내면 괜히 고개가 끄덕끄덕! 그래서 오늘은 지나간 흔적 하나쯤 천천히 들여다보자는 말도 같이 남겨 두고 싶어요."
+        )
         generate_mock = AsyncMock(return_value=anchored)
 
         with (
             patch.object(llm_logic, "LLMService") as MockLLM,
             patch.object(llm_logic, "datetime") as mock_datetime,
+            patch.object(llm_logic, "get_all_categories", return_value=["역사/문화"]),
             patch.object(llm_logic, "load_recent_categories", return_value=[]),
             patch.object(llm_logic, "load_last_random_topic_sent_at", return_value=None),
             patch.object(llm_logic, "save_recent_category", MagicMock()),
@@ -73,7 +81,7 @@ class TestAlarmRandomTopicFallback(unittest.IsolatedAsyncioTestCase):
             instance = MockLLM.get_instance.return_value
             instance.is_loaded.return_value = True
             instance.reset_context.return_value = None
-            mock_datetime.now.return_value = real_datetime(2025, 1, 1, 12, 10)
+            mock_datetime.now.return_value = real_datetime(2025, 1, 2, 12, 10)
 
             await llm_logic.summarize_with_llm(
                 [],
@@ -108,10 +116,9 @@ class TestAlarmRandomTopicFallback(unittest.IsolatedAsyncioTestCase):
             instance = MockLLM.get_instance.return_value
             instance.is_loaded.return_value = True
             instance.reset_context.return_value = None
-            mock_datetime.now.return_value = real_datetime(2025, 1, 1, 12, 10)
+            mock_datetime.now.return_value = real_datetime(2025, 1, 2, 12, 10)
 
             result = await llm_logic.summarize_with_llm([])
-            self.assertIsInstance(result, str)
-            self.assertIn("⚠️", result) # 에러 메시지 반환 확인
-            self.assertIn("도시괴담/오컬트", result)
-            self.assertIn("실패 사유", result)
+            self.assertIsNone(result)
+            save_mock.assert_not_called()
+            save_last_sent_mock.assert_not_called()

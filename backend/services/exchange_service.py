@@ -2,11 +2,11 @@ from __future__ import annotations
 from datetime import date
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from fastapi import HTTPException
 
 from ..core.models import FxTransaction
 from ..core.schemas import FxTransactionCreate, FxTransactionUpdate
 from ..core.time_utils import utcnow
+from .crud_helpers import commit_or_rollback, commit_with_refresh, get_owned_row_or_404
 
 def get_fx_transactions(
     db: Session,
@@ -55,13 +55,7 @@ def create_fx_transaction(
         note=payload.note,
     )
     db.add(record)
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    db.refresh(record)
-    return record
+    return commit_with_refresh(db, record)
 
 def update_fx_transaction(
     db: Session,
@@ -69,44 +63,32 @@ def update_fx_transaction(
     record_id: int,
     payload: FxTransactionUpdate,
 ) -> FxTransaction:
-    record = (
-        db.query(FxTransaction)
-        .filter(FxTransaction.id == record_id, FxTransaction.user_id == user_id)
-        .first()
+    record = get_owned_row_or_404(
+        db,
+        FxTransaction,
+        record_id,
+        user_id,
+        detail="fx transaction not found",
     )
-    if not record:
-        raise HTTPException(status_code=404, detail="fx transaction not found")
-
     data = payload.model_dump(exclude_unset=True)
     for field, value in data.items():
         setattr(record, field, value)
     record.updated_at = utcnow()
 
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    db.refresh(record)
-    return record
+    return commit_with_refresh(db, record)
 
 def delete_fx_transaction(
     db: Session,
     user_id: int,
     record_id: int,
 ) -> bool:
-    record = (
-        db.query(FxTransaction)
-        .filter(FxTransaction.id == record_id, FxTransaction.user_id == user_id)
-        .first()
+    record = get_owned_row_or_404(
+        db,
+        FxTransaction,
+        record_id,
+        user_id,
+        detail="fx transaction not found",
     )
-    if not record:
-        raise HTTPException(status_code=404, detail="fx transaction not found")
-
     db.delete(record)
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
+    commit_or_rollback(db)
     return True

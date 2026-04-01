@@ -26,6 +26,7 @@ httpcore==1.0.9
 httplib2==0.31.2
 httptools==0.7.1
 httpx==0.28.1
+holidays==0.83
 idna==3.11
 iniconfig==2.3.0
 Jinja2==3.1.6

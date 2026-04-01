@@ -41,8 +41,6 @@ from .routers.market_data import router as market_data_router
 from .routers.spam_rules import router as spam_rules_router
 from .routers.news import router as news_router
 from .routers.telegram_webhook import router as telegram_webhook_router
-from .routers.memories import router as memories_router
-from .routers.memory_chat import router as memory_chat_router
 from .routers.scheduler_state import router as scheduler_state_router
 from .routers.naver_auth import router as naver_auth_router
 
@@ -150,8 +148,6 @@ app.include_router(market_data_router)
 app.include_router(spam_rules_router)
 app.include_router(news_router)
 app.include_router(telegram_webhook_router)
-app.include_router(memories_router)
-app.include_router(memory_chat_router)
 app.include_router(scheduler_state_router)
 app.include_router(naver_auth_router)
 

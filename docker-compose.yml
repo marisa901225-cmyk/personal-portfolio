@@ -253,6 +253,7 @@ services:
     container_name: myasset-sync-prices
     restart: always
     volumes:
+      - ./backend:/app/backend
       - ./backend/storage:/app/backend/storage
       - ./backend/data:/app/backend/data
       - ./backend/logs:/app/backend/logs
