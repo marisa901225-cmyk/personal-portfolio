@@ -4,14 +4,18 @@ Spam Rules Router - 스팸 규칙 CRUD API
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from ..core.auth import verify_api_token
 from ..core.db import get_db
-from ..core.models import SpamRule
-from ..core.time_utils import utcnow
+from ..services.spam_rule_service import (
+    create_spam_rule as create_spam_rule_record,
+    delete_spam_rule as delete_spam_rule_record,
+    list_spam_rules as list_spam_rules_record,
+    set_spam_rule_enabled,
+)
 
 router = APIRouter(
     prefix="/api/spam-rules",
@@ -43,43 +47,33 @@ class SpamRuleResponse(BaseModel):
 @router.get("", response_model=List[SpamRuleResponse])
 def list_spam_rules(db: Session = Depends(get_db)):
     """스팸 규칙 목록 조회"""
-    return db.query(SpamRule).order_by(SpamRule.id).all()
+    return list_spam_rules_record(db)
 
 
 @router.post("", response_model=SpamRuleResponse)
 def create_spam_rule(rule: SpamRuleCreate, db: Session = Depends(get_db)):
     """스팸 규칙 추가"""
-    new_rule = SpamRule(
+    return create_spam_rule_record(
+        db,
         rule_type=rule.rule_type,
         pattern=rule.pattern,
         category=rule.category,
         note=rule.note,
-        is_enabled=True,
-        created_at=utcnow()
     )
-    db.add(new_rule)
-    db.commit()
-    db.refresh(new_rule)
-    return new_rule
 
 
 @router.delete("/{rule_id}")
 def delete_spam_rule(rule_id: int, db: Session = Depends(get_db)):
     """스팸 규칙 삭제"""
-    rule = db.query(SpamRule).filter(SpamRule.id == rule_id).first()
-    if not rule:
-        raise HTTPException(status_code=404, detail="Rule not found")
-    db.delete(rule)
-    db.commit()
+    delete_spam_rule_record(db, rule_id)
     return {"message": f"Rule {rule_id} deleted"}
 
 
 @router.patch("/{rule_id}/toggle")
 def toggle_spam_rule(rule_id: int, db: Session = Depends(get_db)):
     """스팸 규칙 활성화/비활성화 토글"""
-    rule = db.query(SpamRule).filter(SpamRule.id == rule_id).first()
-    if not rule:
-        raise HTTPException(status_code=404, detail="Rule not found")
-    rule.is_enabled = not rule.is_enabled
-    db.commit()
+    from ..services.spam_rule_service import get_spam_rule_or_404
+
+    rule = get_spam_rule_or_404(db, rule_id)
+    rule = set_spam_rule_enabled(db, rule_id, enabled=not rule.is_enabled)
     return {"id": rule_id, "is_enabled": rule.is_enabled}

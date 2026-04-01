@@ -5,7 +5,6 @@ import random
 import re
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 try:
     from sqlalchemy import or_, and_  # type: ignore
     from sqlalchemy.orm import Session  # type: ignore
@@ -60,30 +59,14 @@ from .catchphrase_selector import choose_phrase
 from .catchphrase_constants import (
     build_fallback_lines,
 )
+from .esports_match_utils import (
+    ci_contains,
+    extract_match_name,
+    format_match_time_kst,
+    is_tbd_match_title,
+)
 
 logger = logging.getLogger(__name__)
-
-KST = ZoneInfo("Asia/Seoul")
-_UTC_TO_KST_OFFSET = timedelta(hours=9)
-
-
-_KST_LINE_RE = re.compile(r"Start Time\s*\(KST\)\s*:\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})")
-_UTC_Z_LINE_RE = re.compile(r"Start Time\s*:\s*(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})Z")
-_TEAM_SPLIT_RE = re.compile(r"\s+(?:vs|v)\s+", re.IGNORECASE)
-
-
-def _ci_contains(col, needle: str):
-    """
-    SQLAlchemy 기본에는 icontains가 없을 수 있어,
-    있으면 icontains, 없으면 ilike로 처리한다.
-    """
-    if hasattr(col, "icontains"):
-        return col.icontains(needle)  # type: ignore
-    if hasattr(col, "ilike"):
-        return col.ilike(f"%{needle}%")  # type: ignore
-    # 테스트/더미 환경 fallback
-    return ("icontains_fallback", col, needle)
-
 
 def _filter_catchphrases(phrases: list[str]) -> list[str]:
     """
@@ -110,81 +93,6 @@ def _filter_catchphrases(phrases: list[str]) -> list[str]:
 
         out.append(p)
     return out
-
-
-def _parse_kst_from_full_content(full_content: str) -> datetime | None:
-    if not full_content:
-        return None
-    m = _KST_LINE_RE.search(full_content)
-    if m:
-        try:
-            return datetime.fromisoformat(f"{m.group(1)} {m.group(2)}")
-        except Exception:
-            return None
-    m = _UTC_Z_LINE_RE.search(full_content)
-    if m:
-        try:
-            # Z = UTC, convert to KST naive
-            dt_utc = datetime.fromisoformat(m.group(1)).replace(tzinfo=timezone.utc)
-            return dt_utc.astimezone(KST).replace(tzinfo=None)
-        except Exception:
-            return None
-    return None
-
-
-def _format_match_time_kst(match) -> str:
-    try:
-        full_content = getattr(match, "full_content", "") or ""
-        parsed = _parse_kst_from_full_content(full_content)
-        if parsed:
-            return parsed.strftime("%H:%M")
-    except Exception:
-        pass
-
-    dt = getattr(match, "event_time", None)
-    if not dt:
-        return "시간 미정"
-
-    try:
-        # tz-aware이면 그냥 KST 변환
-        if getattr(dt, "tzinfo", None) is not None:
-            return dt.astimezone(KST).strftime("%H:%M")
-
-        # ✅ naive면 "UTC로 저장된 값"이라고 확정 -> UTC로 해석 후 KST 변환 (LO 추천 💖)
-        dt_utc = dt.replace(tzinfo=timezone.utc)
-        return dt_utc.astimezone(KST).strftime("%H:%M")
-    except Exception:
-        return "시간 미정"
-
-
-def _extract_teams(match_name: str) -> tuple[str, str]:
-    s = (match_name or "").strip()
-    if not s:
-        return ("팀A", "팀B")
-
-    if "⚔️" in s:
-        parts = [p.strip() for p in s.split("⚔️", 1)]
-        if len(parts) == 2 and parts[0] and parts[1]:
-            return (parts[0], parts[1])
-
-    parts = [p.strip() for p in _TEAM_SPLIT_RE.split(s, 1)]
-    if len(parts) == 2 and parts[0] and parts[1]:
-        return (parts[0], parts[1])
-
-    return ("팀A", "팀B")
-
-def _is_tbd_team_name(name: str) -> bool:
-    n = (name or "").strip().casefold()
-    return n in {"tbd", "tba"} or "tbd" in n or "tba" in n
-
-
-def _is_tbd_match_title(match_name: str) -> bool:
-    team_a, team_b = _extract_teams(match_name)
-    return _is_tbd_team_name(team_a) or _is_tbd_team_name(team_b)
-
-
-
-
 async def check_upcoming_matches(db: Session, catchphrases_file: str, window_minutes: int = 5) -> bool:
     # DB의 event_time은 tzinfo 없이 저장되는 경우가 많아(특히 SQLite),
     # 시스템 로컬타임에 의존하지 않도록 KST를 명시적으로 사용한다.
@@ -206,10 +114,10 @@ async def check_upcoming_matches(db: Session, catchphrases_file: str, window_min
             and_(
                 GameNews.game_tag == "Valorant",
                 or_(
-                    _ci_contains(GameNews.league_tag, "VCT"),
-                    _ci_contains(GameNews.league_tag, "Champions"),
-                    _ci_contains(GameNews.league_tag, "Masters"),
-                    _ci_contains(GameNews.league_tag, "Kickoff"),
+                    ci_contains(GameNews.league_tag, "VCT"),
+                    ci_contains(GameNews.league_tag, "Champions"),
+                    ci_contains(GameNews.league_tag, "Masters"),
+                    ci_contains(GameNews.league_tag, "Kickoff"),
                 )
             )
         )
@@ -249,12 +157,8 @@ async def check_upcoming_matches(db: Session, catchphrases_file: str, window_min
             if is_noise:
                 continue
 
-        title_clean = (m.title or "").replace("[Esports Schedule] ", "")
-        if " - " in title_clean:
-            _, match_name = title_clean.split(" - ", 1)
-        else:
-            match_name = title_clean
-        if _is_tbd_match_title(match_name):
+        match_name = extract_match_name(m.title or "")
+        if is_tbd_match_title(match_name):
             # 브라켓이 확정되기 전(TBD vs TBD)에는 알림을 보내지 않되,
             # 추후 동일 윈도우에서 반복 알림이 발생하지 않도록 notified_at만 기록한다.
             m.notified_at = utcnow()
@@ -340,17 +244,11 @@ async def check_upcoming_matches(db: Session, catchphrases_file: str, window_min
         selected_phrase = random.choice(selected_phrases)
     lines = [f"🎮 <b>[경기 시작 알림]</b>\n{selected_phrase}\n"]
     for match in matches_to_notify:
-        title = match.title.replace("[Esports Schedule] ", "")
-        # LoL - DNS vs DK 형태에서 팀명 추출
-        if " - " in title:
-            _, match_part = title.split(" - ", 1)
-            match_name = match_part
-        else:
-            match_name = title
+        match_name = extract_match_name(match.title)
     
         
         # event_time은 KST 기준으로 저장/표시 (tz-aware이면 KST로 변환)
-        event_time_str = _format_match_time_kst(match)
+        event_time_str = format_match_time_kst(match)
         lines.append(f"🏆 <b>{match.league_tag}</b> | {event_time_str}\n   {match_name}\n")
         
         # 알림 완료 기록 (UTC 통일!)

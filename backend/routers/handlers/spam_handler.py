@@ -6,8 +6,13 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from ...core.models import SpamRule
-from ...core.time_utils import utcnow
+from ...services.spam_rule_service import (
+    create_spam_rules_from_patterns,
+    delete_spam_rule as delete_spam_rule_record,
+    get_spam_rule_or_404,
+    get_recent_spam_rules,
+    set_spam_rule_enabled,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,19 +36,8 @@ async def handle_spam_command(cmd: str, arg: str, db: Session) -> str:
 def _handle_add(arg: str, db: Session) -> str:
     """스팸 규칙 추가"""
     patterns = [p.strip() for p in arg.split(",") if p.strip()]
-    added_ids = []
-    for p in patterns:
-        new_rule = SpamRule(
-            rule_type="contains",
-            pattern=p,
-            category="general",
-            note="텔레그램 추가",
-            is_enabled=True,
-            created_at=utcnow()
-        )
-        db.add(new_rule)
-        db.commit()
-        added_ids.append(f"#{new_rule.id}")
+    created_rules = create_spam_rules_from_patterns(db, patterns)
+    added_ids = [f"#{rule.id}" for rule in created_rules]
     
     patterns_str = ", ".join([f"<code>{p}</code>" for p in patterns])
     return f"✅ 스팸 규칙 {len(patterns)}개 추가됨: {patterns_str} ({', '.join(added_ids)})"
@@ -55,20 +49,20 @@ def _handle_del(arg: str, db: Session) -> str:
         rule_id = int(arg)
     except ValueError:
         return "❌ ID는 숫자여야 합니다 (예: /del 15)"
-    
-    rule = db.query(SpamRule).filter(SpamRule.id == rule_id).first()
-    if not rule:
+
+    try:
+        rule = get_spam_rule_or_404(db, rule_id)
+    except Exception:
         return f"❌ 규칙 #{rule_id}를 찾을 수 없습니다"
-    
+
     pattern = rule.pattern
-    db.delete(rule)
-    db.commit()
+    delete_spam_rule_record(db, rule_id)
     return f"🗑️ 규칙 #{rule_id} 삭제됨: <code>{pattern}</code>"
 
 
 def _handle_list(db: Session) -> str:
     """스팸 규칙 목록"""
-    rules = db.query(SpamRule).order_by(SpamRule.id.desc()).limit(30).all()
+    rules = get_recent_spam_rules(db, limit=30)
     if not rules:
         return "📋 등록된 스팸 규칙이 없습니다"
     
@@ -88,14 +82,12 @@ def _handle_toggle(arg: str, db: Session, enabled: bool) -> str:
         rule_id = int(arg)
     except ValueError:
         return "❌ ID는 숫자여야 합니다"
-    
-    rule = db.query(SpamRule).filter(SpamRule.id == rule_id).first()
-    if not rule:
+
+    try:
+        rule = set_spam_rule_enabled(db, rule_id, enabled=enabled)
+    except Exception:
         return f"❌ 규칙 #{rule_id}를 찾을 수 없습니다"
-    
-    rule.is_enabled = enabled
-    db.commit()
-    
+
     if enabled:
         return f"▶️ 규칙 #{rule_id} 활성화됨"
     return f"⏸️ 규칙 #{rule_id} 비활성화됨"

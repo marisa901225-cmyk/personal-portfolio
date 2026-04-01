@@ -1,29 +1,53 @@
 import os
-import tempfile
 import unittest
 
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
-# DATABASE_URL is managed by conftest.py
 os.environ["API_TOKEN"] = "test-token"
 
 from backend.main import app  # noqa: E402
-from backend.core.db import SessionLocal  # noqa: E402
+from backend.core import auth as auth_module  # noqa: E402
+from backend.core.db import Base, get_db  # noqa: E402
 from backend.core.models import SpamRule  # noqa: E402
-from backend.core.db_migrations import ensure_schema # noqa: E402
 
 
 class SpamRulesTests(unittest.TestCase):
     def setUp(self) -> None:
-        ensure_schema()
+        self._original_api_token = auth_module.API_TOKEN
+        auth_module.API_TOKEN = "test-token"
+        self.engine = create_engine(
+            "sqlite://",
+            future=True,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(self.engine)
+        self.SessionLocal = sessionmaker(bind=self.engine, autoflush=False, autocommit=False, future=True)
+
+        def _override_get_db():
+            db = self.SessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db] = _override_get_db
         self.client = TestClient(app)
         self.headers = {"X-API-Token": "test-token"}
-        db = SessionLocal()
+        db = self.SessionLocal()
         try:
             db.query(SpamRule).delete()
             db.commit()
         finally:
             db.close()
+
+    def tearDown(self) -> None:
+        auth_module.API_TOKEN = self._original_api_token
+        app.dependency_overrides.clear()
+        self.engine.dispose()
 
     def test_requires_api_token(self) -> None:
         response = self.client.get("/api/spam-rules")

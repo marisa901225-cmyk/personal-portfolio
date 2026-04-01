@@ -225,3 +225,39 @@ class AlarmLlmLogicV2ParityTests(unittest.IsolatedAsyncioTestCase):
             payload = await llm_logic_v2.generate_random_message_payload(now=fixed_now)
 
         self.assertEqual(payload, {"title": title, "body": draft})
+
+
+class AlarmLlmLogicV2WeekendTests(unittest.IsolatedAsyncioTestCase):
+    async def test_random_message_skips_on_weekend(self):
+        stub = _StubLLM(loaded=True)
+        saturday_noon = real_datetime(2026, 3, 14, 12, 0, 0)
+        fake_datetime = MagicMock()
+        fake_datetime.now.return_value = saturday_noon
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(llm_logic_v2.LLMService, "get_instance", return_value=stub))
+            stack.enter_context(patch.object(llm_logic_v2, "datetime", fake_datetime))
+            generate_mock = AsyncMock(return_value="주말 랜덤 메시지")
+            stack.enter_context(patch.object(llm_logic_v2, "generate_with_main_llm_async", new=generate_mock))
+
+            result = await llm_logic_v2.summarize_with_llm([])
+
+        self.assertIsNone(result)
+        generate_mock.assert_not_awaited()
+
+    async def test_random_message_skips_on_kr_public_holiday(self):
+        stub = _StubLLM(loaded=True)
+        independence_day_morning = real_datetime(2026, 3, 1, 10, 0, 0)
+        fake_datetime = MagicMock()
+        fake_datetime.now.return_value = independence_day_morning
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(llm_logic_v2.LLMService, "get_instance", return_value=stub))
+            stack.enter_context(patch.object(llm_logic_v2, "datetime", fake_datetime))
+            generate_mock = AsyncMock(return_value="공휴일 랜덤 메시지")
+            stack.enter_context(patch.object(llm_logic_v2, "generate_with_main_llm_async", new=generate_mock))
+
+            result = await llm_logic_v2.summarize_with_llm([])
+
+        self.assertIsNone(result)
+        generate_mock.assert_not_awaited()

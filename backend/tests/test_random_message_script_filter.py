@@ -45,7 +45,7 @@ class TestRandomMessageScriptFilter(unittest.IsolatedAsyncioTestCase):
             instance = MockLLM.get_instance.return_value
             instance.is_loaded.return_value = True
             instance.reset_context.return_value = None
-            mock_datetime.now.return_value = real_datetime(2025, 1, 1, 12, 10)
+            mock_datetime.now.return_value = real_datetime(2025, 1, 2, 12, 10)
 
             result = await llm_logic.summarize_with_llm([])
 

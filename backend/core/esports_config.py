@@ -1,6 +1,19 @@
 from __future__ import annotations
 from typing import Dict, List, Any, Callable, Optional
 
+
+LOL_INTERNATIONAL_KEYWORDS = (
+    "first stand",
+    "first-stand",
+    "lcq",
+    "worlds",
+    "world championship",
+    "msi",
+    "mid-season invitational",
+    "esports world cup",
+    "ewc",
+)
+
 def default_league_tagger(match: dict) -> str:
     """기본 리그 태거: 리그 이름을 반환하거나 종목명을 반환"""
     return (match.get("league") or {}).get("name") or "Unknown"
@@ -17,7 +30,7 @@ def lol_league_tagger(match: dict) -> str:
     league_name = (match.get("league") or {}).get("name") or ""
     lower_league = league_name.lower()
     
-    if "lcq" in lower_league: # Last Chance Qualifier (보통 국제대회 직전)
+    if any(kw in lower_league for kw in LOL_INTERNATIONAL_KEYWORDS):
         return "Worlds/MSI"
     if "lck" in lower_league or "lck cup" in lower_league:
         if any(kw in lower_league for kw in ["challengers", "cl"]):
@@ -29,8 +42,6 @@ def lol_league_tagger(match: dict) -> str:
         return "LEC"
     elif "lcs" in lower_league:
         return "LCS"
-    elif any(kw in lower_league for kw in ["worlds", "msi", "mid-season invitational"]):
-        return "Worlds/MSI"
     return "LoL 기타"
 
 # 리그별 시청 시간대 설정 (KST)
@@ -125,10 +136,16 @@ def infer_league_tag_from_name(name: str, videogame: str) -> str:
     name_lower = name.lower()
     
     if videogame == "league-of-legends":
+        if any(kw in name_lower for kw in LOL_INTERNATIONAL_KEYWORDS):
+            return "Worlds/MSI"
         if "lck" in name_lower or "lck cup" in name_lower:
+            if any(kw in name_lower for kw in ["challengers", "cl"]):
+                return "LCK-CL"
             return "LCK"
         elif "lpl" in name_lower:
             return "LPL"
+        elif "lec" in name_lower:
+            return "LEC"
         elif "worlds" in name_lower or "msi" in name_lower:
             return "Worlds/MSI"
         # [NEW] Default to LCK for LoL if no other keywords found

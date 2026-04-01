@@ -3,24 +3,20 @@ import httpx
 import os
 import re
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
 from sqlalchemy.orm import Session
 from ...core.config import settings
 from ...core.models import GameNews, SpamNews
-from .core import calculate_simhash, NAVER_NEWS_URL, determine_news_tags
+from .core import (
+    NAVER_NEWS_URL,
+    determine_news_tags,
+    detect_ad_keyword,
+    prepare_news_ingest_record,
+    persist_news_record,
+)
 
 logger = logging.getLogger(__name__)
-
-def _is_ad(title: str) -> str:
-    """
-    제목이 광고성인지 체크한다.
-    광고면 해당 키워드(이유)를 반환하고, 아니면 None을 반환.
-    """
-    for kw in ["이벤트", "세미나", "기획전", "가이드북", "서포터즈", "참가자 모집", "수강생 모집"]:
-        if kw in title:
-            return kw
-    return None
 
 @retry(
     stop=stop_after_attempt(3),
@@ -65,11 +61,8 @@ async def collect_naver_news(db: Session, query: str, category: str = "esports")
             data = response.json()
         
         items = data.get("items", [])
-        # 최근 7일 내의 뉴스들과 비교하여 중복 판별 (메모리 내 빠른 검색용)
-        from datetime import timedelta
         recent_limit = datetime.now(timezone.utc) - timedelta(days=7)
         recent_news = db.query(GameNews).filter(GameNews.published_at >= recent_limit).all()
-        
         # 현재 배치에서 이미 처리된 해시/제목 추적
         seen_in_batch = set()
         
@@ -84,19 +77,6 @@ async def collect_naver_news(db: Session, query: str, category: str = "esports")
             clean_title = re.sub(r'<[^>]+>', '', title)
             clean_desc = re.sub(r'<[^>]+>', '', description)
             
-            # 정확한 중복 체크 (해시)
-            content_hash = calculate_simhash(clean_title + clean_desc)
-            if content_hash in seen_in_batch:
-                continue
-            
-            # 1. DB 전체에서 정확히 일치하는 해시나 제목이 있는지 체크 (인덱스 활용)
-            exists = db.query(GameNews.id).filter(
-                (GameNews.content_hash == content_hash) | (GameNews.title == clean_title)
-            ).first()
-            if exists:
-                seen_in_batch.add(content_hash)
-                continue
-            
             # 날짜 파싱 (RFC 2822 형식)
             try:
                 from email.utils import parsedate_to_datetime
@@ -108,10 +88,16 @@ async def collect_naver_news(db: Session, query: str, category: str = "esports")
             if published_at < datetime.now(timezone.utc) - timedelta(days=14):
                 continue
             
-            # 2. 유사도 기반 중복 체크 (최근 7일 데이터와 비교)
-            from .core import is_duplicate_complex
-            if is_duplicate_complex(clean_title, content_hash, recent_news):
-                seen_in_batch.add(content_hash)
+            content_hash, recent_news, should_skip = prepare_news_ingest_record(
+                db,
+                title=clean_title,
+                content=clean_desc,
+                published_at=published_at,
+                recent_window_hours=24 * 7,
+                recent_news=recent_news,
+                seen_in_batch=seen_in_batch,
+            )
+            if should_skip:
                 continue
             
             game_tag, category_tag, _is_international = determine_news_tags(
@@ -123,39 +109,38 @@ async def collect_naver_news(db: Session, query: str, category: str = "esports")
             )
             
             # 광고 체크
-            spam_reason = _is_ad(clean_title)
+            spam_reason = detect_ad_keyword(clean_title)
             
             if spam_reason:
                 # 스팸 테이블에 저장
-                news = SpamNews(
+                news = persist_news_record(
+                    db,
+                    model_cls=SpamNews,
                     content_hash=content_hash,
                     game_tag=game_tag,
                     category_tag=category_tag,
                     source_name="Naver",
-                    source_type="news",
                     title=clean_title,
                     url=original_link or link,
                     full_content=clean_desc,
                     published_at=published_at,
                     spam_reason=f"Keyword: {spam_reason}",
-                    rule_version=1  # 2026.01 기준 버전 1
+                    rule_version=1,  # 2026.01 기준 버전 1
                 )
-                db.add(news)
                 logger.info(f"Naver: Routed ad to SpamNews: {clean_title[:30]}... ({spam_reason})")
             else:
-                news = GameNews(
+                news = persist_news_record(
+                    db,
+                    model_cls=GameNews,
                     content_hash=content_hash,
                     game_tag=game_tag,
                     category_tag=category_tag,
                     source_name="Naver",
-                    source_type="news",
                     title=clean_title,
                     url=original_link or link,
                     full_content=clean_desc,
                     published_at=published_at,
                 )
-                db.add(news)
-                recent_news.append(news)
                 seen_in_batch.add(content_hash)
                 count += 1
         

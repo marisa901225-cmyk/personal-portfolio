@@ -42,18 +42,7 @@ async def notify_match_finished(
         logger.debug(f"Match {match.match_id} already notified, skipping")
         return True
 
-    # Get league tag for time window check
-    config = GAME_REGISTRY.get(match.videogame, {})
-    tagger = config.get("tagger")
-    league_tag = tagger(api_data) if tagger else "default"
-    
     current_kst = now_kst()
-    
-    # Check if we're in active window for this league
-    if not _check_league_active(league_tag, match.videogame, current_kst):
-        logger.info(f"Skipping notification for {match.name} - outside {league_tag} active window")
-        match.finished_notified_at = utcnow()  # Mark as handled
-        return True
 
     if dry_run:
         logger.info(f"[DRY RUN] Would notify: Match {match.name} finished")

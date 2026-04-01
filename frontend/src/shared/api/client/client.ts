@@ -68,23 +68,6 @@ import {
     updateExpense,
     uploadExpenseFile,
 } from './expenses';
-import {
-    fetchMemories,
-    getMemory,
-    createMemory,
-    updateMemory,
-    deleteMemory,
-    searchMemories,
-    cleanupExpiredMemories,
-    chatWithMemories,
-} from './memories';
-import {
-    MemoryResponse,
-    MemoryCreate,
-    MemoryUpdate,
-    MemorySearchRequest,
-    MemoryCategory,
-} from './types';
 
 export class ApiClient {
     private readonly baseUrl: string;
@@ -441,54 +424,6 @@ export class ApiClient {
         return this.requestFn(url, {
             method: 'GET',
         });
-    }
-
-    // --- Memories ---
-
-    async fetchMemories(params: {
-        category?: MemoryCategory;
-        min_importance?: number;
-        include_expired?: boolean;
-        limit?: number;
-        offset?: number;
-    } = {}): Promise<MemoryResponse[]> {
-        return fetchMemories(this.requestFn, params);
-    }
-
-    async getMemory(id: number): Promise<MemoryResponse> {
-        return getMemory(this.requestFn, id);
-    }
-
-    async createMemory(payload: MemoryCreate): Promise<MemoryResponse> {
-        return createMemory(this.requestFn, payload);
-    }
-
-    async updateMemory(id: number, payload: MemoryUpdate): Promise<MemoryResponse> {
-        return updateMemory(this.requestFn, id, payload);
-    }
-
-    async deleteMemory(id: number): Promise<void> {
-        return deleteMemory(this.requestFn, id);
-    }
-
-    async searchMemories(params: MemorySearchRequest): Promise<MemoryResponse[]> {
-        return searchMemories(this.requestFn, params);
-    }
-
-    async cleanupExpiredMemories(): Promise<void> {
-        return cleanupExpiredMemories(this.requestFn);
-    }
-
-    async *chatWithMemories(params: {
-        messages: { role: string; content: string }[];
-        model?: string;
-        session_id?: string;
-    }): AsyncGenerator<string> {
-        yield* chatWithMemories(
-            params,
-            this.baseUrl,
-            (withJson) => this.createHeaders(withJson)
-        );
     }
 
 }

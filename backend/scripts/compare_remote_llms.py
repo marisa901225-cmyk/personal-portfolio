@@ -139,21 +139,6 @@ def _build_cases() -> list[Case]:
 """
     refine_prompt = load_prompt("refine_alarm_summary", draft=refine_draft)
 
-    memory_prompt = load_prompt(
-        "memory_chat_summary",
-        summary_text=(
-            "- 사용자는 한국 주식 자동매매와 가계부 앱을 함께 관리 중입니다.\n"
-            "- 최근에는 트레이딩엔진 주문 가능 수량 로직을 수정했습니다.\n"
-            "- 답변은 군더더기 없이 빠르게 받는 편을 선호합니다."
-        ),
-        messages_text=(
-            "user: 내일 장 시작하면 파킹 주문이 실제 매수가능수량 기준으로 나가는지 볼 거야.\n"
-            "assistant: 매수가능조회와 매도가능수량조회 둘 다 붙여뒀습니다.\n"
-            "user: 그리고 Codex fast 모드는 꺼둘 생각이야.\n"
-            "assistant: ~/.codex/config.toml 에서 service_tier 설정을 빼면 됩니다."
-        ),
-    )
-
     general_messages = [
         {
             "role": "user",
@@ -178,13 +163,6 @@ def _build_cases() -> list[Case]:
             messages=[{"role": "user", "content": refine_prompt}],
             max_tokens=120,
             expected_shape="bullets",
-        ),
-        Case(
-            name="memory_chat_summary",
-            description="대화 메모리 요약 안정성",
-            messages=[{"role": "user", "content": memory_prompt}],
-            max_tokens=160,
-            expected_shape="plain",
         ),
         Case(
             name="general_finance",

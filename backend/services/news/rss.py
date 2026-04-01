@@ -10,7 +10,11 @@ from sqlalchemy.orm import Session
 from urllib.parse import quote
 from ...core.models import GameNews
 from ...core.time_utils import utcnow
-from .core import calculate_simhash, GOOGLE_NEWS_MACRO_QUERIES
+from .core import (
+    GOOGLE_NEWS_MACRO_QUERIES,
+    prepare_news_ingest_record,
+    persist_news_record,
+)
 from ..duckdb_refine_config import get_db_path
 
 logger = logging.getLogger(__name__)
@@ -92,6 +96,8 @@ def collect_rss(db: Session, feed_url: str, source_name: str):
     """
     try:
         feed = feedparser.parse(feed_url)
+        recent_limit = datetime.now(timezone.utc) - timedelta(hours=48)
+        recent_news = db.query(GameNews).filter(GameNews.published_at >= recent_limit).all()
         for entry in feed.entries:
             title = entry.title
             link = entry.link
@@ -111,22 +117,15 @@ def collect_rss(db: Session, feed_url: str, source_name: str):
             if published_at < datetime.now(timezone.utc) - timedelta(days=14):
                 continue
             
-            # 중복 체크 (강화된 하이브리드 방식)
-            content_hash = calculate_simhash(title + clean_desc)
-            
-            # 1. DB 전체에서 정확히 일치하는 해시나 제목이 있는지 체크
-            exists = db.query(GameNews.id).filter(
-                (GameNews.content_hash == content_hash) | (GameNews.title == title)
-            ).first()
-            if exists:
-                continue
-            
-            # 최근 48시간 내의 뉴스들과 비교
-            recent_limit = datetime.now(timezone.utc) - timedelta(hours=48)
-            recent_news = db.query(GameNews).filter(GameNews.published_at >= recent_limit).all()
-            
-            from .core import is_duplicate_complex
-            if is_duplicate_complex(title, content_hash, recent_news):
+            content_hash, _recent_news, should_skip = prepare_news_ingest_record(
+                db,
+                title=title,
+                content=clean_desc,
+                published_at=published_at,
+                recent_window_hours=48,
+                recent_news=recent_news,
+            )
+            if should_skip:
                 continue
             
             game_tag, category_tag = _infer_rss_metadata(source_name, title)
@@ -135,18 +134,19 @@ def collect_rss(db: Session, feed_url: str, source_name: str):
                 category_tag = "Esports"
             
             # DB 저장
-            news = GameNews(
+            news = persist_news_record(
+                db,
+                model_cls=GameNews,
                 content_hash=content_hash,
                 game_tag=game_tag,
                 category_tag=category_tag,
                 source_name=source_name,
-                source_type="news",
                 title=title,
                 url=link,
                 full_content=clean_desc,
-                published_at=published_at
+                published_at=published_at,
             )
-            db.add(news)
+            recent_news.append(news)
             db.commit() # ID 생성을 위해 즉시 커밋
             db.refresh(news)
             
@@ -194,6 +194,8 @@ async def collect_google_news(db: Session, query: str, region: str = "US"):
         
         clean_desc = "" # Initialize here to prevent NameError
         count = 0
+        recent_limit = datetime.now(timezone.utc) - timedelta(hours=48)
+        recent_news = db.query(GameNews).filter(GameNews.published_at >= recent_limit).all()
         
         for entry in feed.entries[:20]:  # 쿼리당 최대 20개
             title = entry.get("title", "")
@@ -215,38 +217,33 @@ async def collect_google_news(db: Session, query: str, region: str = "US"):
             if published_at < datetime.now(timezone.utc) - timedelta(days=14):
                 continue
             
-            # 중복 체크 (강화된 하이브리드 방식)
-            content_hash = calculate_simhash(title + clean_desc)
-            
-            # 1. DB 전체에서 정확히 일치하는 해시나 제목이 있는지 체크
-            exists = db.query(GameNews.id).filter(
-                (GameNews.content_hash == content_hash) | (GameNews.title == title)
-            ).first()
-            if exists:
-                continue
-            
-            # 최근 48시간 내의 뉴스들과 비교
-            recent_limit = datetime.now(timezone.utc) - timedelta(hours=48)
-            recent_news = db.query(GameNews).filter(GameNews.published_at >= recent_limit).all()
-            
-            from .core import is_duplicate_complex
-            if is_duplicate_complex(title, content_hash, recent_news):
+            content_hash, recent_news, should_skip = prepare_news_ingest_record(
+                db,
+                title=title,
+                content=clean_desc,
+                published_at=published_at,
+                recent_window_hours=48,
+                recent_news=recent_news,
+            )
+            if should_skip:
                 continue
             
             # game_tag 설정
             game_tag = f"GlobalMacro-{region}"
             
-            news = GameNews(
+            news = persist_news_record(
+                db,
+                model_cls=GameNews,
                 content_hash=content_hash,
                 game_tag=game_tag,
+                category_tag="",
                 source_name="GoogleNews",
-                source_type="news",
                 title=title,
                 url=link,
                 full_content="",  # RSS에서는 본문 미제공
                 published_at=published_at,
             )
-            db.add(news)
+            recent_news.append(news)
             count += 1
         
         db.commit()

@@ -10,6 +10,36 @@ from ..integrations.telegram import send_telegram_message
 logger = logging.getLogger(__name__)
 
 
+def _get_or_create_scheduler_state(job_id: str, db: Session) -> SchedulerState:
+    state = db.query(SchedulerState).filter(SchedulerState.job_id == job_id).first()
+    if not state:
+        state = SchedulerState(job_id=job_id)
+        db.add(state)
+    return state
+
+
+def _mark_job_running(state: SchedulerState, db: Session) -> None:
+    state.status = "running"
+    state.last_run_at = utcnow()
+    state.message = None
+    db.commit()
+
+
+def _mark_job_success(state: SchedulerState, db: Session) -> None:
+    state.status = "success"
+    state.last_success_at = utcnow()
+    db.commit()
+
+
+def _mark_job_failure(job_id: str, state: SchedulerState, db: Session, error: Exception) -> None:
+    db.rollback()
+    state.status = "failure"
+    state.last_failure_at = utcnow()
+    state.message = str(error)
+    db.commit()
+    logger.exception("Scheduler job failed: %s", job_id)
+
+
 def _notify_failure_sync(job_id: str, error: str):
     """실패 알림 (동기 래퍼: 이벤트 루프 확인 후 태스크 생성)"""
     try:
@@ -56,30 +86,14 @@ def monitor_job(job_id: str, db: Session):
     """
     스케줄러 작업의 실행 상태를 DB에 기록하는 컨텍스트 매니저 (Sync).
     """
-    state = db.query(SchedulerState).filter(SchedulerState.job_id == job_id).first()
-    if not state:
-        state = SchedulerState(job_id=job_id)
-        db.add(state)
-
-    state.status = "running"
-    state.last_run_at = utcnow()
-    state.message = None
-    db.commit()
+    state = _get_or_create_scheduler_state(job_id, db)
+    _mark_job_running(state, db)
 
     try:
         yield
-        state.status = "success"
-        state.last_success_at = utcnow()
-        db.commit()
+        _mark_job_success(state, db)
     except Exception as e:
-        # LO의 추천: 트랜잭션 안전을 위해 롤백! ❤️
-        db.rollback()
-        
-        state.status = "failure"
-        state.last_failure_at = utcnow()
-        state.message = str(e)
-        db.commit()
-        logger.exception("Scheduler job failed: %s", job_id)
+        _mark_job_failure(job_id, state, db, e)
         _notify_failure_sync(job_id, str(e))
         raise
 
@@ -89,31 +103,14 @@ async def monitor_job_async(job_id: str, db: Session):
     """
     스케줄러 작업의 실행 상태를 DB에 기록하는 컨텍스트 매니저 (Async).
     """
-    state = db.query(SchedulerState).filter(SchedulerState.job_id == job_id).first()
-    if not state:
-        state = SchedulerState(job_id=job_id)
-        db.add(state)
-
-    state.status = "running"
-    state.last_run_at = utcnow()
-    state.message = None
-    db.commit()
+    state = _get_or_create_scheduler_state(job_id, db)
+    _mark_job_running(state, db)
 
     try:
         yield
-        state.status = "success"
-        state.last_success_at = utcnow()
-        db.commit()
+        _mark_job_success(state, db)
     except Exception as e:
-        # LO의 추천: 트랜잭션 안전을 위해 롤백! ❤️
-        db.rollback()
-        
-        state.status = "failure"
-        state.last_failure_at = utcnow()
-        state.message = str(e)
-        db.commit()
-        logger.exception("Scheduler job failed: %s", job_id)
-        
+        _mark_job_failure(job_id, state, db, e)
         # Notify via Telegram
         try:
             await send_telegram_message(
@@ -128,10 +125,7 @@ def update_scheduler_state(job_id: str, db: Session, status: str, message: str =
     """
     특정 서비스나 작업의 상태를 명시적으로 업데이트합니다.
     """
-    state = db.query(SchedulerState).filter(SchedulerState.job_id == job_id).first()
-    if not state:
-        state = SchedulerState(job_id=job_id)
-        db.add(state)
+    state = _get_or_create_scheduler_state(job_id, db)
 
     state.status = status
     state.last_run_at = utcnow()

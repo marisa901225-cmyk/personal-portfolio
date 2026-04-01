@@ -1,6 +1,6 @@
 {
-  "trade_date": "20260326",
-  "week_id": "2026-W13",
+  "trade_date": "20260401",
+  "week_id": "2026-W14",
   "swing_entries_today": 0,
   "swing_entries_week": 0,
   "day_entries_today": 0,
@@ -10,19 +10,19 @@
   "open_positions": {
     "440650": {
       "type": "P",
-      "entry_time": "2026-03-26T09:00:00+09:00",
-      "entry_price": 12435.0,
-      "qty": 56,
-      "highest_price": 12435.0,
-      "entry_date": "20260326",
+      "entry_time": "2026-03-30T09:00:00+09:00",
+      "entry_price": 12442.697368421053,
+      "qty": 76,
+      "highest_price": 12540.0,
+      "entry_date": "20260330",
       "bars_held": 0
     }
   },
-  "last_run_timestamp": "2026-03-26T14:12:00+09:00",
-  "last_bar_date_seen": "20260326",
-  "last_panic_date": "20260323",
+  "last_run_timestamp": "2026-04-01T15:28:00+09:00",
+  "last_bar_date_seen": "20260401",
+  "last_panic_date": "20260330",
   "pass_reasons_today": {
-    "RISK_OFF": 82
+    "RISK_OFF": 101
   },
   "pending_notifications": []
 }

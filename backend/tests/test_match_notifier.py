@@ -8,6 +8,12 @@ import types
 import sys
 
 from backend.services.alarm.catchphrase_constants import build_fallback_lines
+from backend.services.alarm.esports_match_utils import (
+    extract_match_name,
+    extract_match_teams,
+    format_match_time_kst,
+    is_tbd_match_title,
+)
 from backend.services.alarm.match_notifier import check_upcoming_matches, _filter_catchphrases
 
 
@@ -146,3 +152,26 @@ class TestMatchNotifier(unittest.TestCase):
         # 현재 JSON 기반 LoL fallback 풀 중 하나가 실제 알림에 사용되는지 확인
         expected_phrase = build_fallback_lines(game_key="LoL")[0]
         self.assertIn(expected_phrase, sent)
+
+    def test_esports_match_utils_extract_match_name_and_teams(self):
+        self.assertEqual(extract_match_name("[Esports Schedule] LoL - BRO vs BFX"), "BRO vs BFX")
+        self.assertEqual(extract_match_teams("[Esports Schedule] LoL - BRO vs BFX"), ("BRO", "BFX"))
+        self.assertEqual(extract_match_teams("GEN ⚔️ T1"), ("GEN", "T1"))
+
+    def test_esports_match_utils_formats_kst_from_full_content_and_event_time(self):
+        match = _Match(
+            game_tag="LoL",
+            league_tag="LCK",
+            title="[Esports Schedule] LoL - BRO vs BFX",
+            event_time=DateTime(2026, 1, 1, 9, 0, 0),
+        )
+        match.full_content = "Start Time: 2026-01-01T00:30:00Z"
+        self.assertEqual(format_match_time_kst(match), "09:30")
+
+        match.full_content = ""
+        self.assertEqual(format_match_time_kst(match), "18:00")
+
+    def test_esports_match_utils_detects_tbd(self):
+        self.assertTrue(is_tbd_match_title("TBD vs GEN"))
+        self.assertTrue(is_tbd_match_title("[Esports Schedule] LoL - T1 vs TBA"))
+        self.assertFalse(is_tbd_match_title("BRO vs BFX"))

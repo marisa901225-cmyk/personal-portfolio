@@ -11,28 +11,21 @@ import logging
 import httpx
 import re
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from xml.etree import ElementTree
 from urllib.parse import quote
 from sqlalchemy.orm import Session
 from ...core.models import GameNews, SpamNews
 from .core import (
-    calculate_simhash,
     GOOGLE_NEWS_MACRO_QUERIES,
     determine_news_tags,
+    detect_ad_keyword,
     is_blocked_google_source,
+    prepare_news_ingest_record,
+    persist_news_record,
 )
 
 logger = logging.getLogger(__name__)
-
-def _is_ad(title: str) -> str:
-    """
-    제목이 광고성인지 체크한다.
-    """
-    for kw in ["이벤트", "세미나", "기획전", "가이드북", "서포터즈", "참가자 모집", "수강생 모집"]:
-        if kw in title:
-            return kw
-    return None
 
 # Google News RSS URL 템플릿
 GOOGLE_NEWS_RSS_URL = "https://news.google.com/rss/search"
@@ -138,11 +131,8 @@ async def collect_google_news(
             return 0
         
         items = channel.findall("item")
-        # 최근 7일 내의 뉴스들과 비교하여 중복 판별 (메모리 내 빠른 검색용)
-        from datetime import timedelta
         recent_limit = datetime.now(timezone.utc) - timedelta(days=7)
         recent_news = db.query(GameNews).filter(GameNews.published_at >= recent_limit).all()
-        
         # 현재 배치에서 이미 처리된 해시/제목 추적
         seen_in_batch = set()
         
@@ -185,27 +175,20 @@ async def collect_google_news(
             if published_at < datetime.now(timezone.utc) - timedelta(days=14):
                 continue
             
-            # 중복 체크 (강화된 하이브리드 방식)
-            content_hash = calculate_simhash(title + clean_desc)
-            if content_hash in seen_in_batch:
-                continue
-            
-            # 1. DB 전체에서 정확히 일치하는 해시나 제목이 있는지 체크
-            exists = db.query(GameNews.id).filter(
-                (GameNews.content_hash == content_hash) | (GameNews.title == title)
-            ).first()
-            if exists:
-                seen_in_batch.add(content_hash)
-                continue
-            
-            # 2. 유사도 기반 중복 체크 (최근 7일 데이터와 비교)
-            from .core import is_duplicate_complex
-            if is_duplicate_complex(title, content_hash, recent_news):
-                seen_in_batch.add(content_hash)
+            content_hash, _recent_news, should_skip = prepare_news_ingest_record(
+                db,
+                title=title,
+                content=clean_desc,
+                published_at=published_at,
+                recent_window_hours=24 * 7,
+                recent_news=recent_news,
+                seen_in_batch=seen_in_batch,
+            )
+            if should_skip:
                 continue
             
             # 광고 체크
-            spam_reason = _is_ad(title)
+            spam_reason = detect_ad_keyword(title)
             
             if spam_reason:
                 # 스팸 테이블에 저장
@@ -244,7 +227,7 @@ async def collect_google_news(
                 recent_news.append(news)
                 seen_in_batch.add(content_hash)
                 db.flush()  # ID 생성을 위해 flush
-                
+
                 # 영문 뉴스인 경우 LLM 요약 생성
                 if summarize_english and _is_english_content(title + clean_desc):
                     # 동기 함수를 스레드에서 실행
@@ -257,7 +240,7 @@ async def collect_google_news(
                     )
                     if summary:
                         news.summary = summary
-                
+
                 count += 1
         
         db.commit()

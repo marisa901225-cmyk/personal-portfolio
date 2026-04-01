@@ -1,10 +1,10 @@
 from __future__ import annotations
 from typing import List
 from sqlalchemy.orm import Session
-from fastapi import HTTPException
 
 from ..core.models import ExternalCashflow
 from ..core.schemas import ExternalCashflowCreate, ExternalCashflowUpdate
+from .crud_helpers import commit_or_rollback, commit_with_refresh, get_owned_row_or_404
 
 def get_cashflows(db: Session, user_id: int) -> List[ExternalCashflow]:
     return (
@@ -23,13 +23,7 @@ def create_cashflow(db: Session, user_id: int, item: ExternalCashflowCreate) -> 
         account_info=item.account_info
     )
     db.add(db_item)
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    db.refresh(db_item)
-    return db_item
+    return commit_with_refresh(db, db_item)
 
 def update_cashflow(
     db: Session, 
@@ -37,36 +31,25 @@ def update_cashflow(
     cashflow_id: int, 
     item: ExternalCashflowUpdate
 ) -> ExternalCashflow:
-    db_item = db.query(ExternalCashflow).filter(
-        ExternalCashflow.id == cashflow_id, 
-        ExternalCashflow.user_id == user_id
-    ).first()
-    if not db_item:
-        raise HTTPException(status_code=404, detail="Cashflow entry not found")
-    
+    db_item = get_owned_row_or_404(
+        db,
+        ExternalCashflow,
+        cashflow_id,
+        user_id,
+        detail="Cashflow entry not found",
+    )
     for key, value in item.model_dump(exclude_unset=True).items():
         setattr(db_item, key, value)
-    
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
-    db.refresh(db_item)
-    return db_item
+    return commit_with_refresh(db, db_item)
 
 def delete_cashflow(db: Session, user_id: int, cashflow_id: int) -> bool:
-    db_item = db.query(ExternalCashflow).filter(
-        ExternalCashflow.id == cashflow_id, 
-        ExternalCashflow.user_id == user_id
-    ).first()
-    if not db_item:
-        raise HTTPException(status_code=404, detail="Cashflow entry not found")
-    
+    db_item = get_owned_row_or_404(
+        db,
+        ExternalCashflow,
+        cashflow_id,
+        user_id,
+        detail="Cashflow entry not found",
+    )
     db.delete(db_item)
-    try:
-        db.commit()
-    except Exception:
-        db.rollback()
-        raise
+    commit_or_rollback(db)
     return True

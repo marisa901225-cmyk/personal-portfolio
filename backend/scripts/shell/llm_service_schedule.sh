@@ -4,7 +4,7 @@ set -euo pipefail
 PROJECT_ROOT="/home/dlckdgn/personal-portfolio"
 COMPOSE_FILE="$PROJECT_ROOT/docker-compose.yml"
 LOG_FILE="$PROJECT_ROOT/backend/logs/llm_schedule.log"
-TARGET_SERVICES=(llama-server llama-server-light openvino-server)
+TARGET_SERVICES=(llama-server llama-server-light llama-server-vulkan-huihui openvino-server)
 
 ACTION="${1:-}"
 

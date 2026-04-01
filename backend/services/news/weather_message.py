@@ -97,6 +97,58 @@ def get_fallback_message(
     )
 
 
+def _normalize_weather_status(status: str) -> str:
+    return re.sub(r"\s*[☀-🫧]+$", "", (status or "")).strip()
+
+
+def _build_weather_snapshot_prefix(
+    *,
+    temp: str,
+    weather_status: str,
+    pop: str,
+    max_temp: str = "N/A",
+) -> str:
+    segments = [f"서울 기준 지금 {temp}°C", f"하늘 상태는 {_normalize_weather_status(weather_status) or weather_status}"]
+    if max_temp and max_temp != "N/A":
+        segments.append(f"낮 최고 {max_temp}°C")
+    if pop and pop != "N/A":
+        segments.append(f"강수확률 {pop}%")
+    return "<b>[오늘 날씨 한 줄 요약]</b> " + ", ".join(segments) + "."
+
+
+def _ensure_weather_snapshot_prefix(
+    *,
+    text: str,
+    temp: str,
+    weather_status: str,
+    pop: str,
+    max_temp: str = "N/A",
+) -> str:
+    normalized = (text or "").strip()
+    if not normalized:
+        return normalized
+
+    status_core = _normalize_weather_status(weather_status)
+    weather_markers = [
+        "날씨" in normalized,
+        "기온" in normalized,
+        "강수" in normalized,
+        (temp or "") in normalized,
+        (pop or "") in normalized,
+        bool(status_core and status_core in normalized),
+    ]
+    if sum(1 for matched in weather_markers if matched) >= 3:
+        return normalized
+
+    prefix = _build_weather_snapshot_prefix(
+        temp=temp,
+        weather_status=weather_status,
+        pop=pop,
+        max_temp=max_temp,
+    )
+    return f"{prefix}\n\n{normalized}"
+
+
 def format_ultra_short_data(snapshot: Dict[str, str]) -> str:
     """초단기예보 스냅샷을 프롬프트용 단일 문자열로 변환한다."""
     if not snapshot:
@@ -129,9 +181,60 @@ def _format_weekly_derivatives_briefing(text: Optional[str]) -> str:
     if not raw:
         return "데이터 없음"
 
+    if raw.startswith("주간 국내 파생심리 참고:"):
+        return raw
+
     normalized = re.sub(r"</?b>", "", raw)
+    normalized = normalized.replace("\r\n", "\n").replace("\r", "\n")
     normalized = re.sub(r"\n{3,}", "\n\n", normalized).strip()
-    return normalized or "데이터 없음"
+
+    lines = [line.strip() for line in normalized.splitlines() if line.strip()]
+    cleaned_lines = []
+    for line in lines:
+        if re.fullmatch(r"\[[^\]]+\]", line):
+            continue
+        if line.startswith("-"):
+            line = line[1:].strip()
+        if line:
+            cleaned_lines.append(line)
+
+    if not cleaned_lines:
+        return "데이터 없음"
+
+    def _to_sentence(line: str) -> str:
+        def _regime_phrase(regime: str) -> str:
+            return f"{regime}였다." if "우위" in regime else f"{regime}이었다."
+
+        if line.startswith("지난주") and ": 점수 " in line and "/" in line:
+            label, rest = line.split(": 점수 ", 1)
+            score, regime = [part.strip() for part in rest.split("/", 1)]
+            return f"{label}는 점수 {score}로 {_regime_phrase(regime)}"
+        if line.startswith("전주") and ": 점수 " in line and "/" in line:
+            label, rest = line.split(": 점수 ", 1)
+            score, regime = [part.strip() for part in rest.split("/", 1)]
+            return f"{label}는 점수 {score}로 {_regime_phrase(regime)}"
+        if line.startswith("점수 변화:"):
+            return f"점수 변화는 {line.split(':', 1)[1].strip()}였다."
+        if line.startswith("Put/Call(매수잔량) 평균:"):
+            body = line.split(":", 1)[1].strip()
+            if "(" in body and body.endswith(")"):
+                value, tail = body.split("(", 1)
+                return f"Put/Call(매수잔량) 평균은 {value.strip()}였고 {tail[:-1].strip()}."
+            return f"Put/Call(매수잔량) 평균은 {body}였다."
+        if line.startswith("풋-콜 OI증감 격차:"):
+            body = line.split(":", 1)[1].strip()
+            if "(" in body and body.endswith(")"):
+                value, tail = body.split("(", 1)
+                return f"풋-콜 OI증감 격차는 {value.strip()}였고 {tail[:-1].strip()}."
+            return f"풋-콜 OI증감 격차는 {body}였다."
+        if line.startswith("관측 구간:"):
+            return f"관측 구간은 {line.split(':', 1)[1].strip()}였다."
+        if line.startswith("코스피 수익률:"):
+            return f"코스피 수익률은 {line.split(':', 1)[1].strip()}였다."
+        return line if line.endswith((".", "!", "?")) else f"{line}."
+
+    sentences = [_to_sentence(line) for line in cleaned_lines]
+    return f"주간 국내 파생심리 참고: {' '.join(sentences)}"
 
 
 async def fetch_briefing_context() -> Tuple[Optional[Any], Optional[Any], Optional[str], Optional[Dict], Optional[str], Optional[str]]:
@@ -421,6 +524,13 @@ async def generate_weather_message_with_llm(
             creative_text = clean_exaone_tokens(creative_text).strip()
             if _is_valid_message(creative_text):
                 logger.info("모닝브리핑: 오픈라우터 응답 성공 (len=%d)", len(creative_text))
+                creative_text = _ensure_weather_snapshot_prefix(
+                    text=creative_text,
+                    temp=temp,
+                    weather_status=weather_status,
+                    pop=pop,
+                    max_temp=max_temp,
+                )
                 return _trim_for_telegram(creative_text)
             logger.warning("모닝브리핑: 오픈라우터 응답 실패/짧음, remote-only 폴백 진행")
 
@@ -435,6 +545,13 @@ async def generate_weather_message_with_llm(
         )
         creative_text = clean_exaone_tokens(creative_text).strip()
         if _is_valid_message(creative_text):
+            creative_text = _ensure_weather_snapshot_prefix(
+                text=creative_text,
+                temp=temp,
+                weather_status=weather_status,
+                pop=pop,
+                max_temp=max_temp,
+            )
             return _trim_for_telegram(creative_text)
 
         # 3) 옵션: 마지막 유료 폴백 허용
@@ -449,6 +566,13 @@ async def generate_weather_message_with_llm(
             )
             creative_text = clean_exaone_tokens(creative_text).strip()
             if _is_valid_message(creative_text):
+                creative_text = _ensure_weather_snapshot_prefix(
+                    text=creative_text,
+                    temp=temp,
+                    weather_status=weather_status,
+                    pop=pop,
+                    max_temp=max_temp,
+                )
                 return _trim_for_telegram(creative_text)
 
         logger.warning("LLM 날씨 메시지 생성 실패/짧음, fallback 사용. last_error=%s", llm.get_last_error())

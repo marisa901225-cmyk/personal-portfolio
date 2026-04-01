@@ -43,6 +43,54 @@ def _extract_owners(content: str) -> str:
     return match.group("owners").strip()
 
 
+def _rank_sort_value(meta: dict[str, object]) -> int:
+    rank = meta.get("latest_rank")
+    if rank is None:
+        return 10_000
+    return int(rank)
+
+
+def _format_game_summary_entry(game_name: str, meta: dict[str, object]) -> str:
+    details: list[str] = [f"{int(meta['count'])}회 포착"]
+    if meta.get("latest_rank") is not None:
+        details.append(f"최신 #{int(meta['latest_rank'])}")
+    owners = str(meta.get("owners") or "").strip()
+    if owners:
+        details.append(f"보유자 {owners}")
+    return f"{game_name}({', '.join(details)})"
+
+
+def _pick_rank_band_games(
+    ranked_games: list[tuple[str, dict[str, object]]],
+    *,
+    limit: int,
+    exclude: set[str] | None = None,
+    rank_min: int | None = None,
+    rank_max: int | None = None,
+) -> list[tuple[str, dict[str, object]]]:
+    selected: list[tuple[str, dict[str, object]]] = []
+    excluded_names = exclude or set()
+    if limit <= 0:
+        return selected
+
+    for game_name, meta in ranked_games:
+        if game_name in excluded_names:
+            continue
+        latest_rank = meta.get("latest_rank")
+        if latest_rank is None and (rank_min is not None or rank_max is not None):
+            continue
+        if latest_rank is not None:
+            rank_value = int(latest_rank)
+            if rank_min is not None and rank_value < rank_min:
+                continue
+            if rank_max is not None and rank_value > rank_max:
+                continue
+        selected.append((game_name, meta))
+        if len(selected) >= limit:
+            break
+    return selected
+
+
 def _parse_dt(value: str | None) -> datetime | None:
     raw = str(value or "").strip()
     if not raw:
@@ -65,6 +113,7 @@ def load_monthly_steam_ranking_summary(
     now: datetime | None = None,
     lookback_days: int = 30,
     top_games: int = 5,
+    middle_games: int | None = None,
 ) -> str:
     """
     최근 SteamSpy 랭킹 스냅샷을 월간 맥락으로 압축한다.
@@ -84,7 +133,11 @@ def load_monthly_steam_ranking_summary(
     since_kst = now_kst - timedelta(days=max(1, int(lookback_days)))
     since_str = since_kst.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
     until_str = now_kst.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
-    limit = max(3, int(top_games))
+    top_limit = max(3, int(top_games))
+    middle_limit = max(2, int(middle_games if middle_games is not None else min(4, top_limit)))
+    top_rank_max = 10
+    middle_rank_min = 11
+    middle_rank_max = 40
 
     month_sql = """
         SELECT title, full_content, published_at
@@ -161,20 +214,55 @@ def load_monthly_steam_ranking_summary(
         stats.items(),
         key=lambda pair: (
             -int(pair[1]["count"]),
-            10_000 if pair[1]["latest_rank"] is None else int(pair[1]["latest_rank"]),
+            _rank_sort_value(pair[1]),
             pair[0].lower(),
         ),
     )
 
-    lines: list[str] = []
-    for game_name, meta in ranked_games[:limit]:
-        details: list[str] = [f"{int(meta['count'])}회 포착"]
-        if meta.get("latest_rank") is not None:
-            details.append(f"최신 #{int(meta['latest_rank'])}")
-        owners = str(meta.get("owners") or "").strip()
-        if owners:
-            details.append(f"보유자 {owners}")
-        lines.append(f"{game_name}({', '.join(details)})")
+    top_selection = _pick_rank_band_games(
+        ranked_games,
+        limit=top_limit,
+        rank_max=top_rank_max,
+    )
+    selected_names = {game_name for game_name, _ in top_selection}
+    if len(top_selection) < top_limit:
+        top_selection.extend(
+            _pick_rank_band_games(
+                ranked_games,
+                limit=top_limit - len(top_selection),
+                exclude=selected_names,
+            )
+        )
+        selected_names = {game_name for game_name, _ in top_selection}
+
+    middle_selection = _pick_rank_band_games(
+        ranked_games,
+        limit=middle_limit,
+        exclude=selected_names,
+        rank_min=middle_rank_min,
+        rank_max=middle_rank_max,
+    )
+
+    sections: list[str] = []
+    if top_selection:
+        sections.append(
+            "상위권: " + "; ".join(
+                _format_game_summary_entry(game_name, meta) for game_name, meta in top_selection
+            )
+        )
+    if middle_selection:
+        sections.append(
+            "중위권: " + "; ".join(
+                _format_game_summary_entry(game_name, meta) for game_name, meta in middle_selection
+            )
+        )
+    if not sections:
+        sections.append(
+            "인기게임: " + "; ".join(
+                _format_game_summary_entry(game_name, meta)
+                for game_name, meta in ranked_games[:top_limit]
+            )
+        )
 
     latest_label = latest_dt.strftime("%Y-%m-%d %H:%M KST") if latest_dt else "시각미상"
     snapshot_count = max(1, len(snapshot_days))
@@ -183,13 +271,13 @@ def load_monthly_steam_ranking_summary(
         return (
             f"최근 {max(1, int(lookback_days))}일 Steam 월간 데이터는 비어 있음. "
             f"최신 Steam 인기게임 스냅샷({latest_label}, 참고용): "
-            + "; ".join(lines)
+            + " | ".join(sections)
         )
 
     return (
         f"최근 {max(1, int(lookback_days))}일 Steam 인기게임 월간 흐름"
         f"(수집일 {snapshot_count}회, 최신 {latest_label}): "
-        + "; ".join(lines)
+        + " | ".join(sections)
     )
 
 async def collect_steamspy_rankings(db: Session):

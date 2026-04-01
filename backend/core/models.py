@@ -75,9 +75,6 @@ class User(Base):
     ai_reports: Mapped[List["AiReport"]] = relationship(
         "AiReport", back_populates="user", cascade="all, delete-orphan"
     )
-    memories: Mapped[List["UserMemory"]] = relationship(
-        "UserMemory", back_populates="user", cascade="all, delete-orphan"
-    )
 
 
 class Asset(Base):
@@ -389,29 +386,3 @@ class AiReport(Base):
     )
 
     user: Mapped[User] = relationship("User", back_populates="ai_reports")
-
-
-class UserMemory(Base):
-    """사용자가 기억해달라고 요청한 정보 (장기 기억)"""
-    __tablename__ = "user_memories"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    category: Mapped[str] = mapped_column(String(50), default="general", nullable=False) # profile, preference, project, fact, general
-    key: Mapped[Optional[str]] = mapped_column(String(100), nullable=True) # 중복 시 최신본 유지를 위한 키워드
-    importance: Mapped[int] = mapped_column(Integer, default=1)
-    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True) # TTL용
-    
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=utcnow, nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        default=utcnow,
-        onupdate=utcnow,
-        nullable=False,
-    )
-
-    user: Mapped[User] = relationship("User", back_populates="memories")

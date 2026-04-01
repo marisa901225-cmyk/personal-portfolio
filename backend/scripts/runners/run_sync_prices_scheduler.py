@@ -21,6 +21,7 @@ from backend.services.alarm_service import AlarmService
 from backend.core.db import SessionLocal
 from backend.services.scheduler_monitor import monitor_job_async
 from backend.core.logging_config import setup_global_logging
+from backend.integrations.telegram import send_telegram_message
 
 # Set up logging (Sensitive Data Masking enabled)
 setup_global_logging(
@@ -192,6 +193,30 @@ async def run_spam_retraining():
             db.close()
             logger.info("--- Weekly Spam Model Retraining Finished ---")
 
+async def run_coupon_registration_reminder():
+    """
+    매월 1일 쿠폰 등록 리마인더를 DB 백업용 텔레그램 봇으로 전송
+    """
+    db = SessionLocal()
+    async with monitor_job_async("coupon_registration_reminder", db):
+        logger.info("--- Starting Coupon Registration Reminder Job ---")
+        try:
+            message = (
+                "매월 1일 리마인더\n"
+                "쿠폰 등록 체크해. 또 까먹지 말고 지금 처리하자."
+            )
+            sent = await send_telegram_message(message, bot_type="main")
+            if sent:
+                logger.info("Coupon registration reminder sent successfully.")
+            else:
+                logger.warning("Coupon registration reminder was not delivered.")
+        except Exception as e:
+            logger.error(f"Coupon registration reminder job failed: {e}")
+            raise e
+        finally:
+            db.close()
+            logger.info("--- Coupon Registration Reminder Job Finished ---")
+
 async def main():
     logger.info(f"Current System Time: {datetime.now(KST)}")
     
@@ -249,6 +274,13 @@ async def main():
         CronTrigger(day=1, hour=9, minute=0, timezone=KST),
         id="monthly_maintenance",
         name="Monthly Spam Report & Cleanup (1st of Month)"
+    )
+
+    scheduler.add_job(
+        run_coupon_registration_reminder,
+        CronTrigger(day=1, hour=9, minute=10, timezone=KST),
+        id="coupon_registration_reminder",
+        name="Monthly Coupon Registration Reminder (1st of Month)"
     )
     
     # 6. Weekly Spam Retraining: Every Sunday at 04:00 KST (도라 제안 💖)

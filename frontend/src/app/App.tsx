@@ -14,7 +14,6 @@ import {
     AiReportPage,
     AddAssetPage,
     SettingsPage,
-    MemoriesPage,
     AuthCallbackPage,
 } from '../pages';
 
@@ -205,7 +204,6 @@ const App: React.FC = () => {
                     <Route path="exchange" element={<ExchangePage />} />
                     <Route path="expenses" element={<ExpensesPage />} />
                     <Route path="ai-report" element={<AiReportPage />} />
-                    <Route path="memories" element={<MemoriesPage />} />
                     <Route path="add-asset" element={<AddAssetPage />} />
                     <Route path="settings" element={<SettingsPage />} />
                     <Route path="*" element={<Navigate to="/dashboard" replace />} />
