@@ -1,5 +1,5 @@
 {
-  "trade_date": "20260401",
+  "trade_date": "20260402",
   "week_id": "2026-W14",
   "swing_entries_today": 0,
   "swing_entries_week": 0,
@@ -18,11 +18,11 @@
       "bars_held": 0
     }
   },
-  "last_run_timestamp": "2026-04-01T15:28:00+09:00",
-  "last_bar_date_seen": "20260401",
+  "last_run_timestamp": "2026-04-02T11:32:00+09:00",
+  "last_bar_date_seen": "20260402",
   "last_panic_date": "20260330",
   "pass_reasons_today": {
-    "RISK_OFF": 101
+    "RISK_OFF": 41
   },
   "pending_notifications": []
 }
