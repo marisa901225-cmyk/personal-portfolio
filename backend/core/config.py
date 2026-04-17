@@ -6,6 +6,8 @@ from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from backend.core.env_paths import get_project_env_file_strings
+
 # 프로젝트 루트 디렉토리 설정
 BASE_DIR = Path(__file__).resolve().parents[1]
 STORAGE_DIR = BASE_DIR / "storage"
@@ -56,10 +58,22 @@ class Settings(BaseSettings):
     ai_report_api_key: Optional[str] = Field(default=None, validation_alias="AI_REPORT_API_KEY")
     ai_report_model: str = Field(default="gpt-5.2", validation_alias="AI_REPORT_MODEL")
     ai_report_model_yearly: str = Field(default="gpt-5.2-pro", validation_alias="AI_REPORT_MODEL_YEARLY")
-    ai_report_fallback_model: str = Field(default="gpt-5-nano", validation_alias="AI_REPORT_FALLBACK_MODEL")
+    ai_report_fallback_model: str = Field(validation_alias="AI_REPORT_FALLBACK_MODEL")
     ai_report_temperature: float = Field(default=0.3, validation_alias="AI_REPORT_TEMPERATURE")
     ai_report_max_tokens: int = Field(default=8000, validation_alias="AI_REPORT_MAX_TOKENS")
     ai_report_timeout_sec: float = Field(default=900.0, validation_alias="AI_REPORT_TIMEOUT_SEC")
+    morning_openrouter_base_url: str = Field(
+        default="https://openrouter.ai/api/v1",
+        validation_alias="MORNING_OPENROUTER_BASE_URL",
+    )
+    morning_openrouter_model: str = Field(
+        default="google/gemini-3-flash-preview",
+        validation_alias="MORNING_OPENROUTER_MODEL",
+    )
+    morning_allow_paid_fallback: bool = Field(
+        default=False,
+        validation_alias="MORNING_ALLOW_PAID_FALLBACK",
+    )
 
     # 원격 모델 관리
     llm_remote_url: str = Field(default="http://localhost:8080", validation_alias="LLM_REMOTE_URL")
@@ -107,7 +121,7 @@ class Settings(BaseSettings):
 
 
     model_config = SettingsConfigDict(
-        env_file=str(BASE_DIR / ".env"),
+        env_file=get_project_env_file_strings(),
         env_file_encoding="utf-8",
         extra="ignore"
     )

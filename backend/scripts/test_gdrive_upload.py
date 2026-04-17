@@ -7,13 +7,14 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-# .env 파일 로드
-env_path = Path.home() / "ai-models" / "myasset.env"
-load_dotenv(env_path)
-
 # 백엔드 모듈 임포트를 위해 경로 추가
 backend_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(backend_root.parent))
+
+from backend.core.env_paths import get_project_env_files
+
+for env_path in get_project_env_files():
+    load_dotenv(env_path)
 
 from backend.services.google_drive_client import GoogleDriveService
 
@@ -30,8 +31,7 @@ def main():
         print("❌ 구글 드라이브 환경변수가 설정되지 않았어요!")
         return False
     
-    print(f"✅ Client ID: {client_id[:20]}...")
-    print(f"✅ Refresh Token: {refresh_token[:20]}...")
+    print("✅ 구글 드라이브 자격증명 환경변수 확인 완료")
     
     # 액세스 토큰 발급
     print("\n🔑 액세스 토큰 발급 중...")
@@ -41,7 +41,7 @@ def main():
         print("❌ 액세스 토큰 발급 실패!")
         return False
     
-    print(f"✅ 액세스 토큰 발급 성공: {access_token[:20]}...")
+    print("✅ 액세스 토큰 발급 성공")
     
     # 폴더 확인/생성
     if not folder_id:

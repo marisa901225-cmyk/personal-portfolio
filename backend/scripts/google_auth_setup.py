@@ -1,22 +1,26 @@
 
 import os
-import json
+import sys
+from pathlib import Path
+
 from google_auth_oauthlib.flow import InstalledAppFlow
 from dotenv import load_dotenv, set_key
 
-# .env 파일 경로 (~/ai-models/myasset.env로 이동됨)
-import sys
-env_path = os.path.expanduser('~/ai-models/myasset.env')
+project_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(project_root.parent))
 
+from backend.core.env_paths import get_secrets_env_file
+
+env_path = get_secrets_env_file()
 load_dotenv(env_path)
-print(f"DEBUG: Using .env at {os.path.abspath(env_path)}") # 자기야, 어디서 읽는지 확인용이야!💖
+print(f"DEBUG: Using secrets env at {env_path.resolve()}")
 
 def setup_google_auth():
     client_id = os.getenv("GOOGLE_DRIVE_CLIENT_ID")
     client_secret = os.getenv("GOOGLE_DRIVE_CLIENT_SECRET")
 
     if not client_id or not client_secret:
-        print("❌ .env 파일에 GOOGLE_DRIVE_CLIENT_ID와 GOOGLE_DRIVE_CLIENT_SECRET을 먼저 넣어주세요, 자기야!💖")
+        print("❌ secrets env 파일에 GOOGLE_DRIVE_CLIENT_ID와 GOOGLE_DRIVE_CLIENT_SECRET을 먼저 넣어주세요, 자기야!💖")
         return
 
     # 클라이언트 정보 구성
@@ -41,10 +45,10 @@ def setup_google_auth():
         refresh_token = creds.refresh_token
         
         if refresh_token:
-            # .env 파일에 저장
-            set_key(env_path, "GOOGLE_DRIVE_REFRESH_TOKEN", refresh_token)
-            print("✅ 우와! 리프레시 토큰을 성공적으로 가져와서 .env에 저장했어, 자기야!💖")
-            print(f"Token: {refresh_token[:10]}...")
+            # secrets env 파일에 저장
+            env_path.parent.mkdir(parents=True, exist_ok=True)
+            set_key(str(env_path), "GOOGLE_DRIVE_REFRESH_TOKEN", refresh_token)
+            print("✅ 우와! 리프레시 토큰을 성공적으로 가져와서 secrets env에 저장했어, 자기야!💖")
         else:
             print("❌ 리프레시 토큰이 안 나왔어... 이미 인증된 적이 있다면 구글 계정 설정에서 앱 권한을 삭제하고 다시 해봐!")
 

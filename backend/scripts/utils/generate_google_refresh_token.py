@@ -8,10 +8,12 @@ from dotenv import load_dotenv
 project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.append(str(project_root))
 
+from backend.core.env_paths import get_project_env_files, get_secrets_env_file
+
+
 def generate_refresh_token():
-    # .env 로드
-    env_path = project_root / ".env"
-    load_dotenv(env_path)
+    for env_path in get_project_env_files():
+        load_dotenv(env_path)
 
     client_id = os.getenv("GOOGLE_DRIVE_CLIENT_ID")
     client_secret = os.getenv("GOOGLE_DRIVE_CLIENT_SECRET")
@@ -60,7 +62,7 @@ def generate_refresh_token():
         print("\n" + "✨"*20)
         print("✅ 인증 성공! 새로운 Refresh Token입니다:")
         print(f"\n👉 {creds.refresh_token}\n")
-        print("이 토큰을 .env의 GOOGLE_DRIVE_REFRESH_TOKEN 항목에 업데이트하세요!💖")
+        print(f"이 토큰을 {get_secrets_env_file()}의 GOOGLE_DRIVE_REFRESH_TOKEN 항목에 업데이트하세요!💖")
         print("✨"*20 + "\n")
         
     except Exception as e:
