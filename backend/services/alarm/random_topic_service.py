@@ -10,12 +10,20 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 _RE_WS = re.compile(r"\s+")
+_RE_SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?。！？])\s+|\n+")
 _RE_ENGLISH_REASONING = re.compile(
     r"(looking at|the title is|okay[, ]|let's|first[, ]|since there's|so the summary should|i need to)",
     re.IGNORECASE,
 )
 _RE_NON_KOREAN_CJK = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\u3040-\u30FF\u31F0-\u31FF]")
 _RE_RANDOM_TITLE_PREFIX = re.compile(r"^\s*(title|제목)\s*:\s*", re.IGNORECASE)
+_RE_EXPLANATORY_TAIL = re.compile(
+    r"(^\s*(결론적으로|정리하면|한마디로|요컨대)\b)|"
+    r"(바랍니다|좋겠습니다|해보세요|하시길|권합니다)|"
+    r"(느낌이 들(?:었다|었습니다|겠다)|느껴집니다|남겨집니다|정리됩니다|정리된다)|"
+    r"(셈이(?:다|니다|니))",
+    re.IGNORECASE,
+)
 _REPLACEMENT_CHAR = "\ufffd"
 
 
@@ -87,6 +95,20 @@ def _has_non_korean_cjk_chars(text: str) -> bool:
 
 def _has_replacement_char(text: str) -> bool:
     return _REPLACEMENT_CHAR in (text or "")
+
+
+def _get_last_sentence(text: str) -> str:
+    sentences = [part.strip() for part in _RE_SENTENCE_BOUNDARY.split(text or "") if part and part.strip()]
+    if sentences:
+        return sentences[-1]
+    return (text or "").strip()
+
+
+def _has_explanatory_tail(text: str) -> bool:
+    last_sentence = _get_last_sentence(text)
+    if not last_sentence:
+        return False
+    return bool(_RE_EXPLANATORY_TAIL.search(last_sentence))
 
 
 def _default_random_title(now: datetime) -> str:
@@ -177,6 +199,12 @@ def _build_random_topic_messages(plan: _RandomTopicPlan, deps: _RandomTopicDeps)
     ]
 
 
+def _load_paid_system_prompt(prompt_name: str, deps: _RandomTopicDeps) -> Optional[str]:
+    prompt = deps.load_prompt(prompt_name)
+    text = str(prompt or "").strip()
+    return text or None
+
+
 def _build_random_title_messages(
     plan: _RandomTopicPlan,
     body: str,
@@ -265,6 +293,7 @@ async def _generate_random_title_async(
         return None
 
     options = deps.resolve_llm_options(llm_kwargs, default_max_tokens=48, default_temperature=0.75)
+    paid_system_prompt = _load_paid_system_prompt("random_topic_title_gpt5_paid_system", deps)
     try:
         raw = await deps.generate_with_main_llm_async(
             messages,
@@ -272,6 +301,8 @@ async def _generate_random_title_async(
             temperature=options.temperature,
             stop=deps.build_stop_tokens(extra=["\n", "\n\n"]),
             enable_thinking=False,
+            reasoning_effort="none",
+            paid_system_prompt=paid_system_prompt,
             model=model,
             **options.extra_kwargs,
         )
@@ -293,6 +324,8 @@ def _validate_random_message(final_text: str, plan: _RandomTopicPlan, deps: _Ran
         return False, "정제 후 응답이 비어 있음"
     if not deps.has_category_anchor(final_text, plan.category):
         return False, "카테고리 핵심 키워드 미포함"
+    if _has_explanatory_tail(final_text):
+        return False, "마지막 문장이 설명/권유 꼬리로 끝남"
 
     final_ratio = deps.get_korean_ratio(final_text)
     if final_ratio < 0.8:
@@ -321,6 +354,7 @@ async def _generate_random_message_payload_async(
         return None
 
     options = deps.resolve_llm_options(llm_kwargs, default_max_tokens=512, default_temperature=0.85)
+    paid_system_prompt = _load_paid_system_prompt("random_topic_gpt5_paid_system", deps)
     failure_reasons: List[str] = []
 
     for attempt in range(2):
@@ -332,6 +366,7 @@ async def _generate_random_message_payload_async(
                 max_tokens=options.max_tokens,
                 temperature=options.temperature,
                 enable_thinking=options.enable_thinking,
+                paid_system_prompt=paid_system_prompt,
                 model=model,
                 **options.extra_kwargs,
             )

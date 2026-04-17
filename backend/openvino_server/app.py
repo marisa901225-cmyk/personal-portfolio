@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+import threading
 import uuid
 from typing import Any
 
@@ -23,6 +24,8 @@ app = FastAPI(title="OpenVINO OpenAI-Compatible Server")
 
 _tokenizer: AutoTokenizer | None = None
 _model: OVModelForCausalLM | None = None
+_load_lock = threading.Lock()
+_generate_lock = threading.Lock()
 
 
 class ChatMessage(BaseModel):
@@ -43,20 +46,24 @@ class ChatCompletionRequest(BaseModel):
 
 def _ensure_loaded() -> tuple[AutoTokenizer, OVModelForCausalLM]:
     global _tokenizer, _model
-    if _tokenizer is None or _model is None:
-        try:
-            from transformers import AutoTokenizer as _AutoTokenizer  # type: ignore
-            from optimum.intel.openvino import OVModelForCausalLM as _OVModelForCausalLM  # type: ignore
-        except Exception as exc:  # pragma: no cover - runtime env dependent
-            raise RuntimeError(f"OpenVINO dependencies are not available: {exc}")
+    if _tokenizer is not None and _model is not None:
+        return _tokenizer, _model
 
-        globals()["AutoTokenizer"] = _AutoTokenizer
-        globals()["OVModelForCausalLM"] = _OVModelForCausalLM
+    with _load_lock:
+        if _tokenizer is None or _model is None:
+            try:
+                from transformers import AutoTokenizer as _AutoTokenizer  # type: ignore
+                from optimum.intel.openvino import OVModelForCausalLM as _OVModelForCausalLM  # type: ignore
+            except Exception as exc:  # pragma: no cover - runtime env dependent
+                raise RuntimeError(f"OpenVINO dependencies are not available: {exc}")
 
-    if _tokenizer is None:
-        _tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR, trust_remote_code=True)
-    if _model is None:
-        _model = OVModelForCausalLM.from_pretrained(MODEL_DIR, device=DEVICE)
+            globals()["AutoTokenizer"] = _AutoTokenizer
+            globals()["OVModelForCausalLM"] = _OVModelForCausalLM
+
+        if _tokenizer is None:
+            _tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR, trust_remote_code=True)
+        if _model is None:
+            _model = OVModelForCausalLM.from_pretrained(MODEL_DIR, device=DEVICE)
     return _tokenizer, _model
 
 
@@ -151,9 +158,11 @@ def chat_completions(req: ChatCompletionRequest) -> dict[str, Any]:
     else:
         generate_kwargs["do_sample"] = False
 
-    t0 = time.time()
-    output = model.generate(**inputs, **generate_kwargs)
-    dt = max(time.time() - t0, 1e-9)
+    # OpenVINO generate() is not safe to run concurrently on the shared model instance.
+    with _generate_lock:
+        t0 = time.time()
+        output = model.generate(**inputs, **generate_kwargs)
+        dt = max(time.time() - t0, 1e-9)
 
     out_ids = output[0]
     generated_ids = out_ids[in_len:]

@@ -14,6 +14,7 @@ from .weather_cache import (
     load_weather_cache,
     save_last_success_cache,
     save_weather_cache,
+    save_weather_issue_cache,
 )
 from .weather_kma import (
     KMA_API_URL,
@@ -236,8 +237,25 @@ async def fetch_weather_from_cache() -> Optional[str]:
     logger.warning("Immediate API call failed. Using last success cache...")
     last_success = load_last_success_cache()
     if not last_success:
+        save_weather_issue_cache(
+            reason="weather_unavailable",
+            payload={
+                "had_fresh_cache": False,
+                "had_last_success": False,
+            },
+        )
         logger.error("No cache available (fresh or last_success). Cannot send weather notification.")
         return None
+
+    save_weather_issue_cache(
+        reason="weather_fallback_last_success",
+        payload={
+            "had_fresh_cache": False,
+            "had_last_success": True,
+            "last_success_base_date": last_success.base_date,
+            "last_success_base_time": last_success.base_time,
+        },
+    )
 
     if not (last_success.message and last_success.message.strip()):
         logger.warning("Last success cache has empty message. Regenerating now...")
@@ -267,6 +285,14 @@ async def send_weather_notification() -> None:
     """날씨 정보를 텔레그램으로 전송한다."""
     message = await fetch_weather_from_cache()
     if message:
+        try:
+            from ...services.llm_service import LLMService
+
+            llm = LLMService._instance
+            if llm and llm.last_used_paid():
+                message = f"{llm.telegram_paid_prefix()}{message}"
+        except Exception:
+            pass
         await send_telegram_message(message)
         logger.info("Weather notification sent successfully.")
     else:

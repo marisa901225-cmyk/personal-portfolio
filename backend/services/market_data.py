@@ -209,7 +209,10 @@ class MarketDataService:
                     creative_text = info_text
             
             sync_time = datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
-            return f"{prefix}{creative_text.strip()}\n\n🕒 {sync_time} 기준"
+            final_text = f"{prefix}{creative_text.strip()}\n\n🕒 {sync_time} 기준"
+            if llm.last_used_paid():
+                final_text = f"{llm.telegram_paid_prefix()}{final_text}"
+            return final_text
         except Exception as e:
             logger.error(f"LLM generation failed: {e}")
             return f"{prefix}💰 시세 업데이트 완료!\n- 총 {ticker_count}개 종목\n- {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')} 기준"

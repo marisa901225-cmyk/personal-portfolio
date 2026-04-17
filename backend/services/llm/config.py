@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 def _resolve_backend_dir_abs() -> str:
     # backend/services/llm/config.py -> backend/
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 
 BACKEND_DIR_ABS = _resolve_backend_dir_abs()

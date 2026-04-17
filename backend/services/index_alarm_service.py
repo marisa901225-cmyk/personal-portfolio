@@ -251,6 +251,7 @@ async def send_index_alarm(symbol: str, state: IndexState, zone: OversoldZone, d
     rsi = data.get('rsi')
     ma_120 = data.get('ma_120')
     ma_200 = data.get('ma_200')
+    llm = None
     
     # LLM으로 알람 메시지 생성
     try:
@@ -288,6 +289,8 @@ async def send_index_alarm(symbol: str, state: IndexState, zone: OversoldZone, d
         message = f"📈 {symbol} 지수 알람\n상태: {state.value}\n구간: {zone.value}\n현재가: ${_fmt(price)}\nRSI: ${_fmt(rsi)}"
     
     try:
+        if llm and llm.last_used_paid():
+            message = f"{llm.telegram_paid_prefix()}{message}"
         await send_telegram_message(message)
         logger.info(f"Sent index alarm for {symbol}: {state.value}")
     except Exception as e:

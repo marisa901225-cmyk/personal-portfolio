@@ -17,7 +17,7 @@ from ...core.config import settings
 from ...core.db import SessionLocal
 from ...core.models import EsportsMatch
 from ...core.time_utils import utcnow, now_kst
-from ...core.esports_config import get_game_config, GAME_REGISTRY
+from ...core.esports_config import get_game_config, GAME_REGISTRY, is_valid_competitive_match
 from .core import PANDASCORE_URL
 from .esports_notifier import (
     notify_match_finished, notify_match_start, 
@@ -210,21 +210,8 @@ class EsportsMonitor:
             # [NEW] Apply same filtering as upcoming indexer to running matches
             videogame = m.get("_videogame", m.get("videogame", {}).get("slug"))
             league_name = (m.get("league") or {}).get("name") or ""
-            league_name_lower = league_name.lower()
             
-            is_valid = False
-            if videogame == "league-of-legends":
-                allowed_lol = ['LCK', 'LPL', 'LEC', 'First Stand', 'First-Stand', 'MSI', 'Mid-Season Invitational', 'Worlds', 'World Championship', 'Esports World Cup', 'EWC']
-                is_valid = any(word in league_name for word in allowed_lol)
-            elif videogame == "valorant":
-                is_china = any(word in league_name_lower for word in ['cn', 'china', 'lpl'])
-                if 'challengers' in league_name_lower or 'vcl' in league_name_lower or is_china:
-                    is_valid = False
-                else:
-                    allowed_vct = ['vct', 'champions', 'masters']
-                    is_valid = any(word in league_name_lower for word in allowed_vct)
-            else:
-                is_valid = True # Default for other games
+            is_valid = is_valid_competitive_match(m, videogame)
                 
             if not is_valid:
                 logger.debug(f"Skipping running match {match_id} ({m.get('name')}) - filtered league: {league_name}")
@@ -366,43 +353,16 @@ class EsportsMonitor:
                     match_game_slug = game_slug
                     league_name = (m.get("league") or {}).get("name") or ""
                     
-                    # [NEW] Strict League Filtering Logic
-                    is_valid_league = False
-                    
-                    if match_game_slug == "league-of-legends":
-                        # Allow LCK (covers LCK CL), LPL, LEC and International Events (2026 Season)
-                        allowed_lol = [
-                            'LCK', 'LPL', 'LEC',
-                            'First Stand', 'First-Stand',
-                            'MSI', 'Mid-Season Invitational', 
-                            'Worlds', 'World Championship', 
-                            'Esports World Cup', 'EWC'
-                        ]
-                        is_valid_league = any(word in league_name for word in allowed_lol)
-                        if not is_valid_league:
-                            logger.debug(f"Filtered out LoL match: {m.get('name')} (League: {league_name})")
-                        else:
-                            logger.info(f"Accepted LoL match: {m.get('name')} (League: {league_name})")
-                        
-                    elif match_game_slug == "valorant":
-                        # Block Tier 2 and Chinese leagues (LPL related Valorant)
-                        league_name_lower = league_name.lower()
-                        is_china_valorant = any(word in league_name_lower for word in ['cn', 'china', 'lpl'])
-                        
-                        if 'challengers' in league_name_lower or 'vcl' in league_name_lower or is_china_valorant:
-                            is_valid_league = False
-                            logger.info(f"Filtered out Valorant match: {m.get('name')} (League: {league_name}) [CHINA/TIER2]")
-                        else:
-                            # Allow Tier 1
-                            allowed_vct = ['vct', 'champions', 'masters']
-                            is_valid_league = any(word in league_name_lower for word in allowed_vct)
-                            if not is_valid_league:
-                                logger.debug(f"Filtered out Valorant match: {m.get('name')} (League: {league_name}) [NOT T1]")
-                    else:
-                        # Default fallback for other games (e.g. PUBG)
-                        # Check exclude keywords from config
-                        exclude_kws = config.get("exclude_keywords", [])
-                        is_valid_league = not any(kw.lower() in league_name.lower() for kw in exclude_kws)
+                    is_valid_league = is_valid_competitive_match(m, match_game_slug)
+                    if not is_valid_league:
+                        logger.debug(
+                            "Filtered out %s match: %s (League: %s)",
+                            match_game_slug,
+                            m.get("name"),
+                            league_name,
+                        )
+                    elif match_game_slug == "league-of-legends":
+                        logger.info(f"Accepted LoL match: {m.get('name')} (League: {league_name})")
 
                     if not is_valid_league:
                         continue

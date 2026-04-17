@@ -7,17 +7,86 @@ from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 from zoneinfo import ZoneInfo
 
+from ...core.config import settings
 from ...services.alarm.sanitizer import clean_exaone_tokens
 from ...services.llm_service import LLMService
 from ...services.prompt_loader import load_prompt
 
 logger = logging.getLogger(__name__)
 _WEATHER_MESSAGE_MAX_CHARS = 3500
-_MORNING_OPENROUTER_MODEL = "google/gemini-3-flash-preview"
-_MORNING_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-_MORNING_ALLOW_PAID_FALLBACK = os.environ.get("MORNING_ALLOW_PAID_FALLBACK", "0") == "1"
 _MORNING_MIN_TEXT_LEN = 20
 KST = ZoneInfo("Asia/Seoul")
+DEFAULT_PERSONA_NAME = "애니 (Annie)"
+PERSONA_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "../../data/persona_config.json")
+_WEEKDAY_PERSONA_KEYS = (
+    ("0", "mon", "monday", "월", "월요일"),
+    ("1", "tue", "tuesday", "화", "화요일"),
+    ("2", "wed", "wednesday", "수", "수요일"),
+    ("3", "thu", "thursday", "목", "목요일"),
+    ("4", "fri", "friday", "금", "금요일"),
+    ("5", "sat", "saturday", "토", "토요일"),
+    ("6", "sun", "sunday", "일", "일요일"),
+)
+
+
+def _resolve_persona_setting(personas: Any, persona_name: str) -> Optional[str]:
+    if not isinstance(personas, dict):
+        return None
+
+    persona_data = personas.get(persona_name)
+    if isinstance(persona_data, dict):
+        return str(persona_data.get("setting", "") or "")
+
+    normalized_target = re.sub(r"\s+", "", persona_name)
+    for key, candidate in personas.items():
+        if not isinstance(candidate, dict):
+            continue
+        normalized_key = re.sub(r"\s+", "", str(key))
+        if not normalized_key:
+            continue
+        if normalized_key == normalized_target:
+            return str(candidate.get("setting", "") or "")
+        if normalized_target.endswith(normalized_key) or normalized_key.endswith(normalized_target):
+            return str(candidate.get("setting", "") or "")
+
+    return None
+
+
+def load_persona_profile(
+    *,
+    now: Optional[datetime] = None,
+    config_path: Optional[str] = None,
+) -> Tuple[str, str]:
+    active_persona = DEFAULT_PERSONA_NAME
+    selected_persona = DEFAULT_PERSONA_NAME
+    path = config_path or PERSONA_CONFIG_PATH
+
+    try:
+        if not os.path.exists(path):
+            return DEFAULT_PERSONA_NAME, ""
+
+        with open(path, "r", encoding="utf-8") as f:
+            config = json.load(f)
+
+        active_persona = str(config.get("active_persona") or DEFAULT_PERSONA_NAME).strip() or DEFAULT_PERSONA_NAME
+        selected_persona = active_persona
+
+        weekday_personas = config.get("weekday_personas")
+        if isinstance(weekday_personas, dict):
+            now_kst = (now or datetime.now(KST)).astimezone(KST)
+            for key in _WEEKDAY_PERSONA_KEYS[now_kst.weekday()]:
+                candidate = weekday_personas.get(key)
+                if isinstance(candidate, str) and candidate.strip():
+                    selected_persona = candidate.strip()
+                    break
+
+        setting = _resolve_persona_setting(config.get("personas"), selected_persona)
+        if setting is None and selected_persona != active_persona:
+            setting = _resolve_persona_setting(config.get("personas"), active_persona)
+        return selected_persona, setting or ""
+    except Exception as e:
+        logger.error("Failed to load persona config: %s", e)
+        return DEFAULT_PERSONA_NAME, ""
 
 
 def _select_culture_context(
@@ -338,20 +407,6 @@ async def generate_weather_message_with_llm(
     weekly_derivatives_briefing: Optional[str] = None,
 ) -> str:
     """날씨 정보를 LLM으로 자연어 메시지로 변환한다."""
-    def _load_persona_config() -> Tuple[str, str]:
-        config_path = os.path.join(os.path.dirname(__file__), "../../data/persona_config.json")
-        try:
-            if os.path.exists(config_path):
-                with open(config_path, "r", encoding="utf-8") as f:
-                    config = json.load(f)
-                active = config.get("active_persona") or "애니 (Annie)"
-                persona_data = config.get("personas", {}).get(active, {})
-                setting = persona_data.get("setting", "")
-                return active, setting
-        except Exception as e:
-            logger.error("Failed to load persona config: %s", e)
-        return "애니 (Annie)", ""
-
     def _trim_for_telegram(text: str, max_chars: int = _WEATHER_MESSAGE_MAX_CHARS) -> str:
         if len(text) <= max_chars:
             return text
@@ -368,6 +423,19 @@ async def generate_weather_message_with_llm(
 
     def _is_valid_message(text: str) -> bool:
         return len((text or "").strip()) >= _MORNING_MIN_TEXT_LEN
+
+    def _finalize_message(raw_text: str) -> str:
+        normalized = clean_exaone_tokens(raw_text).strip()
+        if not _is_valid_message(normalized):
+            return ""
+        normalized = _ensure_weather_snapshot_prefix(
+            text=normalized,
+            temp=temp,
+            weather_status=weather_status,
+            pop=pop,
+            max_temp=max_temp,
+        )
+        return _trim_for_telegram(normalized)
 
     def _format_futures_options_data(data: Optional[Dict]) -> str:
         if not data:
@@ -425,10 +493,15 @@ async def generate_weather_message_with_llm(
             return "데이터 없음"
 
     llm = LLMService.get_instance()
-    open_api_key = os.environ.get("OPEN_API_KEY")
+    has_primary_paid = llm.settings.is_paid_configured()
+    has_openrouter_fallback = bool(
+        settings.open_api_key
+        and settings.morning_openrouter_model
+        and settings.morning_openrouter_base_url
+    )
+    has_remote_fallback = llm.settings.is_remote_configured()
 
-    # OpenRouter도 없고, LLMService도 미구성일 때만 fallback
-    if not open_api_key and not llm.is_loaded():
+    if not (has_primary_paid or has_openrouter_fallback or has_remote_fallback):
         return get_fallback_message(
             temp=temp,
             weather_status=weather_status,
@@ -467,7 +540,7 @@ async def generate_weather_message_with_llm(
     weekly_fo_str = _format_weekly_derivatives_briefing(weekly_derivatives_briefing)
 
     # 페르소나 설정 로드
-    persona_name, persona_setting = _load_persona_config()
+    persona_name, persona_setting = load_persona_profile()
 
     prompt_content = load_prompt(
         "weather_message",
@@ -504,58 +577,71 @@ async def generate_weather_message_with_llm(
         stop_tokens = ["Ok,", "사용자가", "지시사항"]
         creative_text = ""
 
-        # 1) OpenRouter 우선
-        if open_api_key:
+        # 1) AI_REPORT 우선
+        if has_primary_paid:
             try:
-                logger.info("모닝브리핑: 오픈라우터 우선 (model=%s)", _MORNING_OPENROUTER_MODEL)
+                logger.info("모닝브리핑: AI_REPORT 우선 (model=%s)", llm.settings.ai_report_model)
                 creative_text = llm.generate_paid_chat(
                     messages,
                     max_tokens=4096,
                     temperature=0.85,
-                    model=_MORNING_OPENROUTER_MODEL,
+                    model=llm.settings.ai_report_model,
                     stop=stop_tokens,
-                    api_key=open_api_key,
-                    base_url=_MORNING_OPENROUTER_BASE_URL,
+                    api_key=llm.settings.ai_report_api_key,
+                    base_url=llm.settings.ai_report_base_url,
                 )
             except Exception as e:
-                logger.warning("모닝브리핑: 오픈라우터 예외, remote-only 폴백 진행: %s", e)
+                logger.warning("모닝브리핑: AI_REPORT 예외, 다음 폴백 진행: %s", e)
                 creative_text = ""
 
-            creative_text = clean_exaone_tokens(creative_text).strip()
-            if _is_valid_message(creative_text):
-                logger.info("모닝브리핑: 오픈라우터 응답 성공 (len=%d)", len(creative_text))
-                creative_text = _ensure_weather_snapshot_prefix(
-                    text=creative_text,
-                    temp=temp,
-                    weather_status=weather_status,
-                    pop=pop,
-                    max_temp=max_temp,
+            finalized = _finalize_message(creative_text)
+            if finalized:
+                logger.info("모닝브리핑: AI_REPORT 응답 성공 (len=%d)", len(finalized))
+                return finalized
+            logger.warning("모닝브리핑: AI_REPORT 응답 실패/짧음, 다음 폴백 진행")
+
+        # 2) OpenRouter fallback
+        if has_openrouter_fallback:
+            try:
+                logger.info(
+                    "모닝브리핑: OpenRouter 폴백 (model=%s)",
+                    settings.morning_openrouter_model,
                 )
-                return _trim_for_telegram(creative_text)
-            logger.warning("모닝브리핑: 오픈라우터 응답 실패/짧음, remote-only 폴백 진행")
+                creative_text = llm.generate_paid_chat(
+                    messages,
+                    max_tokens=4096,
+                    temperature=0.85,
+                    model=settings.morning_openrouter_model,
+                    stop=stop_tokens,
+                    api_key=settings.open_api_key,
+                    base_url=settings.morning_openrouter_base_url,
+                )
+            except Exception as e:
+                logger.warning("모닝브리핑: OpenRouter 예외, remote-only 폴백 진행: %s", e)
+                creative_text = ""
 
-        # 2) remote only (유료 폴백 금지)
-        logger.info("모닝브리핑: remote 폴백(유료 금지)")
-        creative_text = llm.generate_chat(
-            messages,
-            max_tokens=4096,
-            temperature=0.85,
-            stop=stop_tokens,
-            allow_paid_fallback=False,
-        )
-        creative_text = clean_exaone_tokens(creative_text).strip()
-        if _is_valid_message(creative_text):
-            creative_text = _ensure_weather_snapshot_prefix(
-                text=creative_text,
-                temp=temp,
-                weather_status=weather_status,
-                pop=pop,
-                max_temp=max_temp,
+            finalized = _finalize_message(creative_text)
+            if finalized:
+                logger.info("모닝브리핑: OpenRouter 응답 성공 (len=%d)", len(finalized))
+                return finalized
+            logger.warning("모닝브리핑: OpenRouter 응답 실패/짧음, remote-only 폴백 진행")
+
+        # 3) remote only (유료 폴백 금지)
+        if has_remote_fallback:
+            logger.info("모닝브리핑: remote 폴백(유료 금지)")
+            creative_text = llm.generate_chat(
+                messages,
+                max_tokens=4096,
+                temperature=0.85,
+                stop=stop_tokens,
+                allow_paid_fallback=False,
             )
-            return _trim_for_telegram(creative_text)
+            finalized = _finalize_message(creative_text)
+            if finalized:
+                return finalized
 
-        # 3) 옵션: 마지막 유료 폴백 허용
-        if _MORNING_ALLOW_PAID_FALLBACK:
+        # 4) 옵션: remote 실패 후 마지막 유료 폴백 허용
+        if settings.morning_allow_paid_fallback and has_remote_fallback:
             logger.info("모닝브리핑: 최후 유료 폴백 허용")
             creative_text = llm.generate_chat(
                 messages,
@@ -564,16 +650,9 @@ async def generate_weather_message_with_llm(
                 stop=stop_tokens,
                 allow_paid_fallback=True,
             )
-            creative_text = clean_exaone_tokens(creative_text).strip()
-            if _is_valid_message(creative_text):
-                creative_text = _ensure_weather_snapshot_prefix(
-                    text=creative_text,
-                    temp=temp,
-                    weather_status=weather_status,
-                    pop=pop,
-                    max_temp=max_temp,
-                )
-                return _trim_for_telegram(creative_text)
+            finalized = _finalize_message(creative_text)
+            if finalized:
+                return finalized
 
         logger.warning("LLM 날씨 메시지 생성 실패/짧음, fallback 사용. last_error=%s", llm.get_last_error())
         return get_fallback_message(

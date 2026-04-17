@@ -41,6 +41,8 @@ def _should_send_random_topic(
         return False
     if _is_kr_public_holiday(now):
         return False
+    if now.hour > 18 or (now.hour == 18 and now.minute > 0):
+        return False
     if now.minute % 10 == 0:
         return True
     last_sent = load_last_random_topic_sent_at()

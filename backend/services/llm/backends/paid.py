@@ -12,6 +12,8 @@ from .base import LLMBackend
 from ..config import Settings
 
 logger = logging.getLogger(__name__)
+_DEFAULT_GPT5_REASONING_EFFORT = "medium"
+_ALLOWED_GPT5_REASONING_EFFORTS = {"none", "low", "medium", "high", "xhigh"}
 
 
 class OpenAIPaidBackend(LLMBackend):
@@ -112,6 +114,13 @@ class OpenAIPaidBackend(LLMBackend):
 
         return None
 
+    @staticmethod
+    def _resolve_gpt5_reasoning_effort(reasoning_effort: Optional[str]) -> str:
+        effort = str(reasoning_effort or "").strip().lower()
+        if effort in _ALLOWED_GPT5_REASONING_EFFORTS:
+            return effort
+        return _DEFAULT_GPT5_REASONING_EFFORT
+
     def _build_chat_payload(
         self,
         *,
@@ -165,6 +174,7 @@ class OpenAIPaidBackend(LLMBackend):
         current_tier: Optional[str],
         response_format: Any,
         is_gpt5: bool,
+        reasoning_effort: Optional[str],
     ) -> dict:
         responses_max_tokens = max(int(max_tokens), 16)
         payload: Dict[str, Any] = {
@@ -182,7 +192,7 @@ class OpenAIPaidBackend(LLMBackend):
             payload["text"] = {"format": responses_text_format}
 
         if is_gpt5:
-            payload["reasoning"] = {"effort": "minimal"}
+            payload["reasoning"] = {"effort": self._resolve_gpt5_reasoning_effort(reasoning_effort)}
         else:
             payload["temperature"] = temperature
 
@@ -228,6 +238,7 @@ class OpenAIPaidBackend(LLMBackend):
         current_tier: Optional[str],
         response_format: Any,
         is_gpt5: bool,
+        reasoning_effort: Optional[str],
     ) -> str:
         import random
         import time
@@ -243,6 +254,7 @@ class OpenAIPaidBackend(LLMBackend):
             current_tier=current_tier,
             response_format=response_format,
             is_gpt5=is_gpt5,
+            reasoning_effort=reasoning_effort,
         )
 
         max_attempts = 3
@@ -363,6 +375,18 @@ class OpenAIPaidBackend(LLMBackend):
         
         return new_messages
 
+    @staticmethod
+    def _prepend_paid_system_prompt(
+        messages: List[dict],
+        extra_system_prompt: Optional[str],
+        *,
+        is_gpt5: bool,
+    ) -> List[dict]:
+        prompt = str(extra_system_prompt or "").strip()
+        if not is_gpt5 or not prompt:
+            return messages
+        return [{"role": "system", "content": prompt}] + list(messages)
+
     def chat(
         self,
         messages: List[dict],
@@ -377,9 +401,6 @@ class OpenAIPaidBackend(LLMBackend):
         import time
         import random
 
-        # OpenAI 유료 모델용 시스템 프롬프트 자동 분리
-        messages = self._convert_to_system_prompt(messages)
-
         api_key = kwargs.get("api_key") or self.settings.ai_report_api_key
         base_url = kwargs.get("base_url") or self.settings.ai_report_base_url
 
@@ -390,8 +411,18 @@ class OpenAIPaidBackend(LLMBackend):
         model = kwargs.get("model") or self.settings.ai_report_model
         service_tier = kwargs.get("service_tier")
         response_format = kwargs.get("response_format")
+        reasoning_effort = kwargs.get("reasoning_effort")
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         is_gpt5 = self._is_gpt5_model(model)
+        extra_paid_system_prompt = kwargs.get("paid_system_prompt")
+
+        # OpenAI 유료 모델용 시스템 프롬프트 자동 분리 + GPT-5 보조 지침 선행 주입
+        messages = self._convert_to_system_prompt(messages)
+        messages = self._prepend_paid_system_prompt(
+            messages,
+            extra_paid_system_prompt,
+            is_gpt5=is_gpt5,
+        )
 
         max_attempts = 5 if service_tier == "flex" else 1
         current_tier = service_tier
@@ -448,6 +479,7 @@ class OpenAIPaidBackend(LLMBackend):
                             current_tier=current_tier,
                             response_format=response_format,
                             is_gpt5=is_gpt5,
+                            reasoning_effort=reasoning_effort,
                         )
                         if out:
                             return out
@@ -486,6 +518,7 @@ class OpenAIPaidBackend(LLMBackend):
                     current_tier=current_tier,
                     response_format=response_format,
                     is_gpt5=is_gpt5,
+                    reasoning_effort=reasoning_effort,
                 )
                 if out:
                     return out
@@ -511,6 +544,7 @@ class OpenAIPaidBackend(LLMBackend):
                 current_tier=current_tier,
                 response_format=response_format,
                 is_gpt5=is_gpt5,
+                reasoning_effort=reasoning_effort,
             )
             if out:
                 return out

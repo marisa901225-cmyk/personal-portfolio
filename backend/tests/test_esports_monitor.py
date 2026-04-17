@@ -98,3 +98,27 @@ class TestEsportsMonitor(unittest.TestCase):
 
             with patch("backend.services.news.esports_monitor.utcnow", return_value=datetime(2026, 3, 17, 17, 31)):
                 self.assertFalse(self.monitor._has_imminent_match(db))
+
+    def test_update_esports_cache_filters_out_game_changers_even_with_vct_parent_league(self) -> None:
+        with self.TestSessionLocal() as db:
+            running_ids, pending_notifications = self.monitor._update_esports_cache(
+                db,
+                [
+                    {
+                        "id": 3001,
+                        "_videogame": "valorant",
+                        "league": {"name": "Valorant Champions Tour 2026", "id": 7},
+                        "serie": {"id": 70, "full_name": "Game Changers North America Stage 1 2026"},
+                        "tournament": {"id": 700, "name": "Main Event"},
+                        "name": "SR GC vs FLY GC",
+                        "scheduled_at": "2026-03-17T13:00:00Z",
+                        "begin_at": "2026-03-17T13:05:00Z",
+                        "official_stream_url": "https://example.com/live",
+                    }
+                ],
+            )
+
+            match = db.query(EsportsMatch).filter(EsportsMatch.match_id == 3001).first()
+            self.assertEqual(running_ids, set())
+            self.assertEqual(pending_notifications, [])
+            self.assertIsNone(match)

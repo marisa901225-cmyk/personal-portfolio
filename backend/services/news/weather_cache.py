@@ -6,11 +6,10 @@
 """
 import json
 import logging
-import os
 from dataclasses import dataclass, asdict
 from datetime import datetime, time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
@@ -18,6 +17,10 @@ logger = logging.getLogger(__name__)
 # 캐시 디렉토리 경로
 CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "storage" / "weather_cache"
 KST = ZoneInfo("Asia/Seoul")
+LAST_SUCCESS_FILENAME = "last_success.json"
+ISSUE_PREFIX = "issue_"
+REGULAR_CACHE_RETENTION_DAYS = 7
+ISSUE_CACHE_RETENTION_DAYS = 30
 
 
 @dataclass
@@ -61,7 +64,55 @@ def _get_cache_path(base_date: str, base_time: str) -> Path:
 
 def _get_last_success_path() -> Path:
     """마지막 성공 캐시 파일 경로"""
-    return CACHE_DIR / "last_success.json"
+    return CACHE_DIR / LAST_SUCCESS_FILENAME
+
+
+def _is_regular_cache_file(cache_file: Path) -> bool:
+    try:
+        date_str, time_str = cache_file.stem.split("_", 1)
+    except ValueError:
+        return False
+    return len(date_str) == 8 and date_str.isdigit() and len(time_str) == 4 and time_str.isdigit()
+
+
+def _is_issue_cache_file(cache_file: Path) -> bool:
+    return cache_file.name.startswith(ISSUE_PREFIX) and cache_file.suffix == ".json"
+
+
+def _prune_regular_caches(*, keep: Path | None = None) -> None:
+    for cache_file in CACHE_DIR.glob("*.json"):
+        if keep is not None and cache_file == keep:
+            continue
+        if cache_file.name == LAST_SUCCESS_FILENAME:
+            continue
+        if not _is_regular_cache_file(cache_file):
+            continue
+        cache_file.unlink(missing_ok=True)
+
+
+def save_weather_issue_cache(*, reason: str, payload: dict[str, Any]) -> Path | None:
+    """이상 상황 디버깅용 스냅샷 저장."""
+    try:
+        _ensure_cache_dir()
+        now = datetime.now(KST)
+        normalized_reason = "".join(
+            ch if ch.isalnum() or ch in {"-", "_"} else "_"
+            for ch in str(reason).strip().lower()
+        ).strip("_") or "unknown"
+        issue_path = CACHE_DIR / f"{ISSUE_PREFIX}{now.strftime('%Y%m%d_%H%M%S')}_{normalized_reason}.json"
+        issue_payload = {
+            "kind": "weather_issue_snapshot",
+            "reason": normalized_reason,
+            "captured_at": now.isoformat(),
+            **dict(payload),
+        }
+        with open(issue_path, "w", encoding="utf-8") as f:
+            json.dump(issue_payload, f, ensure_ascii=False, indent=2)
+        logger.warning("Weather issue snapshot saved: %s", issue_path.name)
+        return issue_path
+    except Exception as e:
+        logger.error(f"Failed to save weather issue cache: {e}", exc_info=True)
+        return None
 
 
 def save_weather_cache(data: WeatherData) -> None:
@@ -73,15 +124,16 @@ def save_weather_cache(data: WeatherData) -> None:
     try:
         _ensure_cache_dir()
         cache_path = _get_cache_path(data.base_date, data.base_time)
-        
+
         with open(cache_path, "w", encoding="utf-8") as f:
             json.dump(data.to_dict(), f, ensure_ascii=False, indent=2)
-        
+
+        _prune_regular_caches(keep=cache_path)
         logger.info(f"Weather cache saved: {cache_path.name}")
-        
+
         # 성공 시 last_success 캐시도 업데이트
         save_last_success_cache(data)
-        
+
     except Exception as e:
         logger.error(f"Failed to save weather cache: {e}", exc_info=True)
 
@@ -186,21 +238,32 @@ def clear_old_caches() -> None:
         
         for cache_file in CACHE_DIR.glob("*.json"):
             # last_success.json은 건너뛰기
-            if cache_file.name == "last_success.json":
+            if cache_file.name == LAST_SUCCESS_FILENAME:
                 continue
-            
-            # 파일명에서 날짜 추출 (YYYYMMDD_HHMM.json)
-            try:
-                date_str = cache_file.stem.split("_")[0]
-                cache_date = datetime.strptime(date_str, "%Y%m%d").replace(tzinfo=KST)
-                
-                # 7일 이상 지난 파일 삭제
-                if (now - cache_date).days > 7:
-                    cache_file.unlink()
-                    logger.debug(f"Deleted old cache: {cache_file.name}")
-            except (ValueError, IndexError):
-                # 파일명 형식이 맞지 않으면 건너뛰기
+
+            if _is_regular_cache_file(cache_file):
+                try:
+                    date_str = cache_file.stem.split("_", 1)[0]
+                    cache_date = datetime.strptime(date_str, "%Y%m%d").replace(tzinfo=KST)
+                    if (now - cache_date).days > REGULAR_CACHE_RETENTION_DAYS:
+                        cache_file.unlink(missing_ok=True)
+                        logger.debug(f"Deleted old regular cache: {cache_file.name}")
+                except ValueError:
+                    continue
                 continue
-                
+
+            if _is_issue_cache_file(cache_file):
+                try:
+                    parts = cache_file.stem.split("_", 3)
+                    captured_at = datetime.strptime(
+                        f"{parts[1]}_{parts[2]}",
+                        "%Y%m%d_%H%M%S",
+                    ).replace(tzinfo=KST)
+                    if (now - captured_at).days > ISSUE_CACHE_RETENTION_DAYS:
+                        cache_file.unlink(missing_ok=True)
+                        logger.debug(f"Deleted old issue cache: {cache_file.name}")
+                except (ValueError, IndexError):
+                    continue
+
     except Exception as e:
         logger.error(f"Failed to clear old caches: {e}", exc_info=True)

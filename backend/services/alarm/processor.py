@@ -346,7 +346,7 @@ async def process_pending_alarms(db: Session, model_override: Optional[str] = No
             try:
                 from ..llm.service import LLMService
                 if LLMService._instance and LLMService._instance.last_used_paid():
-                    summary_text = f"💰 {summary_text}"
+                    summary_text = f"{LLMService._instance.telegram_paid_prefix()}{summary_text}"
             except: pass
             
             await send_telegram_message(summary_text)

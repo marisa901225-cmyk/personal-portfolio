@@ -2,6 +2,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -14,10 +15,19 @@ from backend.services.news.weather_message import (
     _ensure_weather_snapshot_prefix,
     _format_weekly_derivatives_briefing,
     _select_culture_context,
+    load_persona_profile,
 )
 
 
 class SteamBriefingContextTests(unittest.TestCase):
+    def _make_persona_config(self, payload: dict) -> str:
+        tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+        tmp.close()
+        self.addCleanup(lambda: os.path.exists(tmp.name) and os.remove(tmp.name))
+        with open(tmp.name, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+        return tmp.name
+
     def _make_db(self) -> str:
         tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         tmp.close()
@@ -237,3 +247,65 @@ class SteamBriefingContextTests(unittest.TestCase):
         )
 
         self.assertEqual(enriched, original)
+
+    def test_load_persona_profile_uses_weekday_override_in_kst(self):
+        config_path = self._make_persona_config(
+            {
+                "active_persona": "기본 페르소나",
+                "weekday_personas": {
+                    "wed": "수요일 페르소나",
+                },
+                "personas": {
+                    "기본 페르소나": {"setting": "기본 설정"},
+                    "수요일 페르소나": {"setting": "수요일 설정"},
+                },
+            }
+        )
+
+        persona, setting = load_persona_profile(
+            now=datetime(2026, 4, 14, 23, 30, tzinfo=ZoneInfo("UTC")),
+            config_path=config_path,
+        )
+
+        self.assertEqual(persona, "수요일 페르소나")
+        self.assertEqual(setting, "수요일 설정")
+
+    def test_load_persona_profile_falls_back_to_active_persona(self):
+        config_path = self._make_persona_config(
+            {
+                "active_persona": "기본 페르소나",
+                "weekday_personas": {
+                    "mon": "월요일 페르소나",
+                },
+                "personas": {
+                    "기본 페르소나": {"setting": "기본 설정"},
+                    "월요일 페르소나": {"setting": "월요일 설정"},
+                },
+            }
+        )
+
+        persona, setting = load_persona_profile(
+            now=datetime(2026, 4, 15, 7, 0, tzinfo=ZoneInfo("Asia/Seoul")),
+            config_path=config_path,
+        )
+
+        self.assertEqual(persona, "기본 페르소나")
+        self.assertEqual(setting, "기본 설정")
+
+    def test_load_persona_profile_matches_short_persona_key_for_setting(self):
+        config_path = self._make_persona_config(
+            {
+                "active_persona": "어과초의 미사카 미코토",
+                "personas": {
+                    "미사카 미코토": {"setting": "레일건 톤 유지"},
+                },
+            }
+        )
+
+        persona, setting = load_persona_profile(
+            now=datetime(2026, 4, 15, 7, 0, tzinfo=ZoneInfo("Asia/Seoul")),
+            config_path=config_path,
+        )
+
+        self.assertEqual(persona, "어과초의 미사카 미코토")
+        self.assertEqual(setting, "레일건 톤 유지")

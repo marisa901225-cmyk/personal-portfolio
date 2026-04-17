@@ -180,6 +180,62 @@ class AlarmLlmLogicV2ParityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, clean_draft)
         self.assertEqual(generate_mock.await_count, 3)
 
+    async def test_random_message_retries_when_explanatory_tail_remains(self):
+        stub = _StubLLM(loaded=True)
+        fixed_now = real_datetime(2026, 3, 12, 10, 0, 0)
+        explanatory_tail_draft = (
+            "카세트테이프가 냄비처럼 보글거리며 오늘의 메뉴를 낭독했다는 식으로 시작한다. "
+            "키워드 하나와 키워드 둘을 묶어 밤참 같은 사건으로 키우고, 골목 불빛까지 끌어와 충분히 길게 서사를 이어 간다. "
+            "결론적으로 우리는 추억을 천천히 한 입만 씹으시길 바랍니다."
+        )
+        punchline_draft = (
+            "카세트테이프가 냄비처럼 보글거리며 오늘의 메뉴를 낭독했다는 식으로 시작한다. "
+            "키워드 하나와 키워드 둘을 묶어 밤참 같은 사건으로 키우고, 골목 불빛까지 끌어와 충분히 길게 서사를 이어 간다. "
+            "그랬더니 테이프가 마지막에 면치기 소리까지 흉내 내서, 동네 전체가 야식 광고인 척 연기하다 퇴근했다."
+        )
+
+        fake_datetime = MagicMock()
+        fake_datetime.now.return_value = fixed_now
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(llm_logic_v2.LLMService, "get_instance", return_value=stub))
+            stack.enter_context(patch.object(llm_logic_v2, "datetime", fake_datetime))
+            stack.enter_context(patch.object(llm_logic_v2, "get_all_categories", return_value=["영화/드라마/음악"]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_formats", return_value=["질문형"]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_openers", return_value=["오프너"]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_twists", return_value=["트위스트"]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_voices", return_value={"차분한 목소리": "침착하게 말해"}))
+            stack.enter_context(patch.object(llm_logic_v2, "load_recent_categories", return_value=[]))
+            stack.enter_context(patch.object(llm_logic_v2, "pick_keywords_for_constraints", return_value=["키워드 하나", "키워드 둘"]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_category_keywords", return_value={}))
+            stack.enter_context(
+                patch.object(
+                    llm_logic_v2,
+                    "load_prompt",
+                    side_effect=lambda key, **kwargs: "system prompt" if key == "random_topic_system" else "user prompt",
+                )
+            )
+            stack.enter_context(patch.object(llm_logic_v2, "dump_llm_draft", MagicMock()))
+            stack.enter_context(patch.object(llm_logic_v2, "save_recent_category", MagicMock()))
+            stack.enter_context(patch.object(llm_logic_v2, "save_last_random_topic_sent_at", MagicMock()))
+            stack.enter_context(patch.object(llm_logic_v2.random, "choice", side_effect=lambda seq: seq[0]))
+            stack.enter_context(patch.object(llm_logic_v2.random, "shuffle", side_effect=lambda seq: None))
+            generate_mock = AsyncMock(side_effect=[explanatory_tail_draft, punchline_draft, "카세트 야식 소동"])
+            stack.enter_context(patch.object(llm_logic_v2, "generate_with_main_llm_async", new=generate_mock))
+            stack.enter_context(
+                patch.object(
+                    llm_logic_v2,
+                    "refine_draft_with_light_llm_async",
+                    new=AsyncMock(side_effect=[explanatory_tail_draft, punchline_draft]),
+                )
+            )
+            stack.enter_context(patch.object(llm_logic_v2, "has_category_anchor", return_value=True))
+
+            result = await llm_logic_v2.summarize_with_llm([])
+
+        self.assertEqual(result, punchline_draft)
+        self.assertEqual(generate_mock.await_count, 3)
+
     async def test_generate_random_message_payload_returns_llm_title(self):
         stub = _StubLLM(loaded=True)
         fixed_now = real_datetime(2026, 3, 12, 12, 20, 0)
@@ -212,11 +268,12 @@ class AlarmLlmLogicV2ParityTests(unittest.IsolatedAsyncioTestCase):
             stack.enter_context(patch.object(llm_logic_v2, "save_last_random_topic_sent_at", MagicMock()))
             stack.enter_context(patch.object(llm_logic_v2.random, "choice", side_effect=lambda seq: seq[0]))
             stack.enter_context(patch.object(llm_logic_v2.random, "shuffle", side_effect=lambda seq: None))
+            generate_mock = AsyncMock(side_effect=[draft, title])
             stack.enter_context(
                 patch.object(
                     llm_logic_v2,
                     "generate_with_main_llm_async",
-                    new=AsyncMock(side_effect=[draft, title]),
+                    new=generate_mock,
                 )
             )
             stack.enter_context(patch.object(llm_logic_v2, "refine_draft_with_light_llm_async", new=AsyncMock(return_value=draft)))
@@ -225,9 +282,81 @@ class AlarmLlmLogicV2ParityTests(unittest.IsolatedAsyncioTestCase):
             payload = await llm_logic_v2.generate_random_message_payload(now=fixed_now)
 
         self.assertEqual(payload, {"title": title, "body": draft})
+        self.assertEqual(generate_mock.await_args_list[0].kwargs["paid_system_prompt"], "random_topic_gpt5_paid_system prompt")
+        self.assertEqual(generate_mock.await_args_list[1].kwargs["reasoning_effort"], "none")
+        self.assertEqual(generate_mock.await_args_list[1].kwargs["paid_system_prompt"], "random_topic_title_gpt5_paid_system prompt")
 
 
 class AlarmLlmLogicV2WeekendTests(unittest.IsolatedAsyncioTestCase):
+    async def test_random_message_allows_exactly_at_weekday_6pm(self):
+        stub = _StubLLM(loaded=True)
+        weekday_six_pm = real_datetime(2026, 3, 13, 18, 0, 0)
+        fake_datetime = MagicMock()
+        fake_datetime.now.return_value = weekday_six_pm
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(llm_logic_v2.LLMService, "get_instance", return_value=stub))
+            stack.enter_context(patch.object(llm_logic_v2, "datetime", fake_datetime))
+            stack.enter_context(patch.object(llm_logic_v2, "get_all_categories", return_value=["역사/문화"]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_formats", return_value=["질문형"]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_openers", return_value=["오프너"]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_twists", return_value=["트위스트"]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_voices", return_value={"차분한 목소리": "침착하게 말해"}))
+            stack.enter_context(patch.object(llm_logic_v2, "load_recent_categories", return_value=[]))
+            stack.enter_context(patch.object(llm_logic_v2, "pick_keywords_for_constraints", return_value=["키워드 하나", "키워드 둘"]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_category_keywords", return_value={}))
+            stack.enter_context(
+                patch.object(
+                    llm_logic_v2,
+                    "load_prompt",
+                    side_effect=lambda key, **kwargs: "system prompt" if key == "random_topic_system" else "user prompt",
+                )
+            )
+            stack.enter_context(patch.object(llm_logic_v2, "dump_llm_draft", MagicMock()))
+            stack.enter_context(patch.object(llm_logic_v2, "save_recent_category", MagicMock()))
+            stack.enter_context(patch.object(llm_logic_v2, "save_last_random_topic_sent_at", MagicMock()))
+            stack.enter_context(patch.object(llm_logic_v2.random, "choice", side_effect=lambda seq: seq[0]))
+            stack.enter_context(patch.object(llm_logic_v2.random, "shuffle", side_effect=lambda seq: None))
+            draft_text = (
+                "역사 이야기를 길게 풀어 보자. 키워드 하나와 키워드 둘을 담고, "
+                "한국어 문장을 충분히 이어 가서 길이 제한도 무난히 넘기는 테스트용 초안이다. "
+                "평일 오후 여섯 시 정각에는 아직 랜덤 메시지가 살아 있어야 한다는 조건을 검증하려고 "
+                "문장을 조금 더 덧붙여서 실제 생성 규칙의 최소 길이도 안정적으로 통과하게 만든다."
+            )
+            draft = AsyncMock(side_effect=[draft_text, "여섯 시 브리핑"])
+            stack.enter_context(patch.object(llm_logic_v2, "generate_with_main_llm_async", new=draft))
+            stack.enter_context(
+                patch.object(
+                    llm_logic_v2,
+                    "refine_draft_with_light_llm_async",
+                    new=AsyncMock(side_effect=lambda text, **kwargs: text),
+                )
+            )
+            stack.enter_context(patch.object(llm_logic_v2, "has_category_anchor", return_value=True))
+
+            result = await llm_logic_v2.summarize_with_llm([])
+
+        self.assertIsInstance(result, str)
+        self.assertTrue(result)
+        draft.assert_awaited()
+
+    async def test_random_message_skips_after_weekday_6pm(self):
+        stub = _StubLLM(loaded=True)
+        weekday_after_six_pm = real_datetime(2026, 3, 13, 18, 10, 0)
+        fake_datetime = MagicMock()
+        fake_datetime.now.return_value = weekday_after_six_pm
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(llm_logic_v2.LLMService, "get_instance", return_value=stub))
+            stack.enter_context(patch.object(llm_logic_v2, "datetime", fake_datetime))
+            generate_mock = AsyncMock(return_value="오후 6시 이후 랜덤 메시지")
+            stack.enter_context(patch.object(llm_logic_v2, "generate_with_main_llm_async", new=generate_mock))
+
+            result = await llm_logic_v2.summarize_with_llm([])
+
+        self.assertIsNone(result)
+        generate_mock.assert_not_awaited()
+
     async def test_random_message_skips_on_weekend(self):
         stub = _StubLLM(loaded=True)
         saturday_noon = real_datetime(2026, 3, 14, 12, 0, 0)

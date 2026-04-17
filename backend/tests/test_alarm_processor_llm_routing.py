@@ -4,9 +4,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend.services.alarm import processor
+from backend.services.llm.service import LLMService as CoreLLMService
 
 
 class TestAlarmProcessorLlmRouting(unittest.IsolatedAsyncioTestCase):
+    def tearDown(self):
+        CoreLLMService._instance = None
+
     async def test_summary_route_uses_summary_llm_endpoint(self):
         alarm = SimpleNamespace(
             id=1,
@@ -87,6 +91,46 @@ class TestAlarmProcessorLlmRouting(unittest.IsolatedAsyncioTestCase):
             "http://llama-server-vulkan-huihui:8083",
         )
         mock_summary.assert_not_awaited()
+
+    async def test_paid_prefix_notice_is_prepended_to_first_summary_message(self):
+        alarm = SimpleNamespace(
+            id=1,
+            raw_text="[KB] 카드 승인 12,000원",
+            masked_text=None,
+            sender="KB카드",
+            app_name="KB",
+            package="com.kb.app",
+            app_title="결제 알림",
+            conversation=None,
+            status="pending",
+            classification=None,
+        )
+        db = MagicMock()
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [alarm]
+
+        fake_llm = MagicMock()
+        fake_llm.last_used_paid.return_value = True
+        fake_llm.telegram_paid_prefix.return_value = "NOTICE\n💰 "
+        CoreLLMService._instance = fake_llm
+
+        with (
+            patch.object(processor, "check_upcoming_matches", new=AsyncMock()),
+            patch.object(processor, "_get_nb_pipeline", return_value=None),
+            patch("backend.services.users.get_or_create_single_user", return_value=MagicMock(id=1)),
+            patch.object(processor, "is_whitelisted", return_value=False),
+            patch.object(processor, "is_review_spam", return_value=False),
+            patch.object(processor, "is_spam", return_value=(False, "")),
+            patch.object(processor, "is_promo_spam", return_value=False),
+            patch.object(processor, "is_spam_llm", return_value=(False, "llm_ham")),
+            patch.object(processor, "parse_card_approval", return_value=None),
+            patch.object(processor, "summarize_with_llm", new=AsyncMock(return_value="중요 알림 요약")),
+            patch.object(processor, "generate_random_message_payload", new=AsyncMock()),
+            patch.object(processor, "send_telegram_message", new=AsyncMock()) as mock_send,
+        ):
+            await processor.process_pending_alarms(db, model_override="shared-model")
+
+        sent_text = mock_send.await_args.args[0]
+        self.assertTrue(sent_text.startswith("NOTICE\n💰 "))
 
 
 if __name__ == "__main__":

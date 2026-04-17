@@ -1,4 +1,8 @@
-from backend.core.esports_config import infer_league_tag_from_name, lol_league_tagger
+from backend.core.esports_config import (
+    infer_league_tag_from_name,
+    is_valid_competitive_match,
+    lol_league_tagger,
+)
 
 
 def test_lol_league_tagger_maps_international_events() -> None:
@@ -34,4 +38,28 @@ def test_infer_league_tag_from_name_recognizes_international_and_major_regions()
             "league-of-legends",
         )
         == "LCK-CL"
+    )
+
+
+def test_is_valid_competitive_match_accepts_vct_main_event() -> None:
+    assert is_valid_competitive_match(
+        {
+            "league": {"name": "Valorant Champions Tour 2026"},
+            "serie": {"full_name": "VCT 2026: Pacific Stage 1"},
+            "tournament": {"name": "Regular Season"},
+            "name": "GEN.G vs DRX",
+        },
+        "valorant",
+    )
+
+
+def test_is_valid_competitive_match_rejects_game_changers_even_with_parent_vct_name() -> None:
+    assert not is_valid_competitive_match(
+        {
+            "league": {"name": "Valorant Champions Tour 2026"},
+            "serie": {"full_name": "Game Changers North America Stage 1 2026"},
+            "tournament": {"name": "Main Event"},
+            "name": "SR GC vs FLY GC",
+        },
+        "valorant",
     )

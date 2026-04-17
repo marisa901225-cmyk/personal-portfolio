@@ -3,37 +3,27 @@
 """
 import pytest
 import json
-import os
 from datetime import datetime
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import backend.services.news.weather_cache as weather_cache_module
 from backend.services.news.weather_cache import (
     WeatherData,
-    save_weather_cache,
-    load_weather_cache,
-    is_cache_fresh,
-    save_last_success_cache,
-    load_last_success_cache,
     clear_old_caches,
-    CACHE_DIR,
+    is_cache_fresh,
+    load_last_success_cache,
+    load_weather_cache,
+    save_last_success_cache,
+    save_weather_cache,
+    save_weather_issue_cache,
 )
 
 
 @pytest.fixture
-def clean_cache_dir():
-    """테스트 전후 캐시 디렉토리 정리"""
-    # 테스트 전 정리
-    if CACHE_DIR.exists():
-        for cache_file in CACHE_DIR.glob("*.json"):
-            cache_file.unlink()
-    
+def clean_cache_dir(tmp_path, monkeypatch):
+    """테스트용 임시 캐시 디렉토리 사용"""
+    monkeypatch.setattr(weather_cache_module, "CACHE_DIR", tmp_path / "weather_cache")
     yield
-    
-    # 테스트 후 정리
-    if CACHE_DIR.exists():
-        for cache_file in CACHE_DIR.glob("*.json"):
-            cache_file.unlink()
 
 
 @pytest.fixture
@@ -129,7 +119,7 @@ def test_clear_old_caches(clean_cache_dir):
     """오래된 캐시 삭제 테스트"""
     # 오래된 캐시 파일 생성 (7일 이상 지난 것)
     old_date = "20250101"
-    old_cache_path = CACHE_DIR / f"{old_date}_0500.json"
+    old_cache_path = weather_cache_module.CACHE_DIR / f"{old_date}_0500.json"
     old_cache_path.parent.mkdir(parents=True, exist_ok=True)
     
     old_data = {
@@ -148,7 +138,7 @@ def test_clear_old_caches(clean_cache_dir):
     # 현재 캐시 파일 생성
     now = datetime.now(ZoneInfo("Asia/Seoul"))
     today = now.strftime("%Y%m%d")
-    current_cache_path = CACHE_DIR / f"{today}_0500.json"
+    current_cache_path = weather_cache_module.CACHE_DIR / f"{today}_0500.json"
     
     current_data = {
         "message": "current message",
@@ -169,6 +159,47 @@ def test_clear_old_caches(clean_cache_dir):
     # 오래된 캐시는 삭제되고 현재 캐시는 남아있어야 함
     assert not old_cache_path.exists()
     assert current_cache_path.exists()
+
+
+def test_save_weather_cache_keeps_only_latest_regular_file(clean_cache_dir, sample_weather_data):
+    save_weather_cache(sample_weather_data)
+
+    newer_data = WeatherData(
+        message=sample_weather_data.message,
+        temp="16",
+        weather_status=sample_weather_data.weather_status,
+        pop=sample_weather_data.pop,
+        base_date=sample_weather_data.base_date,
+        base_time="0600",
+        cached_at=sample_weather_data.cached_at,
+    )
+    save_weather_cache(newer_data)
+
+    regular_files = sorted(
+        cache_file.name
+        for cache_file in weather_cache_module.CACHE_DIR.glob("*.json")
+        if cache_file.name != "last_success.json" and cache_file.name.startswith(sample_weather_data.base_date)
+    )
+
+    assert regular_files == [f"{sample_weather_data.base_date}_0600.json"]
+
+
+def test_save_weather_issue_cache_creates_debug_snapshot(clean_cache_dir):
+    issue_path = save_weather_issue_cache(
+        reason="fallback last_success",
+        payload={"had_fresh_cache": False, "had_last_success": True},
+    )
+
+    assert issue_path is not None
+    assert issue_path.exists()
+    assert issue_path.name.startswith("issue_")
+
+    with open(issue_path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    assert payload["kind"] == "weather_issue_snapshot"
+    assert payload["reason"] == "fallback_last_success"
+    assert payload["had_last_success"] is True
 
 
 if __name__ == "__main__":

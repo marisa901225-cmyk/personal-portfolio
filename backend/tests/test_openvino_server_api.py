@@ -38,6 +38,20 @@ class _FakeModel:
         return [self.output_ids]
 
 
+class _RecordingLock:
+    def __init__(self):
+        self.enter_count = 0
+        self.exit_count = 0
+
+    def __enter__(self):
+        self.enter_count += 1
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.exit_count += 1
+        return False
+
+
 class OpenVinoServerApiTests(unittest.TestCase):
     def test_finish_reason_length_when_max_tokens_reached(self):
         tokenizer = _FakeTokenizer("테스트")
@@ -84,6 +98,24 @@ class OpenVinoServerApiTests(unittest.TestCase):
         self.assertIsNotNone(tokenizer.template_kwargs)
         self.assertIn("enable_thinking", tokenizer.template_kwargs)
         self.assertFalse(tokenizer.template_kwargs["enable_thinking"])
+
+    def test_generation_is_guarded_by_lock(self):
+        tokenizer = _FakeTokenizer("응답")
+        model = _FakeModel([1, 2, 3, 10])
+        lock = _RecordingLock()
+
+        with (
+            patch.object(ov_app, "_ensure_loaded", return_value=(tokenizer, model)),
+            patch.object(ov_app, "_generate_lock", lock),
+        ):
+            req = ov_app.ChatCompletionRequest(
+                messages=[ov_app.ChatMessage(role="user", content="hi")],
+                max_tokens=5,
+            )
+            ov_app.chat_completions(req)
+
+        self.assertEqual(lock.enter_count, 1)
+        self.assertEqual(lock.exit_count, 1)
 
     def test_stream_true_returns_400(self):
         req = ov_app.ChatCompletionRequest(

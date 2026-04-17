@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 from typing import Dict, List, Any, Callable, Optional
 
 
@@ -126,6 +127,70 @@ def get_game_config(game_id: str) -> Optional[Dict[str, Any]]:
     if normalized_id == "lol":
         normalized_id = "league-of-legends"
     return GAME_REGISTRY.get(normalized_id)
+
+
+def _normalize_match_text(match: dict) -> str:
+    """리그/시리즈/토너먼트/경기명을 합쳐 필터 판별용 텍스트를 만든다."""
+    league = (match.get("league") or {}).get("name") or ""
+    serie = (match.get("serie") or {}).get("full_name") or (match.get("serie") or {}).get("name") or ""
+    tournament = (match.get("tournament") or {}).get("name") or ""
+    name = match.get("name") or ""
+    return " ".join(part for part in (league, serie, tournament, name) if part).lower()
+
+
+def _contains_keyword(text: str, keyword: str) -> bool:
+    normalized = (keyword or "").strip().lower()
+    if not normalized:
+        return False
+    if len(normalized) <= 2 and normalized.isalpha():
+        return re.search(rf"\b{re.escape(normalized)}\b", text) is not None
+    return normalized in text
+
+
+def is_valid_competitive_match(match: dict, game_slug: str) -> bool:
+    """알림/모니터링 대상이 되는 주요 경기인지 판별한다."""
+    config = get_game_config(game_slug)
+    if not config:
+        return True
+
+    league_name = (match.get("league") or {}).get("name") or ""
+
+    if game_slug == "league-of-legends":
+        allowed_lol = (
+            "LCK",
+            "LPL",
+            "LEC",
+            "First Stand",
+            "First-Stand",
+            "MSI",
+            "Mid-Season Invitational",
+            "Worlds",
+            "World Championship",
+            "Esports World Cup",
+            "EWC",
+        )
+        return any(word in league_name for word in allowed_lol)
+
+    if game_slug == "valorant":
+        match_text = _normalize_match_text(match)
+        if not match_text:
+            return False
+
+        noise_keywords = tuple(config.get("noise_keywords", ())) + ("game-changers",)
+        if any(_contains_keyword(match_text, keyword) for keyword in noise_keywords):
+            return False
+
+        if any(_contains_keyword(match_text, keyword) for keyword in ("cn", "china", "lpl")):
+            return False
+
+        return any(
+            _contains_keyword(match_text, keyword)
+            for keyword in config.get("interest_keywords", ())
+        )
+
+    exclude_keywords = config.get("exclude_keywords", ())
+    match_text = _normalize_match_text(match)
+    return not any(_contains_keyword(match_text, keyword) for keyword in exclude_keywords)
 
 
 def infer_league_tag_from_name(name: str, videogame: str) -> str:
