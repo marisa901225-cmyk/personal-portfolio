@@ -17,6 +17,7 @@ backend/.venv
 backend/venv
 venv/
 backend/.env
+backend/.env.bak
 backend/.env.secrets
 backend/__pycache__/
 *.pyc
