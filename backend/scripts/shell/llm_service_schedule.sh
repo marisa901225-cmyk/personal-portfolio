@@ -5,6 +5,7 @@ PROJECT_ROOT="/home/dlckdgn/personal-portfolio"
 COMPOSE_FILE="$PROJECT_ROOT/docker-compose.yml"
 LOG_FILE="$PROJECT_ROOT/backend/logs/llm_schedule.log"
 TARGET_SERVICES=(llama-server llama-server-light llama-server-vulkan-huihui openvino-server)
+ALLOW_WEEKEND_START="${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}"
 
 ACTION="${1:-}"
 
@@ -21,6 +22,12 @@ run_compose() {
 
 timestamp() {
   date +"%Y-%m-%d %H:%M:%S %Z"
+}
+
+is_weekend() {
+  local weekday
+  weekday="$(date +%u)"
+  [[ "$weekday" == "6" || "$weekday" == "7" ]]
 }
 
 get_available_services() {
@@ -43,6 +50,11 @@ get_target_services() {
 
 case "$ACTION" in
   start)
+    if is_weekend && [[ "$ALLOW_WEEKEND_START" != "1" ]]; then
+      echo "$(timestamp) [LLM-SCHEDULE] weekend start skipped (set LLM_SCHEDULE_ALLOW_WEEKEND_START=1 to override)" >> "$LOG_FILE"
+      exit 0
+    fi
+
     mapfile -t services_to_manage < <(get_target_services)
     if [[ ${#services_to_manage[@]} -eq 0 ]]; then
       echo "$(timestamp) [LLM-SCHEDULE] no target services found in compose file" >> "$LOG_FILE"

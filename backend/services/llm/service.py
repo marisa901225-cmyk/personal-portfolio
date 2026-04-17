@@ -1,12 +1,17 @@
 import logging
+import json
 import os
+import time
+from datetime import datetime
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
 from .config import Settings
 from .backends.remote import RemoteLlamaBackend
 from .backends.paid import OpenAIPaidBackend
 
 logger = logging.getLogger(__name__)
+KST = ZoneInfo("Asia/Seoul")
 
 
 class LLMService:
@@ -242,3 +247,98 @@ class LLMService:
     def last_route(self) -> Optional[str]:
         """이번 호출의 라우팅 경로 반환."""
         return self._last_route
+
+    def telegram_paid_prefix(self) -> str:
+        """텔레그램 메시지 앞에 붙일 유료 폴백 표식을 반환한다."""
+        if not self.last_used_paid():
+            return ""
+
+        notice = self._fan_guard_paid_notice()
+        if notice:
+            return f"{notice}💰 "
+        return "💰 "
+
+    def _fan_guard_paid_notice(self) -> Optional[str]:
+        cooldown = self._load_active_fan_guard_cooldown()
+        if not cooldown:
+            return None
+
+        cooldown_id = f"{cooldown['started_epoch']}:{cooldown['until_epoch']}"
+        notice_state_path = self._fan_guard_notice_state_path()
+        notice_state = self._load_json_file(notice_state_path)
+        if notice_state.get("last_notified_cooldown_id") == cooldown_id:
+            return None
+
+        self._write_json_file(
+            notice_state_path,
+            {
+                "last_notified_cooldown_id": cooldown_id,
+                "updated_at_epoch": int(time.time()),
+            },
+        )
+
+        until_text = datetime.fromtimestamp(cooldown["until_epoch"], KST).strftime("%Y-%m-%d %H:%M KST")
+        rpm = cooldown.get("last_trigger_rpm")
+        rpm_text = f" (팬 {rpm} RPM 보호)" if rpm else ""
+        return (
+            "⚠️ <i>로컬 LLM은"
+            f"{rpm_text} 쿨다운으로 {until_text}까지 잠시 쉬는 중이야. "
+            "고장난 건 아니고, 이번 메시지는 유료 폴백으로 보냈어.</i>\n\n"
+        )
+
+    def _load_active_fan_guard_cooldown(self) -> Optional[dict]:
+        state = self._load_json_file(self._fan_guard_state_path())
+        now_epoch = int(time.time())
+
+        try:
+            cooldown_active = int(state.get("cooldown_active", 0)) == 1
+            started_epoch = int(state.get("cooldown_started_epoch", 0) or 0)
+            until_epoch = int(state.get("cooldown_until_epoch", 0) or 0)
+        except (TypeError, ValueError):
+            return None
+
+        if not cooldown_active or until_epoch <= now_epoch:
+            return None
+
+        try:
+            last_trigger_rpm = int(state.get("last_trigger_rpm", 0) or 0)
+        except (TypeError, ValueError):
+            last_trigger_rpm = 0
+
+        return {
+            "started_epoch": started_epoch,
+            "until_epoch": until_epoch,
+            "last_trigger_rpm": last_trigger_rpm,
+        }
+
+    def _fan_guard_state_path(self) -> str:
+        return os.getenv(
+            "LLM_FAN_GUARD_STATE_FILE",
+            os.path.join(self.settings.backend_dir_abs, "data", "llm_fan_guard_state.json"),
+        )
+
+    def _fan_guard_notice_state_path(self) -> str:
+        return os.getenv(
+            "LLM_FAN_GUARD_NOTICE_STATE_FILE",
+            os.path.join(self.settings.backend_dir_abs, "data", "llm_paid_fallback_notice_state.json"),
+        )
+
+    @staticmethod
+    def _load_json_file(path: str) -> dict:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _write_json_file(path: str, payload: dict) -> None:
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp_path = f"{path}.tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, path)
+        except Exception as exc:
+            logger.warning("Failed to persist fan guard notice state: %s", exc)
