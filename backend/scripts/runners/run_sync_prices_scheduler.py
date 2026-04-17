@@ -9,12 +9,14 @@ from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 from pytz import timezone
 
-# .env 파일 로드
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-load_dotenv(os.path.join(PROJECT_ROOT, "backend/.env"))
-
-# 프로젝트 루트를 패스에 추가 (backend 패키지 임포트용)
 sys.path.append(PROJECT_ROOT)
+
+# .env 파일 로드
+from backend.core.env_paths import get_project_env_files
+
+for env_path in get_project_env_files():
+    load_dotenv(env_path)
 
 from backend.services.llm_service import LLMService
 from backend.services.alarm_service import AlarmService
