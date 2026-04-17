@@ -5,15 +5,15 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from dotenv import load_dotenv
 
 # 프로젝트 루트를 패스에 추가
-project_root = Path(__file__).resolve().parent.parent.parent
-sys.path.append(str(project_root))
+repo_root = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(repo_root))
 
 from backend.core.env_paths import get_project_env_files, get_secrets_env_file
 
 
 def generate_refresh_token():
     for env_path in get_project_env_files():
-        load_dotenv(env_path)
+        load_dotenv(env_path, override=True)
 
     client_id = os.getenv("GOOGLE_DRIVE_CLIENT_ID")
     client_secret = os.getenv("GOOGLE_DRIVE_CLIENT_SECRET")

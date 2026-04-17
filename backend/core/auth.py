@@ -1,11 +1,12 @@
 from __future__ import annotations
-from fastapi import Header, HTTPException, Depends, Cookie
+from fastapi import Header, HTTPException, Depends, Cookie, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from .config import settings
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import hmac
+import ipaddress
 import os
 import jwt
 
@@ -23,16 +24,44 @@ def resolve_api_token() -> str | None:
     return API_TOKEN
 
 
+def _tailnet_domain() -> str:
+    return str(os.getenv("TAILSCALE_TAILNET_DOMAIN", "tail5c2348.ts.net") or "").strip().lower()
+
+
+def _is_tailscale_ip(hostname: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    return ip.version == 4 and ip in ipaddress.ip_network("100.64.0.0/10")
+
+
+def _is_tailnet_or_local_host(request: Request) -> bool:
+    forwarded_host = str(request.headers.get("x-forwarded-host") or "").strip()
+    host = forwarded_host or request.headers.get("host") or request.url.hostname or ""
+    hostname = str(host).split(",", 1)[0].strip().split(":", 1)[0].strip().lower()
+    if not hostname:
+        return False
+    if hostname in {"localhost", "127.0.0.1", "::1"}:
+        return True
+
+    tailnet_domain = _tailnet_domain()
+    if tailnet_domain and (hostname == tailnet_domain or hostname.endswith(f".{tailnet_domain}")):
+        return True
+
+    return _is_tailscale_ip(hostname)
+
+
 async def verify_api_token(
+    request: Request,
     x_api_token: str | None = Header(default=None),
     authorization: str | None = Header(default=None),
     auth_token: str | None = Cookie(default=None, alias="auth_token"),
 ) -> None:
     """
     통합 인증 로직.
-    1. JWT 검증 시도 (Cookie or Authorization: Bearer <TOKEN>)
-    2. JWT가 성공하면 API 키 검사 없이 통과.
-    3. JWT가 없거나 실패하더라도 X-API-Token (API 키)이 유효하면 통과.
+    1. Tailnet/localhost 접근: JWT 또는 X-API-Token 중 하나면 통과.
+    2. 그 외 호스트 접근: JWT와 X-API-Token 둘 다 유효해야 통과.
     """
     # 1. JWT 검증 시도
     token = auth_token
@@ -53,9 +82,6 @@ async def verify_api_token(
             # JWT 실패 시 로그를 남기거나 조용히 넘어가서 API 키를 확인하게 함
             pass
 
-    if jwt_valid:
-        return
-
     # 2. 기존 API 키 검사
     token_required = resolve_api_token()
     
@@ -66,13 +92,22 @@ async def verify_api_token(
         raise HTTPException(status_code=503, detail="API token not configured")
     
     # X-API-Token 헤더 확인
-    if x_api_token and hmac.compare_digest(x_api_token, token_required):
+    api_key_valid = bool(x_api_token and hmac.compare_digest(x_api_token, token_required))
+    tailnet_or_local = _is_tailnet_or_local_host(request)
+
+    if tailnet_or_local and (jwt_valid or api_key_valid):
         return
 
-    # 둘 다 실패한 경우
+    if (not tailnet_or_local) and jwt_valid and api_key_valid:
+        return
+
     raise HTTPException(
-        status_code=401, 
-        detail="Invalid authentication credentials (JWT or API Key required)"
+        status_code=401,
+        detail=(
+            "Invalid authentication credentials (JWT or API Key required)"
+            if tailnet_or_local
+            else "Invalid authentication credentials (JWT and API Key required)"
+        ),
     )
 
 

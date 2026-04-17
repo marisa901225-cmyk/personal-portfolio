@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from .config import TradeEngineConfig
@@ -68,6 +68,7 @@ def enter_position(
     budget_cash_cap: float | None = None,
 ) -> FillResult | None:
     existing_position = state.open_positions.get(code)
+    broker_before_qty, _ = _get_broker_position_snapshot(api=api, code=code)
     if code in state.blacklist_today:
         return None
     if position_type == "T" and code in state.day_stoploss_excluded_codes:
@@ -197,18 +198,22 @@ def enter_position(
     if resp is None:
         return None
 
-    filled_qty_num = parse_numeric(resp.get("filled_qty"))
-    if filled_qty_num is None:
-        filled_qty = attempted_qty
-    else:
-        filled_qty = int(filled_qty_num)
-
-    if filled_qty <= 0:
-        logger.warning("enter_position: zero fill for %s", code)
+    filled_qty, avg_price = _resolve_buy_fill(
+        api=api,
+        code=code,
+        fallback_price=float(price_now),
+        response=resp,
+        broker_before_qty=broker_before_qty,
+    )
+    if filled_qty <= 0 or avg_price is None or avg_price <= 0:
+        logger.info(
+            "enter_position: order accepted but no confirmed fill yet code=%s qty=%d order_id=%s",
+            code,
+            attempted_qty,
+            _extract_order_id(resp),
+        )
         return None
 
-    avg_price_num = parse_numeric(resp.get("avg_price"))
-    avg_price = float(avg_price_num) if avg_price_num is not None else price_now
     order_id = _extract_order_id(resp)
 
     if existing_position is not None and position_type == "P" and existing_position.type == "P":
@@ -264,6 +269,7 @@ def exit_position(
     pos = state.open_positions.get(code)
     if not pos:
         return None
+    broker_before_qty, _ = _get_broker_position_snapshot(api=api, code=code)
 
     sell_sizing = _resolve_sell_sizing(api=api, code=code)
     requested_qty = pos.qty
@@ -292,28 +298,22 @@ def exit_position(
     quote = api.quote(code)
     market_price = parse_numeric(quote.get("price")) or pos.entry_price
 
-    filled_qty_num = parse_numeric(resp.get("filled_qty"))
-    if filled_qty_num is None:
-        filled_qty = requested_qty
-    else:
-        filled_qty = int(filled_qty_num)
-
-    if filled_qty <= 0:
-        logger.warning("exit_position: zero fill for %s", code)
+    filled_qty, avg_price = _resolve_sell_fill(
+        api=api,
+        code=code,
+        response=resp,
+        broker_before_qty=broker_before_qty,
+        requested_qty=requested_qty,
+        fallback_price=float(market_price),
+    )
+    if filled_qty <= 0 or avg_price is None or avg_price <= 0:
+        logger.info(
+            "exit_position: order accepted but no confirmed sell fill yet code=%s qty=%d order_id=%s",
+            code,
+            requested_qty,
+            _extract_order_id(resp),
+        )
         return None
-
-    # 1순위: KIS 실현손익 API로 실제 체결 평단가 확정 (앱과 동일한 값)
-    avg_price: float | None = None
-    if hasattr(api, "get_today_sell_avg_price"):
-        try:
-            avg_price = api.get_today_sell_avg_price(code)
-        except Exception as exc:
-            logger.warning("exit_position: get_today_sell_avg_price failed code=%s err=%s", code, exc)
-
-    # 2순위: 주문 응답의 avg_price
-    if avg_price is None or avg_price <= 0:
-        avg_price_num = parse_numeric(resp.get("avg_price"))
-        avg_price = float(avg_price_num) if avg_price_num is not None else market_price
 
     logger.info(
         "exit_position: %s filled qty=%d avg_price=%.0f (market=%.0f)",
@@ -371,10 +371,12 @@ def handle_open_orders(
     api: TradingAPI,
     *,
     timeout_sec: int = 30,
+    now: datetime | None = None,
 ) -> dict[str, int]:
-    del timeout_sec  # open_orders schema is broker-specific; best-effort conservative handling.
-
     cancelled = 0
+    skipped_recent = 0
+    skipped_unknown_time = 0
+    current_time = now or datetime.now()
     for order in api.open_orders() or []:
         order_id = _extract_order_id(order)
         if not order_id:
@@ -384,6 +386,19 @@ def handle_open_orders(
         if status in {"FILLED", "DONE", "CANCELED", "CANCELLED"}:
             continue
 
+        remaining_qty = parse_numeric(order.get("remaining_qty") or order.get("psbl_qty"))
+        if remaining_qty is not None and remaining_qty <= 0:
+            continue
+
+        order_time = _parse_order_time(order, now=current_time)
+        if timeout_sec > 0:
+            if order_time is None:
+                skipped_unknown_time += 1
+                continue
+            if (current_time - order_time) < timedelta(seconds=timeout_sec):
+                skipped_recent += 1
+                continue
+
         try:
             api.cancel_order(order_id)
             cancelled += 1
@@ -391,7 +406,11 @@ def handle_open_orders(
             logger.warning("cancel_order failed order_id=%s error=%s", order_id, exc)
             continue
 
-    return {"cancelled": cancelled}
+    return {
+        "cancelled": cancelled,
+        "skipped_recent": skipped_recent,
+        "skipped_unknown_time": skipped_unknown_time,
+    }
 
 
 def increment_bars_held(state: TradeState) -> None:
@@ -524,3 +543,89 @@ def _should_use_broker_calc_price(*, order_type: str, requested_price: int | Non
 def _is_insufficient_cash_rejection(message: str) -> bool:
     lowered = message.lower()
     return any(token.lower() in lowered for token in _INSUFFICIENT_CASH_MESSAGES)
+
+
+def _get_broker_position_snapshot(
+    *,
+    api: TradingAPI,
+    code: str,
+) -> tuple[int, float | None]:
+    try:
+        for item in api.positions() or []:
+            broker_code = str(item.get("code") or item.get("pdno") or "").strip()
+            if broker_code != str(code).strip():
+                continue
+            qty = int(parse_numeric(item.get("qty") or item.get("hldg_qty")) or 0)
+            avg_price = parse_numeric(item.get("avg_price") or item.get("pchs_avg_pric"))
+            return qty, float(avg_price) if avg_price is not None and avg_price > 0 else None
+    except Exception as exc:
+        logger.warning("broker position snapshot failed code=%s error=%s", code, exc)
+    return 0, None
+
+
+def _resolve_buy_fill(
+    *,
+    api: TradingAPI,
+    code: str,
+    fallback_price: float,
+    response: dict[str, Any],
+    broker_before_qty: int,
+) -> tuple[int, float | None]:
+    broker_after_qty, broker_avg_price = _get_broker_position_snapshot(api=api, code=code)
+    broker_fill_qty = max(0, broker_after_qty - broker_before_qty)
+    if broker_fill_qty > 0 and broker_avg_price is not None and broker_avg_price > 0:
+        return broker_fill_qty, float(broker_avg_price)
+
+    response_fill_qty = int(parse_numeric(response.get("filled_qty")) or 0)
+    response_avg_price = parse_numeric(response.get("avg_price"))
+    if response_fill_qty > 0:
+        avg_price = float(response_avg_price) if response_avg_price is not None and response_avg_price > 0 else fallback_price
+        return response_fill_qty, avg_price
+    return 0, None
+
+
+def _resolve_sell_fill(
+    *,
+    api: TradingAPI,
+    code: str,
+    response: dict[str, Any],
+    broker_before_qty: int,
+    requested_qty: int,
+    fallback_price: float,
+) -> tuple[int, float | None]:
+    broker_after_qty, _ = _get_broker_position_snapshot(api=api, code=code)
+    broker_fill_qty = max(0, broker_before_qty - broker_after_qty)
+
+    avg_price: float | None = None
+    if broker_fill_qty > 0 and hasattr(api, "get_today_sell_avg_price"):
+        try:
+            avg_price = api.get_today_sell_avg_price(code)
+        except Exception as exc:
+            logger.warning("exit_position: get_today_sell_avg_price failed code=%s err=%s", code, exc)
+        if avg_price is not None and avg_price > 0:
+            return broker_fill_qty, float(avg_price)
+
+    response_fill_qty = int(parse_numeric(response.get("filled_qty")) or 0)
+    response_avg_price = parse_numeric(response.get("avg_price"))
+    if response_fill_qty > 0:
+        avg_price = float(response_avg_price) if response_avg_price is not None and response_avg_price > 0 else fallback_price
+        return min(response_fill_qty, requested_qty), avg_price
+    return 0, None
+
+
+def _parse_order_time(order: dict[str, Any], *, now: datetime) -> datetime | None:
+    raw = str(order.get("order_time") or order.get("ord_tmd") or "").strip()
+    if not raw:
+        return None
+
+    normalized = raw.zfill(6)
+    if len(normalized) != 6 or not normalized.isdigit():
+        return None
+
+    try:
+        hh = int(normalized[0:2])
+        mm = int(normalized[2:4])
+        ss = int(normalized[4:6])
+        return now.replace(hour=hh, minute=mm, second=ss, microsecond=0)
+    except ValueError:
+        return None

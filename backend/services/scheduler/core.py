@@ -8,6 +8,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from backend.core.db import SessionLocal
+from backend.services.auth_secret_rotation import (
+    load_auth_secret_rotation_config_from_env,
+    rotate_backend_auth_secrets,
+)
 from backend.services.news_collector import NewsCollector
 from backend.services.retry import async_retry, sync_retry
 from backend.services.scheduler_monitor import monitor_job_async
@@ -263,6 +267,25 @@ async def job_trading_engine_weekly_archive():
             logger.info("trading_engine_weekly_archive result=%s", result)
 
 
+async def job_rotate_backend_auth_secrets():
+    """
+    인증용 비밀키 회전 스케줄러.
+
+    - 외부 secrets env 파일의 API_TOKEN / JWT_SECRET_KEY를 갱신한다.
+    - 첫 실행은 env 파일 mtime을 기준으로 상태만 심고, 즉시 회전은 하지 않는다.
+    - 회전 후에는 텔레그램으로 env 반영 확인 및 서비스 재생성 안내를 보낸다.
+    """
+    config = load_auth_secret_rotation_config_from_env()
+
+    with SessionLocal() as db:
+        async with monitor_job_async("rotate_backend_auth_secrets", db):
+            result = await asyncio.to_thread(
+                rotate_backend_auth_secrets,
+                config=config,
+            )
+            logger.info("rotate_backend_auth_secrets result=%s", result)
+
+
 def start_scheduler():
     if not scheduler.running:
         scheduler.add_job(
@@ -328,6 +351,27 @@ def start_scheduler():
             replace_existing=True,
             max_instances=1,
         )
+
+        auth_rotation_config = load_auth_secret_rotation_config_from_env()
+        if auth_rotation_config.enabled:
+            scheduler.add_job(
+                job_rotate_backend_auth_secrets,
+                CronTrigger(
+                    hour=auth_rotation_config.check_hour,
+                    minute=auth_rotation_config.check_minute,
+                ),
+                id="rotate_backend_auth_secrets",
+                replace_existing=True,
+                max_instances=1,
+            )
+            logger.info(
+                "Backend auth rotation job registered (%02d:%02d KST, interval=%s days)",
+                auth_rotation_config.check_hour,
+                auth_rotation_config.check_minute,
+                auth_rotation_config.interval_days,
+            )
+        else:
+            logger.info("Backend auth rotation job skipped (BACKEND_AUTH_ROTATE_ENABLED != true)")
 
         if trading_engine_enabled():
             interval = _trading_interval_minutes()

@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -125,7 +125,7 @@ def _select_earliest_values(items: List[Dict[str, Any]]) -> Dict[str, Dict[str, 
 
 
 async def fetch_short_term_weather(
-    service_key: str,
+    service_key: str | Sequence[str],
     *,
     nx: int = SEOUL_NX,
     ny: int = SEOUL_NY,
@@ -136,66 +136,75 @@ async def fetch_short_term_weather(
     if not candidate_times:
         return None
 
+    if isinstance(service_key, str):
+        service_keys = [service_key]
+    else:
+        service_keys = [key for key in service_key if key]
+    if not service_keys:
+        return None
+
     async with httpx.AsyncClient() as client:
-        for slot in candidate_times[:max_slots]:
-            params = {
-                "serviceKey": service_key,
-                "base_date": slot["base_date"],
-                "base_time": slot["base_time"],
-                "nx": nx,
-                "ny": ny,
-                "numOfRows": 1000,
-                "pageNo": 1,
-                "dataType": "JSON",
-            }
-
-            try:
-                response = await client.get(KMA_API_URL, params=params, timeout=15.0)
-                logger.info("KMA short-term status: %s", response.status_code)
-                if response.status_code != 200:
-                    logger.error("KMA short-term body: %s", response.text[:500])
-                    continue
-
-                data = response.json()
-                result_code = data.get("response", {}).get("header", {}).get("resultCode")
-                if result_code == "03":
-                    logger.warning(
-                        "No short-term data yet for %s %s. Trying older slot...",
-                        slot["base_date"],
-                        slot["base_time"],
-                    )
-                    continue
-                if result_code != "00":
-                    error_msg = data.get("response", {}).get("header", {}).get("resultMsg", "Unknown error")
-                    logger.error("KMA short-term error (%s): %s", result_code, error_msg)
-                    continue
-
-                items: List[Dict[str, Any]] = (
-                    data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
-                )
-                if not items:
-                    logger.warning("No short-term forecast items returned")
-                    continue
-
-                by_category = _select_earliest_values(items)
-                temp = by_category.get("TMP", {}).get("value", "N/A")
-                max_temp = by_category.get("TMX", {}).get("value", "N/A")
-                sky = by_category.get("SKY", {}).get("value", "1")
-                pty = by_category.get("PTY", {}).get("value", "0")
-                pop = by_category.get("POP", {}).get("value", "0")
-
-                weather_status = get_pty_status(pty) if pty != "0" else get_sky_status(sky)
-                return {
-                    "temp": temp,
-                    "max_temp": max_temp,
-                    "weather_status": weather_status,
-                    "pop": pop,
+        for idx, key in enumerate(service_keys, 1):
+            for slot in candidate_times[:max_slots]:
+                params = {
+                    "ServiceKey": key,
                     "base_date": slot["base_date"],
                     "base_time": slot["base_time"],
+                    "nx": nx,
+                    "ny": ny,
+                    "numOfRows": 1000,
+                    "pageNo": 1,
+                    "dataType": "JSON",
                 }
-            except Exception as e:
-                logger.error("Error fetching short-term weather: %s", e)
-                continue
+
+                try:
+                    response = await client.get(KMA_API_URL, params=params, timeout=15.0)
+                    logger.info("KMA short-term status[%s]: %s", idx, response.status_code)
+                    if response.status_code != 200:
+                        logger.error("KMA short-term body[%s]: %s", idx, response.text[:500])
+                        continue
+
+                    data = response.json()
+                    result_code = data.get("response", {}).get("header", {}).get("resultCode")
+                    if result_code == "03":
+                        logger.warning(
+                            "No short-term data yet for key[%s] %s %s. Trying older slot...",
+                            idx,
+                            slot["base_date"],
+                            slot["base_time"],
+                        )
+                        continue
+                    if result_code != "00":
+                        error_msg = data.get("response", {}).get("header", {}).get("resultMsg", "Unknown error")
+                        logger.error("KMA short-term error[%s] (%s): %s", idx, result_code, error_msg)
+                        continue
+
+                    items: List[Dict[str, Any]] = (
+                        data.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+                    )
+                    if not items:
+                        logger.warning("No short-term forecast items returned for key[%s]", idx)
+                        continue
+
+                    by_category = _select_earliest_values(items)
+                    temp = by_category.get("TMP", {}).get("value", "N/A")
+                    max_temp = by_category.get("TMX", {}).get("value", "N/A")
+                    sky = by_category.get("SKY", {}).get("value", "1")
+                    pty = by_category.get("PTY", {}).get("value", "0")
+                    pop = by_category.get("POP", {}).get("value", "0")
+
+                    weather_status = get_pty_status(pty) if pty != "0" else get_sky_status(sky)
+                    return {
+                        "temp": temp,
+                        "max_temp": max_temp,
+                        "weather_status": weather_status,
+                        "pop": pop,
+                        "base_date": slot["base_date"],
+                        "base_time": slot["base_time"],
+                    }
+                except Exception as e:
+                    logger.error("Error fetching short-term weather[%s]: %s", idx, e)
+                    continue
 
     logger.error("Failed to fetch short-term weather data after retries")
     return None
@@ -215,7 +224,7 @@ async def fetch_ultra_short_snapshot(
     async with httpx.AsyncClient() as client:
         for slot in candidate_times:
             params = {
-                "serviceKey": service_key,
+                "ServiceKey": service_key,
                 "pageNo": 1,
                 "numOfRows": 1000,
                 "dataType": "JSON",

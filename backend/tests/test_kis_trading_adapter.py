@@ -7,6 +7,30 @@ from backend.integrations.kis.trading_adapter import KISTradingAPI
 
 
 class KISTradingAdapterTests(unittest.TestCase):
+    def test_market_get_uses_secondary_context_when_available(self) -> None:
+        api = object.__new__(KISTradingAPI)
+        api._secondary_market_ctx = Mock()
+        api._secondary_market_ctx.get.return_value = {"rt_cd": "0", "output": []}
+        api._get = Mock(return_value={"rt_cd": "0", "output": ["primary"]})
+
+        result = api._market_get("/path", "TRID", {"a": "b"})
+
+        self.assertEqual(result, {"rt_cd": "0", "output": []})
+        api._secondary_market_ctx.get.assert_called_once_with("/path", "TRID", {"a": "b"}, "")
+        api._get.assert_not_called()
+
+    def test_market_get_falls_back_to_primary_when_secondary_fails(self) -> None:
+        api = object.__new__(KISTradingAPI)
+        api._secondary_market_ctx = Mock()
+        api._secondary_market_ctx.get.side_effect = requests.exceptions.Timeout("secondary timeout")
+        api._get = Mock(return_value={"rt_cd": "0", "output": ["primary"]})
+
+        result = api._market_get("/path", "TRID", {"a": "b"})
+
+        self.assertEqual(result, {"rt_cd": "0", "output": ["primary"]})
+        api._secondary_market_ctx.get.assert_called_once_with("/path", "TRID", {"a": "b"}, "")
+        api._get.assert_called_once_with("/path", "TRID", {"a": "b"}, "")
+
     def test_volume_rank_returns_empty_on_transport_error(self) -> None:
         api = object.__new__(KISTradingAPI)
 
@@ -74,9 +98,17 @@ class KISTradingAdapterTests(unittest.TestCase):
         api = object.__new__(KISTradingAPI)
 
         with patch("backend.integrations.kis.trading_adapter.throttle_rest_min_gap") as gap_mock:
-            api._throttle_path_min_gap("/uapi/domestic-stock/v1/quotations/inquire-price")
+            api._throttle_path_min_gap("/uapi/domestic-stock/v1/trading/inquire-balance")
 
         gap_mock.assert_not_called()
+
+    def test_throttle_path_min_gap_applies_to_quote_path(self) -> None:
+        api = object.__new__(KISTradingAPI)
+
+        with patch("backend.integrations.kis.trading_adapter.throttle_rest_min_gap") as gap_mock:
+            api._throttle_path_min_gap("/uapi/domestic-stock/v1/quotations/inquire-price")
+
+        gap_mock.assert_called_once()
 
     def test_get_retries_once_on_connection_abort_then_succeeds(self) -> None:
         api = object.__new__(KISTradingAPI)
@@ -185,7 +217,7 @@ class KISTradingAdapterTests(unittest.TestCase):
 
     def test_quote_scales_market_cap_from_eok_to_won(self) -> None:
         api = object.__new__(KISTradingAPI)
-        api._get = Mock(
+        api._market_get = Mock(
             return_value={
                 "output": {
                     "stck_prpr": "12345",
@@ -206,10 +238,38 @@ class KISTradingAdapterTests(unittest.TestCase):
         self.assertEqual(quote["market_cap"], 8827 * 100_000_000)
         self.assertEqual(quote["market_warning_code"], "00")
         self.assertEqual(quote["management_issue_code"], "N")
+        api._market_get.assert_called_once()
+
+    def test_quote_uses_ttl_cache_for_same_code(self) -> None:
+        api = object.__new__(KISTradingAPI)
+        api._quote_cache = {}
+        api._market_get = Mock(
+            return_value={
+                "output": {
+                    "stck_prpr": "12345",
+                    "stck_oprc": "12000",
+                    "stck_hgpr": "12500",
+                    "stck_lwpr": "11900",
+                    "acml_vol": "456789",
+                    "prdy_ctrt": "2.34",
+                    "hts_avls": "8827",
+                    "mrkt_warn_cls_code": "00",
+                    "mang_issu_cls_code": "N",
+                }
+            }
+        )
+
+        first = api.quote("005880")
+        second = api.quote("005880")
+
+        self.assertEqual(api._market_get.call_count, 1)
+        self.assertEqual(first, second)
+        self.assertIsNot(first, second)
 
     def test_daily_index_bars_parses_industry_daily_chart_rows(self) -> None:
         api = object.__new__(KISTradingAPI)
-        api._get = Mock(
+        api._daily_index_bars_cache = {}
+        api._market_get = Mock(
             return_value={
                 "output2": [
                     {
@@ -239,6 +299,42 @@ class KISTradingAdapterTests(unittest.TestCase):
         self.assertEqual(df["date"].tolist(), ["20260317", "20260318"])
         self.assertAlmostEqual(float(df.iloc[-1]["close"]), 1009.7)
         self.assertEqual(int(df.iloc[-1]["volume"]), 12345)
+
+    def test_daily_bars_uses_ttl_cache_for_same_request(self) -> None:
+        api = object.__new__(KISTradingAPI)
+        api._daily_bars_cache = {}
+        api._market_get = Mock(
+            return_value={
+                "output2": [
+                    {
+                        "stck_bsop_date": "20260318",
+                        "stck_oprc": "1000",
+                        "stck_hgpr": "1100",
+                        "stck_lwpr": "990",
+                        "stck_clpr": "1080",
+                        "acml_vol": "12345",
+                        "acml_tr_pbmn": "67890",
+                    },
+                    {
+                        "stck_bsop_date": "20260317",
+                        "stck_oprc": "950",
+                        "stck_hgpr": "1000",
+                        "stck_lwpr": "940",
+                        "stck_clpr": "980",
+                        "acml_vol": "11111",
+                        "acml_tr_pbmn": "22222",
+                    },
+                ]
+            }
+        )
+
+        first = api.daily_bars("005930", end="20260318", lookback=2)
+        second = api.daily_bars("005930", end="20260318", lookback=2)
+
+        self.assertEqual(api._market_get.call_count, 1)
+        self.assertEqual(first["date"].tolist(), ["20260317", "20260318"])
+        self.assertEqual(second["date"].tolist(), ["20260317", "20260318"])
+        self.assertIsNot(first, second)
 
 
 if __name__ == "__main__":

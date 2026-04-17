@@ -9,7 +9,7 @@ from typing import Any
 import pandas as pd
 
 from .candidate_notifications import (
-    maybe_build_candidate_notification,
+    maybe_build_candidate_notifications,
     maybe_build_swing_skip_notification,
 )
 from .config import TradeEngineConfig
@@ -160,7 +160,7 @@ class HybridTradingBot:
             news_signal = build_news_sentiment_signal(self.config)
             candidates = build_candidates(self.api, asof, self.config, news_signal=news_signal)
 
-            handle_open_orders(self.api, timeout_sec=30)
+            handle_open_orders(self.api, timeout_sec=30, now=now)
             self._reconcile_state_with_broker_positions()
             self.monitor_positions(now=now)
             self._manage_risk_off_parking(now=now, regime=regime)
@@ -723,7 +723,7 @@ class HybridTradingBot:
         regime: str,
         display_candidates: Any | None = None,
     ) -> None:
-        updated_idx, message = maybe_build_candidate_notification(
+        updated_idx, messages = maybe_build_candidate_notifications(
             now=now,
             candidates=candidates,
             regime=regime,
@@ -732,7 +732,7 @@ class HybridTradingBot:
             display_candidates=display_candidates,
         )
         self._last_notified_window_idx = updated_idx
-        if message:
+        for message in messages:
             self._notify_text(message)
 
     def _build_notification_candidates(self, *, candidates: Any, ranked_codes: list[str]) -> pd.DataFrame:

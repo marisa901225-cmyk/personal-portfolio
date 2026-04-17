@@ -12,7 +12,7 @@ sys.path.insert(0, str(project_root.parent))
 from backend.core.env_paths import get_secrets_env_file
 
 env_path = get_secrets_env_file()
-load_dotenv(env_path)
+load_dotenv(env_path, override=True)
 print(f"DEBUG: Using secrets env at {env_path.resolve()}")
 
 def setup_google_auth():

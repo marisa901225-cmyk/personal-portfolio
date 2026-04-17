@@ -120,7 +120,7 @@ services:
     container_name: myasset-backend-api
     restart: always
     ports:
-      - "0.0.0.0:8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./backend/storage:/app/backend/storage
       - ./backend/data:/app/backend/data
@@ -189,6 +189,7 @@ services:
       - ./backend/storage:/app/backend/storage
       - ./backend/data:/app/backend/data
       - ./backend/logs:/app/backend/logs
+      - ${MYASSET_SECRETS_ENV_FILE:-/home/dlckdgn/ai-models/myasset.secrets.env}:/app/runtime/myasset.secrets.env
       - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
       - /mnt/one-touch/backups:/mnt/one-touch/backups
     command: python -m backend.scripts.manage run-scheduler
@@ -197,6 +198,7 @@ services:
       - LLM_BASE_URL=http://openvino-server:8082
       - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-int8
       - TZ=Asia/Seoul
+      - MYASSET_SECRETS_ENV_FILE=/app/runtime/myasset.secrets.env
       - TRADING_ENGINE_ENABLED=1
       - TRADING_ENGINE_API_FACTORY=${TRADING_ENGINE_API_FACTORY:-backend.integrations.kis.trading_adapter:create_trading_api}
       - TRADING_ENGINE_SCHEDULE_INTERVAL_MIN=${TRADING_ENGINE_SCHEDULE_INTERVAL_MIN:-4}
@@ -205,6 +207,13 @@ services:
       - TRADING_ENGINE_STATE_PATH=${TRADING_ENGINE_STATE_PATH:-backend/storage/trading_engine/state.json}
       - TRADING_ENGINE_OUTPUT_DIR=${TRADING_ENGINE_OUTPUT_DIR:-backend/storage/trading_engine/output}
       - TRADING_ENGINE_RUNLOG_PATH=${TRADING_ENGINE_RUNLOG_PATH:-backend/storage/trading_engine/runlog_current.log}
+      - BACKEND_AUTH_ROTATE_ENABLED=${BACKEND_AUTH_ROTATE_ENABLED:-1}
+      - BACKEND_AUTH_ROTATE_INTERVAL_DAYS=${BACKEND_AUTH_ROTATE_INTERVAL_DAYS:-60}
+      - BACKEND_AUTH_ROTATE_CHECK_HOUR=${BACKEND_AUTH_ROTATE_CHECK_HOUR:-4}
+      - BACKEND_AUTH_ROTATE_CHECK_MINUTE=${BACKEND_AUTH_ROTATE_CHECK_MINUTE:-17}
+      - BACKEND_AUTH_ROTATE_SKIP_INITIAL=${BACKEND_AUTH_ROTATE_SKIP_INITIAL:-1}
+      - BACKEND_AUTH_ROTATE_RESTART_HINT_SERVICES=${BACKEND_AUTH_ROTATE_RESTART_HINT_SERVICES:-backend-api alarm-collector}
+      - BACKEND_AUTH_ROTATE_STATE_PATH=${BACKEND_AUTH_ROTATE_STATE_PATH:-backend/data/auth_secret_rotation_state.json}
     env_file: *backend_env_files
     # depends_on:
     #   llama-server:

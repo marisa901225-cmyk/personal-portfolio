@@ -27,12 +27,18 @@ def reconcile_state_with_broker_positions(
             logger.warning("positions reconcile skipped: failed to load broker positions: %s", exc)
         return
 
-    broker_codes: set[str] = set()
+    broker_position_map: dict[str, tuple[int, float | None]] = {}
     for item in broker_positions:
         code = str(item.get("code") or item.get("pdno") or "").strip()
         qty = int(parse_numeric(item.get("qty") or item.get("hldg_qty")) or 0)
         if code and qty > 0:
-            broker_codes.add(code)
+            avg_price = parse_numeric(item.get("avg_price") or item.get("pchs_avg_pric"))
+            broker_position_map[code] = (
+                qty,
+                float(avg_price) if avg_price is not None and avg_price > 0 else None,
+            )
+
+    broker_codes = set(broker_position_map)
 
     stale_codes = [code for code in state.open_positions if code not in broker_codes]
     for code in stale_codes:
@@ -55,6 +61,51 @@ def reconcile_state_with_broker_positions(
             strategy_type=pos.type,
         )
         notify_text(f"[STATE_SYNC][DROP] {code} local_qty={pos.qty} broker_qty=0")
+
+    for code, pos in state.open_positions.items():
+        broker_snapshot = broker_position_map.get(code)
+        if broker_snapshot is None:
+            continue
+
+        broker_qty, broker_avg_price = broker_snapshot
+        changed = False
+        old_qty = pos.qty
+        old_avg = float(pos.entry_price)
+
+        if broker_qty > 0 and broker_qty != pos.qty:
+            pos.qty = broker_qty
+            changed = True
+
+        if broker_avg_price is not None and broker_avg_price > 0 and abs(broker_avg_price - pos.entry_price) > 1e-6:
+            pos.entry_price = float(broker_avg_price)
+            changed = True
+
+        if not changed:
+            continue
+
+        if logger is not None:
+            logger.warning(
+                "state reconcile updated position code=%s qty=%s->%s avg=%.4f->%.4f",
+                code,
+                old_qty,
+                pos.qty,
+                old_avg,
+                pos.entry_price,
+            )
+        journal(
+            "STATE_RECONCILE_UPDATE",
+            asof_date=trade_date,
+            code=code,
+            old_qty=old_qty,
+            new_qty=pos.qty,
+            old_avg_price=old_avg,
+            new_avg_price=pos.entry_price,
+            reason="BROKER_POSITION_MISMATCH",
+            strategy_type=pos.type,
+        )
+        notify_text(
+            f"[STATE_SYNC][UPDATE] {code} qty={old_qty}->{pos.qty} avg={old_avg:.0f}->{pos.entry_price:.0f}"
+        )
 
 
 def is_swing_trend_broken(

@@ -205,6 +205,10 @@ class Setting(Base):
     kis_token_expires_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
     )
+    kis_token_encrypted1: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    kis_token_expires_at1: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
     # KIS 토큰 갱신 분산 락 (스탬피드 방지)
     token_refresh_locked_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True

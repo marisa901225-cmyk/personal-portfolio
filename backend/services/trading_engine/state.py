@@ -4,6 +4,7 @@ import json
 import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 
@@ -108,8 +109,18 @@ def save_state(path: str, state: TradeState) -> None:
     payload["day_stoploss_excluded_codes"] = sorted(state.day_stoploss_excluded_codes)
     payload["swing_time_excluded_codes"] = sorted(state.swing_time_excluded_codes)
 
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+    original_mode: int | None = None
+    if os.path.exists(path):
+        original_mode = os.stat(path).st_mode & 0o777
+
+    with NamedTemporaryFile("w", encoding="utf-8", dir=os.path.dirname(path) or ".", delete=False) as tmp:
+        json.dump(payload, tmp, ensure_ascii=False, indent=2)
+        tmp.write("\n")
+        tmp_path = tmp.name
+
+    if original_mode is not None:
+        os.chmod(tmp_path, original_mode)
+    os.replace(tmp_path, path)
 
 
 def rollover_state_for_date(state: TradeState, today: str) -> TradeState:

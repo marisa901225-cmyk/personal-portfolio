@@ -15,12 +15,14 @@ from __future__ import annotations
 from datetime import datetime
 import json
 import logging
+import os
 import time
 from typing import Any
 
 import pandas as pd
 import requests
 from backend.integrations.kis.rest_rate_limiter import throttle_rest_min_gap
+from backend.integrations.kis.secondary_market_context import build_secondary_market_context
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +31,35 @@ _KIS_HTTP_READ_TIMEOUT_SEC = 10.0
 _KIS_HTTP_GET_MAX_ATTEMPTS = 3
 _KIS_HTTP_RETRY_BACKOFF_SEC = 0.35
 _KIS_HTTP_RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = str(os.getenv(name, "") or "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
 _KIS_HTTP_PATH_MIN_GAP_SEC = {
-    "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice": 0.12,
-    "/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice": 0.12,
+    "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice": _env_float(
+        "KIS_DAILY_CHART_MIN_GAP_SEC",
+        0.12,
+    ),
+    "/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice": _env_float(
+        "KIS_DAILY_INDEX_CHART_MIN_GAP_SEC",
+        0.12,
+    ),
+    "/uapi/domestic-stock/v1/quotations/inquire-price": _env_float(
+        "KIS_QUOTE_MIN_GAP_SEC",
+        0.10,
+    ),
 }
+_KIS_DAILY_BARS_CACHE_TTL_SEC = max(0.0, _env_float("KIS_DAILY_BARS_CACHE_TTL_SEC", 300.0))
+_KIS_DAILY_INDEX_BARS_CACHE_TTL_SEC = max(0.0, _env_float("KIS_DAILY_INDEX_BARS_CACHE_TTL_SEC", 300.0))
+_KIS_QUOTE_CACHE_TTL_SEC = max(0.0, _env_float("KIS_QUOTE_CACHE_TTL_SEC", 20.0))
 
 
 class KISTradingAPI:
@@ -50,6 +77,14 @@ class KISTradingAPI:
 
         self._session = requests.Session()
         self._rest_throttle = kis_auth_rest._throttle_rest
+        self._daily_bars_cache: dict[tuple[str, str, int], tuple[float, pd.DataFrame]] = {}
+        self._daily_index_bars_cache: dict[tuple[str, str, int], tuple[float, pd.DataFrame]] = {}
+        self._quote_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._secondary_market_ctx = build_secondary_market_context(
+            min_gap_by_path=_KIS_HTTP_PATH_MIN_GAP_SEC,
+        )
+        if self._secondary_market_ctx is not None:
+            logger.info("[KIS TradingAPI] 보조 조회 전용 appkey 활성화")
         logger.info("[KIS TradingAPI] 어댑터 초기화 완료")
 
     # ──────────────────────────────────────────────
@@ -89,6 +124,56 @@ class KISTradingAPI:
             scope=f"kis_get:{path}",
             min_gap_sec=min_gap_sec,
         )
+
+    def _market_get(self, path: str, tr_id: str, params: dict, tr_cont: str = "") -> dict:
+        secondary_market_ctx = getattr(self, "_secondary_market_ctx", None)
+        if secondary_market_ctx is None:
+            return self._get(path, tr_id, params, tr_cont)
+
+        try:
+            return secondary_market_ctx.get(path, tr_id, params, tr_cont)
+        except Exception as exc:
+            logger.warning(
+                "[KIS TradingAPI] 보조 조회 전용 appkey 실패 -> 기본 appkey fallback path=%s tr_id=%s error=%s",
+                path,
+                tr_id,
+                exc,
+            )
+            return self._get(path, tr_id, params, tr_cont)
+
+    @staticmethod
+    def _copy_cached_value(value: Any) -> Any:
+        if isinstance(value, pd.DataFrame):
+            return value.copy(deep=True)
+        if isinstance(value, dict):
+            return dict(value)
+        return value
+
+    def _cache_lookup(self, cache_name: str, key: Any, ttl_sec: float) -> Any | None:
+        if ttl_sec <= 0:
+            return None
+        cache = getattr(self, cache_name, None)
+        if not isinstance(cache, dict):
+            cache = {}
+            setattr(self, cache_name, cache)
+        entry = cache.get(key)
+        if not entry:
+            return None
+        stored_at, payload = entry
+        if (time.monotonic() - float(stored_at)) > ttl_sec:
+            cache.pop(key, None)
+            return None
+        return self._copy_cached_value(payload)
+
+    def _cache_store(self, cache_name: str, key: Any, value: Any, ttl_sec: float) -> Any:
+        copied = self._copy_cached_value(value)
+        if ttl_sec > 0:
+            cache = getattr(self, cache_name, None)
+            if not isinstance(cache, dict):
+                cache = {}
+                setattr(self, cache_name, cache)
+            cache[key] = (time.monotonic(), copied)
+        return self._copy_cached_value(copied)
 
     def _is_expired_token_response(self, response: requests.Response, data: dict | None = None) -> bool:
         checker = getattr(getattr(self, "_ka", None), "is_expired_token_response", None)
@@ -298,7 +383,7 @@ class KISTradingAPI:
             "FID_INPUT_DATE_1": "",
         }
         try:
-            data = self._get(
+            data = self._market_get(
                 "/uapi/domestic-stock/v1/quotations/volume-rank",
                 "FHPST01710000",
                 params,
@@ -348,7 +433,7 @@ class KISTradingAPI:
             "FID_INPUT_DATE_1": "",
         }
         try:
-            data = self._get(
+            data = self._market_get(
                 "/uapi/domestic-stock/v1/quotations/volume-rank",
                 "FHPST01710000",
                 params,
@@ -383,27 +468,39 @@ class KISTradingAPI:
         """
         from datetime import datetime, timedelta
 
-        end_dt = datetime.strptime(end, "%Y%m%d") if len(end) == 8 else datetime.now()
+        normalized_code = str(code or "").strip()
+        normalized_end = self._normalize_yyyymmdd(end)
+        cache_key = (normalized_code, normalized_end, int(lookback))
+        cached = self._cache_lookup("_daily_bars_cache", cache_key, _KIS_DAILY_BARS_CACHE_TTL_SEC)
+        if cached is not None:
+            return cached
+
+        end_dt = datetime.strptime(normalized_end, "%Y%m%d") if len(normalized_end) == 8 else datetime.now()
         start_dt = end_dt - timedelta(days=lookback * 2)  # 영업일 고려
         start_str = start_dt.strftime("%Y%m%d")
         end_str = end_dt.strftime("%Y%m%d")
 
         params = {
             "FID_COND_MRKT_DIV_CODE": "J",
-            "FID_INPUT_ISCD": code,
+            "FID_INPUT_ISCD": normalized_code,
             "FID_INPUT_DATE_1": start_str,
             "FID_INPUT_DATE_2": end_str,
             "FID_PERIOD_DIV_CODE": "D",         # 일봉
             "FID_ORG_ADJ_PRC": "0",             # 수정주가 미반영(0) / 반영(1)
         }
-        data = self._get(
+        data = self._market_get(
             "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
             "FHKST03010100",
             params,
         )
         rows = data.get("output2", [])
         if not rows:
-            return pd.DataFrame()
+            return self._cache_store(
+                "_daily_bars_cache",
+                cache_key,
+                pd.DataFrame(),
+                _KIS_DAILY_BARS_CACHE_TTL_SEC,
+            )
 
         records = []
         for r in rows:
@@ -423,9 +520,19 @@ class KISTradingAPI:
             )
         df = pd.DataFrame(records)
         if df.empty:
-            return df
+            return self._cache_store(
+                "_daily_bars_cache",
+                cache_key,
+                df,
+                _KIS_DAILY_BARS_CACHE_TTL_SEC,
+            )
         df = df.sort_values("date").tail(lookback).reset_index(drop=True)
-        return df
+        return self._cache_store(
+            "_daily_bars_cache",
+            cache_key,
+            df,
+            _KIS_DAILY_BARS_CACHE_TTL_SEC,
+        )
 
     def daily_index_bars(
         self,
@@ -439,23 +546,39 @@ class KISTradingAPI:
         """
         from datetime import datetime, timedelta
 
-        end_dt = datetime.strptime(end, "%Y%m%d") if len(end) == 8 else datetime.now()
+        normalized_index_code = str(index_code or "").strip().zfill(4)
+        normalized_end = self._normalize_yyyymmdd(end)
+        cache_key = (normalized_index_code, normalized_end, int(lookback))
+        cached = self._cache_lookup(
+            "_daily_index_bars_cache",
+            cache_key,
+            _KIS_DAILY_INDEX_BARS_CACHE_TTL_SEC,
+        )
+        if cached is not None:
+            return cached
+
+        end_dt = datetime.strptime(normalized_end, "%Y%m%d") if len(normalized_end) == 8 else datetime.now()
         start_dt = end_dt - timedelta(days=lookback * 2)
         params = {
             "FID_COND_MRKT_DIV_CODE": "U",
-            "FID_INPUT_ISCD": str(index_code or "").strip().zfill(4),
+            "FID_INPUT_ISCD": normalized_index_code,
             "FID_INPUT_DATE_1": start_dt.strftime("%Y%m%d"),
             "FID_INPUT_DATE_2": end_dt.strftime("%Y%m%d"),
             "FID_PERIOD_DIV_CODE": "D",
         }
-        data = self._get(
+        data = self._market_get(
             "/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice",
             "FHKUP03500100",
             params,
         )
         rows = data.get("output2", [])
         if not rows:
-            return pd.DataFrame()
+            return self._cache_store(
+                "_daily_index_bars_cache",
+                cache_key,
+                pd.DataFrame(),
+                _KIS_DAILY_INDEX_BARS_CACHE_TTL_SEC,
+            )
 
         records = []
         for r in rows:
@@ -475,8 +598,19 @@ class KISTradingAPI:
             )
         df = pd.DataFrame(records)
         if df.empty:
-            return df
-        return df.sort_values("date").tail(lookback).reset_index(drop=True)
+            return self._cache_store(
+                "_daily_index_bars_cache",
+                cache_key,
+                df,
+                _KIS_DAILY_INDEX_BARS_CACHE_TTL_SEC,
+            )
+        df = df.sort_values("date").tail(lookback).reset_index(drop=True)
+        return self._cache_store(
+            "_daily_index_bars_cache",
+            cache_key,
+            df,
+            _KIS_DAILY_INDEX_BARS_CACHE_TTL_SEC,
+        )
 
     def _parse_intraday_rows(self, rows: list[dict[str, Any]]) -> pd.DataFrame:
         records: list[dict[str, Any]] = []
@@ -522,7 +656,7 @@ class KISTradingAPI:
             "FID_PW_DATA_INCU_YN": "Y" if include_past else "N",
             "FID_ETC_CLS_CODE": "",
         }
-        data = self._get(
+        data = self._market_get(
             "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice",
             "FHKST03010200",
             params,
@@ -552,7 +686,7 @@ class KISTradingAPI:
             "FID_PW_DATA_INCU_YN": "Y" if include_past else "N",
             "FID_FAKE_TICK_INCU_YN": "Y" if include_fake_tick else "",
         }
-        data = self._get(
+        data = self._market_get(
             "/uapi/domestic-stock/v1/quotations/inquire-time-dailychartprice",
             "FHKST03010230",
             params,
@@ -613,18 +747,23 @@ class KISTradingAPI:
         국내주식 현재가 조회 [v1_국내주식-008].
         GET /uapi/domestic-stock/v1/quotations/inquire-price
         """
+        normalized_code = str(code or "").strip()
+        cached = self._cache_lookup("_quote_cache", normalized_code, _KIS_QUOTE_CACHE_TTL_SEC)
+        if cached is not None:
+            return cached
+
         params = {
             "FID_COND_MRKT_DIV_CODE": "J",
-            "FID_INPUT_ISCD": code,
+            "FID_INPUT_ISCD": normalized_code,
         }
-        data = self._get(
+        data = self._market_get(
             "/uapi/domestic-stock/v1/quotations/inquire-price",
             "FHKST01010100",
             params,
         )
         out = data.get("output", {})
-        return {
-            "code": code,
+        payload = {
+            "code": normalized_code,
             "price": int(out.get("stck_prpr", 0)),
             "open": int(out.get("stck_oprc", 0)),
             "high": int(out.get("stck_hgpr", 0)),
@@ -636,6 +775,7 @@ class KISTradingAPI:
             "market_warning_code": str(out.get("mrkt_warn_cls_code", "")).strip(),
             "management_issue_code": str(out.get("mang_issu_cls_code", "")).strip(),
         }
+        return self._cache_store("_quote_cache", normalized_code, payload, _KIS_QUOTE_CACHE_TTL_SEC)
 
     def positions(self) -> list[dict[str, Any]]:
         """

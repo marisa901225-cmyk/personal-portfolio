@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     naver_client_id: Optional[str] = Field(default=None, validation_alias="NAVER_CLIENT_ID")
     naver_client_secret: Optional[str] = Field(default=None, validation_alias="NAVER_CLIENT_SECRET")
     kma_service_key: Optional[str] = Field(default=None, validation_alias="KMA_SERVICE_KEY")
+    kma_service_key1: Optional[str] = Field(default=None, validation_alias="KMA_SERVICE_KEY1")
     fred_api_key: Optional[str] = Field(default=None, validation_alias="FRED_API_KEY")
     bok_ecos_api_key: Optional[str] = Field(default=None, validation_alias="BOK_ECOS_API_KEY")
     
@@ -88,6 +89,10 @@ class Settings(BaseSettings):
     kis_my_sec: Optional[str] = Field(default=None, validation_alias="KIS_MY_SEC")
     kis_my_acct_stock: Optional[str] = Field(default=None, validation_alias="KIS_MY_ACCT_STOCK")
     kis_my_prod: Optional[str] = Field(default=None, validation_alias="KIS_MY_PROD")
+    kis_my_app1: Optional[str] = Field(default=None, validation_alias="KIS_MY_APP1")
+    kis_my_sec1: Optional[str] = Field(default=None, validation_alias="KIS_MY_SEC1")
+    kis_my_acct_stock1: Optional[str] = Field(default=None, validation_alias="KIS_MY_ACCT_STOCK1")
+    kis_my_prod1: Optional[str] = Field(default=None, validation_alias="KIS_MY_PROD1")
     kis_my_htsid: Optional[str] = Field(default=None, validation_alias="KIS_MY_HTSID")
     kis_prod: Optional[str] = Field(default=None, validation_alias="KIS_PROD")
     kis_ops: Optional[str] = Field(default=None, validation_alias="KIS_OPS")

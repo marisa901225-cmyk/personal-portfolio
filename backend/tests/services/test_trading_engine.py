@@ -34,8 +34,10 @@ from backend.services.trading_engine.state import (
     get_day_stoploss_fail_count,
     get_day_stoploss_excluded_codes,
     get_swing_time_excluded_codes,
+    load_state,
     new_state,
     record_day_stoploss_failure,
+    save_state,
 )
 
 
@@ -1110,6 +1112,18 @@ def test_bot_candidate_notification_visible_in_risk_off(tmp_path) -> None:
     bot = HybridTradingBot(api, config=cfg, notifier=notifier)  # type: ignore[arg-type]
 
     candidates = SimpleNamespace(
+        popular=pd.DataFrame(
+            [
+                {
+                    "code": "005930",
+                    "name": "삼성전자",
+                    "avg_value_5d": 210_000_000_000,
+                    "avg_value_20d": 205_000_000_000,
+                }
+            ]
+        ),
+        model=pd.DataFrame(),
+        etf=pd.DataFrame(),
         merged=pd.DataFrame(
             [
                 {
@@ -1126,7 +1140,7 @@ def test_bot_candidate_notification_visible_in_risk_off(tmp_path) -> None:
     bot._maybe_notify_candidates(now, candidates, regime="RISK_OFF")
     bot._maybe_notify_candidates(now, candidates, regime="RISK_OFF")  # same window dedupe
 
-    candidate_msgs = [t for t in notifier.texts if t.startswith("🎯 [Entry Window] Scanned Symbols (RISK_OFF)")]
+    candidate_msgs = [t for t in notifier.texts if t.startswith("⚡ [Entry Window] [DAY] Scanned Symbols (RISK_OFF)")]
     assert len(candidate_msgs) == 1
     assert "관찰 전용" in candidate_msgs[0]
     assert "440650" in candidate_msgs[0]
@@ -1161,6 +1175,13 @@ def test_bot_candidate_notification_prefers_ranked_display_candidates(tmp_path) 
     bot = HybridTradingBot(api, config=cfg, notifier=notifier)  # type: ignore[arg-type]
 
     candidates = SimpleNamespace(
+        popular=pd.DataFrame(
+            [
+                {"code": "RAW001", "name": "원시후보", "avg_value_5d": 210_000_000_000},
+            ]
+        ),
+        model=pd.DataFrame(),
+        etf=pd.DataFrame(),
         merged=pd.DataFrame(
             [
                 {"code": "RAW001", "name": "원시후보", "avg_value_5d": 210_000_000_000},
@@ -1181,10 +1202,76 @@ def test_bot_candidate_notification_prefers_ranked_display_candidates(tmp_path) 
         display_candidates=display_candidates,
     )
 
-    candidate_msgs = [t for t in notifier.texts if t.startswith("🎯 [Entry Window] Scanned Symbols (RISK_ON)")]
+    candidate_msgs = [t for t in notifier.texts if t.startswith("⚡ [Entry Window] [DAY] Scanned Symbols (RISK_ON)")]
     assert len(candidate_msgs) == 1
     assert "TOP001" in candidate_msgs[0]
     assert "RAW001" not in candidate_msgs[0]
+
+
+def test_bot_candidate_notification_sends_day_and_swing_separately(tmp_path) -> None:
+    class SpyNotifier:
+        def __init__(self) -> None:
+            self.texts: list[str] = []
+            self.files: list[tuple[str, str | None]] = []
+
+        def enqueue_text(self, text: str) -> None:
+            self.texts.append(text)
+
+        def enqueue_file(self, path: str, caption: str | None = None) -> None:
+            self.files.append((path, caption))
+
+        def flush(self, timeout_sec: float = 2.0) -> None:
+            del timeout_sec
+
+        def close(self, timeout_sec: float = 2.0) -> None:
+            del timeout_sec
+
+    api = FakeAPI()
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+    )
+    notifier = SpyNotifier()
+    bot = HybridTradingBot(api, config=cfg, notifier=notifier)  # type: ignore[arg-type]
+
+    candidates = SimpleNamespace(
+        popular=pd.DataFrame(
+            [
+                {"code": "DAY001", "name": "단타후보", "avg_value_5d": 170_000_000_000},
+            ]
+        ),
+        model=pd.DataFrame(
+            [
+                {"code": "SWG001", "name": "스윙후보", "avg_value_20d": 320_000_000_000},
+            ]
+        ),
+        etf=pd.DataFrame(),
+        merged=pd.DataFrame(
+            [
+                {"code": "DAY001", "name": "단타후보", "avg_value_5d": 170_000_000_000},
+                {"code": "SWG001", "name": "스윙후보", "avg_value_20d": 320_000_000_000},
+            ]
+        ),
+    )
+    display_candidates = pd.DataFrame(
+        [
+            {"code": "DAY001", "name": "단타후보", "avg_value_5d": 170_000_000_000},
+        ]
+    )
+
+    bot._maybe_notify_candidates(
+        datetime(2026, 2, 16, 9, 10),
+        candidates,
+        regime="RISK_ON",
+        display_candidates=display_candidates,
+    )
+
+    assert len(notifier.texts) == 2
+    assert notifier.texts[0].startswith("📈 [Entry Window] [SWING] Scanned Symbols (RISK_ON)")
+    assert "SWG001" in notifier.texts[0]
+    assert notifier.texts[1].startswith("⚡ [Entry Window] [DAY] Scanned Symbols (RISK_ON)")
+    assert "DAY001" in notifier.texts[1]
 
 
 def test_bot_risk_off_parks_cash_in_bond_etf(tmp_path) -> None:
@@ -2266,6 +2353,155 @@ def test_enter_position_best_order_uses_quote_price_before_retrying_down() -> No
         "cash_ratio": 1.0,
         "order_type": "best",
     }
+
+
+def test_enter_position_does_not_book_fill_from_order_acceptance_only() -> None:
+    class PendingOnlyAPI(FakeAPI):
+        def place_order(self, side: str, code: str, qty: int, order_type: str, price: int | None) -> dict:
+            self.order_calls.append(
+                {"side": side, "code": code, "qty": qty, "order_type": order_type, "price": price}
+            )
+            return {"success": True, "order_id": f"{side}-{code}", "msg": "주문 접수"}
+
+    api = PendingOnlyAPI()
+    api._cash_available = 500_000
+    api._quotes["005930"] = {"price": 100_000, "change_pct": 1.0}
+    state = new_state("20260415")
+
+    from backend.services.trading_engine.execution import enter_position
+
+    result = enter_position(
+        api,
+        state,
+        position_type="S",
+        code="005930",
+        cash_ratio=0.5,
+        asof_date="20260415",
+        now=datetime(2026, 4, 15, 9, 8),
+        order_type="MKT",
+    )
+
+    assert result is None
+    assert "005930" not in state.open_positions
+    assert state.swing_entries_today == 0
+
+
+def test_exit_position_does_not_book_fill_from_order_acceptance_only() -> None:
+    class PendingOnlyAPI(FakeAPI):
+        def place_order(self, side: str, code: str, qty: int, order_type: str, price: int | None) -> dict:
+            self.order_calls.append(
+                {"side": side, "code": code, "qty": qty, "order_type": order_type, "price": price}
+            )
+            return {"success": True, "order_id": f"{side}-{code}", "msg": "주문 접수"}
+
+    api = PendingOnlyAPI()
+    api._quotes["005930"] = {"price": 105_000, "change_pct": 1.0}
+    api._positions = [{"code": "005930", "qty": 10, "avg_price": 100_000.0}]
+    state = new_state("20260415")
+    state.open_positions["005930"] = PositionState(
+        type="S",
+        entry_time="2026-04-14T09:00:00",
+        entry_price=100_000.0,
+        qty=10,
+        highest_price=105_000.0,
+        entry_date="20260414",
+    )
+
+    result = exit_position(
+        api,
+        state,
+        code="005930",
+        reason="TP",
+        now=datetime(2026, 4, 15, 10, 0),
+    )
+
+    assert result is None
+    assert state.open_positions["005930"].qty == 10
+    assert state.realized_pnl_today == 0.0
+
+
+def test_handle_open_orders_only_cancels_stale_orders() -> None:
+    class OpenOrderAPI(FakeAPI):
+        def __init__(self) -> None:
+            super().__init__()
+            self._open_orders = [
+                {"order_id": "old-1", "order_time": "090000", "remaining_qty": 3},
+                {"order_id": "recent-1", "order_time": "090045", "remaining_qty": 2},
+                {"order_id": "filled-1", "order_time": "085900", "remaining_qty": 0, "status": "FILLED"},
+                {"order_id": "unknown-1", "remaining_qty": 1},
+            ]
+            self.cancelled_ids: list[str] = []
+
+        def open_orders(self) -> list[dict]:
+            return list(self._open_orders)
+
+        def cancel_order(self, order_id: str) -> dict:
+            self.cancelled_ids.append(order_id)
+            return {"order_id": order_id, "status": "cancelled"}
+
+    from backend.services.trading_engine.execution import handle_open_orders
+
+    api = OpenOrderAPI()
+    result = handle_open_orders(
+        api,
+        timeout_sec=30,
+        now=datetime(2026, 4, 15, 9, 1, 0),
+    )
+
+    assert api.cancelled_ids == ["old-1"]
+    assert result == {"cancelled": 1, "skipped_recent": 1, "skipped_unknown_time": 1}
+
+
+def test_reconcile_state_updates_qty_and_avg_price_from_broker_snapshot() -> None:
+    from backend.services.trading_engine.position_helpers import reconcile_state_with_broker_positions
+
+    api = FakeAPI()
+    api._positions = [{"code": "005930", "qty": 3, "avg_price": 98_000.0}]
+    state = new_state("20260415")
+    state.open_positions["005930"] = PositionState(
+        type="S",
+        entry_time="2026-04-14T09:00:00",
+        entry_price=100_000.0,
+        qty=5,
+        highest_price=105_000.0,
+        entry_date="20260414",
+    )
+    journal_rows: list[tuple[str, dict]] = []
+    notifications: list[str] = []
+
+    reconcile_state_with_broker_positions(
+        api,
+        state,
+        trade_date="20260415",
+        journal=lambda event, **fields: journal_rows.append((event, fields)),
+        notify_text=notifications.append,
+    )
+
+    pos = state.open_positions["005930"]
+    assert pos.qty == 3
+    assert pos.entry_price == 98_000.0
+    assert journal_rows[0][0] == "STATE_RECONCILE_UPDATE"
+    assert notifications == ["[STATE_SYNC][UPDATE] 005930 qty=5->3 avg=100000->98000"]
+
+
+def test_save_state_roundtrip_uses_atomic_replace(tmp_path) -> None:
+    state_path = tmp_path / "state.json"
+    state = new_state("20260415")
+    state.open_positions["005930"] = PositionState(
+        type="S",
+        entry_time="2026-04-14T09:00:00",
+        entry_price=100_000.0,
+        qty=5,
+        highest_price=105_000.0,
+        entry_date="20260414",
+    )
+
+    save_state(str(state_path), state)
+    loaded = load_state(str(state_path))
+
+    assert loaded.trade_date == "20260415"
+    assert loaded.open_positions["005930"].qty == 5
+    assert state_path.read_text(encoding="utf-8").endswith("\n")
 
 
 def test_bot_risk_on_exits_existing_risk_off_parking(tmp_path) -> None:

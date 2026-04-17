@@ -22,6 +22,7 @@ _SUMMARY_EVENT_LABELS = {
     "OPEN_ORDERS": "미체결 처리",
     "PASS": "패스",
     "STATE_RECONCILE_DROP": "상태 동기화 정리",
+    "STATE_RECONCILE_UPDATE": "상태 동기화 보정",
 }
 
 

@@ -27,6 +27,9 @@
 - Read the minimum necessary scope only. Prefer targeted lookups such as `rg '^KEY=' backend/.env backend/.env.example backend/.env.secrets.example` over opening full files.
 - Never search, read, or print environment files outside this repository unless the user explicitly approves it for the current task.
 - This includes parent directories, sibling repositories, home-directory files, and generic secret locations such as `~/.env`, `~/.config`, `~/.aws`, `~/.ssh`, `~/ai-models`, or any `*.env` outside the repo.
+- Never use indirect rendering commands that can expand or print secret values from outside the repository, even if they do not open the secret file explicitly.
+- This includes commands such as `docker compose config`, `docker-compose config`, `env`, `printenv`, `set`, `export`, or templating/debug commands that may resolve `${VAR}` or `env_file` values into output.
+- If compose inspection is needed, use targeted reads of repository files only, and avoid commands that materialize merged environment output unless the user explicitly approves that exact secret exposure for the current task.
 - Do not use broad filesystem searches for secrets or config, including commands/patterns that start from `..`, `~`, `/`, or any non-repo root.
 - Do not “helpfully” inspect adjacent projects, cached workspaces, or similarly named repositories.
 - If a required secret/config value is not present inside the repository, state that it was not found in the repository and request explicit user approval before checking anywhere else.
@@ -46,3 +49,6 @@
 - `ls ../other-repo`
 - `cat ~/.env`
 - `cat ~/ai-models/*.env`
+- `docker compose config`
+- `docker-compose config`
+- `env | grep API_TOKEN`

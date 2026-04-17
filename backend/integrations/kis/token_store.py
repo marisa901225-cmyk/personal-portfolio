@@ -20,6 +20,12 @@ _TOKEN_NONCE_SIZE = 12
 _TOKEN_TAG_SIZE = 16
 
 
+def _slot_columns(slot: int) -> tuple[str, str]:
+    if int(slot) == 1:
+        return "kis_token_encrypted1", "kis_token_expires_at1"
+    return "kis_token_encrypted", "kis_token_expires_at"
+
+
 def _load_token_key() -> bytes:
     from ...core.config import settings
     raw = settings.kis_token_key
@@ -125,7 +131,10 @@ def trigger_async_refresh() -> None:
         logger.debug("[KIS Token] 스레드를 통한 갱신 트리거")
 
 
-def read_kis_token(db: Optional[Session] = None) -> Optional[str]:
+def read_kis_token_record(
+    slot: int = 0,
+    db: Optional[Session] = None,
+) -> tuple[Optional[str], Optional[datetime]]:
     """
     DB에서 KIS 토큰을 읽어온다. (재시도 로직 포함)
     
@@ -144,6 +153,7 @@ def read_kis_token(db: Optional[Session] = None) -> Optional[str]:
 
     max_retries = 10
     retry_delay = 0.2  # seconds (짧게 여러 번 시도)
+    token_field, expires_field = _slot_columns(slot)
 
     for attempt in range(max_retries):
         owned_session = db is None
@@ -151,13 +161,14 @@ def read_kis_token(db: Optional[Session] = None) -> Optional[str]:
         
         try:
             setting = _get_or_create_setting(session)
-            if not setting.kis_token_encrypted:
-                logger.info("[KIS Token] 저장된 토큰 없음")
-                return None
+            token_payload = getattr(setting, token_field, None)
+            expires_at = getattr(setting, expires_field, None)
+            if not token_payload:
+                logger.info("[KIS Token][slot=%s] 저장된 토큰 없음", slot)
+                return None, None
             
             # 만료 시간 검사
-            if setting.kis_token_expires_at:
-                expires_at = setting.kis_token_expires_at
+            if expires_at:
                 now = (
                     datetime.now(expires_at.tzinfo)
                     if expires_at.tzinfo is not None
@@ -168,46 +179,52 @@ def read_kis_token(db: Optional[Session] = None) -> Optional[str]:
                 # 완전 만료 (30분 미만) - 반드시 재발급 필요
                 if time_until_expiry <= timedelta(hours=HARD_EXPIRY_BUFFER_HOURS):
                     logger.warning(
-                        "[KIS Token] ⚠️ 토큰 만료 임박! (expires_at=%s, 남은시간=%s)",
-                        expires_at, time_until_expiry
+                        "[KIS Token][slot=%s] ⚠️ 토큰 만료 임박! (expires_at=%s, 남은시간=%s)",
+                        slot, expires_at, time_until_expiry
                     )
-                    return None
+                    return None, expires_at
                 
                 # 갱신 필요 (2시간 미만) - 토큰은 반환하되 백그라운드 갱신 트리거
-                if time_until_expiry <= timedelta(hours=REFRESH_WINDOW_HOURS):
+                if slot == 0 and time_until_expiry <= timedelta(hours=REFRESH_WINDOW_HOURS):
                     logger.info(
-                        "[KIS Token] 🔄 갱신 윈도우 진입 (expires_at=%s, 남은시간=%s). 백그라운드 갱신을 시도합니다.",
-                        expires_at, time_until_expiry
+                        "[KIS Token][slot=%s] 🔄 갱신 윈도우 진입 (expires_at=%s, 남은시간=%s). 백그라운드 갱신을 시도합니다.",
+                        slot, expires_at, time_until_expiry
                     )
                     trigger_async_refresh()
                 
-                logger.debug("[KIS Token] 토큰 유효 (만료까지 %s 남음)", time_until_expiry)
+                logger.debug("[KIS Token][slot=%s] 토큰 유효 (만료까지 %s 남음)", slot, time_until_expiry)
             else:
-                logger.debug("[KIS Token] 만료 시간 미설정, 기존 토큰 사용")
+                logger.debug("[KIS Token][slot=%s] 만료 시간 미설정, 기존 토큰 사용", slot)
             
-            return _decrypt_token(setting.kis_token_encrypted)
+            return _decrypt_token(token_payload), expires_at
 
         except OperationalError as exc:
             if "locked" in str(exc).lower():
-                logger.warning("[KIS Token] DB Locked! Retrying (%d/%d)...", attempt + 1, max_retries)
+                logger.warning("[KIS Token][slot=%s] DB Locked! Retrying (%d/%d)...", slot, attempt + 1, max_retries)
                 time.sleep(retry_delay)
                 continue
-            logger.error("[KIS Token] DB OperationalError: %s", exc)
-            return None
+            logger.error("[KIS Token][slot=%s] DB OperationalError: %s", slot, exc)
+            return None, None
         except Exception as exc:
-            logger.warning("Failed to read KIS token from DB: %s", exc)
-            return None
+            logger.warning("Failed to read KIS token from DB (slot=%s): %s", slot, exc)
+            return None, None
         finally:
             if owned_session:
                 session.close()
     
-    logger.error("[KIS Token] Failed to read token after %d retries.", max_retries)
-    return None
+    logger.error("[KIS Token][slot=%s] Failed to read token after %d retries.", slot, max_retries)
+    return None, None
+
+
+def read_kis_token(slot: int = 0, db: Optional[Session] = None) -> Optional[str]:
+    token, _ = read_kis_token_record(slot=slot, db=db)
+    return token
 
 
 def save_kis_token(
     token: str,
     expires_at: Optional[datetime],
+    slot: int = 0,
     db: Optional[Session] = None,
 ) -> None:
     owned_session = db is None
@@ -215,13 +232,13 @@ def save_kis_token(
         db = SessionLocal()
     try:
         setting = _get_or_create_setting(db)
-        setting.kis_token_encrypted = _encrypt_token(token)
-        setting.kis_token_expires_at = expires_at
+        token_field, expires_field = _slot_columns(slot)
+        setattr(setting, token_field, _encrypt_token(token))
+        setattr(setting, expires_field, expires_at)
         db.commit()
-        logger.info("[KIS Token] 토큰 저장 완료 - 만료시간: %s", expires_at)
+        logger.info("[KIS Token][slot=%s] 토큰 저장 완료 - 만료시간: %s", slot, expires_at)
     except Exception as exc:
-        logger.warning("Failed to save KIS token to DB: %s", exc)
+        logger.warning("Failed to save KIS token to DB (slot=%s): %s", slot, exc)
     finally:
         if owned_session and db is not None:
             db.close()
-

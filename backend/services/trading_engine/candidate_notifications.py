@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from typing import Any
 
+import pandas as pd
 import requests
 
 from ..alarm.sanitizer import clean_exaone_tokens
@@ -19,6 +20,70 @@ _SWING_SKIP_LLM_TIMEOUT_SEC = 4.0
 _SWING_SKIP_LLM_MAX_TOKENS = 80
 
 
+def maybe_build_candidate_notifications(
+    *,
+    now: datetime,
+    candidates: Any,
+    regime: str,
+    config: TradeEngineConfig,
+    last_notified_window_idx: int | None,
+    display_candidates: Any | None = None,
+) -> tuple[int | None, list[str]]:
+    merged = getattr(candidates, "merged", None)
+    if merged is None or getattr(merged, "empty", True):
+        return last_notified_window_idx, []
+
+    current_window_idx = _current_entry_window_idx(now, config)
+    if current_window_idx is None:
+        return last_notified_window_idx, []
+    if last_notified_window_idx == current_window_idx:
+        return last_notified_window_idx, []
+
+    day_rows = _resolve_day_notification_rows(candidates=candidates, display_candidates=display_candidates)
+    swing_rows = _resolve_swing_notification_rows(candidates=candidates)
+
+    messages: list[str] = []
+    if swing_rows is not None and not getattr(swing_rows, "empty", True):
+        messages.append(
+            _build_candidate_notification_text(
+                candidate_rows=swing_rows,
+                regime=regime,
+                config=config,
+                strategy_label="SWING",
+                icon="📈",
+            )
+        )
+    if day_rows is not None and not getattr(day_rows, "empty", True):
+        messages.append(
+            _build_candidate_notification_text(
+                candidate_rows=day_rows,
+                regime=regime,
+                config=config,
+                strategy_label="DAY",
+                icon="⚡",
+            )
+        )
+
+    if messages:
+        return current_window_idx, messages
+
+    fallback_rows = display_candidates if display_candidates is not None else merged
+    if fallback_rows is None or getattr(fallback_rows, "empty", True):
+        fallback_rows = merged
+    if fallback_rows is None or getattr(fallback_rows, "empty", True):
+        return current_window_idx, []
+
+    return current_window_idx, [
+        _build_candidate_notification_text(
+            candidate_rows=fallback_rows,
+            regime=regime,
+            config=config,
+            strategy_label=None,
+            icon="🎯",
+        )
+    ]
+
+
 def maybe_build_candidate_notification(
     *,
     now: datetime,
@@ -28,20 +93,72 @@ def maybe_build_candidate_notification(
     last_notified_window_idx: int | None,
     display_candidates: Any | None = None,
 ) -> tuple[int | None, str | None]:
-    if candidates.merged.empty:
-        return last_notified_window_idx, None
+    updated_idx, messages = maybe_build_candidate_notifications(
+        now=now,
+        candidates=candidates,
+        regime=regime,
+        config=config,
+        last_notified_window_idx=last_notified_window_idx,
+        display_candidates=display_candidates,
+    )
+    if not messages:
+        return updated_idx, None
+    return updated_idx, "\n\n".join(messages)
 
-    current_window_idx = _current_entry_window_idx(now, config)
-    if current_window_idx is None:
-        return last_notified_window_idx, None
-    if last_notified_window_idx == current_window_idx:
-        return last_notified_window_idx, None
 
-    candidate_rows = display_candidates if display_candidates is not None else candidates.merged
-    if candidate_rows is None or getattr(candidate_rows, "empty", True):
-        candidate_rows = candidates.merged
+def _resolve_day_notification_rows(*, candidates: Any, display_candidates: Any | None) -> Any | None:
+    if display_candidates is not None and not getattr(display_candidates, "empty", True):
+        return display_candidates
+    popular = getattr(candidates, "popular", None)
+    if popular is not None and not getattr(popular, "empty", True):
+        return popular
+    return None
+
+
+def _resolve_swing_notification_rows(*, candidates: Any) -> Any | None:
+    model = getattr(candidates, "model", None)
+    etf = getattr(candidates, "etf", None)
+
+    model_empty = model is None or getattr(model, "empty", True)
+    etf_empty = etf is None or getattr(etf, "empty", True)
+
+    if model_empty and etf_empty:
+        return None
+    if model_empty:
+        return etf
+    if etf_empty:
+        return model
+
+    if "code" not in model.columns or "code" not in etf.columns:
+        return model
+
+    seen_codes = {str(code) for code in model["code"].astype(str).tolist()}
+    etf_only = etf[~etf["code"].astype(str).isin(seen_codes)]
+    if etf_only.empty:
+        return model
+    return _concat_rows([model, etf_only])
+
+
+def _concat_rows(frames: list[Any]) -> Any | None:
+    valid_frames = [frame for frame in frames if frame is not None and not getattr(frame, "empty", True)]
+    if not valid_frames:
+        return None
+    if len(valid_frames) == 1:
+        return valid_frames[0]
+    return pd.concat(valid_frames, ignore_index=True)
+
+
+def _build_candidate_notification_text(
+    *,
+    candidate_rows: Any,
+    regime: str,
+    config: TradeEngineConfig,
+    strategy_label: str | None,
+    icon: str,
+) -> str:
     top_10 = candidate_rows.head(10)
-    lines = [f"🎯 [Entry Window] Scanned Symbols ({regime})"]
+    label_suffix = f"[{strategy_label}] " if strategy_label else ""
+    lines = [f"{icon} [Entry Window] {label_suffix}Scanned Symbols ({regime})"]
     if regime == "RISK_OFF":
         lines.append("※ RISK_OFF 상태: 후보 관찰 전용 (공격적 신규 진입 차단)")
         if config.risk_off_parking_enabled and config.risk_off_parking_code:
@@ -53,8 +170,7 @@ def maybe_build_candidate_notification(
         val20 = parse_numeric(row.get("avg_value_20d")) or 0
         val = max(val5, val20)
         lines.append(f"{i}. {name}({code}) | {val/1e8:.1f}억")
-
-    return current_window_idx, "\n".join(lines)
+    return "\n".join(lines)
 
 
 def maybe_build_swing_skip_notification(
