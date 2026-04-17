@@ -17,6 +17,7 @@ backend/.venv
 backend/venv
 venv/
 backend/.env
+backend/.env.secrets
 backend/__pycache__/
 *.pyc
 
@@ -73,4 +74,17 @@ alarm_collector.log
 alarm_process.log
 
 backend/data/llm_drafts.jsonl
+backend/data/llm_fan_guard_state.json
+backend/data/llm_paid_fallback_notice_state.json
+backend/data/kis_rate_limit_restore_state.json
 backend/igt-gpu-tools/
+
+# Local Codex working files
+.codex
+.skill-build/
+.subagents/
+subagent-runs/
+.worker2.last.txt
+
+# Local translation workspace
+translations/

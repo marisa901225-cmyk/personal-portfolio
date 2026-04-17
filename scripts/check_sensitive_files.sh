@@ -27,6 +27,7 @@ SENSITIVE_PATTERNS=(
 ALLOWLIST_GLOBS=(
   "backend/integrations/kis/stocks_info/*.xlsx"
   "*.env.example"
+  "*.env.secrets.example"
   "*.env.sample"
   "*.env.template"
   "backend/config/crontab.bak"

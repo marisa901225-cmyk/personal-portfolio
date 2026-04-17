@@ -69,32 +69,41 @@
 
 Docker Compose를 사용하여 백엔드, 프론트엔드, LLM 서버를 한 번에 실행할 수 있습니다.
 
-### 1. 환경 설정 (.env)
-`backend/.env.example`을 복사하여 `.env`를 생성하세요.
+### 1. 환경 설정 (repo `.env` + 외부 secrets)
+비밀이 아닌 런타임 설정은 레포 안 `backend/.env`에 두고, 토큰/API 키는 레포 밖 secrets 파일에 둡니다.
 
 ```ini
-# Security
+cp backend/.env.example backend/.env
+cp backend/.env.secrets.example ~/ai-models/myasset.secrets.env
+```
+
+`backend/.env` 예시:
+
+```ini
+LLM_BASE_URL=http://openvino-server:8082
+ALARM_SUMMARY_LLM_BASE_URL=http://openvino-server:8082
+ALARM_RANDOM_LLM_BASE_URL=http://llama-server-vulkan-huihui:8083
+KIS_CONFIG_DIR=/root/KIS/config
+TRADING_ENGINE_SWING_CASH_RATIO=0.80
+TRADING_ENGINE_DAY_CASH_RATIO=0.20
+```
+
+`~/ai-models/myasset.secrets.env` 예시:
+
+```ini
 API_TOKEN=your_secure_token_hash
-
-# KIS Config Directory (Required for stock price sync)
-KIS_CONFIG_DIR=/path/to/your/KIS/config
-
-# Database
-DATABASE_URL=sqlite:///backend/storage/db/portfolio.db
-
-# LLM Config
-LOCAL_LLM_MODEL_PATH=backend/data/EXAONE-3.5-7.8B-Instruct-Llamafied-Q4_K_M.gguf
-NEWS_LLM_BASE_URL=http://your-main-pc:8080/v1
-
-# Telegram
+JWT_SECRET_KEY=your_jwt_secret
+NAVER_CLIENT_ID=...
+NAVER_CLIENT_SECRET=...
 TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
 TELEGRAM_CHAT_ID=123456789
-
-# APIs
-KIS_APP_KEY=...
+KIS_MY_APP=...
+KIS_MY_SEC=...
 PANDASCORE_API_KEY=...
-NAVER_CLIENT_ID=...
+AI_REPORT_API_KEY=...
 ```
+
+기본 외부 secrets 경로는 `~/ai-models/myasset.secrets.env`이고, 다른 경로를 쓰려면 호스트 환경변수 `MYASSET_SECRETS_ENV_FILE`로 바꿀 수 있습니다.
 
 ### 2. 실행
 ```bash
@@ -104,6 +113,28 @@ docker-compose up -d
 # 로그 확인
 docker-compose logs -f backend-api
 ```
+
+### 2-1. 팬 과속 시 LLM 자동 쿨다운
+호스트에서 `sensors` 명령을 읽어 팬 RPM이 너무 높아지면 LLM 서비스를 잠깐 내려서 열을 식히고, 쿨다운 뒤 자동으로 다시 올릴 수 있습니다.
+
+```bash
+# 1분마다 감시 예시
+* * * * * cd /home/dlckdgn/personal-portfolio && \
+LLM_FAN_GUARD_ENABLED=1 \
+LLM_FAN_GUARD_THRESHOLD_RPM=1600 \
+LLM_FAN_GUARD_COOLDOWN_SEC=3600 \
+LLM_FAN_GUARD_SENSOR_PATTERN=xe-pci-0300 \
+LLM_FAN_GUARD_START_MAX_TEMP_C=65 \
+LLM_FAN_GUARD_START_RETRY_SEC=300 \
+backend/scripts/shell/llm_fan_guard.sh >> /home/dlckdgn/personal-portfolio/backend/logs/llm_fan_guard.cron.log 2>&1
+```
+
+- 기본 동작은 모든 LLM 서비스를 정지 후 1시간 뒤 재시작입니다.
+- `LLM_FAN_GUARD_THRESHOLD_RPM`은 절대값이므로, 실제 체감 소음에 맞춰 `1600`, `1800`, `2000`처럼 조정하면 됩니다.
+- `LLM_FAN_GUARD_SENSOR_PATTERN`을 비우면 `sensors` 출력 전체에서 가장 높은 fan RPM을 기준으로 판단합니다.
+- `LLM_FAN_GUARD_START_MAX_TEMP_C`를 설정하면 쿨다운이 끝나도 온도가 아직 높을 때는 즉시 켜지지 않고, `LLM_FAN_GUARD_START_RETRY_SEC` 뒤에 다시 확인합니다.
+- 온도 확인은 기본적으로 `LLM_FAN_GUARD_SENSOR_PATTERN`과 같은 센서 블록을 사용하고, 따로 나누고 싶으면 `LLM_FAN_GUARD_TEMP_SENSOR_PATTERN`으로 덮어쓸 수 있습니다.
+- 상태 파일은 `backend/data/llm_fan_guard_state.json`, 운영 로그는 `backend/logs/llm_fan_guard.log`를 사용합니다.
 
 ### 3. 접속
 - **Web UI**: `http://localhost:5173` (또는 서버 IP)
