@@ -20,6 +20,7 @@ from typing import Any
 
 import pandas as pd
 import requests
+from backend.integrations.kis.rest_rate_limiter import throttle_rest_min_gap
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,10 @@ _KIS_HTTP_READ_TIMEOUT_SEC = 10.0
 _KIS_HTTP_GET_MAX_ATTEMPTS = 3
 _KIS_HTTP_RETRY_BACKOFF_SEC = 0.35
 _KIS_HTTP_RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
+_KIS_HTTP_PATH_MIN_GAP_SEC = {
+    "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice": 0.12,
+    "/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice": 0.12,
+}
 
 
 class KISTradingAPI:
@@ -75,6 +80,26 @@ class KISTradingAPI:
             return
         # Fallback for partially initialized test doubles.
         time.sleep(0.05)
+
+    def _throttle_path_min_gap(self, path: str) -> None:
+        min_gap_sec = _KIS_HTTP_PATH_MIN_GAP_SEC.get(str(path or "").strip())
+        if not min_gap_sec:
+            return
+        throttle_rest_min_gap(
+            scope=f"kis_get:{path}",
+            min_gap_sec=min_gap_sec,
+        )
+
+    def _is_expired_token_response(self, response: requests.Response, data: dict | None = None) -> bool:
+        checker = getattr(getattr(self, "_ka", None), "is_expired_token_response", None)
+        if callable(checker):
+            return bool(checker(response, data=data))
+        return False
+
+    def _force_reauth_current_env(self) -> None:
+        refresher = getattr(getattr(self, "_ka", None), "force_reauth_current_env", None)
+        if callable(refresher):
+            refresher()
 
     @staticmethod
     def _normalize_yyyymmdd(value: str) -> str:
@@ -135,10 +160,12 @@ class KISTradingAPI:
     def _get(self, path: str, tr_id: str, params: dict, tr_cont: str = "") -> dict:
         """GET 요청 래퍼."""
         url = f"{self._base_url()}{path}"
+        force_refreshed = False
         for attempt in range(1, _KIS_HTTP_GET_MAX_ATTEMPTS + 1):
             self._core._ensure_auth()
             headers = self._headers(tr_id, tr_cont)
             self._throttle_rest()
+            self._throttle_path_min_gap(path)
             try:
                 res = self._session.get(
                     url,
@@ -146,8 +173,22 @@ class KISTradingAPI:
                     params=params,
                     timeout=(_KIS_HTTP_CONNECT_TIMEOUT_SEC, _KIS_HTTP_READ_TIMEOUT_SEC),
                 )
+                data = res.json() if "json" in dir(res) else None
+                if self._is_expired_token_response(res, data=data):
+                    if force_refreshed:
+                        res.raise_for_status()
+                    logger.warning(
+                        "[KIS API] GET 응답에서 만료 토큰 감지; 강제 재인증 후 재시도 tr_id=%s path=%s",
+                        tr_id,
+                        path,
+                    )
+                    self._force_reauth_current_env()
+                    force_refreshed = True
+                    continue
+
                 res.raise_for_status()
-                data = res.json()
+                if not isinstance(data, dict):
+                    data = res.json()
                 if data.get("rt_cd") != "0":
                     logger.error(
                         "[KIS API] GET 실패: tr_id=%s msg=%s", tr_id, data.get("msg1")
@@ -184,34 +225,52 @@ class KISTradingAPI:
 
     def _post(self, path: str, tr_id: str, body: dict) -> dict:
         """POST 요청 래퍼."""
-        self._core._ensure_auth()
         url = f"{self._base_url()}{path}"
-        headers = self._headers(tr_id)
-        # hashkey 설정
-        self._ka.set_order_hash_key(headers, body)
-        self._throttle_rest()
-        try:
-            res = self._session.post(
-                url,
-                headers=headers,
-                data=json.dumps(body),
-                timeout=(_KIS_HTTP_CONNECT_TIMEOUT_SEC, _KIS_HTTP_READ_TIMEOUT_SEC),
-            )
-        except requests.exceptions.RequestException as exc:
-            logger.warning(
-                "[KIS API] POST 전송 실패: tr_id=%s path=%s error=%s",
-                tr_id,
-                path,
-                exc,
-            )
-            raise
-        res.raise_for_status()
-        data = res.json()
-        if data.get("rt_cd") != "0":
-            logger.error(
-                "[KIS API] POST 실패: tr_id=%s msg=%s", tr_id, data.get("msg1")
-            )
-        return data
+        force_refreshed = False
+
+        while True:
+            self._core._ensure_auth()
+            headers = self._headers(tr_id)
+            # hashkey 설정
+            self._ka.set_order_hash_key(headers, body)
+            self._throttle_rest()
+            try:
+                res = self._session.post(
+                    url,
+                    headers=headers,
+                    data=json.dumps(body),
+                    timeout=(_KIS_HTTP_CONNECT_TIMEOUT_SEC, _KIS_HTTP_READ_TIMEOUT_SEC),
+                )
+            except requests.exceptions.RequestException as exc:
+                logger.warning(
+                    "[KIS API] POST 전송 실패: tr_id=%s path=%s error=%s",
+                    tr_id,
+                    path,
+                    exc,
+                )
+                raise
+
+            data = res.json() if "json" in dir(res) else None
+            if self._is_expired_token_response(res, data=data):
+                if force_refreshed:
+                    res.raise_for_status()
+                logger.warning(
+                    "[KIS API] POST 응답에서 만료 토큰 감지; 강제 재인증 후 재시도 tr_id=%s path=%s",
+                    tr_id,
+                    path,
+                )
+                self._force_reauth_current_env()
+                force_refreshed = True
+                continue
+
+            res.raise_for_status()
+            if not isinstance(data, dict):
+                data = res.json()
+            if data.get("rt_cd") != "0":
+                logger.error(
+                    "[KIS API] POST 실패: tr_id=%s msg=%s", tr_id, data.get("msg1")
+                )
+            return data
 
     # ──────────────────────────────────────────────
     # TradingAPI protocol methods
@@ -368,6 +427,57 @@ class KISTradingAPI:
         df = df.sort_values("date").tail(lookback).reset_index(drop=True)
         return df
 
+    def daily_index_bars(
+        self,
+        index_code: str,
+        end: str,
+        lookback: int,
+    ) -> pd.DataFrame:
+        """
+        국내주식업종기간별시세(일/주/월/년) 조회 [v1_국내주식-021].
+        GET /uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice
+        """
+        from datetime import datetime, timedelta
+
+        end_dt = datetime.strptime(end, "%Y%m%d") if len(end) == 8 else datetime.now()
+        start_dt = end_dt - timedelta(days=lookback * 2)
+        params = {
+            "FID_COND_MRKT_DIV_CODE": "U",
+            "FID_INPUT_ISCD": str(index_code or "").strip().zfill(4),
+            "FID_INPUT_DATE_1": start_dt.strftime("%Y%m%d"),
+            "FID_INPUT_DATE_2": end_dt.strftime("%Y%m%d"),
+            "FID_PERIOD_DIV_CODE": "D",
+        }
+        data = self._get(
+            "/uapi/domestic-stock/v1/quotations/inquire-daily-indexchartprice",
+            "FHKUP03500100",
+            params,
+        )
+        rows = data.get("output2", [])
+        if not rows:
+            return pd.DataFrame()
+
+        records = []
+        for r in rows:
+            dt = r.get("stck_bsop_date", "")
+            if not dt:
+                continue
+            records.append(
+                {
+                    "date": dt,
+                    "open": self._to_float(r.get("bstp_nmix_oprc")),
+                    "high": self._to_float(r.get("bstp_nmix_hgpr")),
+                    "low": self._to_float(r.get("bstp_nmix_lwpr")),
+                    "close": self._to_float(r.get("bstp_nmix_prpr")),
+                    "volume": self._to_int(r.get("acml_vol")),
+                    "value": self._to_int(r.get("acml_tr_pbmn")),
+                }
+            )
+        df = pd.DataFrame(records)
+        if df.empty:
+            return df
+        return df.sort_values("date").tail(lookback).reset_index(drop=True)
+
     def _parse_intraday_rows(self, rows: list[dict[str, Any]]) -> pd.DataFrame:
         records: list[dict[str, Any]] = []
         for r in rows or []:
@@ -522,7 +632,9 @@ class KISTradingAPI:
             "volume": int(out.get("acml_vol", 0)),
             "change_rate": float(out.get("prdy_ctrt", 0)),
             "change_pct": float(out.get("prdy_ctrt", 0)),
-            "market_cap": int(out.get("hts_avls", 0)),
+            "market_cap": int(out.get("hts_avls", 0)) * 100_000_000,
+            "market_warning_code": str(out.get("mrkt_warn_cls_code", "")).strip(),
+            "management_issue_code": str(out.get("mang_issu_cls_code", "")).strip(),
         }
 
     def positions(self) -> list[dict[str, Any]]:

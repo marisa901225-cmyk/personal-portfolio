@@ -60,7 +60,12 @@ def can_enter(
     if len(state.open_positions) >= config.max_total_positions:
         return False, "MAX_TOTAL_POSITIONS"
 
-    if not _is_entry_window_open(entry_type, now, config):
+    if not _is_entry_window_open(
+        entry_type,
+        now,
+        config,
+        day_entries_today=state.day_entries_today,
+    ):
         return False, "ENTRY_WINDOW_CLOSED"
 
     return True, "OK"
@@ -73,11 +78,23 @@ def should_exit_position(
     now: datetime,
     config: TradeEngineConfig,
     swing_trend_broken: bool | None = None,
+    day_lock_retrace_gap_pct_override: float | None = None,
 ) -> tuple[bool, str, float]:
     if position.entry_price <= 0:
         return False, "", 0.0
 
     pnl_pct = (quote_price / position.entry_price) - 1.0
+    if position.type == "T":
+        _update_day_profit_lock(
+            position,
+            pnl_pct,
+            config,
+            retrace_gap_pct_override=day_lock_retrace_gap_pct_override,
+        )
+
+    locked_profit_pct = float(position.locked_profit_pct) if position.locked_profit_pct is not None else None
+    if locked_profit_pct is not None and pnl_pct < locked_profit_pct:
+        return True, "LOCK", pnl_pct
 
     if position.type == "P":
         return False, "", pnl_pct
@@ -117,21 +134,60 @@ def should_exit_position(
     return False, "", pnl_pct
 
 
-def _is_entry_window_open(entry_type: str, now: datetime, cfg: TradeEngineConfig) -> bool:
+def _update_day_profit_lock(
+    position: PositionState,
+    pnl_pct: float,
+    config: TradeEngineConfig,
+    *,
+    retrace_gap_pct_override: float | None = None,
+) -> None:
+    trigger_pct = float(config.day_lock_profit_trigger_pct)
+    if trigger_pct <= 0 or pnl_pct < trigger_pct:
+        return
+
+    base_floor_pct = max(0.0, float(config.day_lock_profit_floor_pct))
+    if retrace_gap_pct_override is None:
+        retrace_gap_pct = max(0.0, float(config.day_lock_retrace_gap_pct))
+    else:
+        retrace_gap_pct = max(0.0, float(retrace_gap_pct_override))
+    dynamic_floor_pct = max(base_floor_pct, pnl_pct - retrace_gap_pct)
+    if dynamic_floor_pct <= 0:
+        return
+
+    current_floor_pct = float(position.locked_profit_pct) if position.locked_profit_pct is not None else 0.0
+    position.locked_profit_pct = max(current_floor_pct, dynamic_floor_pct)
+
+
+def _is_entry_window_open(
+    entry_type: str,
+    now: datetime,
+    cfg: TradeEngineConfig,
+    *,
+    day_entries_today: int = 0,
+) -> bool:
     windows = cfg.entry_windows
     if not windows:
         return False
 
     if entry_type == "T":
+        current_window_index = _current_entry_window_index(now, windows)
+        if current_window_index is None:
+            return False
         try:
-            window_index = int(getattr(cfg, "day_entry_window_index", 0))
+            start_window_index = int(getattr(cfg, "day_entry_window_index", 0))
         except (TypeError, ValueError):
-            window_index = 0
-        if 0 <= window_index < len(windows):
-            return _is_in_window(now, windows[window_index][0], windows[window_index][1])
-        return False
+            start_window_index = 0
+        expected_window_index = start_window_index + max(0, int(day_entries_today))
+        return current_window_index == expected_window_index
 
     return any(_is_in_window(now, start, end) for start, end in windows)
+
+
+def _current_entry_window_index(now: datetime, windows: list[tuple[str, str]]) -> int | None:
+    for index, (start, end) in enumerate(windows):
+        if _is_in_window(now, start, end):
+            return index
+    return None
 
 
 def _count_positions(state: TradeState, position_type: str) -> int:

@@ -193,17 +193,13 @@ async def get_futures_period_price(
     }
     
     try:
-        headers = ka._getBaseHeader()
-        headers["tr_id"] = tr_id
-        headers["custtype"] = "P"
-        
         url = ka.getTREnv().my_url + "/uapi/domestic-futureoption/v1/quotations/inquire-daily-fuopchartprice"
-        
-        import httpx
-        async with httpx.AsyncClient() as client:
-            res = await client.get(url, headers=headers, params=params)
-            res.raise_for_status()
-            return res.json()
+        return await _get_json_with_reauth_retry(
+            url,
+            tr_id,
+            params,
+            context="선물 기간별 시세 조회",
+        )
     except Exception as e:
         logger.error("선물 기간별 시세 조회 실패: %s", e)
         return None
@@ -245,6 +241,46 @@ def _ensure_auth() -> None:
         raise RuntimeError(
             "KIS authentication failed; KIS config not found in settings (환경변수 KIS_MY_APP...) or file (~/KIS/config/kis_user.yaml)"
         ) from exc
+
+
+async def _get_json_with_reauth_retry(
+    url: str,
+    tr_id: str,
+    params: dict,
+    *,
+    context: str,
+) -> Optional[Dict]:
+    import httpx
+
+    force_refreshed = False
+
+    async with httpx.AsyncClient() as client:
+        while True:
+            headers = ka._getBaseHeader()
+            headers["tr_id"] = tr_id
+            headers["custtype"] = "P"
+
+            ka._throttle_rest()  # type: ignore[union-attr]
+            res = await client.get(url, headers=headers, params=params)
+            try:
+                data = res.json()
+            except ValueError:
+                data = None
+
+            if ka.is_expired_token_response(  # type: ignore[union-attr]
+                data=data if isinstance(data, dict) else None,
+                status_code=res.status_code,
+                response_text=res.text,
+            ):
+                if force_refreshed:
+                    res.raise_for_status()
+                logger.warning("%s 응답에서 만료 토큰 감지; 강제 재인증 후 재시도", context)
+                ka.force_reauth_current_env()  # type: ignore[union-attr]
+                force_refreshed = True
+                continue
+
+            res.raise_for_status()
+            return data
 
 
 def _parse_overseas_ticker(ticker: str) -> tuple[str, str]:
@@ -324,25 +360,18 @@ async def get_futures_daily_chart(
     }
     
     try:
-        # kis_auth_rest._url_fetch를 직접 활용하여 호출
-        headers = ka._getBaseHeader()
-        headers["tr_id"] = tr_id
-        headers["custtype"] = "P" # 개인
-        
         url = ka.getTREnv().my_url + "/uapi/domestic-futureoption/v1/quotations/inquire-daily-fuopchartprice"
-        
-        # 비동기 요청을 위해 httpx 활용 (기존 kis_prices 등 패턴 참고)
-        import httpx
-        async with httpx.AsyncClient() as client:
-            res = await client.get(url, headers=headers, params=params)
-            res.raise_for_status()
-            data = res.json()
-            
-            if data.get("rt_cd") != "0":
-                logger.error("KIS 선물 API 오류: %s", data.get("msg1"))
-                return None
-                
-            return data
+        data = await _get_json_with_reauth_retry(
+            url,
+            tr_id,
+            params,
+            context="선물 차트 데이터 조회",
+        )
+        if data and data.get("rt_cd") != "0":
+            logger.error("KIS 선물 API 오류: %s", data.get("msg1"))
+            return None
+
+        return data
     except Exception as e:
         logger.error("선물 차트 데이터 수집 실패: %s", e)
         return None
@@ -363,17 +392,13 @@ async def get_futures_option_price(
     }
     
     try:
-        headers = ka._getBaseHeader()
-        headers["tr_id"] = tr_id
-        headers["custtype"] = "P"
-        
         url = ka.getTREnv().my_url + "/uapi/domestic-futureoption/v1/quotations/inquire-price"
-        
-        import httpx
-        async with httpx.AsyncClient() as client:
-            res = await client.get(url, headers=headers, params=params)
-            res.raise_for_status()
-            return res.json()
+        return await _get_json_with_reauth_retry(
+            url,
+            tr_id,
+            params,
+            context="선물옵션 시세 조회",
+        )
     except Exception as e:
         logger.error("선물옵션 시세 조회 실패: %s", e)
         return None
@@ -399,17 +424,13 @@ async def get_options_display_board(
     }
     
     try:
-        headers = ka._getBaseHeader()
-        headers["tr_id"] = tr_id
-        headers["custtype"] = "P"
-        
         url = ka.getTREnv().my_url + "/uapi/domestic-futureoption/v1/quotations/display-board-callput"
-        
-        import httpx
-        async with httpx.AsyncClient() as client:
-            res = await client.get(url, headers=headers, params=params)
-            res.raise_for_status()
-            return res.json()
+        return await _get_json_with_reauth_retry(
+            url,
+            tr_id,
+            params,
+            context="옵션 전광판 조회",
+        )
     except Exception as e:
         logger.error("옵션 전광판 조회 실패: %s", e)
         return None

@@ -17,7 +17,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
 import kis_auth_state as state
-from kis_auth_rest import _getBaseHeader, _getResultObject, changeTREnv, getTREnv, smart_sleep
+from kis_auth_rest import _getBaseHeader, _getResultObject, _throttle_rest, changeTREnv, getTREnv, smart_sleep
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ def auth_ws(svr="prod", product=None):
     p["secretkey"] = state.get_cfg()[ak2]
 
     url = f"{state.get_cfg()[svr]}/oauth2/Approval"
+    _throttle_rest()
     res = requests.post(url, data=json.dumps(p), headers=_getBaseHeader())
     rescode = res.status_code
     if rescode == 200:

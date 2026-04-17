@@ -11,9 +11,11 @@ from backend.core.db import SessionLocal
 from backend.services.news_collector import NewsCollector
 from backend.services.retry import async_retry, sync_retry
 from backend.services.scheduler_monitor import monitor_job_async
+from backend.services.trading_engine.archive import archive_trading_engine_weekly
 from backend.services.trading_engine.runtime import (
     close_bot as close_trading_bot,
     get_or_create_bot,
+    load_config_from_env as load_trading_engine_config,
     trading_engine_enabled,
 )
 
@@ -229,7 +231,7 @@ async def job_trading_engine_cycle():
 
 async def job_trading_engine_finalize():
     """
-    장 종료 후 거래일지/상태 백업 zip 생성 및 알림 전송.
+    장 종료 후 거래일지 요약 알림 전송.
     """
     bot = get_or_create_bot()
     if bot is None:
@@ -237,8 +239,28 @@ async def job_trading_engine_finalize():
 
     with SessionLocal() as db:
         async with monitor_job_async("trading_engine_finalize", db):
-            zip_path = await asyncio.to_thread(bot.finalize_day)
-            logger.info("trading_engine_finalize zip=%s", zip_path)
+            summary_text = await asyncio.to_thread(bot.finalize_day)
+            logger.info("trading_engine_finalize summary=%s", summary_text)
+
+
+async def job_trading_engine_weekly_archive():
+    """
+    토요일 주간 아카이브.
+
+    - output 디렉토리 산출물과 runlog를 DB로 흡수
+    - state.json은 스냅샷만 보관하고 원본 파일은 유지
+    - 성공 후 output 파일 삭제, runlog는 비움
+    """
+    config = load_trading_engine_config()
+
+    with SessionLocal() as db:
+        async with monitor_job_async("trading_engine_weekly_archive", db):
+            result = archive_trading_engine_weekly(
+                db,
+                config=config,
+                now=datetime.now(KST),
+            )
+            logger.info("trading_engine_weekly_archive result=%s", result)
 
 
 def start_scheduler():
@@ -338,6 +360,14 @@ def start_scheduler():
                 job_trading_engine_finalize,
                 CronTrigger(day_of_week="mon-fri", hour=15, minute=31),
                 id="trading_engine_finalize",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            scheduler.add_job(
+                job_trading_engine_weekly_archive,
+                CronTrigger(day_of_week="sat", hour=6, minute=40),
+                id="trading_engine_weekly_archive",
                 replace_existing=True,
                 max_instances=1,
             )

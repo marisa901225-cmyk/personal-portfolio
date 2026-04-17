@@ -9,6 +9,22 @@ from datetime import datetime
 from typing import Any
 
 
+_SUMMARY_EVENT_LABELS = {
+    "DAY_CANDIDATE_FILTERED": "단타 후보 제외",
+    "ENTER": "진입",
+    "ENTRY_FILL": "진입 체결",
+    "ERROR": "오류",
+    "EXIT": "청산",
+    "EXIT_FILL": "청산 체결",
+    "FORCE_EXIT": "강제 청산",
+    "HOLD_MATCH": "기보유 유지",
+    "NEWS_SENTIMENT": "뉴스 심리",
+    "OPEN_ORDERS": "미체결 처리",
+    "PASS": "패스",
+    "STATE_RECONCILE_DROP": "상태 동기화 정리",
+}
+
+
 @dataclass(slots=True)
 class TradeJournal:
     output_dir: str
@@ -50,24 +66,43 @@ class TradeJournal:
 
     def summary(self) -> str:
         """이벤트별 카운트 요약 문자열 반환"""
+        counts = self._load_event_counts_from_file() or dict(self.event_counts)
         # 알림에서 노이즈인 내부 이벤트는 제외
         skip = {"RUN_START", "RUN_END", "SCAN_DONE"}
         lines = []
-        scan = self.event_counts.get("SCAN_DONE", 0)
+        scan = counts.get("SCAN_DONE", 0)
         if scan:
             lines.append(f"스캔: {scan}회")
-        for event, count in sorted(self.event_counts.items()):
+        for event, count in sorted(counts.items()):
             if event in skip:
                 continue
-            label = {
-                "ENTER": "진입",
-                "EXIT": "청산",
-                "PASS": "패스",
-                "ERROR": "오류",
-                "OPEN_ORDERS": "미체결처리",
-            }.get(event, event)
+            label = _SUMMARY_EVENT_LABELS.get(event, event)
             lines.append(f"{label}: {count}회")
         return " | ".join(lines) if lines else "이벤트 없음"
+
+    def _load_event_counts_from_file(self) -> dict[str, int]:
+        if not os.path.exists(self.jsonl_path):
+            return {}
+
+        counts: dict[str, int] = {}
+        try:
+            with open(self.jsonl_path, "r", encoding="utf-8") as f:
+                for raw_line in f:
+                    line = raw_line.strip()
+                    if not line:
+                        continue
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    event = str(row.get("event") or "").strip()
+                    if not event:
+                        continue
+                    counts[event] = counts.get(event, 0) + 1
+        except OSError:
+            return {}
+
+        return counts
 
     def make_backup_zip(
         self,

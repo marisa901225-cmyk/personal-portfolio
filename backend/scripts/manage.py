@@ -99,10 +99,11 @@ def backup_db(args):
     """Backup SQLite database, compress, and notify."""
     try:
         from dotenv import load_dotenv
-        # .env 파일 로드
+        from backend.core.env_paths import get_project_env_files
+
         project_root = Path(__file__).resolve().parent.parent
-        env_path = project_root / ".env"
-        load_dotenv(env_path)
+        for env_path in get_project_env_files():
+            load_dotenv(env_path)
         
         from backend.services.backup import BackupService
         from backend.services.google_drive_client import GoogleDriveService
@@ -282,6 +283,7 @@ def backup_db(args):
 def run_scheduler(args):
     """Run the master service supervisor (Orchestrator/Policy Manager)"""
     import asyncio
+    from backend.core.db_migrations import ensure_schema
     from backend.services.scheduler.core import start_scheduler, shutdown_scheduler
     from backend.core.db import SessionLocal
     from backend.services.scheduler_monitor import (
@@ -290,6 +292,7 @@ def run_scheduler(args):
         update_scheduler_state
     )
 
+    ensure_schema()
     logging.info("Initializing Master Service Supervisor (Policy Manager)...")
 
     async def _main():

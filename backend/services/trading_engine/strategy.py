@@ -5,11 +5,22 @@ from typing import Any
 
 import pandas as pd
 
+from .candidate_scoring import (
+    _day_intraday_structure_score,
+    _resolve_change_pct,
+    _score_day_row,
+    _score_swing_row,
+    _swing_quote_structure_score,
+)
 from .config import TradeEngineConfig
 from .interfaces import TradingAPI
-from .news_sentiment import NewsSentimentSignal
+from .news_sentiment import NewsSentimentSignal, _load_sector_keywords
 from .screeners import etf_swing_screener, model_screener, popular_screener
-from .utils import parse_numeric
+from .utils import is_broad_market_etf, is_live_status_disqualified, match_name_to_sectors, parse_numeric
+
+_PREFERRED_THEME_ETF_NAME_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "semiconductor": ("kodex 반도체",),
+}
 
 
 @dataclass(slots=True)
@@ -23,10 +34,21 @@ class Candidates:
 
 
 
-def build_candidates(api: TradingAPI, asof: str, config: TradeEngineConfig) -> Candidates:
+def build_candidates(
+    api: TradingAPI,
+    asof: str,
+    config: TradeEngineConfig,
+    news_signal: NewsSentimentSignal | None = None,
+) -> Candidates:
     excluded_codes = _proxy_codes(config)
     popular = _drop_excluded_codes(
-        popular_screener(api, asof, include_etf=config.include_etf, config=config),
+        popular_screener(
+            api,
+            asof,
+            include_etf=config.include_etf,
+            config=config,
+            news_signal=news_signal,
+        ),
         excluded_codes,
     )
     model = _drop_excluded_codes(
@@ -39,7 +61,14 @@ def build_candidates(api: TradingAPI, asof: str, config: TradeEngineConfig) -> C
         else pd.DataFrame()
     )
 
-    merged = _merge_candidates(popular, model, etf)
+    sector_keywords = _candidate_sector_keywords(config, news_signal)
+    merged = _merge_candidates(
+        popular,
+        model,
+        etf,
+        sector_keywords=sector_keywords,
+        news_signal=news_signal,
+    )
     merged = _drop_excluded_codes(merged, excluded_codes)
     quote_codes = _build_quote_codes(merged, config.quote_score_limit)
     return Candidates(
@@ -49,6 +78,20 @@ def build_candidates(api: TradingAPI, asof: str, config: TradeEngineConfig) -> C
         etf=etf,
         merged=merged,
         quote_codes=quote_codes,
+    )
+
+
+def exclude_candidate_codes(candidates: Candidates, excluded_codes: set[str]) -> Candidates:
+    if not excluded_codes:
+        return candidates
+
+    return Candidates(
+        asof=candidates.asof,
+        popular=_drop_excluded_codes(candidates.popular, excluded_codes),
+        model=_drop_excluded_codes(candidates.model, excluded_codes),
+        etf=_drop_excluded_codes(candidates.etf, excluded_codes),
+        merged=_drop_excluded_codes(candidates.merged, excluded_codes),
+        quote_codes=[str(code) for code in candidates.quote_codes if str(code) not in excluded_codes],
     )
 
 
@@ -84,6 +127,11 @@ def pick_swing(
     if primary.empty:
         return None
 
+    if "is_etf" in primary.columns and primary["is_etf"].fillna(False).any():
+        primary = primary[~primary.apply(lambda r: is_broad_market_etf(r.to_dict()), axis=1)]
+        if primary.empty:
+            return None
+
     primary["_change_pct_num"] = primary.apply(lambda r: _resolve_change_pct(r, quotes), axis=1)
     primary = primary[
         primary["_change_pct_num"].isna()
@@ -108,6 +156,17 @@ def pick_swing(
     scored = scored.sort_values("score", ascending=False)
     if scored.empty:
         return None
+
+    if not use_etf_fallback:
+        themed_etf_code = _pick_theme_day_swing_etf(
+            stock_scored=scored,
+            etf_candidates=candidates.etf,
+            quotes=quotes,
+            config=config,
+            news_signal=news_signal,
+        )
+        if themed_etf_code:
+            return themed_etf_code
     return str(scored.iloc[0]["code"])
 
 
@@ -139,11 +198,23 @@ def rank_daytrade_codes(
         if "avg_value_5d" in pool.columns
         else 0.0
     )
+    pool["_mcap_num"] = (
+        pool["mcap"].map(parse_numeric)
+        if "mcap" in pool.columns
+        else 0.0
+    )
     pool["_change_pct_num"] = (
         pool["change_pct"].map(parse_numeric)
         if "change_pct" in pool.columns
         else None
     )
+    pool["_retrace_from_high_10d_pct"] = (
+        pool["retrace_from_high_10d_pct"].map(parse_numeric)
+        if "retrace_from_high_10d_pct" in pool.columns
+        else None
+    )
+    pool["_market_warning_code"] = pool.apply(lambda r: _resolve_market_warning_code(r, quotes), axis=1)
+    pool["_management_issue_code"] = pool.apply(lambda r: _resolve_management_issue_code(r, quotes), axis=1)
 
     if config.include_etf:
         pool = pool[
@@ -156,10 +227,62 @@ def rank_daytrade_codes(
     if pool.empty:
         return []
 
+    stock_has_mcap = (
+        (~pool["_is_etf"])
+        & pool["_mcap_num"].fillna(0).gt(0)
+    ).any()
+    pool = pool[
+        pool["_is_etf"]
+        | (
+            (pool["_avg_value_5d_num"].fillna(0) >= float(config.day_stock_min_avg_value_5d))
+            & (
+                (pool["_mcap_num"].fillna(0) >= float(config.day_stock_min_mcap))
+                if stock_has_mcap
+                else True
+            )
+        )
+    ]
+    if pool.empty:
+        return []
+
+    pool = pool[
+        ~pool.apply(
+            lambda row: is_live_status_disqualified(
+                {
+                    "market_warning_code": row.get("_market_warning_code"),
+                    "management_issue_code": row.get("_management_issue_code"),
+                }
+            ),
+            axis=1,
+        )
+    ]
+    if pool.empty:
+        return []
+
     pool["_live_change_pct_num"] = pool.apply(lambda r: _resolve_change_pct(r, quotes), axis=1)
     pool = pool[
         pool["_live_change_pct_num"].isna()
         | (pool["_live_change_pct_num"] > float(config.day_hard_drop_exclude_pct))
+    ]
+    if pool.empty:
+        return []
+
+    pool = pool[
+        pool["_retrace_from_high_10d_pct"].isna()
+        | (pool["_retrace_from_high_10d_pct"] >= float(config.day_recent_high_retrace_10d_min_pct))
+    ]
+    if pool.empty:
+        return []
+
+    pool["_day_max_change_pct"] = pool["_is_etf"].map(
+        lambda is_etf: float(config.day_etf_max_change_pct if is_etf else config.day_max_change_pct)
+    )
+    pool = pool[
+        pool["_live_change_pct_num"].isna()
+        | (
+            (pool["_live_change_pct_num"] >= float(config.day_min_change_pct))
+            & (pool["_live_change_pct_num"] <= pool["_day_max_change_pct"])
+        )
     ]
     if pool.empty:
         return []
@@ -179,24 +302,32 @@ def rank_daytrade_codes(
     stock_pool = pool[~pool["_is_etf"]]
     etf_pool = pool[pool["_is_etf"]]
 
-    ordered_codes: list[str] = []
-
+    preferred_code: str | None = None
     if not stock_pool.empty and not etf_pool.empty:
         best_stock = stock_pool.iloc[0]
         best_etf = etf_pool.iloc[0]
         if best_stock["score"] >= best_etf["score"] * config.day_stock_prefer_threshold:
-            ordered_frames = [stock_pool, etf_pool]
+            preferred_code = str(best_stock["code"])
         else:
-            ordered_frames = [etf_pool, stock_pool]
-    elif not stock_pool.empty:
-        ordered_frames = [stock_pool]
-    elif not etf_pool.empty:
-        ordered_frames = [etf_pool]
-    else:
-        ordered_frames = []
+            preferred_code = str(best_etf["code"])
+    elif not pool.empty:
+        preferred_code = str(pool.iloc[0]["code"])
 
-    for frame in ordered_frames:
-        ordered_codes.extend([str(code) for code in frame["code"].tolist()])
+    sector_keywords = _candidate_sector_keywords(config, news_signal)
+    ordered_pool = _diversify_candidate_rows_by_sector(
+        pool,
+        sector_keywords=sector_keywords,
+        news_signal=news_signal,
+        preferred_code=preferred_code,
+    )
+
+    # Keep the original score order for fallback attempts; only bias the first pick.
+    ordered_codes: list[str] = []
+    if preferred_code:
+        ordered_codes.append(str(preferred_code))
+    ordered_codes.extend(
+        str(code) for code in ordered_pool["code"].tolist() if str(code) != str(preferred_code)
+    )
 
     deduped_codes: list[str] = []
     seen: set[str] = set()
@@ -209,11 +340,39 @@ def rank_daytrade_codes(
     return deduped_codes
 
 
-def _merge_candidates(popular: pd.DataFrame, model: pd.DataFrame, etf: pd.DataFrame) -> pd.DataFrame:
+def _merge_candidates(
+    popular: pd.DataFrame,
+    model: pd.DataFrame,
+    etf: pd.DataFrame,
+    *,
+    sector_keywords: dict[str, tuple[str, ...]] | None = None,
+    news_signal: NewsSentimentSignal | None = None,
+) -> pd.DataFrame:
     blocks: list[pd.DataFrame] = []
 
     if not popular.empty:
-        p = popular[["code", "name", "avg_value_5d", "close", "change_pct", "is_etf"]].copy()
+        p_cols = ["code", "name", "avg_value_5d", "close", "change_pct", "is_etf"]
+        if "mcap" in popular.columns:
+            p_cols.insert(2, "mcap")
+        for extra_col in (
+            "theme_injected",
+            "theme_sector",
+            "industry_large_name",
+            "industry_medium_name",
+            "industry_small_name",
+            "industry_bucket_code",
+            "industry_bucket_name",
+            "industry_close",
+            "industry_ma5",
+            "industry_ma20",
+            "industry_day_change_pct",
+            "industry_5d_change_pct",
+            "sector_bucket_selected",
+            "legacy_top10_selected",
+        ):
+            if extra_col in popular.columns:
+                p_cols.append(extra_col)
+        p = popular[p_cols].copy()
         p["source_popular"] = True
         blocks.append(p)
 
@@ -231,16 +390,30 @@ def _merge_candidates(popular: pd.DataFrame, model: pd.DataFrame, etf: pd.DataFr
         return pd.DataFrame(columns=["code"])
 
     merged = pd.concat(blocks, ignore_index=True, sort=False)
-    # 존재하는 컬럼만 기준으로 정렬 (popular만 있을 경우 avg_value_20d가 없음)
-    sort_cols = [c for c in ["avg_value_20d", "avg_value_5d"] if c in merged.columns]
-    if sort_cols:
-        merged = merged.sort_values(
-            by=sort_cols,
-            ascending=False,
-            na_position="last",
-        )
+    if "theme_injected" not in merged.columns:
+        merged["theme_injected"] = False
+    merged["theme_injected"] = merged["theme_injected"].map(_to_bool)
+    merged["_liquidity_score"] = merged.apply(
+        lambda row: max(
+            parse_numeric(row.get("avg_value_20d")) or 0.0,
+            parse_numeric(row.get("avg_value_5d")) or 0.0,
+        ),
+        axis=1,
+    )
+    sort_cols = ["theme_injected", "_liquidity_score"]
+    sort_cols.extend(col for col in ("avg_value_20d", "avg_value_5d") if col in merged.columns)
+    merged = merged.sort_values(
+        by=sort_cols,
+        ascending=[False] * len(sort_cols),
+        na_position="last",
+    )
     merged = merged.drop_duplicates(subset=["code"], keep="first").reset_index(drop=True)
-    return merged
+    merged = _diversify_candidate_rows_by_sector(
+        merged,
+        sector_keywords=sector_keywords,
+        news_signal=news_signal,
+    )
+    return merged.drop(columns=["_liquidity_score"], errors="ignore")
 
 
 def _build_quote_codes(merged: pd.DataFrame, limit: int) -> list[str]:
@@ -250,137 +423,231 @@ def _build_quote_codes(merged: pd.DataFrame, limit: int) -> list[str]:
     return [str(c) for c in top["code"].tolist()]
 
 
-def _score_swing_row(
-    row: pd.Series,
-    quotes: dict[str, dict[str, Any]],
+def _candidate_sector_keywords(
     config: TradeEngineConfig,
-    news_signal: NewsSentimentSignal | None = None,
-) -> float:
-    code = str(row.get("code"))
-    q = quotes.get(code, {})
-    close = parse_numeric(q.get("price")) or parse_numeric(row.get("close")) or 0.0
-    ma20 = parse_numeric(row.get("ma20"))
-    ma60 = parse_numeric(row.get("ma60"))
-    avg20 = parse_numeric(row.get("avg_value_20d")) or 0.0
-
-    score = 0.0
-    trend_tier = str(row.get("trend_tier") or "").strip().lower()
-    if bool(row.get("source_model", False)):
-        score += 30.0 if trend_tier == "strict" else 22.0
-
-    if ma20 and close > ma20:
-        score += 10.0
-    if ma20 and ma60 and ma20 > ma60:
-        score += 10.0
-
-    score += min(20.0, max(0.0, avg20 / 100_000_000_000))
-
-    if ma20 and ma20 > 0 and (close / ma20 - 1.0) > 0.08:
-        score -= 20.0
-
-    chg = _resolve_change_pct(row, quotes)
-    if chg is not None:
-        cap_pct = max(float(config.swing_momentum_bonus_cap_pct), 1e-9)
-        if chg >= 0:
-            score += min(float(config.swing_momentum_bonus_max), float(config.swing_momentum_bonus_max) * (chg / cap_pct))
-        else:
-            penalty_cap = max(abs(float(config.swing_hard_drop_exclude_pct)), cap_pct, 1.0)
-            penalty_ratio = min(1.0, abs(chg) / penalty_cap)
-            score -= float(config.swing_negative_penalty_max) * penalty_ratio
-
-    score += _news_score_bonus(
-        row,
-        news_signal,
-        weight=config.news_swing_weight,
-        market_fallback_ratio=config.news_market_fallback_ratio,
-    )
-
-    return score
-
-
-def _score_day_row(
-    row: pd.Series,
-    quotes: dict[str, dict[str, Any]],
-    config: TradeEngineConfig,
-    news_signal: NewsSentimentSignal | None = None,
-) -> float:
-    code = str(row.get("code"))
-    q = quotes.get(code, {})
-
-    score = 30.0
-    avg5 = parse_numeric(row.get("_avg_value_5d_num"))
-    if avg5 is None:
-        avg5 = parse_numeric(row.get("avg_value_5d")) or 0.0
-    score += min(20.0, avg5 / 100_000_000_000)
-
-    chg = _resolve_change_pct(row, quotes)
-
-    if chg is not None:
-        cap_pct = max(config.day_momentum_bonus_cap_pct, 1e-9)
-        if 0.5 <= chg <= cap_pct:
-            score += config.day_momentum_bonus_max * (chg / cap_pct)
-        elif chg > 20.0:        # 20% 이상 급등은 너무 늦음 (리스크)
-            score -= 10.0
-        elif chg < 0:           # 하락세인 종목은 감점 (떨어지는 칼날 회피)
-            score -= min(
-                float(config.day_negative_penalty_max),
-                abs(float(chg)) * float(config.day_negative_penalty_per_pct),
-            )
-
-    bid = parse_numeric(q.get("bid"))
-    ask = parse_numeric(q.get("ask"))
-    price = parse_numeric(q.get("price"))
-    if bid and ask and price and price > 0:
-        spread_pct = (ask - bid) / price
-        if spread_pct > 0.015:  # 1% -> 1.5% 완화 (중소형주 호가 공백 감안)
-            score -= 5.0        # 감점 폭도 -10 -> -5로 완화
-
-    if bool(row.get("fallback_selected", False)):
-        score -= 5.0
-    
-    # ETF가 아닌 개별 주식에 가산점 부여 (알파 추구)
-    if not _to_bool(row.get("_is_etf", row.get("is_etf", False))):
-        score += 5.0
-
-    score += _news_score_bonus(
-        row,
-        news_signal,
-        weight=config.news_day_weight,
-        market_fallback_ratio=config.news_market_fallback_ratio,
-    )
-
-    return score
-
-
-def _news_score_bonus(
-    row: pd.Series,
     news_signal: NewsSentimentSignal | None,
+) -> dict[str, tuple[str, ...]]:
+    if news_signal is not None and news_signal.sector_keywords:
+        return news_signal.sector_keywords
+    return _load_sector_keywords(config.news_sector_queries_path)
+
+
+def _diversify_candidate_rows_by_sector(
+    df: pd.DataFrame,
     *,
-    weight: float,
-    market_fallback_ratio: float,
-) -> float:
-    if news_signal is None or abs(weight) < 1e-9:
-        return 0.0
+    sector_keywords: dict[str, tuple[str, ...]] | None,
+    news_signal: NewsSentimentSignal | None = None,
+    preferred_code: str | None = None,
+) -> pd.DataFrame:
+    if df.empty or "code" not in df.columns or not sector_keywords:
+        return df
 
-    sentiment, matched = news_signal.score_for_name(str(row.get("name", "")))
+    working = df.copy()
+    working["_primary_sector"] = working.apply(
+        lambda row: _resolve_candidate_primary_sector(
+            row,
+            sector_keywords=sector_keywords,
+            news_signal=news_signal,
+        ),
+        axis=1,
+    )
+    classified_sectors = {str(sector).strip() for sector in working["_primary_sector"].tolist() if str(sector).strip()}
+    if len(classified_sectors) <= 1:
+        return working.drop(columns=["_primary_sector"], errors="ignore")
+
+    ordered_indices: list[Any] = []
+    seen_codes: set[str] = set()
+    seen_sectors: set[str] = set()
+
+    def _append_row(idx: Any) -> None:
+        row = working.loc[idx]
+        code = str(row.get("code") or "")
+        if not code or code in seen_codes:
+            return
+        ordered_indices.append(idx)
+        seen_codes.add(code)
+        sector = str(row.get("_primary_sector") or "").strip()
+        if sector:
+            seen_sectors.add(sector)
+
+    if preferred_code:
+        preferred_mask = working["code"].astype(str) == str(preferred_code)
+        if preferred_mask.any():
+            _append_row(working.index[preferred_mask][0])
+
+    for idx, row in working.iterrows():
+        code = str(row.get("code") or "")
+        if not code or code in seen_codes:
+            continue
+        sector = str(row.get("_primary_sector") or "").strip()
+        if sector and sector in seen_sectors:
+            continue
+        _append_row(idx)
+
+    for idx, row in working.iterrows():
+        code = str(row.get("code") or "")
+        if not code or code in seen_codes:
+            continue
+        _append_row(idx)
+
+    if not ordered_indices:
+        return working.drop(columns=["_primary_sector"], errors="ignore")
+    return working.loc[ordered_indices].drop(columns=["_primary_sector"], errors="ignore").reset_index(drop=True)
+
+
+def _resolve_candidate_primary_sector(
+    row: pd.Series,
+    *,
+    sector_keywords: dict[str, tuple[str, ...]],
+    news_signal: NewsSentimentSignal | None = None,
+) -> str:
+    industry_bucket = _clean_text(row.get("industry_bucket_name"))
+    if industry_bucket:
+        return industry_bucket
+
+    explicit_sector = _clean_text(row.get("theme_sector"))
+    if explicit_sector:
+        return explicit_sector
+
+    matched = _match_name_to_sectors(str(row.get("name") or ""), sector_keywords)
     if not matched:
-        weight = weight * max(0.0, float(market_fallback_ratio))
-    return float(sentiment) * float(weight)
+        return ""
+
+    if news_signal is None:
+        return sorted(matched)[0]
+
+    ranked_matches = sorted(
+        matched,
+        key=lambda sector: (float(news_signal.sector_scores.get(sector, 0.0)), str(sector)),
+        reverse=True,
+    )
+    return str(ranked_matches[0]) if ranked_matches else ""
+
+def _pick_theme_day_swing_etf(
+    *,
+    stock_scored: pd.DataFrame,
+    etf_candidates: pd.DataFrame,
+    quotes: dict[str, dict[str, Any]],
+    config: TradeEngineConfig,
+    news_signal: NewsSentimentSignal | None,
+) -> str | None:
+    if (
+        news_signal is None
+        or etf_candidates is None
+        or etf_candidates.empty
+        or not bool(config.swing_prefer_sector_etf_on_theme_day)
+    ):
+        return None
+
+    best_stock = stock_scored.iloc[0]
+    matched_sectors = _match_name_to_sectors(
+        str(best_stock.get("name") or ""),
+        news_signal.sector_keywords,
+    )
+    if not matched_sectors:
+        return None
+
+    etf_pool = etf_candidates.copy()
+    etf_pool = etf_pool[~etf_pool.apply(lambda r: is_broad_market_etf(r.to_dict()), axis=1)]
+    if etf_pool.empty:
+        return None
+    etf_pool["source_model"] = False
+    etf_pool["_change_pct_num"] = etf_pool.apply(lambda r: _resolve_change_pct(r, quotes), axis=1)
+    etf_pool = etf_pool[
+        etf_pool["_change_pct_num"].isna()
+        | (etf_pool["_change_pct_num"] > float(config.swing_hard_drop_exclude_pct))
+    ]
+    if etf_pool.empty:
+        return None
+
+    etf_pool["score"] = etf_pool.apply(
+        lambda r: _score_swing_row(r, quotes, config, news_signal),
+        axis=1,
+    )
+
+    sector_order = sorted(
+        matched_sectors,
+        key=lambda sector: float(news_signal.sector_scores.get(sector, 0.0)),
+        reverse=True,
+    )
+    for sector in sector_order:
+        sector_score = float(news_signal.sector_scores.get(sector, 0.0))
+        if sector_score < float(config.swing_sector_etf_min_sector_score):
+            continue
+
+        breadth = int(
+            stock_scored["name"]
+            .fillna("")
+            .map(lambda name: sector in _match_name_to_sectors(str(name), news_signal.sector_keywords))
+            .sum()
+        )
+        if breadth < int(config.swing_sector_etf_min_breadth):
+            continue
+
+        themed_etfs = etf_pool[
+            etf_pool["name"]
+            .fillna("")
+            .map(lambda name: sector in _match_name_to_sectors(str(name), news_signal.sector_keywords))
+        ].copy()
+        if themed_etfs.empty:
+            continue
+
+        theme_bonus = (sector_score * 20.0) + min(10.0, max(0, breadth - 1) * 4.0)
+        themed_etfs["theme_score"] = themed_etfs["score"] + theme_bonus
+        themed_etfs["_preferred_name_rank"] = themed_etfs["name"].fillna("").map(
+            lambda name: _theme_etf_name_preference_rank(str(name), sector)
+        )
+        themed_etfs = themed_etfs[
+            themed_etfs["theme_score"] >= float(config.swing_sector_etf_min_score)
+        ]
+        themed_etfs = themed_etfs[
+            themed_etfs["_change_pct_num"].isna()
+            | (themed_etfs["_change_pct_num"] >= float(config.swing_sector_etf_min_change_pct))
+        ]
+        if themed_etfs.empty:
+            continue
+
+        themed_etfs = themed_etfs.sort_values(
+            by=["_preferred_name_rank", "theme_score", "score", "_change_pct_num", "avg_value_20d"],
+            ascending=[True, False, False, False, False],
+        )
+        return str(themed_etfs.iloc[0]["code"])
+
+    return None
 
 
-def _resolve_change_pct(row: pd.Series, quotes: dict[str, dict[str, Any]]) -> float | None:
+def _match_name_to_sectors(
+    name: str,
+    sector_keywords: dict[str, tuple[str, ...]],
+) -> set[str]:
+    return match_name_to_sectors(name, sector_keywords)
+
+
+def _theme_etf_name_preference_rank(name: str, sector: str) -> int:
+    normalized = str(name or "").strip().lower()
+    preferred_keywords = _PREFERRED_THEME_ETF_NAME_KEYWORDS.get(str(sector), ())
+    for idx, keyword in enumerate(preferred_keywords):
+        if keyword in normalized:
+            return idx
+    return len(preferred_keywords) + 1
+
+
+def _resolve_market_warning_code(row: pd.Series, quotes: dict[str, dict[str, Any]]) -> Any:
     code = str(row.get("code"))
     q = quotes.get(code, {})
-    chg = parse_numeric(q.get("change_pct"))
-    if chg is None:
-        chg = parse_numeric(q.get("change_rate"))
-    if chg is None:
-        chg = parse_numeric(row.get("_live_change_pct_num"))
-    if chg is None:
-        chg = parse_numeric(row.get("_change_pct_num"))
-    if chg is None:
-        chg = parse_numeric(row.get("change_pct"))
-    return chg
+    return q.get("market_warning_code") or row.get("market_warning_code") or row.get("mrkt_warn_cls_code")
+
+
+def _resolve_management_issue_code(row: pd.Series, quotes: dict[str, dict[str, Any]]) -> Any:
+    code = str(row.get("code"))
+    q = quotes.get(code, {})
+    return (
+        q.get("management_issue_code")
+        or row.get("management_issue_code")
+        or row.get("mang_issu_cls_code")
+        or row.get("mang_issu_yn")
+        or row.get("admn_item_yn")
+    )
 
 
 def _proxy_codes(config: TradeEngineConfig) -> set[str]:
@@ -400,8 +667,24 @@ def _to_bool(value: Any) -> bool:
         return value
     if value is None:
         return False
+    try:
+        if pd.isna(value):
+            return False
+    except TypeError:
+        pass
     if isinstance(value, (int, float)):
         return value != 0
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
     return bool(value)
+
+
+def _clean_text(value: Any) -> str:
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except TypeError:
+        pass
+    return str(value).strip()

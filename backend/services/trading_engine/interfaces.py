@@ -73,6 +73,14 @@ class TradingDayAPI(Protocol):
         ...
 
 
+@runtime_checkable
+class IndexChartAPI(Protocol):
+    """Optional interface for domestic industry/index daily charts."""
+
+    def daily_index_bars(self, index_code: str, end: str, lookback: int) -> pd.DataFrame:
+        ...
+
+
 class TextNotifier(Protocol):
     def __call__(self, text: str) -> bool:
         ...

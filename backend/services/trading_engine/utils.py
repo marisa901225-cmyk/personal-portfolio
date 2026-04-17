@@ -38,6 +38,34 @@ _LEVERAGE_ETF_KEYWORDS = [
     "ultra",
 ]
 
+_BROAD_MARKET_ETF_KEYWORDS = [
+    "s&p500",
+    "s&p 500",
+    "snp500",
+    "snp 500",
+    "나스닥100",
+    "나스닥 100",
+    "nasdaq100",
+    "nasdaq 100",
+    "코스피200",
+    "코스피 200",
+    "kospi200",
+    "kospi 200",
+    "코스닥150",
+    "코스닥 150",
+    "kosdaq150",
+    "kosdaq 150",
+    "다우존스",
+    "dowjones",
+    "dow jones",
+    "러셀2000",
+    "러셀 2000",
+    "russell2000",
+    "russell 2000",
+]
+
+_DISQUALIFY_MARKET_WARNING_CODES = {"02", "03"}
+
 
 def parse_numeric(value: Any) -> float | None:
     if value is None:
@@ -132,6 +160,29 @@ def _to_bool(value: Any) -> bool:
     return text in {"y", "yes", "true", "1", "etf"}
 
 
+def normalize_market_warning_code(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.isdigit():
+        return text.zfill(2)
+    return text.upper()
+
+
+def is_live_status_disqualified(row: dict[str, Any] | pd.Series) -> bool:
+    data = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+    management_issue = (
+        data.get("management_issue_code")
+        or data.get("mang_issu_cls_code")
+        or data.get("mang_issu_yn")
+        or data.get("admn_item_yn")
+    )
+    market_warning_code = normalize_market_warning_code(
+        data.get("market_warning_code") or data.get("mrkt_warn_cls_code")
+    )
+    return _to_bool(management_issue) or market_warning_code in _DISQUALIFY_MARKET_WARNING_CODES
+
+
 def is_etf_row(row: dict[str, Any] | pd.Series) -> bool:
     data = row.to_dict() if hasattr(row, "to_dict") else dict(row)
     if _to_bool(data.get("is_etf")):
@@ -152,6 +203,36 @@ def is_excluded_etf(row: dict[str, Any] | pd.Series) -> bool:
     product_type = str(data.get("product_type") or "").lower()
     text = f"{name} {product_type}"
     return any(keyword in text for keyword in _LEVERAGE_ETF_KEYWORDS)
+
+
+def is_broad_market_etf(row: dict[str, Any] | pd.Series) -> bool:
+    data = row.to_dict() if hasattr(row, "to_dict") else dict(row)
+    name = str(data.get("name") or "").strip().lower()
+    product_type = str(data.get("product_type") or "").strip().lower()
+    if not name and not product_type:
+        return False
+
+    text = f"{name} {product_type}"
+    compact_text = text.replace(" ", "")
+    return any(
+        keyword in text or keyword.replace(" ", "") in compact_text
+        for keyword in _BROAD_MARKET_ETF_KEYWORDS
+    )
+
+
+def match_name_to_sectors(
+    name: str,
+    sector_keywords: dict[str, tuple[str, ...]],
+) -> set[str]:
+    normalized = str(name or "").strip().lower()
+    if not normalized:
+        return set()
+
+    matched: set[str] = set()
+    for sector, keywords in sector_keywords.items():
+        if any(keyword in normalized for keyword in keywords):
+            matched.add(str(sector))
+    return matched
 
 
 def compute_sma(close_series: pd.Series, window: int) -> pd.Series:

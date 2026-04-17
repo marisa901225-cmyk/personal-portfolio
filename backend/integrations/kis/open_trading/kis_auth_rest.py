@@ -10,25 +10,66 @@ import logging
 import requests
 
 import kis_auth_state as state
+from backend.integrations.kis.rest_rate_limiter import throttle_rest_requests
 from backend.integrations.kis.token_store import read_kis_token, save_kis_token
 
 logger = logging.getLogger(__name__)
 
+_EXPIRED_TOKEN_MESSAGE_CODES = {"EGW00123"}
+_EXPIRED_TOKEN_MESSAGE_SNIPPETS = (
+    "기간이 만료된 token",
+    "token expired",
+    "expired token",
+)
+
 
 def _throttle_rest() -> None:
-    while True:
-        with state._rest_rate_lock:
-            now = time.perf_counter()
-            while state._rest_rate_timestamps and now - state._rest_rate_timestamps[0] >= state._REST_RATE_WINDOW:
-                state._rest_rate_timestamps.popleft()
-            if len(state._rest_rate_timestamps) < state._REST_RATE_LIMIT:
-                state._rest_rate_timestamps.append(now)
-                return
-            sleep_for = state._REST_RATE_WINDOW - (now - state._rest_rate_timestamps[0])
-        if sleep_for > 0:
-            time.sleep(sleep_for)
-        else:
-            time.sleep(0)
+    throttle_rest_requests()
+
+
+def _safe_json_dict(response) -> dict | None:
+    try:
+        payload = response.json()
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def is_expired_token_response(
+    response=None,
+    *,
+    data: dict | None = None,
+    status_code: int | None = None,
+    response_text: str | None = None,
+) -> bool:
+    payload = data if isinstance(data, dict) else None
+
+    if payload is None and response is not None:
+        payload = _safe_json_dict(response)
+
+    if status_code is None and response is not None:
+        status_code = getattr(response, "status_code", None)
+
+    if response_text is None and response is not None:
+        response_text = getattr(response, "text", None)
+
+    msg_cd = str((payload or {}).get("msg_cd") or "").strip()
+    msg1 = str((payload or {}).get("msg1") or "").strip()
+    combined = " ".join(part for part in (msg_cd, msg1, response_text or "") if part).lower()
+
+    if msg_cd in _EXPIRED_TOKEN_MESSAGE_CODES:
+        return True
+    if any(snippet.lower() in combined for snippet in _EXPIRED_TOKEN_MESSAGE_SNIPPETS):
+        return True
+    if status_code == 401 and "token" in combined:
+        return True
+    return False
+
+
+def force_reauth_current_env():
+    product = getattr(getTREnv(), "my_prod", None)
+    svr = "vps" if isPaperTrading() else "prod"
+    return auth(svr=svr, product=product, force=True)
 
 
 def save_token(my_token, my_expired):
@@ -257,6 +298,7 @@ def auth(svr="prod", product=None, url=None, force=False):
 
             if not url:
                 url = f"{state.get_cfg()[svr]}/oauth2/tokenP"
+            _throttle_rest()
             res = requests.post(url, data=json.dumps(p), headers=_getBaseHeader())
             rescode = res.status_code
             
@@ -349,12 +391,33 @@ def getTREnv():
 
 def set_order_hash_key(h, p):
     url = f"{getTREnv().my_url}/uapi/hashkey"
-    res = requests.post(url, data=json.dumps(p), headers=h)
-    rescode = res.status_code
-    if rescode == 200:
-        h["hashkey"] = _getResultObject(res.json()).HASH
-    else:
-        print("Error:", rescode)
+    force_refreshed = False
+
+    while True:
+        _throttle_rest()
+        res = requests.post(url, data=json.dumps(p), headers=h)
+        rescode = res.status_code
+        payload = _safe_json_dict(res)
+
+        if is_expired_token_response(res, data=payload):
+            if force_refreshed:
+                print("Error:", rescode)
+                return
+
+            logger.warning("[KIS] hashkey 응답에서 만료 토큰 감지; 강제 재인증 후 재시도")
+            force_reauth_current_env()
+            refreshed_headers = _getBaseHeader()
+            for key in ("authorization", "appkey", "appsecret"):
+                if key in refreshed_headers:
+                    h[key] = refreshed_headers[key]
+            force_refreshed = True
+            continue
+
+        if rescode == 200:
+            h["hashkey"] = _getResultObject(payload or res.json()).HASH
+        else:
+            print("Error:", rescode)
+        return
 
 
 class APIResp:
@@ -480,38 +543,55 @@ def _url_fetch(
     api_url, ptr_id, tr_cont, params, appendHeaders=None, postFlag=False, hashFlag=True
 ):
     url = f"{getTREnv().my_url}{api_url}"
+    force_refreshed = False
 
-    headers = _getBaseHeader()
+    while True:
+        headers = _getBaseHeader()
 
-    tr_id = ptr_id
-    if ptr_id[0] in ("T", "J", "C"):
-        if isPaperTrading():
-            tr_id = "V" + ptr_id[1:]
+        tr_id = ptr_id
+        if ptr_id[0] in ("T", "J", "C"):
+            if isPaperTrading():
+                tr_id = "V" + ptr_id[1:]
 
-    headers["tr_id"] = tr_id
-    headers["custtype"] = "P"
-    headers["tr_cont"] = tr_cont
+        headers["tr_id"] = tr_id
+        headers["custtype"] = "P"
+        headers["tr_cont"] = tr_cont
 
-    if appendHeaders is not None and len(appendHeaders) > 0:
-        for x in appendHeaders.keys():
-            headers[x] = appendHeaders.get(x)
+        if appendHeaders is not None and len(appendHeaders) > 0:
+            for x in appendHeaders.keys():
+                headers[x] = appendHeaders.get(x)
 
-    if state._DEBUG:
-        print("< Sending Info >")
-        print(f"URL: {url}, TR: {tr_id}")
-        print(f"<header>\n{headers}")
-        print(f"<body>\n{params}")
-
-    _throttle_rest()
-    if postFlag:
-        res = requests.post(url, headers=headers, data=json.dumps(params))
-    else:
-        res = requests.get(url, headers=headers, params=params)
-
-    if res.status_code == 200:
-        ar = APIResp(res)
         if state._DEBUG:
-            ar.printAll()
-        return ar
-    print("Error Code : " + str(res.status_code) + " | " + res.text)
-    return APIRespError(res.status_code, res.text)
+            print("< Sending Info >")
+            print(f"URL: {url}, TR: {tr_id}")
+            print(f"<header>\n{headers}")
+            print(f"<body>\n{params}")
+
+        _throttle_rest()
+        if postFlag:
+            res = requests.post(url, headers=headers, data=json.dumps(params))
+        else:
+            res = requests.get(url, headers=headers, params=params)
+
+        if is_expired_token_response(res):
+            if force_refreshed:
+                print("Error Code : " + str(res.status_code) + " | " + res.text)
+                return APIRespError(res.status_code, res.text)
+
+            logger.warning(
+                "[KIS] _url_fetch 응답에서 만료 토큰 감지; 강제 재인증 후 재시도 tr_id=%s url=%s",
+                tr_id,
+                api_url,
+            )
+            force_reauth_current_env()
+            force_refreshed = True
+            continue
+
+        if res.status_code == 200:
+            ar = APIResp(res)
+            if state._DEBUG:
+                ar.printAll()
+            return ar
+
+        print("Error Code : " + str(res.status_code) + " | " + res.text)
+        return APIRespError(res.status_code, res.text)

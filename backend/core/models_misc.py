@@ -257,6 +257,95 @@ class KrOptionBoardSnapshot(Base):
     )
 
 
+class TradingEngineArchive(Base):
+    """트레이딩 엔진 산출물 주간 아카이브 배치"""
+
+    __tablename__ = "trading_engine_archives"
+    __table_args__ = (
+        Index("idx_trading_engine_archives_archive_date", "archive_date"),
+        Index("idx_trading_engine_archives_archive_kind", "archive_kind"),
+        Index("idx_trading_engine_archives_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    archive_date: Mapped[str] = mapped_column(String(8), nullable=False)
+    archive_kind: Mapped[str] = mapped_column(String(30), nullable=False, default="weekly_cleanup")
+    week_id: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    covered_trade_dates_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
+    manifest_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    archived_output_file_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    removed_output_file_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cleanup_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    cleanup_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow,
+        onupdate=utcnow,
+        nullable=False,
+    )
+
+
+class TradingEngineIndustrySyncState(Base):
+    """트레이딩 엔진 업종 마스터 적재 상태"""
+
+    __tablename__ = "trading_engine_industry_sync_states"
+
+    dataset_name: Mapped[str] = mapped_column(String(50), primary_key=True)
+    source_signature: Mapped[str] = mapped_column(String(64), nullable=False)
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow,
+        onupdate=utcnow,
+        nullable=False,
+    )
+
+
+class TradingEngineStockIndustry(Base):
+    """종목코드별 업종 마스터 캐시"""
+
+    __tablename__ = "trading_engine_stock_industries"
+    __table_args__ = (
+        Index("idx_trading_engine_stock_industries_market", "market"),
+        Index("idx_trading_engine_stock_industries_bucket_name", "bucket_name"),
+        Index("idx_trading_engine_stock_industries_source_signature", "source_signature"),
+    )
+
+    code: Mapped[str] = mapped_column(String(12), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    market: Mapped[str] = mapped_column(String(20), nullable=False)
+
+    large_code: Mapped[Optional[str]] = mapped_column(String(4), nullable=True)
+    large_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    medium_code: Mapped[Optional[str]] = mapped_column(String(4), nullable=True)
+    medium_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    small_code: Mapped[Optional[str]] = mapped_column(String(4), nullable=True)
+    small_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    bucket_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    source_signature: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow,
+        onupdate=utcnow,
+        nullable=False,
+    )
+
+
 class EsportsMatch(Base):
     """E-Sports 매치 상태 캐시 (스마트 폴링 로직용)"""
     __tablename__ = "esports_matches"

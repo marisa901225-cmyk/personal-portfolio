@@ -9,8 +9,10 @@ from backend.services.trading_engine.config import TradeEngineConfig
 from backend.services.trading_engine.news_sentiment import NewsSentimentSignal
 from backend.services.trading_engine.strategy import (
     Candidates,
+    _merge_candidates,
     _score_day_row,
     build_candidates,
+    exclude_candidate_codes,
     pick_daytrade,
     pick_swing,
     rank_daytrade_codes,
@@ -83,6 +85,126 @@ class TradingStrategyTests(unittest.TestCase):
         self.assertNotIn("069500", set(result.quote_codes))
         self.assertNotIn("229200", set(result.quote_codes))
 
+    def test_merge_candidates_prioritizes_theme_injected_rows(self) -> None:
+        popular = pd.DataFrame(
+            [
+                {
+                    "code": "333333",
+                    "name": "한싹",
+                    "avg_value_5d": 35_000_000_000,
+                    "close": 10_000,
+                    "change_pct": 4.0,
+                    "is_etf": False,
+                    "theme_injected": True,
+                    "theme_sector": "cyber_security",
+                }
+            ]
+        )
+        model = pd.DataFrame(
+            [
+                {
+                    "code": "111111",
+                    "name": "대형주A",
+                    "avg_value_20d": 800_000_000_000,
+                    "ma20": 1,
+                    "ma60": 1,
+                    "close": 1,
+                    "change_pct": 1.0,
+                    "is_etf": False,
+                },
+                {
+                    "code": "222222",
+                    "name": "대형주B",
+                    "avg_value_20d": 700_000_000_000,
+                    "ma20": 1,
+                    "ma60": 1,
+                    "close": 1,
+                    "change_pct": 1.0,
+                    "is_etf": False,
+                },
+            ]
+        )
+
+        merged = _merge_candidates(popular, model, pd.DataFrame())
+
+        self.assertEqual(str(merged.iloc[0]["code"]), "333333")
+        self.assertIs(bool(merged.iloc[0]["theme_injected"]), True)
+        self.assertEqual(str(merged.iloc[0]["theme_sector"]), "cyber_security")
+
+    def test_merge_candidates_uses_best_available_liquidity_across_sources(self) -> None:
+        popular = pd.DataFrame(
+            [
+                {
+                    "code": "444444",
+                    "name": "인기주",
+                    "avg_value_5d": 120_000_000_000,
+                    "close": 10_000,
+                    "change_pct": 3.0,
+                    "is_etf": False,
+                }
+            ]
+        )
+        model = pd.DataFrame(
+            [
+                {
+                    "code": "555555",
+                    "name": "모델주",
+                    "avg_value_20d": 90_000_000_000,
+                    "ma20": 1,
+                    "ma60": 1,
+                    "close": 1,
+                    "change_pct": 1.0,
+                    "is_etf": False,
+                }
+            ]
+        )
+
+        merged = _merge_candidates(popular, model, pd.DataFrame())
+
+        self.assertEqual(merged["code"].tolist(), ["444444", "555555"])
+
+    def test_merge_candidates_rotates_other_sector_before_same_sector_repeat(self) -> None:
+        popular = pd.DataFrame(
+            [
+                {
+                    "code": "SEMI1",
+                    "name": "반도체 대장주",
+                    "avg_value_5d": 120_000_000_000,
+                    "close": 10_000,
+                    "change_pct": 5.0,
+                    "is_etf": False,
+                },
+                {
+                    "code": "SEMI2",
+                    "name": "반도체 후속주",
+                    "avg_value_5d": 110_000_000_000,
+                    "close": 9_500,
+                    "change_pct": 4.5,
+                    "is_etf": False,
+                },
+                {
+                    "code": "SEC1",
+                    "name": "보안 대장주",
+                    "avg_value_5d": 100_000_000_000,
+                    "close": 8_000,
+                    "change_pct": 4.0,
+                    "is_etf": False,
+                },
+            ]
+        )
+
+        merged = _merge_candidates(
+            popular,
+            pd.DataFrame(),
+            pd.DataFrame(),
+            sector_keywords={
+                "semiconductor": ("반도체",),
+                "cyber_security": ("보안",),
+            },
+        )
+
+        self.assertEqual(merged["code"].tolist(), ["SEMI1", "SEC1", "SEMI2"])
+
     @patch("backend.services.trading_engine.strategy._score_day_row")
     def test_pick_daytrade_prefers_stock_within_relative_threshold(self, mock_score) -> None:
         pool = pd.DataFrame(
@@ -137,6 +259,226 @@ class TradingStrategyTests(unittest.TestCase):
 
         self.assertEqual(ranked, ["EXPENSIVE", "AFFORD01", "ETF01"])
 
+    @patch("backend.services.trading_engine.strategy._score_day_row")
+    def test_rank_daytrade_codes_excludes_small_stock_under_quality_floor(self, mock_score) -> None:
+        pool = pd.DataFrame(
+            [
+                {
+                    "code": "SMALL01",
+                    "name": "Small",
+                    "is_etf": False,
+                    "mcap": "400000000000",
+                    "avg_value_5d": "60000000000",
+                    "change_pct": "3.0",
+                    "mock_score": 120.0,
+                },
+                {
+                    "code": "LARGE01",
+                    "name": "Large",
+                    "is_etf": False,
+                    "mcap": "1200000000000",
+                    "avg_value_5d": "60000000000",
+                    "change_pct": "2.5",
+                    "mock_score": 110.0,
+                },
+                {
+                    "code": "ETF01",
+                    "name": "ETF",
+                    "is_etf": True,
+                    "mcap": "0",
+                    "avg_value_5d": "70000000000",
+                    "change_pct": "2.0",
+                    "mock_score": 100.0,
+                },
+            ]
+        )
+        mock_score.side_effect = lambda row, quotes, config: float(row["mock_score"])
+
+        cfg = TradeEngineConfig(
+            include_etf=True,
+            day_etf_min_avg_value_5d=50_000_000_000,
+            day_stock_min_avg_value_5d=30_000_000_000,
+            day_stock_min_mcap=1_000_000_000_000,
+        )
+
+        ranked = rank_daytrade_codes(self._candidates_with_popular(pool), quotes={}, config=cfg)
+
+        self.assertEqual(ranked, ["LARGE01", "ETF01"])
+
+    @patch("backend.services.trading_engine.strategy._score_day_row")
+    def test_rank_daytrade_codes_excludes_live_management_warning_risk_candidates(self, mock_score) -> None:
+        pool = pd.DataFrame(
+            [
+                {
+                    "code": "MGMT01",
+                    "name": "Management",
+                    "is_etf": False,
+                    "mcap": "1200000000000",
+                    "avg_value_5d": "60000000000",
+                    "change_pct": "3.0",
+                    "mock_score": 130.0,
+                },
+                {
+                    "code": "WARN01",
+                    "name": "Warning",
+                    "is_etf": False,
+                    "mcap": "1200000000000",
+                    "avg_value_5d": "60000000000",
+                    "change_pct": "2.8",
+                    "mock_score": 120.0,
+                },
+                {
+                    "code": "RISK01",
+                    "name": "Risk",
+                    "is_etf": False,
+                    "mcap": "1200000000000",
+                    "avg_value_5d": "60000000000",
+                    "change_pct": "2.6",
+                    "mock_score": 110.0,
+                },
+                {
+                    "code": "OK001",
+                    "name": "Okay",
+                    "is_etf": False,
+                    "mcap": "1200000000000",
+                    "avg_value_5d": "60000000000",
+                    "change_pct": "2.4",
+                    "mock_score": 100.0,
+                },
+            ]
+        )
+        quotes = {
+            "MGMT01": {"management_issue_code": "Y", "market_warning_code": "00"},
+            "WARN01": {"management_issue_code": "N", "market_warning_code": "02"},
+            "RISK01": {"management_issue_code": "N", "market_warning_code": "03"},
+            "OK001": {"management_issue_code": "N", "market_warning_code": "00"},
+        }
+        mock_score.side_effect = lambda row, quotes, config: float(row["mock_score"])
+
+        cfg = TradeEngineConfig(
+            include_etf=False,
+            day_stock_min_avg_value_5d=30_000_000_000,
+            day_stock_min_mcap=1_000_000_000_000,
+        )
+
+        ranked = rank_daytrade_codes(self._candidates_with_popular(pool), quotes=quotes, config=cfg)
+
+        self.assertEqual(ranked, ["OK001"])
+
+    @patch("backend.services.trading_engine.strategy._day_intraday_structure_score", return_value=0.0)
+    def test_rank_daytrade_codes_prefers_candidate_with_strong_industry_trend(self, _mock_intraday) -> None:
+        pool = pd.DataFrame(
+            [
+                {
+                    "code": "111111",
+                    "name": "StrongIndustry",
+                    "is_etf": False,
+                    "mcap": "1200000000000",
+                    "avg_value_5d": "60000000000",
+                    "change_pct": "2.0",
+                    "close": 10000,
+                    "retrace_from_high_10d_pct": -2.0,
+                    "industry_bucket_name": "창업투자",
+                    "industry_close": 1020.0,
+                    "industry_ma5": 1010.0,
+                    "industry_ma20": 980.0,
+                    "industry_day_change_pct": 1.2,
+                    "industry_5d_change_pct": 3.0,
+                },
+                {
+                    "code": "222222",
+                    "name": "WeakIndustry",
+                    "is_etf": False,
+                    "mcap": "1200000000000",
+                    "avg_value_5d": "60000000000",
+                    "change_pct": "2.0",
+                    "close": 10000,
+                    "retrace_from_high_10d_pct": -2.0,
+                    "industry_bucket_name": "통신장비",
+                    "industry_close": 970.0,
+                    "industry_ma5": 975.0,
+                    "industry_ma20": 1005.0,
+                    "industry_day_change_pct": -1.1,
+                    "industry_5d_change_pct": -3.5,
+                },
+            ]
+        )
+        quotes = {
+            "111111": {"price": 10000, "open": 9950, "high": 10050, "low": 9900, "change_pct": 2.0},
+            "222222": {"price": 10000, "open": 9950, "high": 10050, "low": 9900, "change_pct": 2.0},
+        }
+        cfg = TradeEngineConfig(
+            include_etf=False,
+            day_stock_min_avg_value_5d=0,
+            day_stock_min_mcap=0,
+        )
+
+        ranked = rank_daytrade_codes(self._candidates_with_popular(pool), quotes=quotes, config=cfg)
+
+        self.assertEqual(ranked[0], "111111")
+
+    @patch("backend.services.trading_engine.strategy._score_day_row")
+    def test_rank_daytrade_promotes_only_top_stock_preference(self, mock_score) -> None:
+        pool = pd.DataFrame(
+            [
+                {"code": "ETF_TOP", "name": "ETF top", "is_etf": True, "avg_value_5d": "70000000000", "change_pct": "2.0", "mock_score": 100.0},
+                {"code": "STK_TOP", "name": "Stock top", "is_etf": False, "avg_value_5d": "30000000000", "change_pct": "1.8", "mock_score": 95.0},
+                {"code": "ETF_NEXT", "name": "ETF next", "is_etf": True, "avg_value_5d": "65000000000", "change_pct": "1.7", "mock_score": 94.0},
+                {"code": "STK_LOW", "name": "Stock low", "is_etf": False, "avg_value_5d": "20000000000", "change_pct": "1.1", "mock_score": 70.0},
+            ]
+        )
+        mock_score.side_effect = lambda row, quotes, config: float(row["mock_score"])
+
+        cfg = TradeEngineConfig(
+            include_etf=True,
+            day_etf_min_avg_value_5d=50_000_000_000,
+            day_stock_prefer_threshold=0.95,
+        )
+
+        ranked = rank_daytrade_codes(self._candidates_with_popular(pool), quotes={}, config=cfg)
+
+        self.assertEqual(ranked, ["STK_TOP", "ETF_TOP", "ETF_NEXT", "STK_LOW"])
+
+    @patch("backend.services.trading_engine.strategy._score_day_row")
+    def test_rank_daytrade_codes_rotates_other_sector_before_same_sector_repeat(self, mock_score) -> None:
+        pool = pd.DataFrame(
+            [
+                {"code": "SEMI1", "name": "반도체 대장주", "is_etf": False, "avg_value_5d": "90000000000", "change_pct": "5.0", "mock_score": 110.0},
+                {"code": "SEMI2", "name": "반도체 후속주", "is_etf": False, "avg_value_5d": "85000000000", "change_pct": "4.8", "mock_score": 108.0},
+                {"code": "SEC1", "name": "보안 대장주", "is_etf": False, "avg_value_5d": "80000000000", "change_pct": "4.6", "mock_score": 106.0},
+                {"code": "BIO1", "name": "바이오 대장주", "is_etf": False, "avg_value_5d": "75000000000", "change_pct": "4.4", "mock_score": 104.0},
+            ]
+        )
+        mock_score.side_effect = lambda row, quotes, config, news_signal=None: float(row["mock_score"])
+
+        cfg = TradeEngineConfig(
+            include_etf=False,
+            day_max_change_pct=12.0,
+        )
+        news_signal = NewsSentimentSignal(
+            market_score=0.2,
+            sector_scores={
+                "semiconductor": 0.9,
+                "cyber_security": 0.8,
+                "bio_healthcare": 0.7,
+            },
+            sector_keywords={
+                "semiconductor": ("반도체",),
+                "cyber_security": ("보안",),
+                "bio_healthcare": ("바이오",),
+            },
+            article_count=20,
+        )
+
+        ranked = rank_daytrade_codes(
+            self._candidates_with_popular(pool),
+            quotes={},
+            config=cfg,
+            news_signal=news_signal,
+        )
+
+        self.assertEqual(ranked, ["SEMI1", "SEC1", "BIO1", "SEMI2"])
+
     @patch("backend.services.trading_engine.strategy._score_day_row", return_value=80.0)
     def test_pick_daytrade_sorts_change_pct_as_numeric(self, _mock_score) -> None:
         pool = pd.DataFrame(
@@ -145,7 +487,7 @@ class TradingStrategyTests(unittest.TestCase):
                 {"code": "B", "name": "Beta", "is_etf": False, "avg_value_5d": "10000000000", "change_pct": "10.2"},
             ]
         )
-        cfg = TradeEngineConfig(include_etf=False)
+        cfg = TradeEngineConfig(include_etf=False, day_max_change_pct=11.0)
 
         picked = pick_daytrade(self._candidates_with_popular(pool), quotes={}, config=cfg)
         self.assertEqual(picked, "B")
@@ -186,6 +528,90 @@ class TradingStrategyTests(unittest.TestCase):
         picked = pick_daytrade(self._candidates_with_popular(pool), quotes={}, config=cfg)
         self.assertEqual(picked, "SAFE01")
 
+    @patch("backend.services.trading_engine.strategy._score_day_row")
+    def test_pick_daytrade_excludes_overheated_chasers(self, mock_score) -> None:
+        pool = pd.DataFrame(
+            [
+                {"code": "CHASE9", "name": "Chaser", "is_etf": False, "avg_value_5d": "90000000000", "change_pct": "9.2", "mock_score": 150.0},
+                {"code": "SAFE02", "name": "Safer", "is_etf": False, "avg_value_5d": "70000000000", "change_pct": "2.4", "mock_score": 100.0},
+            ]
+        )
+        mock_score.side_effect = lambda row, quotes, config: float(row["mock_score"])
+
+        cfg = TradeEngineConfig(
+            include_etf=False,
+            day_max_change_pct=6.0,
+        )
+
+        picked = pick_daytrade(self._candidates_with_popular(pool), quotes={}, config=cfg)
+        self.assertEqual(picked, "SAFE02")
+
+    @patch("backend.services.trading_engine.strategy._score_day_row")
+    def test_pick_daytrade_excludes_deeply_retraced_recent_high_candidates(self, mock_score) -> None:
+        pool = pd.DataFrame(
+            [
+                {
+                    "code": "FADE10",
+                    "name": "광통신 급락주",
+                    "is_etf": False,
+                    "avg_value_5d": "90000000000",
+                    "change_pct": "2.0",
+                    "retrace_from_high_10d_pct": "-24.0",
+                    "mock_score": 150.0,
+                },
+                {
+                    "code": "SAFE10",
+                    "name": "추세 유지주",
+                    "is_etf": False,
+                    "avg_value_5d": "70000000000",
+                    "change_pct": "2.4",
+                    "retrace_from_high_10d_pct": "-4.0",
+                    "mock_score": 100.0,
+                },
+            ]
+        )
+        mock_score.side_effect = lambda row, quotes, config: float(row["mock_score"])
+
+        cfg = TradeEngineConfig(
+            include_etf=False,
+            day_max_change_pct=6.0,
+            day_recent_high_retrace_10d_min_pct=-12.0,
+        )
+
+        picked = pick_daytrade(self._candidates_with_popular(pool), quotes={}, config=cfg)
+        self.assertEqual(picked, "SAFE10")
+
+    def test_exclude_candidate_codes_removes_stoploss_symbols_from_all_views(self) -> None:
+        candidates = Candidates(
+            asof="20260407",
+            popular=pd.DataFrame(
+                [
+                    {"code": "011930", "name": "신성이엔지", "avg_value_5d": 100, "close": 1000, "change_pct": 5.0, "is_etf": False},
+                    {"code": "005930", "name": "삼성전자", "avg_value_5d": 90, "close": 900, "change_pct": 2.0, "is_etf": False},
+                ]
+            ),
+            model=pd.DataFrame(
+                [
+                    {"code": "011930", "name": "신성이엔지", "avg_value_20d": 200, "ma20": 100, "ma60": 95, "close": 101, "change_pct": 5.0, "is_etf": False},
+                ]
+            ),
+            etf=pd.DataFrame(),
+            merged=pd.DataFrame(
+                [
+                    {"code": "011930", "name": "신성이엔지"},
+                    {"code": "005930", "name": "삼성전자"},
+                ]
+            ),
+            quote_codes=["011930", "005930"],
+        )
+
+        filtered = exclude_candidate_codes(candidates, {"011930"})
+
+        self.assertEqual(set(filtered.popular["code"]), {"005930"})
+        self.assertTrue(filtered.model.empty)
+        self.assertEqual(set(filtered.merged["code"]), {"005930"})
+        self.assertEqual(filtered.quote_codes, ["005930"])
+
     def test_pick_swing_etf_fallback_avoids_deep_losers(self) -> None:
         etf_pool = pd.DataFrame(
             [
@@ -222,6 +648,44 @@ class TradingStrategyTests(unittest.TestCase):
         picked = pick_swing(candidates, quotes={}, config=cfg)
         self.assertEqual(picked, "ETF_OK")
 
+    @patch("backend.services.trading_engine.strategy._score_swing_row")
+    def test_pick_swing_etf_fallback_excludes_broad_market_etf(self, mock_score) -> None:
+        etf_pool = pd.DataFrame(
+            [
+                {
+                    "code": "379800",
+                    "name": "KODEX 미국S&P500",
+                    "avg_value_20d": 900_000_000_000,
+                    "ma20": 100.0,
+                    "ma60": 95.0,
+                    "close": 110.0,
+                    "change_pct": 1.2,
+                    "is_etf": True,
+                },
+                {
+                    "code": "ETF_SECTOR",
+                    "name": "KODEX 반도체",
+                    "avg_value_20d": 700_000_000_000,
+                    "ma20": 98.0,
+                    "ma60": 93.0,
+                    "close": 108.0,
+                    "change_pct": 1.1,
+                    "is_etf": True,
+                },
+            ]
+        )
+        mock_score.side_effect = lambda row, quotes, config, news_signal=None: 100.0 if row["code"] == "379800" else 90.0
+
+        cfg = TradeEngineConfig(
+            allow_etf_swing_fallback=True,
+            swing_hard_drop_exclude_pct=-6.0,
+            swing_etf_fallback_min_change_pct=-1.0,
+        )
+        candidates = self._candidates_with_swing(model=pd.DataFrame(), etf=etf_pool)
+
+        picked = pick_swing(candidates, quotes={}, config=cfg)
+        self.assertEqual(picked, "ETF_SECTOR")
+
     def test_pick_swing_prefers_strict_model_setup_over_relaxed(self) -> None:
         model_pool = pd.DataFrame(
             [
@@ -253,6 +717,51 @@ class TradingStrategyTests(unittest.TestCase):
 
         picked = pick_swing(candidates, quotes={}, config=TradeEngineConfig())
         self.assertEqual(picked, "STRICT01")
+
+    @patch("backend.services.trading_engine.strategy._swing_quote_structure_score", return_value=0.0)
+    def test_pick_swing_prefers_stronger_industry_trend(self, _mock_quote_structure) -> None:
+        model_pool = pd.DataFrame(
+            [
+                {
+                    "code": "STRONG01",
+                    "name": "Strong",
+                    "avg_value_20d": 600_000_000_000,
+                    "ma20": 100,
+                    "ma60": 95,
+                    "close": 104,
+                    "change_pct": 1.5,
+                    "is_etf": False,
+                    "trend_tier": "strict",
+                    "industry_bucket_name": "창업투자",
+                    "industry_close": 1020.0,
+                    "industry_ma5": 1010.0,
+                    "industry_ma20": 980.0,
+                    "industry_day_change_pct": 0.8,
+                    "industry_5d_change_pct": 5.0,
+                },
+                {
+                    "code": "WEAK01",
+                    "name": "Weak",
+                    "avg_value_20d": 600_000_000_000,
+                    "ma20": 100,
+                    "ma60": 95,
+                    "close": 104,
+                    "change_pct": 1.5,
+                    "is_etf": False,
+                    "trend_tier": "strict",
+                    "industry_bucket_name": "통신장비",
+                    "industry_close": 970.0,
+                    "industry_ma5": 975.0,
+                    "industry_ma20": 1005.0,
+                    "industry_day_change_pct": -0.8,
+                    "industry_5d_change_pct": -4.0,
+                },
+            ]
+        )
+        candidates = self._candidates_with_swing(model=model_pool, etf=pd.DataFrame())
+
+        picked = pick_swing(candidates, quotes={}, config=TradeEngineConfig())
+        self.assertEqual(picked, "STRONG01")
 
     def test_score_day_row_applies_sector_news_bonus(self) -> None:
         row = pd.Series(

@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime
 from typing import Any
 
+from .intraday import sort_intraday_bars
 from .interfaces import TradingAPI
 from .utils import compute_sma, normalize_bar_date, parse_numeric
 
@@ -120,7 +121,7 @@ def detect_intraday_circuit_breaker(
     if bars is None or bars.empty:
         return False, {"reason": "NO_DATA"}
 
-    bars = _sort_intraday_bars(bars)
+    bars = sort_intraday_bars(bars)
     close_s = pd.to_numeric(bars.get("close"), errors="coerce").dropna()
     if len(close_s) < 2:
         return False, {"reason": "INSUFFICIENT_DATA"}
@@ -201,26 +202,6 @@ def _normalize_yyyymmdd(text: str) -> str:
     if "-" in raw:
         raw = raw.replace("-", "")
     return raw[:8]
-
-
-def _sort_intraday_bars(bars: pd.DataFrame) -> pd.DataFrame:
-    if bars is None or bars.empty:
-        return bars
-
-    view = bars.copy()
-    if "timestamp" in view.columns:
-        return view.sort_values("timestamp", ascending=True)
-
-    if "date" in view.columns and "time" in view.columns:
-        key = view["date"].astype(str) + view["time"].astype(str).str.zfill(6)
-        return view.assign(_k=key).sort_values("_k", ascending=True).drop(columns=["_k"])
-
-    if "date" in view.columns:
-        return view.sort_values("date", ascending=True)
-
-    return view.sort_index(ascending=True)
-
-
 def _resolve_day_change_pct(api: TradingAPI, code: str, bars: pd.DataFrame) -> float | None:
     if "change_pct" in bars.columns:
         cp = pd.to_numeric(bars["change_pct"], errors="coerce").dropna()

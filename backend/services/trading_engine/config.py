@@ -17,11 +17,12 @@ class TradeEngineConfig:
     # Entry limits
     max_swing_entries_per_week: int = 2
     max_swing_entries_per_day: int = 1
-    max_day_entries_per_day: int = 1
+    max_day_entries_per_day: int = 2
 
     # Sizing
-    swing_cash_ratio: float = 0.75
+    swing_cash_ratio: float = 0.80
     day_cash_ratio: float = 0.20
+    use_realized_profit_buffer: bool = True
     swing_entry_order_type: str = "best"
     day_entry_order_type: str = "best"
 
@@ -47,6 +48,11 @@ class TradeEngineConfig:
     day_stop_loss_pct: float = -0.012
     day_take_profit_pct: float = 0.018
     day_force_exit_at: str = "15:15"
+    day_lock_profit_trigger_pct: float = 0.012
+    day_lock_profit_floor_pct: float = 0.005
+    day_lock_retrace_gap_pct: float = 0.006
+    day_lock_volatility_gap_multiplier: float = 0.60
+    day_stoploss_exclude_after_losses: int = 3
 
     # Global risk
     daily_max_loss_pct: float = -0.02
@@ -63,25 +69,60 @@ class TradeEngineConfig:
     # Scanner knobs
     popular_volume_top_n: int = 100
     popular_value_candidate_top_n: int = 200
+    popular_sector_top_n: int = 10
     popular_final_top_n: int = 10
     model_top_k: int = 500
     model_mcap_min: int = 1_000_000_000_000
-    model_avg_value_20d_min: int = 500_000_000_000
+    model_avg_value_20d_min: int = 100_000_000_000
     swing_etf_min_avg_value_20d: int = 100_000_000_000
     day_etf_min_avg_value_5d: int = 50_000_000_000
+    day_stock_min_avg_value_5d: int = 10_000_000_000
+    day_stock_min_mcap: int = 850_000_000_000
     day_stock_prefer_threshold: float = 0.95
+    day_industry_lookback_bars: int = 30
+    day_industry_trend_bonus_max: float = 8.0
+    day_industry_negative_penalty_max: float = 8.0
     day_momentum_bonus_max: float = 20.0
     day_momentum_bonus_cap_pct: float = 15.0
+    day_min_change_pct: float = 0.5
+    day_max_change_pct: float = 6.0
+    day_etf_max_change_pct: float = 4.0
     day_hard_drop_exclude_pct: float = -6.0
+    day_recent_high_retrace_10d_min_pct: float = -12.0
+    day_use_intraday_confirmation: bool = True
+    day_intraday_confirmation_bars: int = 3
+    day_intraday_min_window_change_pct: float = 0.2
+    day_intraday_min_last_bar_change_pct: float = -0.2
+    day_intraday_max_retrace_from_high_pct: float = -0.8
+    day_intraday_tight_base_min_day_change_pct: float = 1.0
+    day_intraday_tight_base_min_window_change_pct: float = 0.05
+    day_intraday_tight_base_min_last_bar_change_pct: float = 0.05
+    day_intraday_tight_base_max_range_pct: float = 0.8
+    day_intraday_tight_base_max_retrace_from_high_pct: float = -0.3
     day_negative_penalty_per_pct: float = 3.0
     day_negative_penalty_max: float = 30.0
+    day_theme_candidate_injection_enabled: bool = True
+    day_theme_candidate_max_injections: int = 3
+    day_theme_candidate_min_sector_score: float = 0.35
+    day_theme_candidate_min_avg_value_5d: int = 30_000_000_000
     swing_momentum_bonus_max: float = 12.0
     swing_momentum_bonus_cap_pct: float = 8.0
     swing_negative_penalty_max: float = 30.0
     swing_hard_drop_exclude_pct: float = -6.0
+    swing_industry_lookback_bars: int = 60
+    swing_industry_trend_bonus_max: float = 14.0
+    swing_industry_negative_penalty_max: float = 10.0
     swing_etf_fallback_min_change_pct: float = -1.0
+    swing_prefer_sector_etf_on_theme_day: bool = True
+    swing_sector_etf_min_sector_score: float = 0.2
+    swing_sector_etf_min_breadth: int = 2
+    swing_sector_etf_min_score: float = 30.0
+    swing_sector_etf_min_change_pct: float = 0.0
     quote_score_limit: int = 30
     allow_etf_swing_fallback: bool = True
+    industry_idx_master_path: str = "backend/data/trading_engine_masters/idxcode.mst.zip"
+    industry_kospi_master_path: str = "backend/data/trading_engine_masters/kospi_code.mst.zip"
+    industry_kosdaq_master_path: str = "backend/data/trading_engine_masters/kosdaq_code.mst.zip"
 
     # Regime / calendar
     market_proxy_code: str = "069500"
