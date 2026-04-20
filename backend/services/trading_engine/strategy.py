@@ -111,26 +111,36 @@ def pick_swing(
     config: TradeEngineConfig,
     news_signal: NewsSentimentSignal | None = None,
 ) -> str | None:
+    ranked_codes = rank_swing_codes(candidates, quotes, config, news_signal=news_signal)
+    return ranked_codes[0] if ranked_codes else None
+
+
+def rank_swing_codes(
+    candidates: Candidates,
+    quotes: dict[str, dict[str, Any]],
+    config: TradeEngineConfig,
+    news_signal: NewsSentimentSignal | None = None,
+) -> list[str]:
     primary = candidates.model.copy()
     use_etf_fallback = primary.empty and config.allow_etf_swing_fallback
     if primary.empty and not use_etf_fallback:
-        return None
+        return []
 
     if use_etf_fallback:
         primary = candidates.etf.copy()
         if primary.empty:
-            return None
+            return []
         primary["source_model"] = False
     else:
         primary["source_model"] = True
 
     if primary.empty:
-        return None
+        return []
 
     if "is_etf" in primary.columns and primary["is_etf"].fillna(False).any():
         primary = primary[~primary.apply(lambda r: is_broad_market_etf(r.to_dict()), axis=1)]
         if primary.empty:
-            return None
+            return []
 
     primary["_change_pct_num"] = primary.apply(lambda r: _resolve_change_pct(r, quotes), axis=1)
     primary = primary[
@@ -138,7 +148,7 @@ def pick_swing(
         | (primary["_change_pct_num"] > float(config.swing_hard_drop_exclude_pct))
     ]
     if primary.empty:
-        return None
+        return []
 
     if use_etf_fallback:
         primary = primary[
@@ -146,7 +156,7 @@ def pick_swing(
             | (primary["_change_pct_num"] >= float(config.swing_etf_fallback_min_change_pct))
         ]
         if primary.empty:
-            return None
+            return []
 
     scored = primary.copy()
     if news_signal is None:
@@ -155,7 +165,9 @@ def pick_swing(
         scored["score"] = scored.apply(lambda r: _score_swing_row(r, quotes, config, news_signal), axis=1)
     scored = scored.sort_values("score", ascending=False)
     if scored.empty:
-        return None
+        return []
+
+    ordered_codes = [str(code) for code in scored["code"].tolist()]
 
     if not use_etf_fallback:
         themed_etf_code = _pick_theme_day_swing_etf(
@@ -166,8 +178,17 @@ def pick_swing(
             news_signal=news_signal,
         )
         if themed_etf_code:
-            return themed_etf_code
-    return str(scored.iloc[0]["code"])
+            ordered_codes = [str(themed_etf_code)] + [code for code in ordered_codes if str(code) != str(themed_etf_code)]
+
+    deduped_codes: list[str] = []
+    seen: set[str] = set()
+    for code in ordered_codes:
+        code_str = str(code or "").strip()
+        if not code_str or code_str in seen:
+            continue
+        seen.add(code_str)
+        deduped_codes.append(code_str)
+    return deduped_codes
 
 
 def pick_daytrade(

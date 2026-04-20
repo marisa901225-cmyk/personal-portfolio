@@ -4,7 +4,9 @@ set -euo pipefail
 PROJECT_ROOT="/home/dlckdgn/personal-portfolio"
 COMPOSE_FILE="$PROJECT_ROOT/docker-compose.yml"
 LOG_FILE="$PROJECT_ROOT/backend/logs/llm_schedule.log"
-TARGET_SERVICES=(llama-server llama-server-light llama-server-vulkan-huihui openvino-server)
+# Keep only the primary Vulkan server and the light reviewer model on
+# automatic schedule to avoid bringing up heavier unused backends.
+TARGET_SERVICES=(llama-server-light llama-server-vulkan-huihui)
 ALLOW_WEEKEND_START="${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}"
 
 ACTION="${1:-}"

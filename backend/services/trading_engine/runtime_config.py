@@ -202,6 +202,22 @@ def _apply_daytrade_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_DAY_STOPLOSS_EXCLUDE_AFTER_LOSSES",
         cfg.day_stoploss_exclude_after_losses,
     )
+    cfg.day_chart_review_enabled = _env_bool(
+        "TRADING_ENGINE_DAY_CHART_REVIEW_ENABLED",
+        cfg.day_chart_review_enabled,
+    )
+    cfg.day_chart_review_top_n = _env_int(
+        "TRADING_ENGINE_DAY_CHART_REVIEW_TOP_N",
+        cfg.day_chart_review_top_n,
+    )
+    cfg.day_chart_review_model = _env_text(
+        "TRADING_ENGINE_DAY_CHART_REVIEW_MODEL",
+        cfg.day_chart_review_model,
+    )
+    cfg.day_chart_review_reasoning_effort = _env_text(
+        "TRADING_ENGINE_DAY_CHART_REVIEW_REASONING_EFFORT",
+        cfg.day_chart_review_reasoning_effort,
+    )
 
 
 def _apply_swing_overrides(cfg: TradeEngineConfig) -> None:
@@ -256,6 +272,22 @@ def _apply_swing_overrides(cfg: TradeEngineConfig) -> None:
     cfg.swing_sector_etf_min_change_pct = _env_float(
         "TRADING_ENGINE_SWING_SECTOR_ETF_MIN_CHANGE_PCT",
         cfg.swing_sector_etf_min_change_pct,
+    )
+    cfg.swing_chart_review_enabled = _env_bool(
+        "TRADING_ENGINE_SWING_CHART_REVIEW_ENABLED",
+        cfg.swing_chart_review_enabled,
+    )
+    cfg.swing_chart_review_top_n = _env_int(
+        "TRADING_ENGINE_SWING_CHART_REVIEW_TOP_N",
+        cfg.swing_chart_review_top_n,
+    )
+    cfg.swing_chart_review_model = _env_text(
+        "TRADING_ENGINE_SWING_CHART_REVIEW_MODEL",
+        cfg.swing_chart_review_model,
+    )
+    cfg.swing_chart_review_reasoning_effort = _env_text(
+        "TRADING_ENGINE_SWING_CHART_REVIEW_REASONING_EFFORT",
+        cfg.swing_chart_review_reasoning_effort,
     )
     cfg.swing_sl_requires_trend_break = _env_bool(
         "TRADING_ENGINE_SWING_SL_REQUIRES_TREND_BREAK",

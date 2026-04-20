@@ -180,7 +180,7 @@ class OpenAIPaidBackend(LLMBackend):
         payload: Dict[str, Any] = {
             "model": model,
             "input": [
-                {"role": msg["role"], "content": [{"type": "input_text", "text": str(msg["content"])}]}
+                {"role": str(msg.get("role") or "user"), "content": self._build_responses_input_content(msg.get("content"))}
                 for msg in messages
             ],
             # OpenAI Responses API는 매우 작은 값에서 400을 반환할 수 있어 하한을 맞춘다.
@@ -204,6 +204,50 @@ class OpenAIPaidBackend(LLMBackend):
             payload["service_tier"] = current_tier
 
         return payload
+
+    @staticmethod
+    def _build_responses_input_content(content: Any) -> List[dict]:
+        if isinstance(content, str):
+            return [{"type": "input_text", "text": content}]
+
+        if not isinstance(content, list):
+            return [{"type": "input_text", "text": str(content)}]
+
+        items: List[dict] = []
+        for part in content:
+            if isinstance(part, str):
+                items.append({"type": "input_text", "text": part})
+                continue
+            if not isinstance(part, dict):
+                continue
+
+            part_type = str(part.get("type") or "").strip().lower()
+            if part_type in {"text", "input_text"}:
+                text = part.get("text")
+                if text is not None:
+                    items.append({"type": "input_text", "text": str(text)})
+                continue
+
+            if part_type in {"image_url", "input_image"}:
+                raw_image = part.get("image_url")
+                image_url: str | None = None
+                if isinstance(raw_image, dict):
+                    image_url = raw_image.get("url") or raw_image.get("image_url")
+                elif raw_image:
+                    image_url = str(raw_image)
+                elif part.get("url"):
+                    image_url = str(part.get("url"))
+                if image_url:
+                    image_part: Dict[str, Any] = {"type": "input_image", "image_url": image_url}
+                    detail = part.get("detail")
+                    if detail:
+                        image_part["detail"] = detail
+                    items.append(image_part)
+                continue
+
+        if items:
+            return items
+        return [{"type": "input_text", "text": ""}]
 
     def _extract_responses_output(self, data: Any) -> str:
         if not isinstance(data, dict):
@@ -346,7 +390,7 @@ class OpenAIPaidBackend(LLMBackend):
             return messages  # 이미 system이 있거나 다른 role이면 그대로
         
         content = first.get("content", "")
-        if not content:
+        if not isinstance(content, str) or not content:
             return messages
         
         # 시스템 지시문 패턴 감지 (한글/영어)

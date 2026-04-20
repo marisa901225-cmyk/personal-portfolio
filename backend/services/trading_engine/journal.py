@@ -10,6 +10,7 @@ from typing import Any
 
 
 _SUMMARY_EVENT_LABELS = {
+    "DAY_CHART_REVIEW": "단타 차트 LLM 검토",
     "DAY_CANDIDATE_FILTERED": "단타 후보 제외",
     "ENTER": "진입",
     "ENTRY_FILL": "진입 체결",
@@ -23,6 +24,7 @@ _SUMMARY_EVENT_LABELS = {
     "PASS": "패스",
     "STATE_RECONCILE_DROP": "상태 동기화 정리",
     "STATE_RECONCILE_UPDATE": "상태 동기화 보정",
+    "SWING_CHART_REVIEW": "스윙 차트 LLM 검토",
 }
 
 

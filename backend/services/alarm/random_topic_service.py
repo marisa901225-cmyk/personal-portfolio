@@ -69,6 +69,7 @@ class _RandomTopicDeps:
     postprocess_llm_text: Any
     compact_reason: Any
     hourly_reset_llm_context: Any
+    last_used_paid: Any
     random_module: Any
 
 
@@ -266,6 +267,52 @@ def _postprocess_random_title(raw: str, deps: _RandomTopicDeps) -> str:
     return title[:32].strip()
 
 
+def _postprocess_random_body(raw: str, deps: _RandomTopicDeps) -> str:
+    text = deps.postprocess_llm_text(raw or "")
+    lines = [line.rstrip() for line in text.splitlines()]
+    cleaned_lines: List[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if cleaned_lines and cleaned_lines[-1]:
+                cleaned_lines.append("")
+            continue
+        if re.match(r"^(본문|body)\s*:\s*$", stripped, re.IGNORECASE):
+            continue
+        cleaned_lines.append(stripped)
+    return "\n".join(cleaned_lines).strip()
+
+
+def _extract_paid_random_payload(raw: str, deps: _RandomTopicDeps) -> Optional[_RandomMessagePayload]:
+    text = (raw or "").strip()
+    if not text:
+        return None
+
+    if text.startswith("{") and text.endswith("}"):
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            data = None
+        if isinstance(data, dict):
+            title = _postprocess_random_title(str(data.get("title", "")), deps)
+            body = _postprocess_random_body(str(data.get("body", "")), deps)
+            if body:
+                return _RandomMessagePayload(title=title, body=body)
+
+    match = re.search(
+        r"^\s*(?:제목|title)\s*:\s*(?P<title>[^\n]+?)\s*(?:\n+|\r\n+)(?P<body>.+)$",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if match:
+        title = _postprocess_random_title(match.group("title"), deps)
+        body = _postprocess_random_body(match.group("body"), deps)
+        if body:
+            return _RandomMessagePayload(title=title, body=body)
+
+    return None
+
+
 def _validate_random_title(title: str, deps: _RandomTopicDeps) -> Tuple[bool, str]:
     if not title:
         return False, "빈 제목"
@@ -376,7 +423,12 @@ async def _generate_random_message_payload_async(
             logger.warning("Random wisdom generation failed (Attempt %s/2): %s", attempt_no, exc)
             continue
 
-        draft = _prepare_random_draft(raw, deps)
+        paid_payload = _extract_paid_random_payload(raw, deps) if deps.last_used_paid() else None
+        if paid_payload:
+            deps.dump_llm_draft("random_wisdom_title_draft", paid_payload.title)
+            draft = _prepare_random_draft(paid_payload.body, deps)
+        else:
+            draft = _prepare_random_draft(raw, deps)
         if not draft.strip():
             failure_reasons.append(f"{attempt_no}회차: 응답이 비어 있음")
             continue
@@ -392,7 +444,12 @@ async def _generate_random_message_payload_async(
             failure_reasons.append(f"{attempt_no}회차: {reason}")
             continue
 
-        title = await _generate_random_title_async(plan, final_text, deps=deps, model=model, **llm_kwargs)
+        title = paid_payload.title if paid_payload else ""
+        title_ok, _ = _validate_random_title(title, deps)
+        if not title_ok and not paid_payload:
+            title = await _generate_random_title_async(plan, final_text, deps=deps, model=model, **llm_kwargs)
+        if not title_ok and paid_payload:
+            title = ""
         if not title:
             title = _default_random_title(now)
 

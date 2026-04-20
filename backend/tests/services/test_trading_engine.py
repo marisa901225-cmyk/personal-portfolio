@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import json
 import zipfile
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -15,6 +16,10 @@ from backend.core.models_misc import (
 )
 from backend.services.trading_engine.bot import HybridTradingBot
 from backend.services.trading_engine.config import TradeEngineConfig
+from backend.services.trading_engine.day_chart_review import (
+    DayChartReviewResult,
+    review_day_candidates_with_llm,
+)
 from backend.services.trading_engine.execution import exit_position
 from backend.services.trading_engine.industry_master import (
     StockIndustryInfo,
@@ -90,6 +95,34 @@ class FakeAPI:
         return {"order_id": order_id, "status": "cancelled"}
 
 
+class _ChartReviewLLMStub:
+    def __init__(
+        self,
+        *,
+        local_raw: str = "",
+        paid_raw: str = "",
+        remote_configured: bool = True,
+        paid_configured: bool = True,
+    ) -> None:
+        self.settings = SimpleNamespace(
+            is_remote_configured=lambda: remote_configured,
+            is_paid_configured=lambda: paid_configured,
+        )
+        self.paid_backend = object() if paid_configured else None
+        self.local_raw = local_raw
+        self.paid_raw = paid_raw
+        self.local_calls: list[dict] = []
+        self.paid_calls: list[dict] = []
+
+    def generate_chat(self, messages, **kwargs):
+        self.local_calls.append({"messages": messages, "kwargs": kwargs})
+        return self.local_raw
+
+    def generate_paid_chat(self, messages, **kwargs):
+        self.paid_calls.append({"messages": messages, "kwargs": kwargs})
+        return self.paid_raw
+
+
 def _make_bars(asof: str, n: int, start_close: float, step: float, value: float | None = None) -> pd.DataFrame:
     end = datetime.strptime(asof, "%Y%m%d")
     rows = []
@@ -149,6 +182,23 @@ def _make_intraday_bars(
             row["change_pct"] = last_change_pct
         rows.append(row)
     return pd.DataFrame(rows)
+
+
+def _make_chart_review_candidates(asof: str) -> Candidates:
+    return Candidates(
+        asof=asof,
+        popular=pd.DataFrame(
+            [
+                {"code": "PASS01", "name": "Pass 01"},
+                {"code": "KEEP01", "name": "Keep 01"},
+                {"code": "NEXT01", "name": "Next 01"},
+            ]
+        ),
+        model=pd.DataFrame(),
+        etf=pd.DataFrame(),
+        merged=pd.DataFrame(),
+        quote_codes=[],
+    )
 
 
 def test_popular_screener_intersection_and_proxy() -> None:
@@ -951,6 +1001,7 @@ def test_bot_passes_on_holiday_without_order(tmp_path) -> None:
         state_path=str(tmp_path / "state.json"),
         output_dir=str(tmp_path / "output"),
         runlog_path=str(tmp_path / "run.log"),
+        swing_chart_review_enabled=False,
     )
     bot = HybridTradingBot(api, config=cfg)
     result = bot.run_once(now=datetime(2026, 2, 14, 8, 50))
@@ -2683,7 +2734,7 @@ def test_swing_can_retry_in_second_window_after_morning_no_pick(tmp_path) -> Non
         etf=pd.DataFrame(),
     )
 
-    with patch("backend.services.trading_engine.bot.pick_swing", return_value=None):
+    with patch("backend.services.trading_engine.bot.rank_swing_codes", return_value=[]):
         bot._try_enter_swing(
             now=datetime(2026, 2, 16, 9, 10),
             regime="RISK_ON",
@@ -2699,7 +2750,7 @@ def test_swing_can_retry_in_second_window_after_morning_no_pick(tmp_path) -> Non
     assert "후보를 끝까지 못 좁혀서" in swing_skip_msgs[0]
     assert "13:00-13:20 창에서 다시 볼게." in swing_skip_msgs[0]
 
-    with patch("backend.services.trading_engine.bot.pick_swing", return_value="005930"):
+    with patch("backend.services.trading_engine.bot.rank_swing_codes", return_value=["005930"]):
         bot._try_enter_swing(
             now=datetime(2026, 2, 16, 13, 10),
             regime="RISK_ON",
@@ -2743,6 +2794,7 @@ def test_swing_no_candidate_notified_once_per_window(tmp_path) -> None:
         state_path=str(tmp_path / "state.json"),
         output_dir=str(tmp_path / "output"),
         runlog_path=str(tmp_path / "run.log"),
+        swing_chart_review_enabled=False,
     )
     notifier = SpyNotifier()
     bot = HybridTradingBot(api, config=cfg, notifier=notifier)  # type: ignore[arg-type]
@@ -2950,7 +3002,7 @@ def test_swing_hold_skips_rebuy_when_same_symbol_is_already_profitable(tmp_path)
         etf=pd.DataFrame(),
     )
 
-    with patch("backend.services.trading_engine.bot.pick_swing", return_value="005930"):
+    with patch("backend.services.trading_engine.bot.rank_swing_codes", return_value=["005930"]):
         bot._try_enter_swing(
             now=datetime(2026, 2, 16, 13, 10),
             regime="RISK_ON",
@@ -2974,6 +3026,7 @@ def test_locked_profit_position_exits_immediately_after_profit_floor_break(tmp_p
         runlog_path=str(tmp_path / "run.log"),
         swing_take_profit_mode="trailing",
         swing_trail_start=0.50,
+        swing_chart_review_enabled=False,
     )
     bot = HybridTradingBot(api, config=cfg)
     bot.state.trade_date = "20260216"
@@ -2991,7 +3044,7 @@ def test_locked_profit_position_exits_immediately_after_profit_floor_break(tmp_p
         etf=pd.DataFrame(),
     )
 
-    with patch("backend.services.trading_engine.bot.pick_swing", return_value="005930"):
+    with patch("backend.services.trading_engine.bot.rank_swing_codes", return_value=["005930"]):
         bot._try_enter_swing(
             now=datetime(2026, 2, 16, 13, 10),
             regime="RISK_ON",
@@ -3550,6 +3603,7 @@ def test_day_entry_skips_fading_intraday_candidate_and_uses_next_symbol(tmp_path
         runlog_path=str(tmp_path / "run.log"),
         day_cash_ratio=0.20,
         day_use_intraday_confirmation=True,
+        day_chart_review_enabled=False,
         use_news_sentiment=False,
         use_intraday_circuit_breaker=False,
     )
@@ -3607,6 +3661,7 @@ def test_day_entry_skips_candidate_when_intraday_fetch_fails(tmp_path) -> None:
         runlog_path=str(tmp_path / "run.log"),
         day_cash_ratio=0.20,
         day_use_intraday_confirmation=True,
+        day_chart_review_enabled=False,
         use_news_sentiment=False,
         use_intraday_circuit_breaker=False,
     )
@@ -3663,6 +3718,7 @@ def test_day_entry_skips_candidate_when_intraday_data_is_missing(tmp_path) -> No
         runlog_path=str(tmp_path / "run.log"),
         day_cash_ratio=0.20,
         day_use_intraday_confirmation=True,
+        day_chart_review_enabled=False,
         use_news_sentiment=False,
         use_intraday_circuit_breaker=False,
     )
@@ -3728,6 +3784,7 @@ def test_day_entry_accepts_tight_base_intraday_candidate(tmp_path) -> None:
         runlog_path=str(tmp_path / "run.log"),
         day_cash_ratio=0.20,
         day_use_intraday_confirmation=True,
+        day_chart_review_enabled=False,
         use_news_sentiment=False,
         use_intraday_circuit_breaker=False,
     )
@@ -3759,6 +3816,336 @@ def test_day_entry_accepts_tight_base_intraday_candidate(tmp_path) -> None:
     assert api.order_calls == [
         {"side": "BUY", "code": "BASE01", "qty": 20, "order_type": "best", "price": None}
     ]
+
+
+def test_day_entry_uses_chart_review_selected_candidate(tmp_path) -> None:
+    asof = "20260216"
+    api = FakeAPI()
+    api._quotes["PASS01"] = {"price": 10_000, "change_pct": 2.1}
+    api._quotes["KEEP01"] = {"price": 10_000, "change_pct": 1.8}
+    api._quotes["NEXT01"] = {"price": 10_000, "change_pct": 1.5}
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        day_cash_ratio=0.20,
+        day_use_intraday_confirmation=False,
+        use_news_sentiment=False,
+        use_intraday_circuit_breaker=False,
+        day_chart_review_enabled=True,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.trade_date = asof
+    candidates = Candidates(
+        asof=asof,
+        popular=pd.DataFrame([{"code": "PASS01"}, {"code": "KEEP01"}, {"code": "NEXT01"}]),
+        model=pd.DataFrame(),
+        etf=pd.DataFrame(),
+        merged=pd.DataFrame(),
+        quote_codes=[],
+    )
+
+    with (
+        patch(
+            "backend.services.trading_engine.bot.rank_daytrade_codes",
+            return_value=["PASS01", "KEEP01", "NEXT01"],
+        ),
+        patch(
+            "backend.services.trading_engine.bot.review_day_candidates_with_llm",
+            return_value=DayChartReviewResult(
+                shortlisted_codes=["PASS01", "KEEP01", "NEXT01"],
+                approved_codes=["KEEP01", "NEXT01"],
+                selected_code="KEEP01",
+                summary="KEEP01이 더 안정적",
+                chart_paths=[],
+                raw_response={},
+            ),
+        ),
+    ):
+        bot._try_enter_day(
+            now=datetime(2026, 2, 16, 9, 10),
+            regime="RISK_ON",
+            candidates=candidates,
+            quotes=api._quotes,
+            news_signal=None,
+        )
+
+    assert bot.state.day_entries_today == 1
+    assert "KEEP01" in bot.state.open_positions
+    assert api.order_calls == [
+        {"side": "BUY", "code": "KEEP01", "qty": 20, "order_type": "best", "price": None}
+    ]
+
+
+def test_day_entry_skips_chart_review_when_entry_window_closed(tmp_path) -> None:
+    asof = "20260216"
+    api = FakeAPI()
+    api._quotes["PASS01"] = {"price": 10_000, "change_pct": 2.1}
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        day_cash_ratio=0.20,
+        day_use_intraday_confirmation=False,
+        use_news_sentiment=False,
+        use_intraday_circuit_breaker=False,
+        day_chart_review_enabled=True,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.trade_date = asof
+    candidates = Candidates(
+        asof=asof,
+        popular=pd.DataFrame([{"code": "PASS01"}]),
+        model=pd.DataFrame(),
+        etf=pd.DataFrame(),
+        merged=pd.DataFrame(),
+        quote_codes=[],
+    )
+
+    with (
+        patch("backend.services.trading_engine.bot.rank_daytrade_codes", return_value=["PASS01"]),
+        patch("backend.services.trading_engine.bot.review_day_candidates_with_llm") as review_mock,
+    ):
+        bot._try_enter_day(
+            now=datetime(2026, 2, 16, 11, 1),
+            regime="RISK_ON",
+            candidates=candidates,
+            quotes=api._quotes,
+            news_signal=None,
+        )
+
+    review_mock.assert_not_called()
+    assert bot.state.pass_reasons_today["ENTRY_WINDOW_CLOSED"] == 1
+
+
+def test_swing_entry_skips_chart_review_when_entry_window_closed(tmp_path) -> None:
+    asof = "20260216"
+    api = FakeAPI()
+    api._quotes["SWING01"] = {"price": 10_000, "change_pct": 2.1}
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        use_news_sentiment=False,
+        use_intraday_circuit_breaker=False,
+        swing_chart_review_enabled=True,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.trade_date = asof
+    candidates = Candidates(
+        asof=asof,
+        popular=pd.DataFrame(),
+        model=pd.DataFrame([{"code": "SWING01"}]),
+        etf=pd.DataFrame(),
+        merged=pd.DataFrame(),
+        quote_codes=[],
+    )
+
+    with (
+        patch("backend.services.trading_engine.bot.rank_swing_codes", return_value=["SWING01"]),
+        patch("backend.services.trading_engine.bot.review_swing_candidates_with_llm") as review_mock,
+    ):
+        bot._try_enter_swing(
+            now=datetime(2026, 2, 16, 11, 1),
+            regime="RISK_ON",
+            candidates=candidates,
+            quotes=api._quotes,
+            news_signal=None,
+        )
+
+    review_mock.assert_not_called()
+    assert bot.state.pass_reasons_today["ENTRY_WINDOW_CLOSED"] == 1
+
+
+def test_day_chart_review_uses_paid_tiebreak_after_local_filter(tmp_path) -> None:
+    asof = "20260216"
+
+    class IntradayAPI(FakeAPI):
+        def __init__(self) -> None:
+            super().__init__()
+            self._intraday: dict[tuple[str, str], pd.DataFrame] = {}
+
+        def intraday_bars(self, code: str, asof: str, lookback: int = 120) -> pd.DataFrame:
+            del lookback
+            return self._intraday.get((code, asof), pd.DataFrame())
+
+    api = IntradayAPI()
+    for code, close in (("PASS01", 100.0), ("KEEP01", 110.0), ("NEXT01", 115.0)):
+        api._bars[(code, asof)] = _make_bars(asof, 40, close - 10.0, 0.3, value=50_000_000_000)
+        api._intraday[(code, asof)] = _make_intraday_bars(asof, [close - 1.0, close, close + 1.0])
+        api._quotes[code] = {"price": close, "change_pct": 2.0}
+
+    stub = _ChartReviewLLMStub(
+        local_raw=json.dumps(
+            {
+                "selected_code": "KEEP01",
+                "summary": "로컬은 KEEP01 우선",
+                "candidates": [
+                    {"code": "PASS01", "decision": "PASS", "reason": "과열", "confidence": 0.9},
+                    {"code": "KEEP01", "decision": "ENTER", "reason": "안정", "confidence": 0.8},
+                    {"code": "NEXT01", "decision": "UNSURE", "reason": "애매", "confidence": 0.6},
+                ],
+            }
+        ),
+        paid_raw=json.dumps(
+            {
+                "selected_code": "NEXT01",
+                "summary": "유료는 NEXT01이 더 낫다고 판단",
+                "candidates": [
+                    {"code": "KEEP01", "decision": "UNSURE", "reason": "무난", "confidence": 0.7},
+                    {"code": "NEXT01", "decision": "ENTER", "reason": "더 좋은 타이밍", "confidence": 0.9},
+                ],
+            }
+        ),
+    )
+
+    cfg = TradeEngineConfig(
+        output_dir=str(tmp_path / "output"),
+        day_chart_review_enabled=True,
+    )
+    candidates = _make_chart_review_candidates(asof)
+
+    with patch("backend.services.trading_engine.day_chart_review.LLMService.get_instance", return_value=stub):
+        review = review_day_candidates_with_llm(
+            api=api,
+            trade_date=asof,
+            ranked_codes=["PASS01", "KEEP01", "NEXT01"],
+            candidates=candidates,
+            quotes=api._quotes,
+            config=cfg,
+            output_dir=str(tmp_path / "output"),
+        )
+
+    assert review is not None
+    assert review.shortlisted_codes == ["PASS01", "KEEP01", "NEXT01"]
+    assert review.selected_code == "NEXT01"
+    assert review.approved_codes == ["NEXT01", "KEEP01"]
+    assert stub.local_calls
+    assert len(stub.paid_calls) == 1
+    paid_message = stub.paid_calls[0]["messages"][1]["content"][0]["text"]
+    assert "로컬 1차 검토 통과 후보: KEEP01,NEXT01" in paid_message
+
+
+def test_day_chart_review_falls_back_to_paid_when_local_parse_fails(tmp_path) -> None:
+    asof = "20260216"
+
+    class IntradayAPI(FakeAPI):
+        def __init__(self) -> None:
+            super().__init__()
+            self._intraday: dict[tuple[str, str], pd.DataFrame] = {}
+
+        def intraday_bars(self, code: str, asof: str, lookback: int = 120) -> pd.DataFrame:
+            del lookback
+            return self._intraday.get((code, asof), pd.DataFrame())
+
+    api = IntradayAPI()
+    for code, close in (("PASS01", 100.0), ("KEEP01", 110.0)):
+        api._bars[(code, asof)] = _make_bars(asof, 40, close - 10.0, 0.3, value=50_000_000_000)
+        api._intraday[(code, asof)] = _make_intraday_bars(asof, [close - 1.0, close, close + 1.0])
+        api._quotes[code] = {"price": close, "change_pct": 2.0}
+
+    stub = _ChartReviewLLMStub(
+        local_raw="this is not json",
+        paid_raw=json.dumps(
+            {
+                "selected_code": "KEEP01",
+                "summary": "유료만 성공",
+                "candidates": [
+                    {"code": "PASS01", "decision": "PASS", "reason": "과열", "confidence": 0.9},
+                    {"code": "KEEP01", "decision": "ENTER", "reason": "무난", "confidence": 0.8},
+                ],
+            }
+        ),
+    )
+
+    cfg = TradeEngineConfig(
+        output_dir=str(tmp_path / "output"),
+        day_chart_review_enabled=True,
+    )
+    candidates = Candidates(
+        asof=asof,
+        popular=pd.DataFrame([{"code": "PASS01", "name": "Pass 01"}, {"code": "KEEP01", "name": "Keep 01"}]),
+        model=pd.DataFrame(),
+        etf=pd.DataFrame(),
+        merged=pd.DataFrame(),
+        quote_codes=[],
+    )
+
+    with patch("backend.services.trading_engine.day_chart_review.LLMService.get_instance", return_value=stub):
+        review = review_day_candidates_with_llm(
+            api=api,
+            trade_date=asof,
+            ranked_codes=["PASS01", "KEEP01"],
+            candidates=candidates,
+            quotes=api._quotes,
+            config=cfg,
+            output_dir=str(tmp_path / "output"),
+        )
+
+    assert review is not None
+    assert review.selected_code == "KEEP01"
+    assert review.approved_codes == ["KEEP01"]
+    assert len(stub.local_calls) == 1
+    assert len(stub.paid_calls) == 1
+
+
+def test_day_entry_records_veto_when_chart_review_rejects_all(tmp_path) -> None:
+    asof = "20260216"
+    api = FakeAPI()
+    api._quotes["PASS01"] = {"price": 10_000, "change_pct": 2.1}
+    api._quotes["KEEP01"] = {"price": 10_000, "change_pct": 1.8}
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        day_cash_ratio=0.20,
+        day_use_intraday_confirmation=False,
+        use_news_sentiment=False,
+        use_intraday_circuit_breaker=False,
+        day_chart_review_enabled=True,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.trade_date = asof
+    candidates = Candidates(
+        asof=asof,
+        popular=pd.DataFrame([{"code": "PASS01"}, {"code": "KEEP01"}]),
+        model=pd.DataFrame(),
+        etf=pd.DataFrame(),
+        merged=pd.DataFrame(),
+        quote_codes=[],
+    )
+
+    with (
+        patch(
+            "backend.services.trading_engine.bot.rank_daytrade_codes",
+            return_value=["PASS01", "KEEP01"],
+        ),
+        patch(
+            "backend.services.trading_engine.bot.review_day_candidates_with_llm",
+            return_value=DayChartReviewResult(
+                shortlisted_codes=["PASS01", "KEEP01"],
+                approved_codes=[],
+                selected_code=None,
+                summary="둘 다 추격 위험",
+                chart_paths=[],
+                raw_response={},
+            ),
+        ),
+    ):
+        bot._try_enter_day(
+            now=datetime(2026, 2, 16, 9, 10),
+            regime="RISK_ON",
+            candidates=candidates,
+            quotes=api._quotes,
+            news_signal=None,
+        )
+
+    assert api.order_calls == []
+    assert bot.state.pass_reasons_today["DAY_LLM_VETO"] == 1
 
 
 def test_bot_holds_profitable_broker_position_when_same_symbol_is_picked(tmp_path) -> None:

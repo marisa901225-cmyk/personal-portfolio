@@ -206,7 +206,7 @@ class RemoteLlamaBackend(LLMBackend):
         self,
         prompt: str,
         max_tokens: int = 512,
-        temperature: float = 0.7,
+        temperature: float = 1.0,
         stop: Optional[list] = None,
         seed: Optional[int] = None,
         **kwargs,
@@ -218,7 +218,7 @@ class RemoteLlamaBackend(LLMBackend):
         self,
         messages: List[dict],
         max_tokens: int = 512,
-        temperature: float = 0.7,
+        temperature: float = 1.0,
         stop: Optional[list] = None,
         seed: Optional[int] = None,
         **kwargs,
@@ -230,8 +230,8 @@ class RemoteLlamaBackend(LLMBackend):
         url = f"{base_url}/v1/chat/completions"
 
         model = kwargs.get("model") or self._get_model_id(base_url)
-        top_p = kwargs.get("top_p", 0.8)
-        top_k = kwargs.get("top_k", 20)
+        top_p = kwargs.get("top_p", 0.95)
+        top_k = kwargs.get("top_k", 64)
         enable_thinking = bool(kwargs.get("enable_thinking", False))
 
         payload: Dict[str, Any] = {

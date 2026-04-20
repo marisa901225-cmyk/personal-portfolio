@@ -363,6 +363,69 @@ class TestLLMService(unittest.TestCase):
             second_payload = backend._post.call_args_list[1].kwargs["payload"]
             self.assertEqual(second_payload.get("reasoning"), {"effort": "none"})
 
+    def test_paid_backend_responses_preserves_multimodal_content(self):
+        class _Resp:
+            def __init__(self, status_code: int, json_data=None, text: str = ""):
+                self.status_code = status_code
+                self._json_data = json_data
+                self.text = text
+
+            def json(self):
+                if isinstance(self._json_data, Exception):
+                    raise self._json_data
+                return self._json_data
+
+        error_resp = _Resp(
+            400,
+            json_data={
+                "error": {
+                    "message": "This model does not support the v1/chat/completions endpoint. Use /responses instead."
+                }
+            },
+        )
+        ok_resp = _Resp(200, json_data={"output_text": "vision-ok"})
+
+        with patch("backend.services.llm.config.settings") as mock_settings:
+            mock_settings.llm_base_url = None
+            mock_settings.llm_api_key = None
+            mock_settings.llm_timeout = 30
+            mock_settings.open_api_key = None
+            mock_settings.ai_report_api_key = "test-key"
+            mock_settings.ai_report_base_url = "https://api.openai.com/v1"
+            mock_settings.ai_report_model = "gpt-5.4"
+            mock_settings.ai_report_fallback_model = "gpt-5.4-mini"
+            mock_settings.ai_report_timeout_sec = 30
+
+            backend = OpenAIPaidBackend(Settings())
+            backend._post = unittest.mock.Mock(side_effect=[error_resp, ok_resp])
+
+            out = backend.chat(
+                [
+                    {"role": "system", "content": "chart-review-system"},
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "review this chart"},
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": "data:image/png;base64,AAAA"},
+                            },
+                        ],
+                    },
+                ],
+                model="gpt-5.4",
+            )
+
+            self.assertEqual(out, "vision-ok")
+            second_payload = backend._post.call_args_list[1].kwargs["payload"]
+            self.assertEqual(
+                second_payload["input"][1]["content"],
+                [
+                    {"type": "input_text", "text": "review this chart"},
+                    {"type": "input_image", "image_url": "data:image/png;base64,AAAA"},
+                ],
+            )
+
     def test_paid_backend_prepends_gpt5_paid_system_prompt(self):
         class _Resp:
             def __init__(self, status_code: int, json_data=None, text: str = ""):

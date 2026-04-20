@@ -7,12 +7,16 @@ from backend.services.alarm import llm_logic, llm_logic_v2
 
 
 class _StubLLM:
-    def __init__(self, loaded: bool) -> None:
+    def __init__(self, loaded: bool, *, used_paid: bool = False) -> None:
         self._loaded = loaded
+        self._used_paid = used_paid
         self.reset_context = MagicMock()
 
     def is_loaded(self) -> bool:
         return self._loaded
+
+    def last_used_paid(self) -> bool:
+        return self._used_paid
 
 
 class AlarmLlmLogicV2ParityTests(unittest.IsolatedAsyncioTestCase):
@@ -236,8 +240,58 @@ class AlarmLlmLogicV2ParityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, punchline_draft)
         self.assertEqual(generate_mock.await_count, 3)
 
-    async def test_generate_random_message_payload_returns_llm_title(self):
-        stub = _StubLLM(loaded=True)
+    async def test_generate_random_message_payload_uses_paid_single_call_title_and_body(self):
+        stub = _StubLLM(loaded=True, used_paid=True)
+        fixed_now = real_datetime(2026, 3, 12, 12, 20, 0)
+        draft = (
+            "폴라로이드 사진이 미래 뉴스를 들고 와 버렸다는 식으로 시작한다. "
+            "키워드 하나와 키워드 둘을 묶어 황당한 사건처럼 풀어내고, 마지막은 핫픽스 완료 같은 식으로 끝낸다. "
+            "테스트용이라도 충분히 길게 적어서 길이 제한을 무난히 통과하게 만든다."
+        )
+        title = "폴라로이드 핫픽스"
+        paid_payload = f"제목: {title}\n본문:\n{draft}"
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(llm_logic_v2.LLMService, "get_instance", return_value=stub))
+            stack.enter_context(patch.object(llm_logic_v2, "get_all_categories", return_value=["폴라로이드 추억/기묘한 타임슬립"]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_formats", return_value=["미래 뉴스 속보 형식으로 시작해라"]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_openers", return_value=["자, 지금이 아니면 절대 들을 수 없는 이야기!"]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_twists", return_value=["마지막 문장에서 이야기를 갑자기 철학적으로 뒤집어라."]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_voices", return_value={"코딩하는 점술가": "핫픽스 완료 같은 선언으로 끝낸다."}))
+            stack.enter_context(patch.object(llm_logic_v2, "load_recent_categories", return_value=[]))
+            stack.enter_context(patch.object(llm_logic_v2, "pick_keywords_for_constraints", return_value=["키워드 하나", "키워드 둘"]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_category_keywords", return_value={}))
+            stack.enter_context(
+                patch.object(
+                    llm_logic_v2,
+                    "load_prompt",
+                    side_effect=lambda key, **kwargs: f"{key} prompt",
+                )
+            )
+            stack.enter_context(patch.object(llm_logic_v2, "dump_llm_draft", MagicMock()))
+            stack.enter_context(patch.object(llm_logic_v2, "save_recent_category", MagicMock()))
+            stack.enter_context(patch.object(llm_logic_v2, "save_last_random_topic_sent_at", MagicMock()))
+            stack.enter_context(patch.object(llm_logic_v2.random, "choice", side_effect=lambda seq: seq[0]))
+            stack.enter_context(patch.object(llm_logic_v2.random, "shuffle", side_effect=lambda seq: None))
+            generate_mock = AsyncMock(return_value=paid_payload)
+            stack.enter_context(
+                patch.object(
+                    llm_logic_v2,
+                    "generate_with_main_llm_async",
+                    new=generate_mock,
+                )
+            )
+            stack.enter_context(patch.object(llm_logic_v2, "refine_draft_with_light_llm_async", new=AsyncMock(return_value=draft)))
+            stack.enter_context(patch.object(llm_logic_v2, "has_category_anchor", return_value=True))
+
+            payload = await llm_logic_v2.generate_random_message_payload(now=fixed_now)
+
+        self.assertEqual(payload, {"title": title, "body": draft})
+        self.assertEqual(generate_mock.await_args_list[0].kwargs["paid_system_prompt"], "random_topic_gpt5_paid_system prompt")
+        self.assertEqual(generate_mock.await_count, 1)
+
+    async def test_generate_random_message_payload_keeps_second_title_call_for_local_route(self):
+        stub = _StubLLM(loaded=True, used_paid=False)
         fixed_now = real_datetime(2026, 3, 12, 12, 20, 0)
         draft = (
             "폴라로이드 사진이 미래 뉴스를 들고 와 버렸다는 식으로 시작한다. "

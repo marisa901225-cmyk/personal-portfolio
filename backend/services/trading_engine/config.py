@@ -53,6 +53,10 @@ class TradeEngineConfig:
     day_lock_retrace_gap_pct: float = 0.006
     day_lock_volatility_gap_multiplier: float = 0.60
     day_stoploss_exclude_after_losses: int = 3
+    day_chart_review_enabled: bool = True
+    day_chart_review_top_n: int = 3
+    day_chart_review_model: str = "gpt-5.4"
+    day_chart_review_reasoning_effort: str = "high"
 
     # Global risk
     daily_max_loss_pct: float = -0.02
@@ -118,6 +122,10 @@ class TradeEngineConfig:
     swing_sector_etf_min_breadth: int = 2
     swing_sector_etf_min_score: float = 30.0
     swing_sector_etf_min_change_pct: float = 0.0
+    swing_chart_review_enabled: bool = True
+    swing_chart_review_top_n: int = 5
+    swing_chart_review_model: str = "gpt-5.4"
+    swing_chart_review_reasoning_effort: str = "high"
     quote_score_limit: int = 30
     allow_etf_swing_fallback: bool = True
     industry_idx_master_path: str = "backend/data/trading_engine_masters/idxcode.mst.zip"

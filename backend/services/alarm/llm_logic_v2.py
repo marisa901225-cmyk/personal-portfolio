@@ -92,6 +92,7 @@ def _make_random_topic_deps() -> _RandomTopicDeps:
         postprocess_llm_text=_postprocess_llm_text,
         compact_reason=_compact_reason,
         hourly_reset_llm_context=_hourly_reset_llm_context,
+        last_used_paid=lambda: bool(LLMService.get_instance().last_used_paid()),
         random_module=random,
     )
 

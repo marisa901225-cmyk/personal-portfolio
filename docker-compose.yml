@@ -68,7 +68,7 @@ services:
       - /dev/dri:/dev/dri
     environment:
       - TZ=Asia/Seoul
-      - LLM_MODEL_PATH=/data/Huihui-Qwen3.5-9B-Claude-4.6-Opus-abliterated.Q8_0.gguf
+      - LLM_MODEL_PATH=/data/supergemma4-Q8_0.gguf
       - LLM_MODEL_PATH_FILE=/data/__llama_server_vulkan_huihui__.txt
       - LLM_THREADS=6
       - LLM_N_GPU_LAYERS=all
@@ -77,6 +77,10 @@ services:
       - LLM_PARALLEL=1
       - LLM_USE_MODEL_BUILTIN_TEMPLATE=1
       - LLM_DEVICE=Vulkan0
+      - LLM_FLASH_ATTN=on
+      - LLM_CACHE_TYPE_K=q4_0
+      - LLM_CACHE_TYPE_V=q4_0
+      - LLM_MMPROJ_PATH=/data/gemma-4-E4B.mmproj-Q8_0.gguf
     entrypoint: [ "/bin/bash", "/run.sh" ]
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8083/health" ]
@@ -93,6 +97,8 @@ services:
       dockerfile: Dockerfile
     container_name: myasset-openvino-llm
     restart: always
+    profiles:
+      - manual
     ports:
       - "8082:8082"
     volumes:
@@ -129,8 +135,8 @@ services:
       - /mnt/one-touch/backups:/mnt/one-touch/backups
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
     environment:
-      - LLM_BASE_URL=http://openvino-server:8082
-      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-int8
+      - LLM_BASE_URL=http://llama-server-vulkan-huihui:8083
+      - LLM_REMOTE_DEFAULT_MODEL=supergemma4-Q8_0.gguf
       - TZ=Asia/Seoul
     env_file: *backend_env_files
     # depends_on:
@@ -162,8 +168,8 @@ services:
     command: python -m backend.scripts.manage run-collector --host 0.0.0.0 --port 8001
     environment:
       - PYTHONPATH=/app
-      - LLM_BASE_URL=http://openvino-server:8082
-      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-int8
+      - LLM_BASE_URL=http://llama-server-vulkan-huihui:8083
+      - LLM_REMOTE_DEFAULT_MODEL=supergemma4-Q8_0.gguf
       - TZ=Asia/Seoul
     env_file: *backend_env_files
     # depends_on:
@@ -195,8 +201,8 @@ services:
     command: python -m backend.scripts.manage run-scheduler
     environment:
       - PYTHONPATH=/app
-      - LLM_BASE_URL=http://openvino-server:8082
-      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-int8
+      - LLM_BASE_URL=http://llama-server-vulkan-huihui:8083
+      - LLM_REMOTE_DEFAULT_MODEL=supergemma4-Q8_0.gguf
       - TZ=Asia/Seoul
       - MYASSET_SECRETS_ENV_FILE=/app/runtime/myasset.secrets.env
       - TRADING_ENGINE_ENABLED=1
@@ -266,10 +272,10 @@ services:
     environment:
       - PYTHONPATH=/app
       - BACKEND_URL=http://backend-api:8000
-      - LLM_BASE_URL=http://openvino-server:8082
+      - LLM_BASE_URL=http://llama-server-vulkan-huihui:8083
       - AI_REPORT_MODEL=gpt-5.1
       - AI_REPORT_TIMEOUT_SEC=900
-      - LLM_REMOTE_DEFAULT_MODEL=Josiefied-Qwen3-8B-int8
+      - LLM_REMOTE_DEFAULT_MODEL=supergemma4-Q8_0.gguf
       - TZ=Asia/Seoul
     env_file: *backend_env_files
     # depends_on:
