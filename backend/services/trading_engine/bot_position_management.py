@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 
 from .execution import exit_position
+from .notification_text import format_exit_message
 from .parking import manage_risk_off_parking
 from .position_helpers import (
     is_swing_trend_broken,
@@ -17,13 +18,15 @@ logger = logging.getLogger(__name__)
 
 
 class BotPositionManagementMixin:
-    def _reconcile_state_with_broker_positions(self) -> None:
+    def _reconcile_state_with_broker_positions(self, *, now: datetime | None = None) -> None:
         reconcile_state_with_broker_positions(
             self.api,
             self.state,
             trade_date=self.state.trade_date,
             journal=self._journal,
             notify_text=self._notify_text,
+            config=self.config,
+            now=now,
             logger=logger,
         )
 
@@ -79,7 +82,14 @@ class BotPositionManagementMixin:
                 strategy_type=pos.type,
             )
             self._notify_text(
-                f"[EXIT][{pos.type}][{reason}] {code} qty={result.qty} avg={result.avg_price:.0f} pnl={pnl_pct * 100:+.2f}%"
+                format_exit_message(
+                    strategy=pos.type,
+                    reason=reason,
+                    code=code,
+                    qty=result.qty,
+                    avg_price=result.avg_price,
+                    pnl_pct=pnl_pct * 100,
+                )
             )
 
     def force_exit_day_positions(self, now: datetime | None = None) -> None:

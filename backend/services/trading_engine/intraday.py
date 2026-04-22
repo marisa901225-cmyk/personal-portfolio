@@ -7,6 +7,7 @@ import pandas as pd
 
 from .config import TradeEngineConfig
 from .interfaces import TradingAPI
+from .utils import parse_numeric
 
 
 def _numeric_series(frame: pd.DataFrame, column: str) -> pd.Series:
@@ -74,6 +75,7 @@ def passes_day_intraday_confirmation(
     recent_low = float(min(recent.min(), low_s.min())) if not low_s.empty else float(recent.min())
     day_change_s = _numeric_series(sorted_bars, "change_pct")
     day_change_pct = float(day_change_s.iloc[-1]) if not day_change_s.empty else None
+    day_change_pct = _resolve_day_change_pct(api, code=code, current=day_change_pct)
 
     if start_close <= 0 or prev_close <= 0 or recent_high <= 0 or recent_low <= 0:
         return False, {"reason": "INVALID_DATA", "bars": int(len(close_s))}
@@ -104,12 +106,28 @@ def passes_day_intraday_confirmation(
         )
         if tight_base_ok:
             return True, {"reason": "TIGHT_INTRADAY_BASE", **meta}
+        if _is_momentum_pullback_ok(
+            config=config,
+            day_change_pct=day_change_pct,
+            window_change_pct=window_change_pct,
+            last_bar_change_pct=last_bar_change_pct,
+            retrace_from_high_pct=retrace_from_high_pct,
+        ):
+            return True, {"reason": "MOMENTUM_PULLBACK_OK", **meta}
         return False, {
             "reason": "WEAK_INTRADAY_WINDOW",
             **meta,
         }
 
     if last_bar_change_pct < float(config.day_intraday_min_last_bar_change_pct):
+        if _is_momentum_pullback_ok(
+            config=config,
+            day_change_pct=day_change_pct,
+            window_change_pct=window_change_pct,
+            last_bar_change_pct=last_bar_change_pct,
+            retrace_from_high_pct=retrace_from_high_pct,
+        ):
+            return True, {"reason": "MOMENTUM_PULLBACK_OK", **meta}
         return False, {
             "reason": "WEAK_INTRADAY_LAST_BAR",
             **meta,
@@ -125,3 +143,42 @@ def passes_day_intraday_confirmation(
         "reason": "OK",
         **meta,
     }
+
+
+def _resolve_day_change_pct(
+    api: TradingAPI,
+    *,
+    code: str,
+    current: float | None,
+) -> float | None:
+    if current is not None and abs(float(current)) > 1e-9:
+        return float(current)
+
+    try:
+        quote = api.quote(code) or {}
+    except Exception:
+        return current
+
+    fallback = parse_numeric(quote.get("change_pct"))
+    if fallback is None:
+        fallback = parse_numeric(quote.get("change_rate"))
+    return float(fallback) if fallback is not None else current
+
+
+def _is_momentum_pullback_ok(
+    *,
+    config: TradeEngineConfig,
+    day_change_pct: float | None,
+    window_change_pct: float,
+    last_bar_change_pct: float,
+    retrace_from_high_pct: float,
+) -> bool:
+    if day_change_pct is None:
+        return False
+
+    return (
+        day_change_pct >= float(getattr(config, "day_momentum_pullback_min_day_change_pct", 0.0))
+        and window_change_pct >= float(getattr(config, "day_momentum_pullback_min_window_change_pct", 0.0))
+        and last_bar_change_pct >= float(getattr(config, "day_momentum_pullback_min_last_bar_change_pct", 0.0))
+        and retrace_from_high_pct >= float(getattr(config, "day_momentum_pullback_max_retrace_from_high_pct", 0.0))
+    )

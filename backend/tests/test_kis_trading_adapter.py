@@ -43,6 +43,138 @@ class KISTradingAdapterTests(unittest.TestCase):
 
         self.assertEqual(result, [])
 
+    def test_volume_rank_value_aggregates_price_buckets_and_sorts_by_traded_value(self) -> None:
+        api = object.__new__(KISTradingAPI)
+
+        def _fake_market_get(path, tr_id, params, tr_cont=""):  # noqa: ANN001
+            del path, tr_id, tr_cont
+            price_from = str(params.get("FID_INPUT_PRICE_1"))
+            price_to = str(params.get("FID_INPUT_PRICE_2"))
+            if (price_from, price_to) == ("0", "1000"):
+                return {
+                    "output": [
+                        {
+                            "mksc_shrn_iscd": "LOW001",
+                            "hts_kor_isnm": "LowValue",
+                            "stck_prpr": "500",
+                            "acml_vol": "1000000",
+                            "acml_tr_pbmn": "500000000",
+                            "prdy_ctrt": "1.0",
+                            "stck_avls": "1",
+                        }
+                    ]
+                }
+            if (price_from, price_to) == ("50000", "100000"):
+                return {
+                    "output": [
+                        {
+                            "mksc_shrn_iscd": "HIGH01",
+                            "hts_kor_isnm": "HighValue",
+                            "stck_prpr": "70000",
+                            "acml_vol": "20000",
+                            "acml_tr_pbmn": "1400000000",
+                            "prdy_ctrt": "2.5",
+                            "stck_avls": "20",
+                        }
+                    ]
+                }
+            return {"output": []}
+
+        api._market_get = Mock(side_effect=_fake_market_get)
+
+        result = api.volume_rank("value", top_n=5, asof="20260317")
+
+        self.assertEqual([row["code"] for row in result[:2]], ["HIGH01", "LOW001"])
+        self.assertEqual(result[0]["value"], 1_400_000_000)
+        self.assertEqual(result[0]["rank"], 1)
+        self.assertGreaterEqual(api._market_get.call_count, 2)
+
+    def test_volume_rank_merges_krx_and_nxt_and_dedupes_by_volume(self) -> None:
+        api = object.__new__(KISTradingAPI)
+
+        def _fake_market_get(path, tr_id, params, tr_cont=""):  # noqa: ANN001
+            del path, tr_id, tr_cont
+            market = str(params.get("FID_COND_MRKT_DIV_CODE"))
+            if market == "J":
+                return {
+                    "output": [
+                        {
+                            "mksc_shrn_iscd": "AAA001",
+                            "hts_kor_isnm": "A-One",
+                            "stck_prpr": "1000",
+                            "acml_vol": "100",
+                            "acml_tr_pbmn": "100000",
+                            "prdy_ctrt": "1.0",
+                            "stck_avls": "1",
+                        }
+                    ]
+                }
+            if market == "NX":
+                return {
+                    "output": [
+                        {
+                            "mksc_shrn_iscd": "AAA001",
+                            "hts_kor_isnm": "A-One",
+                            "stck_prpr": "1000",
+                            "acml_vol": "300",
+                            "acml_tr_pbmn": "300000",
+                            "prdy_ctrt": "1.0",
+                            "stck_avls": "1",
+                        },
+                        {
+                            "mksc_shrn_iscd": "BBB001",
+                            "hts_kor_isnm": "B-One",
+                            "stck_prpr": "900",
+                            "acml_vol": "200",
+                            "acml_tr_pbmn": "180000",
+                            "prdy_ctrt": "0.5",
+                            "stck_avls": "1",
+                        },
+                    ]
+                }
+            return {"output": []}
+
+        api._market_get = Mock(side_effect=_fake_market_get)
+
+        result = api.volume_rank("volume", top_n=5, asof="20260317")
+
+        self.assertEqual([row["code"] for row in result[:2]], ["AAA001", "BBB001"])
+        self.assertEqual(result[0]["volume"], 300)
+        self.assertEqual(result[0]["venue_market"], "NX")
+
+    def test_hts_top_view_rank_parses_output2_rows(self) -> None:
+        api = object.__new__(KISTradingAPI)
+        api._market_get = Mock(
+            return_value={
+                "output1": {"rprs_mrkt_kor_name": "KOSPI"},
+                "output2": [
+                    {
+                        "mksc_shrn_iscd": "005930",
+                        "hts_kor_isnm": "삼성전자",
+                        "data_rank": "1",
+                        "nsel_cnt": "12345",
+                        "stck_prpr": "70200",
+                        "prdy_ctrt": "1.23",
+                    },
+                    {
+                        "mksc_shrn_iscd": "000660",
+                        "hts_kor_isnm": "SK하이닉스",
+                        "data_rank": "2",
+                        "nsel_cnt": "6789",
+                        "stck_prpr": "180000",
+                        "prdy_ctrt": "2.34",
+                    },
+                ],
+            }
+        )
+
+        result = api.hts_top_view_rank(top_n=5, asof="20260317")
+
+        self.assertEqual([row["code"] for row in result[:2]], ["005930", "000660"])
+        self.assertEqual(result[0]["rank"], 1)
+        self.assertEqual(result[0]["view_count"], 12345)
+        self.assertEqual(result[0]["price"], 70200)
+
     def test_market_cap_rank_returns_empty_on_transport_error(self) -> None:
         api = object.__new__(KISTradingAPI)
 

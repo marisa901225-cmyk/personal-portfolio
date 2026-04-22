@@ -60,6 +60,19 @@ _KIS_HTTP_PATH_MIN_GAP_SEC = {
 _KIS_DAILY_BARS_CACHE_TTL_SEC = max(0.0, _env_float("KIS_DAILY_BARS_CACHE_TTL_SEC", 300.0))
 _KIS_DAILY_INDEX_BARS_CACHE_TTL_SEC = max(0.0, _env_float("KIS_DAILY_INDEX_BARS_CACHE_TTL_SEC", 300.0))
 _KIS_QUOTE_CACHE_TTL_SEC = max(0.0, _env_float("KIS_QUOTE_CACHE_TTL_SEC", 20.0))
+_KIS_RANK_MARKET_DIV_CODES: tuple[str, ...] = ("J", "NX")
+_KIS_VALUE_RANK_PRICE_BUCKETS: tuple[tuple[str, str], ...] = (
+    ("0", "1000"),
+    ("1000", "2000"),
+    ("2000", "5000"),
+    ("5000", "10000"),
+    ("10000", "20000"),
+    ("20000", "50000"),
+    ("50000", "100000"),
+    ("100000", "200000"),
+    ("200000", "500000"),
+    ("500000", "9999999"),
+)
 
 
 class KISTradingAPI:
@@ -369,47 +382,229 @@ class KISTradingAPI:
         GET /uapi/domestic-stock/v1/quotations/volume-rank
         """
         del asof
+        normalized_kind = str(kind or "").strip().lower()
+        if normalized_kind == "value":
+            return self._value_rank(top_n=top_n)
+
+        merged_by_code: dict[str, dict[str, Any]] = {}
+        for market_div_code in _KIS_RANK_MARKET_DIV_CODES:
+            params = self._volume_rank_params(
+                kind=normalized_kind,
+                price_from="0",
+                price_to="0",
+                market_div_code=market_div_code,
+            )
+            try:
+                data = self._market_get(
+                    "/uapi/domestic-stock/v1/quotations/volume-rank",
+                    "FHPST01710000",
+                    params,
+                )
+            except requests.exceptions.RequestException as exc:
+                logger.warning(
+                    "volume_rank request failed kind=%s market=%s top_n=%s error=%s",
+                    kind,
+                    market_div_code,
+                    top_n,
+                    exc,
+                )
+                continue
+            for row in self._parse_volume_rank_rows(data.get("output", []), venue_market=market_div_code):
+                self._upsert_rank_row(
+                    merged_by_code,
+                    row,
+                    prefer_field="volume",
+                )
+
+        rows = sorted(
+            merged_by_code.values(),
+            key=lambda row: (
+                int(row.get("volume", 0)),
+                int(row.get("value", 0)),
+                int(row.get("market_cap", 0)),
+            ),
+            reverse=True,
+        )
+        for idx, row in enumerate(rows, start=1):
+            row["rank"] = idx
+        return rows[:top_n]
+
+    def hts_top_view_rank(self, top_n: int, asof: str) -> list[dict[str, Any]]:
+        """
+        HTS 조회상위20종목 조회.
+        GET /uapi/domestic-stock/v1/ranking/hts-top-view
+        """
+        del asof
         params = {
-            "FID_COND_MRKT_DIV_CODE": "J",  # 주식
+            "FID_INPUT_ISCD": "0000",
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_MKOP_CLS_CODE": "00",
+        }
+        try:
+            data = self._market_get(
+                "/uapi/domestic-stock/v1/ranking/hts-top-view",
+                "FHPST01810000",
+                params,
+            )
+        except requests.exceptions.RequestException as exc:
+            logger.warning("hts_top_view_rank request failed top_n=%s error=%s", top_n, exc)
+            return []
+
+        rows = self._parse_hts_top_view_rows(data)
+        rows = sorted(
+            rows,
+            key=lambda row: (
+                int(row.get("rank", 0)) <= 0,
+                int(row.get("rank", 0)) if int(row.get("rank", 0)) > 0 else 999999,
+            ),
+        )
+        for idx, row in enumerate(rows, start=1):
+            if int(row.get("rank", 0)) <= 0:
+                row["rank"] = idx
+        return rows[:top_n]
+
+    def _value_rank(self, *, top_n: int) -> list[dict[str, Any]]:
+        merged_by_code: dict[str, dict[str, Any]] = {}
+        for price_from, price_to in _KIS_VALUE_RANK_PRICE_BUCKETS:
+            for market_div_code in _KIS_RANK_MARKET_DIV_CODES:
+                params = self._volume_rank_params(
+                    kind="value",
+                    price_from=price_from,
+                    price_to=price_to,
+                    market_div_code=market_div_code,
+                )
+                try:
+                    data = self._market_get(
+                        "/uapi/domestic-stock/v1/quotations/volume-rank",
+                        "FHPST01710000",
+                        params,
+                    )
+                except requests.exceptions.RequestException as exc:
+                    logger.warning(
+                        "value_rank bucket request failed market=%s price_from=%s price_to=%s error=%s",
+                        market_div_code,
+                        price_from,
+                        price_to,
+                        exc,
+                    )
+                    continue
+
+                for row in self._parse_volume_rank_rows(data.get("output", []), venue_market=market_div_code):
+                    self._upsert_rank_row(
+                        merged_by_code,
+                        row,
+                        prefer_field="value",
+                    )
+
+        sorted_rows = sorted(
+            merged_by_code.values(),
+            key=lambda row: (
+                int(row.get("value", 0)),
+                int(row.get("volume", 0)),
+                int(row.get("market_cap", 0)),
+            ),
+            reverse=True,
+        )
+        for idx, row in enumerate(sorted_rows, start=1):
+            row["rank"] = idx
+        return sorted_rows[:top_n]
+
+    def _volume_rank_params(
+        self,
+        *,
+        kind: str,
+        price_from: str,
+        price_to: str,
+        market_div_code: str,
+    ) -> dict[str, str]:
+        return {
+            "FID_COND_MRKT_DIV_CODE": str(market_div_code),  # J:KRX, NX:NXT
             "FID_COND_SCR_DIV_CODE": "20171",
             "FID_INPUT_ISCD": "0000",  # 전체
             "FID_DIV_CLS_CODE": "0",  # 전체
             "FID_BLNG_CLS_CODE": "1" if kind == "etf" else "0",
             "FID_TRGT_CLS_CODE": "",
             "FID_TRGT_EXLS_CLS_CODE": "",
-            "FID_INPUT_PRICE_1": "0",
-            "FID_INPUT_PRICE_2": "0",
+            "FID_INPUT_PRICE_1": str(price_from),
+            "FID_INPUT_PRICE_2": str(price_to),
             "FID_VOL_CNT": "0",
             "FID_INPUT_DATE_1": "",
         }
-        try:
-            data = self._market_get(
-                "/uapi/domestic-stock/v1/quotations/volume-rank",
-                "FHPST01710000",
-                params,
-            )
-        except requests.exceptions.RequestException as exc:
-            logger.warning(
-                "volume_rank request failed kind=%s top_n=%s error=%s",
-                kind,
-                top_n,
-                exc,
-            )
-            return []
-        rows = data.get("output", [])
-        result = []
-        for r in rows[:top_n]:
-            result.append(
+
+    def _parse_volume_rank_rows(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        venue_market: str,
+    ) -> list[dict[str, Any]]:
+        parsed_rows: list[dict[str, Any]] = []
+        for r in rows or []:
+            parsed_rows.append(
                 {
-                    "code": r.get("mksc_shrn_iscd", ""),  # 종목코드
-                    "name": r.get("hts_kor_isnm", ""),  # 종목명
-                    "price": int(r.get("stck_prpr", 0)),  # 현재가
-                    "volume": int(r.get("acml_vol", 0)),  # 누적거래량
-                    "change_rate": float(r.get("prdy_ctrt", 0)),  # 전일대비율
-                    "market_cap": int(r.get("stck_avls", 0)) * 100_000_000,
+                    "code": str(r.get("mksc_shrn_iscd", "")),
+                    "name": str(r.get("hts_kor_isnm", "")),
+                    "price": self._to_int(r.get("stck_prpr")),
+                    "volume": self._to_int(r.get("acml_vol")),
+                    "value": self._to_int(r.get("acml_tr_pbmn")),
+                    "change_rate": self._to_float(r.get("prdy_ctrt")),
+                    "market_cap": self._to_int(r.get("stck_avls")) * 100_000_000,
+                    "venue_market": str(venue_market),
                 }
             )
-        return result
+        return parsed_rows
+
+    def _upsert_rank_row(
+        self,
+        merged_by_code: dict[str, dict[str, Any]],
+        row: dict[str, Any],
+        *,
+        prefer_field: str,
+    ) -> None:
+        code = str(row.get("code") or "").strip()
+        if not code:
+            return
+        existing = merged_by_code.get(code)
+        if existing is None:
+            merged_by_code[code] = row
+            return
+        if int(row.get(prefer_field, 0)) > int(existing.get(prefer_field, 0)):
+            merged_by_code[code] = row
+
+    def _parse_hts_top_view_rows(self, data: dict[str, Any]) -> list[dict[str, Any]]:
+        rows = data.get("output2") or data.get("output") or []
+        parsed_rows: list[dict[str, Any]] = []
+        for raw in rows or []:
+            parsed_rows.append(
+                {
+                    "code": str(
+                        raw.get("mksc_shrn_iscd")
+                        or raw.get("stck_shrn_iscd")
+                        or raw.get("shrn_iscd")
+                        or raw.get("iscd")
+                        or ""
+                    ),
+                    "name": str(
+                        raw.get("hts_kor_isnm")
+                        or raw.get("kor_isnm")
+                        or raw.get("stck_kor_isnm")
+                        or raw.get("name")
+                        or ""
+                    ),
+                    "rank": self._to_int(
+                        raw.get("data_rank")
+                        or raw.get("hts_rank")
+                        or raw.get("rank")
+                    ),
+                    "view_count": self._to_int(
+                        raw.get("nsel_cnt")
+                        or raw.get("seln_cnt")
+                        or raw.get("view_cnt")
+                    ),
+                    "price": self._to_int(raw.get("stck_prpr")),
+                    "change_rate": self._to_float(raw.get("prdy_ctrt")),
+                }
+            )
+        return [row for row in parsed_rows if str(row.get("code") or "").strip()]
 
     def market_cap_rank(
         self, top_k: int, asof: str

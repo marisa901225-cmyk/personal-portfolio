@@ -17,11 +17,12 @@ from .journal import TradeJournal
 from .market_calendar import get_last_trading_day, is_trading_day
 from .news_sentiment import build_news_sentiment_signal
 from .notifier import BestEffortNotifier
+from .notification_text import format_error_message, format_pass_message, format_run_start_message
 from .regime import detect_intraday_circuit_breaker, get_regime
 from .state import (
     TradeState,
     add_pass_reason,
-    get_day_stoploss_excluded_codes,
+    get_day_reentry_blocked_codes,
     get_swing_time_excluded_codes,
     load_state,
     rollover_state_for_date,
@@ -104,7 +105,7 @@ class HybridTradingBot(
         if (not self.config.notify_on_core_pass_only) or reason in _CORE_PASS_REASONS:
             if reason in _ONCE_PER_DAY_PASS_REASONS and prev_count > 0:
                 return
-            self._notify_text(f"[PASS] {reason} {self.state.trade_date}")
+            self._notify_text(format_pass_message(reason, self.state.trade_date))
 
     def _pass_and_return(self, reason: str, now: datetime, regime: str) -> dict[str, Any]:
         self._pass(reason, regime)
@@ -175,7 +176,7 @@ class HybridTradingBot(
         if not self._run_started:
             self._journal("RUN_START", asof_date=today)
             self._run_started = True
-            self._notify_text(f"[RUN_START] {today}")
+            self._notify_text(format_run_start_message(today))
 
         try:
             if not is_trading_day(self.api, today, config=self.config):
@@ -248,21 +249,24 @@ class HybridTradingBot(
 
             news_signal = build_news_sentiment_signal(self.config)
             candidates = build_candidates(self.api, asof, self.config, news_signal=news_signal)
+            traded_today_codes = {str(code).strip() for code in self.state.blacklist_today if str(code).strip()}
+            eligible_candidates = exclude_candidate_codes(candidates, traded_today_codes)
 
             handle_open_orders(self.api, timeout_sec=30, now=now)
-            self._reconcile_state_with_broker_positions()
+            self._reconcile_state_with_broker_positions(now=now)
             self.monitor_positions(now=now)
             self._manage_risk_off_parking(now=now, regime=regime)
 
-            day_blocked_codes = get_day_stoploss_excluded_codes(self.state)
-            day_candidates = exclude_candidate_codes(candidates, day_blocked_codes)
+            day_blocked_codes = get_day_reentry_blocked_codes(self.state)
+            day_candidates = exclude_candidate_codes(eligible_candidates, day_blocked_codes)
             swing_blocked_codes = get_swing_time_excluded_codes(self.state)
-            swing_candidates = exclude_candidate_codes(candidates, swing_blocked_codes)
+            swing_candidates = exclude_candidate_codes(eligible_candidates, swing_blocked_codes)
             self._journal(
                 "SCAN_DONE",
                 asof_date=today,
                 regime=regime,
                 candidates_count=int(len(candidates.merged)),
+                blocked_blacklist_codes_count=int(len(traded_today_codes)),
                 blocked_day_stoploss_codes_count=int(len(day_blocked_codes)),
                 blocked_swing_time_codes_count=int(len(swing_blocked_codes)),
                 used_value_proxy=int(candidates.popular["used_value_proxy"].fillna(False).sum())
@@ -287,7 +291,7 @@ class HybridTradingBot(
             )
 
             # --- Candidate Notification ---
-            self._maybe_notify_candidates(now, candidates, regime, display_candidates=display_candidates)
+            self._maybe_notify_candidates(now, day_candidates, regime, display_candidates=display_candidates)
             # ------------------------------
 
             if regime == "RISK_OFF":
@@ -318,7 +322,7 @@ class HybridTradingBot(
         except Exception as exc:
             logger.exception("bot run failed: %s", exc)
             self._journal("ERROR", asof_date=today, reason=str(exc))
-            self._notify_text(f"[ERROR] {today} {str(exc)[:180]}")
+            self._notify_text(format_error_message(today, str(exc)[:180]))
             save_state(self.config.state_path, self.state)
             return {"status": "ERROR", "error": str(exc)}
 

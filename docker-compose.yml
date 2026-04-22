@@ -63,17 +63,18 @@ services:
       - "8083:8083"
     volumes:
       - /home/dlckdgn/ai-models:/data:ro
+      - ./backend/data/llm_model_path_vulkan_huihui.txt:/data/__llama_server_vulkan_huihui__.txt
       - ./backend/scripts/shell/run_llm_server.sh:/run.sh:ro
     devices:
       - /dev/dri:/dev/dri
     environment:
       - TZ=Asia/Seoul
-      - LLM_MODEL_PATH=/data/supergemma4-Q8_0.gguf
+      - LLM_MODEL_PATH=/data/cq_gemma4_e4b_q8.gguf
       - LLM_MODEL_PATH_FILE=/data/__llama_server_vulkan_huihui__.txt
       - LLM_THREADS=6
       - LLM_N_GPU_LAYERS=all
       - LLM_SERVER_PORT=8083
-      - LLM_CTX_SIZE=8192
+      - LLM_CTX_SIZE=65536
       - LLM_PARALLEL=1
       - LLM_USE_MODEL_BUILTIN_TEMPLATE=1
       - LLM_DEVICE=Vulkan0
@@ -91,33 +92,33 @@ services:
     networks:
       - appnet
 
-  openvino-server:
-    build:
-      context: ./backend/openvino_server
-      dockerfile: Dockerfile
-    container_name: myasset-openvino-llm
-    restart: always
-    profiles:
-      - manual
-    ports:
-      - "8082:8082"
-    volumes:
-      - /home/dlckdgn/ai-models/openvino/Josiefied-Qwen3-8B-int8:/models/Josiefied-Qwen3-8B-int8:ro
-    devices:
-      - /dev/dri:/dev/dri
-    environment:
-      - OV_MODEL_DIR=/models/Josiefied-Qwen3-8B-int8
-      - OV_MODEL_ID=Josiefied-Qwen3-8B-int8
-      - OV_DEVICE=GPU
-      - TZ=Asia/Seoul
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8082/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 120s
-    networks:
-      - appnet
+  # openvino-server:
+  #   build:
+  #     context: ./backend/openvino_server
+  #     dockerfile: Dockerfile
+  #   container_name: myasset-openvino-llm
+  #   restart: always
+  #   profiles:
+  #     - manual
+  #   ports:
+  #     - "8082:8082"
+  #   volumes:
+  #     - /home/dlckdgn/ai-models/openvino/Josiefied-Qwen3-8B-int8:/models/Josiefied-Qwen3-8B-int8:ro
+  #   devices:
+  #     - /dev/dri:/dev/dri
+  #   environment:
+  #     - OV_MODEL_DIR=/models/Josiefied-Qwen3-8B-int8
+  #     - OV_MODEL_ID=Josiefied-Qwen3-8B-int8
+  #     - OV_DEVICE=GPU
+  #     - TZ=Asia/Seoul
+  #   healthcheck:
+  #     test: [ "CMD", "curl", "-f", "http://localhost:8082/health" ]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 120s
+  #   networks:
+  #     - appnet
 
   backend-api:
     build:
@@ -204,15 +205,9 @@ services:
       - LLM_BASE_URL=http://llama-server-vulkan-huihui:8083
       - LLM_REMOTE_DEFAULT_MODEL=supergemma4-Q8_0.gguf
       - TZ=Asia/Seoul
+      - SCHEDULER_ROLE=news
       - MYASSET_SECRETS_ENV_FILE=/app/runtime/myasset.secrets.env
-      - TRADING_ENGINE_ENABLED=1
-      - TRADING_ENGINE_API_FACTORY=${TRADING_ENGINE_API_FACTORY:-backend.integrations.kis.trading_adapter:create_trading_api}
-      - TRADING_ENGINE_SCHEDULE_INTERVAL_MIN=${TRADING_ENGINE_SCHEDULE_INTERVAL_MIN:-4}
-      - TRADING_ENGINE_INCLUDE_ETF=${TRADING_ENGINE_INCLUDE_ETF:-1}
-      - TRADING_ENGINE_REGIME_VOL_THRESHOLD=${TRADING_ENGINE_REGIME_VOL_THRESHOLD:-0.05}
-      - TRADING_ENGINE_STATE_PATH=${TRADING_ENGINE_STATE_PATH:-backend/storage/trading_engine/state.json}
-      - TRADING_ENGINE_OUTPUT_DIR=${TRADING_ENGINE_OUTPUT_DIR:-backend/storage/trading_engine/output}
-      - TRADING_ENGINE_RUNLOG_PATH=${TRADING_ENGINE_RUNLOG_PATH:-backend/storage/trading_engine/runlog_current.log}
+      - TRADING_ENGINE_ENABLED=0
       - BACKEND_AUTH_ROTATE_ENABLED=${BACKEND_AUTH_ROTATE_ENABLED:-1}
       - BACKEND_AUTH_ROTATE_INTERVAL_DAYS=${BACKEND_AUTH_ROTATE_INTERVAL_DAYS:-60}
       - BACKEND_AUTH_ROTATE_CHECK_HOUR=${BACKEND_AUTH_ROTATE_CHECK_HOUR:-4}
@@ -220,6 +215,47 @@ services:
       - BACKEND_AUTH_ROTATE_SKIP_INITIAL=${BACKEND_AUTH_ROTATE_SKIP_INITIAL:-1}
       - BACKEND_AUTH_ROTATE_RESTART_HINT_SERVICES=${BACKEND_AUTH_ROTATE_RESTART_HINT_SERVICES:-backend-api alarm-collector}
       - BACKEND_AUTH_ROTATE_STATE_PATH=${BACKEND_AUTH_ROTATE_STATE_PATH:-backend/data/auth_secret_rotation_state.json}
+    env_file: *backend_env_files
+    # depends_on:
+    #   llama-server:
+    #     condition: service_healthy
+    networks:
+      - appnet
+    # Resource limits: Crawler + scheduler (moderate CPU during scraping)
+    cpus: "1.0"
+    mem_limit: "512m"
+    pids_limit: 300
+
+  trading-scheduler:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: myasset-trading-scheduler
+    restart: always
+    volumes:
+      - ./backend:/app/backend
+      - ./backend/storage:/app/backend/storage
+      - ./backend/data:/app/backend/data
+      - ./backend/logs:/app/backend/logs
+      - ${MYASSET_SECRETS_ENV_FILE:-/home/dlckdgn/ai-models/myasset.secrets.env}:/app/runtime/myasset.secrets.env
+      - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
+      - /mnt/one-touch/backups:/mnt/one-touch/backups
+    command: python -m backend.scripts.manage run-scheduler
+    environment:
+      - PYTHONPATH=/app
+      - LLM_BASE_URL=http://llama-server-vulkan-huihui:8083
+      - LLM_REMOTE_DEFAULT_MODEL=supergemma4-Q8_0.gguf
+      - TZ=Asia/Seoul
+      - SCHEDULER_ROLE=trading
+      - MYASSET_SECRETS_ENV_FILE=/app/runtime/myasset.secrets.env
+      - TRADING_ENGINE_ENABLED=1
+      - TRADING_ENGINE_API_FACTORY=${TRADING_ENGINE_API_FACTORY:-backend.integrations.kis.trading_adapter:create_trading_api}
+      - TRADING_ENGINE_SCHEDULE_INTERVAL_MIN=${TRADING_ENGINE_SCHEDULE_INTERVAL_MIN:-2}
+      - TRADING_ENGINE_INCLUDE_ETF=${TRADING_ENGINE_INCLUDE_ETF:-1}
+      - TRADING_ENGINE_REGIME_VOL_THRESHOLD=${TRADING_ENGINE_REGIME_VOL_THRESHOLD:-0.05}
+      - TRADING_ENGINE_STATE_PATH=${TRADING_ENGINE_STATE_PATH:-backend/storage/trading_engine/state.json}
+      - TRADING_ENGINE_OUTPUT_DIR=${TRADING_ENGINE_OUTPUT_DIR:-backend/storage/trading_engine/output}
+      - TRADING_ENGINE_RUNLOG_PATH=${TRADING_ENGINE_RUNLOG_PATH:-backend/storage/trading_engine/runlog_current.log}
     env_file: *backend_env_files
     # depends_on:
     #   llama-server:

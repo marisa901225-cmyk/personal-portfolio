@@ -17,7 +17,7 @@ class TradeEngineConfig:
     # Entry limits
     max_swing_entries_per_week: int = 2
     max_swing_entries_per_day: int = 1
-    max_day_entries_per_day: int = 2
+    max_day_entries_per_day: int = 4
 
     # Sizing
     swing_cash_ratio: float = 0.80
@@ -46,7 +46,7 @@ class TradeEngineConfig:
 
     # Day-trade exits
     day_stop_loss_pct: float = -0.012
-    day_take_profit_pct: float = 0.018
+    day_take_profit_pct: float = 0.03
     day_force_exit_at: str = "15:15"
     day_lock_profit_trigger_pct: float = 0.012
     day_lock_profit_floor_pct: float = 0.005
@@ -55,8 +55,11 @@ class TradeEngineConfig:
     day_stoploss_exclude_after_losses: int = 3
     day_chart_review_enabled: bool = True
     day_chart_review_top_n: int = 3
+    day_chart_review_chart_wildcard_slots: int = 1
     day_chart_review_model: str = "gpt-5.4"
     day_chart_review_reasoning_effort: str = "high"
+    day_afternoon_entry_start_window_index: int = 2
+    day_afternoon_loss_limit_loss_count: int = 2
 
     # Global risk
     daily_max_loss_pct: float = -0.02
@@ -64,17 +67,22 @@ class TradeEngineConfig:
 
     # Time windows
     entry_windows: list[tuple[str, str]] = field(
-        default_factory=lambda: [("09:05", "09:20"), ("13:00", "13:20")]
+        default_factory=lambda: [
+            ("09:05", "09:20"),
+            ("09:55", "10:10"),
+            ("13:00", "13:20"),
+            ("13:55", "14:10"),
+        ]
     )
     no_new_entry_after: str = "15:00"
     monitor_interval_sec: int = 240
     day_entry_window_index: int = 0
 
     # Scanner knobs
-    popular_volume_top_n: int = 100
-    popular_value_candidate_top_n: int = 200
+    popular_volume_top_n: int = 150
+    popular_value_candidate_top_n: int = 400
     popular_sector_top_n: int = 10
-    popular_final_top_n: int = 10
+    popular_final_top_n: int = 15
     model_top_k: int = 500
     model_mcap_min: int = 1_000_000_000_000
     model_avg_value_20d_min: int = 100_000_000_000
@@ -88,6 +96,15 @@ class TradeEngineConfig:
     day_industry_negative_penalty_max: float = 8.0
     day_momentum_bonus_max: float = 20.0
     day_momentum_bonus_cap_pct: float = 15.0
+    day_intraday_strength_weight: float = 1.8
+    day_hts_top_view_top_n: int = 20
+    day_hts_top_view_bonus_max: float = 3.0
+    day_momentum_chase_max_change_pct: float = 26.0
+    day_momentum_chase_min_intraday_score: float = 3.0
+    day_momentum_pullback_min_day_change_pct: float = 12.0
+    day_momentum_pullback_min_window_change_pct: float = -1.0
+    day_momentum_pullback_min_last_bar_change_pct: float = -0.25
+    day_momentum_pullback_max_retrace_from_high_pct: float = -1.8
     day_min_change_pct: float = 0.5
     day_max_change_pct: float = 6.0
     day_etf_max_change_pct: float = 4.0

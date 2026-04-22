@@ -166,6 +166,42 @@ def _apply_daytrade_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_DAY_NEGATIVE_PENALTY_MAX",
         cfg.day_negative_penalty_max,
     )
+    cfg.day_intraday_strength_weight = _env_float(
+        "TRADING_ENGINE_DAY_INTRADAY_STRENGTH_WEIGHT",
+        cfg.day_intraday_strength_weight,
+    )
+    cfg.day_hts_top_view_top_n = _env_int(
+        "TRADING_ENGINE_DAY_HTS_TOP_VIEW_TOP_N",
+        cfg.day_hts_top_view_top_n,
+    )
+    cfg.day_hts_top_view_bonus_max = _env_float(
+        "TRADING_ENGINE_DAY_HTS_TOP_VIEW_BONUS_MAX",
+        cfg.day_hts_top_view_bonus_max,
+    )
+    cfg.day_momentum_chase_max_change_pct = _env_float(
+        "TRADING_ENGINE_DAY_MOMENTUM_CHASE_MAX_CHANGE_PCT",
+        cfg.day_momentum_chase_max_change_pct,
+    )
+    cfg.day_momentum_chase_min_intraday_score = _env_float(
+        "TRADING_ENGINE_DAY_MOMENTUM_CHASE_MIN_INTRADAY_SCORE",
+        cfg.day_momentum_chase_min_intraday_score,
+    )
+    cfg.day_momentum_pullback_min_day_change_pct = _env_float(
+        "TRADING_ENGINE_DAY_MOMENTUM_PULLBACK_MIN_DAY_CHANGE_PCT",
+        cfg.day_momentum_pullback_min_day_change_pct,
+    )
+    cfg.day_momentum_pullback_min_window_change_pct = _env_float(
+        "TRADING_ENGINE_DAY_MOMENTUM_PULLBACK_MIN_WINDOW_CHANGE_PCT",
+        cfg.day_momentum_pullback_min_window_change_pct,
+    )
+    cfg.day_momentum_pullback_min_last_bar_change_pct = _env_float(
+        "TRADING_ENGINE_DAY_MOMENTUM_PULLBACK_MIN_LAST_BAR_CHANGE_PCT",
+        cfg.day_momentum_pullback_min_last_bar_change_pct,
+    )
+    cfg.day_momentum_pullback_max_retrace_from_high_pct = _env_float(
+        "TRADING_ENGINE_DAY_MOMENTUM_PULLBACK_MAX_RETRACE_FROM_HIGH_PCT",
+        cfg.day_momentum_pullback_max_retrace_from_high_pct,
+    )
     cfg.day_theme_candidate_injection_enabled = _env_bool(
         "TRADING_ENGINE_DAY_THEME_CANDIDATE_INJECTION_ENABLED",
         cfg.day_theme_candidate_injection_enabled,
@@ -217,6 +253,14 @@ def _apply_daytrade_overrides(cfg: TradeEngineConfig) -> None:
     cfg.day_chart_review_reasoning_effort = _env_text(
         "TRADING_ENGINE_DAY_CHART_REVIEW_REASONING_EFFORT",
         cfg.day_chart_review_reasoning_effort,
+    )
+    cfg.day_afternoon_entry_start_window_index = _env_int(
+        "TRADING_ENGINE_DAY_AFTERNOON_ENTRY_START_WINDOW_INDEX",
+        cfg.day_afternoon_entry_start_window_index,
+    )
+    cfg.day_afternoon_loss_limit_loss_count = _env_int(
+        "TRADING_ENGINE_DAY_AFTERNOON_LOSS_LIMIT_LOSS_COUNT",
+        cfg.day_afternoon_loss_limit_loss_count,
     )
 
 

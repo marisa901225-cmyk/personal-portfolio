@@ -12,6 +12,7 @@ import pandas as pd
 
 from ..llm.service import LLMService
 from ..prompt_loader import load_prompt
+from .candidate_scoring import _day_intraday_structure_score
 from .chart_review_renderer import render_candidate_chart_png
 from .config import TradeEngineConfig
 from .intraday import sort_intraday_bars
@@ -88,7 +89,11 @@ def review_day_candidates_with_llm(
 ) -> DayChartReviewResult | None:
     if not getattr(config, "day_chart_review_enabled", False):
         return None
-    shortlist = _build_shortlist(ranked_codes, max_count=max(1, int(config.day_chart_review_top_n)))
+    shortlist = _build_day_shortlist(
+        ranked_codes=ranked_codes,
+        quotes=quotes,
+        config=config,
+    )
     if not shortlist:
         return None
 
@@ -220,6 +225,44 @@ def _build_shortlist(ranked_codes: list[str], *, max_count: int) -> list[str]:
         if len(ordered) >= max_count:
             break
     return ordered
+
+
+def _build_day_shortlist(
+    *,
+    ranked_codes: list[str],
+    quotes: dict[str, dict[str, Any]],
+    config: TradeEngineConfig,
+) -> list[str]:
+    base_count = max(1, int(config.day_chart_review_top_n))
+    shortlist = _build_shortlist(ranked_codes, max_count=base_count)
+
+    wildcard_slots = max(0, int(getattr(config, "day_chart_review_chart_wildcard_slots", 0)))
+    if wildcard_slots <= 0:
+        return shortlist
+
+    shortlisted_codes = set(shortlist)
+    remaining_seen: set[str] = set()
+    chart_scored_remaining: list[tuple[float, int, str]] = []
+    for rank_index, code in enumerate(ranked_codes):
+        code_str = str(code or "").strip()
+        if not code_str or code_str in shortlisted_codes or code_str in remaining_seen:
+            continue
+        remaining_seen.add(code_str)
+        quote = quotes.get(code_str, {})
+        chart_score = float(_day_intraday_structure_score(quote))
+        chart_scored_remaining.append((chart_score, rank_index, code_str))
+
+    if not chart_scored_remaining:
+        return shortlist
+
+    chart_scored_remaining.sort(key=lambda item: (-item[0], item[1], item[2]))
+    extended = list(shortlist)
+    for _, _, code_str in chart_scored_remaining[:wildcard_slots]:
+        if code_str in shortlisted_codes:
+            continue
+        extended.append(code_str)
+        shortlisted_codes.add(code_str)
+    return extended
 
 
 def _find_candidate_row(candidates: Any, code: str) -> pd.Series | None:

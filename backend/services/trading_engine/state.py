@@ -49,6 +49,8 @@ class TradeState:
     pending_notifications: list[dict[str, Any]] = field(default_factory=list)
     day_stoploss_fail_counts: dict[str, int] = field(default_factory=dict)
     day_stoploss_excluded_codes: set[str] = field(default_factory=set)
+    day_stoploss_codes_today: set[str] = field(default_factory=set)
+    day_entry_windows_used_today: set[int] = field(default_factory=set)
     swing_time_excluded_codes: set[str] = field(default_factory=set)
 
 
@@ -86,6 +88,12 @@ def load_state(path: str) -> TradeState:
         day_stoploss_excluded_codes=_parse_day_stoploss_excluded_codes(
             raw.get("day_stoploss_excluded_codes", [])
         ),
+        day_stoploss_codes_today=_parse_day_stoploss_excluded_codes(
+            raw.get("day_stoploss_codes_today", [])
+        ),
+        day_entry_windows_used_today=_parse_int_set(
+            raw.get("day_entry_windows_used_today", [])
+        ),
         swing_time_excluded_codes=_parse_day_stoploss_excluded_codes(
             raw.get("swing_time_excluded_codes", [])
         ),
@@ -107,6 +115,10 @@ def save_state(path: str, state: TradeState) -> None:
         if str(code).strip() and int(count) > 0
     }
     payload["day_stoploss_excluded_codes"] = sorted(state.day_stoploss_excluded_codes)
+    payload["day_stoploss_codes_today"] = sorted(state.day_stoploss_codes_today)
+    payload["day_entry_windows_used_today"] = sorted(
+        int(idx) for idx in state.day_entry_windows_used_today
+    )
     payload["swing_time_excluded_codes"] = sorted(state.swing_time_excluded_codes)
 
     original_mode: int | None = None
@@ -134,6 +146,8 @@ def rollover_state_for_date(state: TradeState, today: str) -> TradeState:
     state.consecutive_losses_today = 0
     state.blacklist_today.clear()
     state.pass_reasons_today.clear()
+    state.day_stoploss_codes_today.clear()
+    state.day_entry_windows_used_today.clear()
     state.swing_time_excluded_codes.clear()
 
     new_week_id = _week_id(today)
@@ -191,6 +205,28 @@ def get_day_stoploss_fail_count(state: TradeState, code: str) -> int:
 
 def get_day_stoploss_excluded_codes(state: TradeState) -> set[str]:
     return {str(code) for code in state.day_stoploss_excluded_codes}
+
+
+def mark_day_stoploss_today(
+    state: TradeState,
+    *,
+    code: str,
+) -> None:
+    normalized_code = str(code).strip()
+    if not normalized_code:
+        return
+
+    state.day_stoploss_codes_today.add(normalized_code)
+
+
+def get_day_stoploss_codes_today(state: TradeState) -> set[str]:
+    return {str(code) for code in state.day_stoploss_codes_today}
+
+
+def get_day_reentry_blocked_codes(state: TradeState) -> set[str]:
+    blocked_codes = get_day_stoploss_excluded_codes(state)
+    blocked_codes.update(get_day_stoploss_codes_today(state))
+    return blocked_codes
 
 
 def mark_swing_time_excluded(
@@ -257,4 +293,21 @@ def _parse_day_stoploss_fail_counts(raw: Any) -> dict[str, int]:
             continue
         if count > 0:
             out[normalized_code] = count
+    return out
+
+
+def _parse_int_set(raw: Any) -> set[int]:
+    if isinstance(raw, dict):
+        items = raw.keys()
+    elif isinstance(raw, (list, tuple, set)):
+        items = raw
+    else:
+        items = []
+
+    out: set[int] = set()
+    for value in items:
+        try:
+            out.add(int(value))
+        except (TypeError, ValueError):
+            continue
     return out

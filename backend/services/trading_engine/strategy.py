@@ -281,6 +281,9 @@ def rank_daytrade_codes(
         return []
 
     pool["_live_change_pct_num"] = pool.apply(lambda r: _resolve_change_pct(r, quotes), axis=1)
+    pool["_day_intraday_score"] = pool["code"].map(
+        lambda code: _day_intraday_structure_score(quotes.get(str(code), {}))
+    )
     pool = pool[
         pool["_live_change_pct_num"].isna()
         | (pool["_live_change_pct_num"] > float(config.day_hard_drop_exclude_pct))
@@ -295,8 +298,9 @@ def rank_daytrade_codes(
     if pool.empty:
         return []
 
-    pool["_day_max_change_pct"] = pool["_is_etf"].map(
-        lambda is_etf: float(config.day_etf_max_change_pct if is_etf else config.day_max_change_pct)
+    pool["_day_max_change_pct"] = pool.apply(
+        lambda row: _resolve_day_max_change_pct(row, config),
+        axis=1,
     )
     pool = pool[
         pool["_live_change_pct_num"].isna()
@@ -312,10 +316,10 @@ def rank_daytrade_codes(
         pool["score"] = pool.apply(lambda r: _score_day_row(r, quotes, config), axis=1)
     else:
         pool["score"] = pool.apply(lambda r: _score_day_row(r, quotes, config, news_signal), axis=1)
-    # 동점 시 거래대금보다 상승률(모멘텀)이 중요하므로 2차 정렬 기준 추가
+    # 단타는 실시간 강도가 우선이므로 장중 구조 점수를 상승률/거래대금보다 먼저 반영한다.
     pool = pool.sort_values(
-        by=["score", "_live_change_pct_num", "_avg_value_5d_num"],
-        ascending=[False, False, False]
+        by=["score", "_day_intraday_score", "_live_change_pct_num", "_avg_value_5d_num"],
+        ascending=[False, False, False, False]
     )
     if pool.empty:
         return []
@@ -359,6 +363,28 @@ def rank_daytrade_codes(
         deduped_codes.append(code)
 
     return deduped_codes
+
+
+def _resolve_day_max_change_pct(row: pd.Series, config: TradeEngineConfig) -> float:
+    is_etf = _to_bool(row.get("_is_etf", row.get("is_etf", False)))
+    base_cap = float(config.day_etf_max_change_pct if is_etf else config.day_max_change_pct)
+    if is_etf:
+        return base_cap
+
+    live_change_pct = parse_numeric(row.get("_live_change_pct_num"))
+    intraday_score = parse_numeric(row.get("_day_intraday_score"))
+    if live_change_pct is None or intraday_score is None:
+        return base_cap
+
+    chase_cap = float(getattr(config, "day_momentum_chase_max_change_pct", base_cap))
+    chase_score_min = float(getattr(config, "day_momentum_chase_min_intraday_score", 0.0))
+    if (
+        live_change_pct > base_cap
+        and live_change_pct <= max(base_cap, chase_cap)
+        and intraday_score >= chase_score_min
+    ):
+        return max(base_cap, chase_cap)
+    return base_cap
 
 
 def _merge_candidates(

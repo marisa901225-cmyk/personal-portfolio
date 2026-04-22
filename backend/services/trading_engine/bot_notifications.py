@@ -9,6 +9,7 @@ from .candidate_notifications import (
     maybe_build_candidate_notifications,
     maybe_build_swing_skip_notification,
 )
+from .notification_text import format_chart_review_skip_message
 
 
 class BotNotificationsMixin:
@@ -17,6 +18,21 @@ class BotNotificationsMixin:
 
     def _notify_file(self, path: str, caption: str | None = None) -> None:
         self.notifier.enqueue_file(path, caption=caption)
+
+    def _notify_chart_review_skip(
+        self,
+        *,
+        strategy_label: str,
+        reason: str,
+        code: str | None = None,
+    ) -> None:
+        self._notify_text(
+            format_chart_review_skip_message(
+                strategy=strategy_label,
+                reason=reason,
+                code=code,
+            )
+        )
 
     def _maybe_notify_candidates(
         self,

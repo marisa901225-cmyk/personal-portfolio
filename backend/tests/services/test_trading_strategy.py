@@ -417,6 +417,88 @@ class TradingStrategyTests(unittest.TestCase):
 
         self.assertEqual(ranked[0], "111111")
 
+    def test_rank_daytrade_codes_realtime_strength_weight_overrides_liquidity_bias(self) -> None:
+        pool = pd.DataFrame(
+            [
+                {
+                    "code": "WEAKBIG",
+                    "name": "Weak Big",
+                    "is_etf": False,
+                    "mcap": "1500000000000",
+                    "avg_value_5d": "500000000000",
+                    "change_pct": "1.2",
+                    "close": 101.0,
+                    "retrace_from_high_10d_pct": -2.0,
+                },
+                {
+                    "code": "STRONG",
+                    "name": "Strong Lead",
+                    "is_etf": False,
+                    "mcap": "1500000000000",
+                    "avg_value_5d": "70000000000",
+                    "change_pct": "3.4",
+                    "close": 106.0,
+                    "retrace_from_high_10d_pct": -1.0,
+                },
+            ]
+        )
+        quotes = {
+            "WEAKBIG": {"price": 101.0, "open": 101.0, "high": 106.0, "low": 100.0, "change_pct": 1.2},
+            "STRONG": {"price": 106.0, "open": 102.0, "high": 106.5, "low": 101.5, "change_pct": 3.4},
+        }
+        cfg = TradeEngineConfig(
+            include_etf=False,
+            day_stock_min_avg_value_5d=0,
+            day_stock_min_mcap=0,
+            day_intraday_strength_weight=1.8,
+        )
+
+        ranked = rank_daytrade_codes(self._candidates_with_popular(pool), quotes=quotes, config=cfg)
+
+        self.assertEqual(ranked[:2], ["STRONG", "WEAKBIG"])
+
+    def test_rank_daytrade_codes_allows_strong_momentum_chase_above_default_cap(self) -> None:
+        pool = pd.DataFrame(
+            [
+                {
+                    "code": "CHASE1",
+                    "name": "Chase Leader",
+                    "is_etf": False,
+                    "mcap": "1600000000000",
+                    "avg_value_5d": "90000000000",
+                    "change_pct": "18.0",
+                    "close": 118.0,
+                    "retrace_from_high_10d_pct": -1.0,
+                },
+                {
+                    "code": "SAFE01",
+                    "name": "Safe Follower",
+                    "is_etf": False,
+                    "mcap": "1600000000000",
+                    "avg_value_5d": "85000000000",
+                    "change_pct": "5.0",
+                    "close": 105.0,
+                    "retrace_from_high_10d_pct": -1.5,
+                },
+            ]
+        )
+        quotes = {
+            "CHASE1": {"price": 118.0, "open": 109.0, "high": 119.0, "low": 108.5, "change_pct": 18.0},
+            "SAFE01": {"price": 105.0, "open": 102.0, "high": 106.0, "low": 101.0, "change_pct": 5.0},
+        }
+        cfg = TradeEngineConfig(
+            include_etf=False,
+            day_stock_min_avg_value_5d=0,
+            day_stock_min_mcap=0,
+            day_max_change_pct=6.0,
+            day_momentum_chase_max_change_pct=26.0,
+            day_momentum_chase_min_intraday_score=3.0,
+        )
+
+        ranked = rank_daytrade_codes(self._candidates_with_popular(pool), quotes=quotes, config=cfg)
+
+        self.assertEqual(ranked[0], "CHASE1")
+
     @patch("backend.services.trading_engine.strategy._score_day_row")
     def test_rank_daytrade_promotes_only_top_stock_preference(self, mock_score) -> None:
         pool = pd.DataFrame(
@@ -815,6 +897,43 @@ class TradingStrategyTests(unittest.TestCase):
 
         # unmatched -> market_score * weight * fallback_ratio = 1.0 * 6.0 * 0.5
         self.assertAlmostEqual(score_with_news - score_without_news, 3.0, places=6)
+
+    def test_score_day_row_rewards_high_current_value_rank(self) -> None:
+        base_row = {
+            "code": "000001",
+            "name": "알파컴퍼니",
+            "_avg_value_5d_num": 80_000_000_000,
+            "_change_pct_num": 2.0,
+            "_is_etf": False,
+            "volume_rank": 15,
+        }
+        strong_row = pd.Series({**base_row, "value_rank": 1})
+        weak_row = pd.Series({**base_row, "value_rank": 150})
+        cfg = TradeEngineConfig()
+
+        strong_score = _score_day_row(strong_row, quotes={}, config=cfg, news_signal=None)
+        weak_score = _score_day_row(weak_row, quotes={}, config=cfg, news_signal=None)
+
+        self.assertGreater(strong_score, weak_score)
+
+    def test_score_day_row_rewards_high_hts_top_view_rank_softly(self) -> None:
+        base_row = {
+            "code": "000001",
+            "name": "알파컴퍼니",
+            "_avg_value_5d_num": 80_000_000_000,
+            "_change_pct_num": 2.0,
+            "_is_etf": False,
+            "value_rank": 20,
+            "volume_rank": 15,
+        }
+        strong_row = pd.Series({**base_row, "hts_view_rank": 1})
+        weak_row = pd.Series({**base_row, "hts_view_rank": 20})
+        cfg = TradeEngineConfig(day_hts_top_view_top_n=20, day_hts_top_view_bonus_max=3.0)
+
+        strong_score = _score_day_row(strong_row, quotes={}, config=cfg, news_signal=None)
+        weak_score = _score_day_row(weak_row, quotes={}, config=cfg, news_signal=None)
+
+        self.assertGreater(strong_score, weak_score)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,8 @@ from .interfaces import BuyOrderInfoAPI, SellOrderInfoAPI, TradingAPI
 from .state import (
     PositionState,
     TradeState,
+    get_day_reentry_blocked_codes,
+    mark_day_stoploss_today,
     mark_swing_time_excluded,
     record_day_stoploss_failure,
 )
@@ -20,6 +22,7 @@ logger = logging.getLogger(__name__)
 _BUY_BUFFER_RATIO = 0.005
 _BUY_BUFFER_KRW = 5_000
 _BUY_RETRY_MAX = 1
+_BUY_PRICE_RETRY_MAX = 1
 _INSUFFICIENT_CASH_MESSAGES = (
     "주문가능금액",
     "주문 가능 금액",
@@ -71,7 +74,7 @@ def enter_position(
     broker_before_qty, _ = _get_broker_position_snapshot(api=api, code=code)
     if code in state.blacklist_today:
         return None
-    if position_type == "T" and code in state.day_stoploss_excluded_codes:
+    if position_type == "T" and code in get_day_reentry_blocked_codes(state):
         return None
     if existing_position is not None and not (
         position_type == "P" and existing_position.type == "P"
@@ -82,6 +85,19 @@ def enter_position(
     price_now = parse_numeric(quote.get("price"))
     if price_now is None or price_now <= 0:
         return None
+
+    normalized_order_type = str(order_type or "").strip().lower()
+    if price is not None and price > 0 and normalized_order_type in {"limit", "best"}:
+        normalized_price = _normalize_buy_limit_price(int(price))
+        if normalized_price != int(price):
+            logger.warning(
+                "enter_position: normalized invalid limit price code=%s order_type=%s price=%s->%s",
+                code,
+                order_type,
+                price,
+                normalized_price,
+            )
+        price = normalized_price
 
     fallback_cash = float(api.cash_available())
     sizing = _resolve_buy_sizing(
@@ -98,8 +114,6 @@ def enter_position(
         budget_cash_cap=budget_cash_cap,
     )
     qty = _calc_buy_qty(budget_cash=budget_cash, price_now=sizing.price_now)
-    if sizing.max_qty is not None:
-        qty = min(qty, sizing.max_qty)
     if qty < 1:
         return None
 
@@ -126,74 +140,136 @@ def enter_position(
         )
 
     attempted_qty = qty
+    attempted_price = int(price) if price is not None else None
+    cash_retry_count = 0
+    price_retry_count = 0
     resp: dict[str, Any] | None = None
-    for retry_idx in range(_BUY_RETRY_MAX + 1):
+    while True:
         resp = api.place_order(
             side="BUY",
             code=code,
             qty=attempted_qty,
             order_type=order_type,
-            price=price,
+            price=attempted_price,
         )
         if resp.get("success") is not False:
             break
 
         msg = str(resp.get("msg") or "")
-        if retry_idx >= _BUY_RETRY_MAX or not _is_insufficient_cash_rejection(msg):
-            logger.warning(
-                "enter_position: broker rejected order code=%s qty=%d msg=%s",
-                code,
-                attempted_qty,
-                msg,
-            )
-            return None
-
-        refreshed_sizing = _resolve_buy_sizing(
-            api=api,
-            code=code,
-            order_type=order_type,
-            price=price,
-            fallback_cash=float(api.cash_available()),
-            fallback_price=float(price_now),
-        )
-        refreshed_budget_cash = _resolve_buy_budget_cash(
-            cash=refreshed_sizing.cash,
-            cash_ratio=cash_ratio,
-            budget_cash_cap=budget_cash_cap,
-        )
-        next_qty = _calc_buy_qty(
-            budget_cash=refreshed_budget_cash,
-            price_now=refreshed_sizing.price_now,
-            extra_buffer_ratio=_BUY_BUFFER_RATIO * (retry_idx + 2),
-            extra_buffer_krw=_BUY_BUFFER_KRW * (retry_idx + 2),
-        )
-        if refreshed_sizing.max_qty is not None:
-            next_qty = min(next_qty, refreshed_sizing.max_qty)
-        next_qty = min(next_qty, attempted_qty - 1)
-        if next_qty < 1:
-            logger.warning(
-                "enter_position: insufficient buying power after retry code=%s last_qty=%d cash=%.0f msg=%s",
-                code,
-                attempted_qty,
-                refreshed_sizing.cash,
-                msg,
-            )
-            return None
-
         logger.warning(
-            "enter_position: reducing qty after insufficient cash code=%s qty=%d->%d cash=%.0f msg=%s",
+            "enter_position: broker rejected order code=%s qty=%d order_type=%s price=%s order_id=%s msg=%s",
             code,
             attempted_qty,
-            next_qty,
-            refreshed_sizing.cash,
+            order_type,
+            attempted_price,
+            _extract_order_id(resp),
             msg,
         )
-        attempted_qty = next_qty
-        sizing_meta["sizing_cash"] = int(refreshed_sizing.cash)
-        sizing_meta["sizing_price"] = float(refreshed_sizing.price_now)
-        sizing_meta["budget_cash"] = int(refreshed_budget_cash)
-        sizing_meta["max_qty"] = int(refreshed_sizing.max_qty) if refreshed_sizing.max_qty is not None else None
-        sizing_meta["requested_qty"] = int(next_qty)
+
+        if _is_insufficient_cash_rejection(msg) and cash_retry_count < _BUY_RETRY_MAX:
+            cash_retry_count += 1
+            refreshed_sizing = _resolve_buy_sizing(
+                api=api,
+                code=code,
+                order_type=order_type,
+                price=attempted_price,
+                fallback_cash=float(api.cash_available()),
+                fallback_price=float(attempted_price or price_now),
+            )
+            refreshed_budget_cash = _resolve_buy_budget_cash(
+                cash=refreshed_sizing.cash,
+                cash_ratio=cash_ratio,
+                budget_cash_cap=budget_cash_cap,
+            )
+            next_qty = _calc_buy_qty(
+                budget_cash=refreshed_budget_cash,
+                price_now=refreshed_sizing.price_now,
+                extra_buffer_ratio=_BUY_BUFFER_RATIO * (cash_retry_count + 1),
+                extra_buffer_krw=_BUY_BUFFER_KRW * (cash_retry_count + 1),
+            )
+            if refreshed_sizing.max_qty is not None:
+                next_qty = min(next_qty, refreshed_sizing.max_qty)
+            next_qty = min(next_qty, attempted_qty - 1)
+            if next_qty < 1:
+                logger.warning(
+                    "enter_position: insufficient buying power after retry code=%s last_qty=%d cash=%.0f price=%s msg=%s",
+                    code,
+                    attempted_qty,
+                    refreshed_sizing.cash,
+                    attempted_price,
+                    msg,
+                )
+                return None
+
+            logger.warning(
+                "enter_position: reducing qty after insufficient cash code=%s qty=%d->%d cash=%.0f price=%s msg=%s",
+                code,
+                attempted_qty,
+                next_qty,
+                refreshed_sizing.cash,
+                attempted_price,
+                msg,
+            )
+            attempted_qty = next_qty
+            sizing_meta["sizing_cash"] = int(refreshed_sizing.cash)
+            sizing_meta["sizing_price"] = float(refreshed_sizing.price_now)
+            sizing_meta["budget_cash"] = int(refreshed_budget_cash)
+            sizing_meta["max_qty"] = int(refreshed_sizing.max_qty) if refreshed_sizing.max_qty is not None else None
+            sizing_meta["requested_qty"] = int(next_qty)
+            continue
+
+        if _can_retry_buy_with_higher_price(order_type=order_type, price=attempted_price) and price_retry_count < _BUY_PRICE_RETRY_MAX:
+            price_retry_count += 1
+            next_price = _next_buy_retry_price(int(attempted_price))
+            refreshed_sizing = _resolve_buy_sizing(
+                api=api,
+                code=code,
+                order_type=order_type,
+                price=next_price,
+                fallback_cash=float(api.cash_available()),
+                fallback_price=float(next_price),
+            )
+            refreshed_budget_cash = _resolve_buy_budget_cash(
+                cash=refreshed_sizing.cash,
+                cash_ratio=cash_ratio,
+                budget_cash_cap=budget_cash_cap,
+            )
+            next_qty = _calc_buy_qty(
+                budget_cash=refreshed_budget_cash,
+                price_now=refreshed_sizing.price_now,
+            )
+            if refreshed_sizing.max_qty is not None:
+                next_qty = min(next_qty, refreshed_sizing.max_qty)
+            next_qty = min(next_qty, attempted_qty)
+            if next_qty < 1:
+                logger.warning(
+                    "enter_position: higher-price retry skipped due to zero qty code=%s next_price=%s cash=%.0f msg=%s",
+                    code,
+                    next_price,
+                    refreshed_sizing.cash,
+                    msg,
+                )
+                return None
+
+            logger.warning(
+                "enter_position: retrying with higher price code=%s qty=%d->%d price=%s->%s msg=%s",
+                code,
+                attempted_qty,
+                next_qty,
+                attempted_price,
+                next_price,
+                msg,
+            )
+            attempted_price = next_price
+            attempted_qty = next_qty
+            sizing_meta["sizing_cash"] = int(refreshed_sizing.cash)
+            sizing_meta["sizing_price"] = float(refreshed_sizing.price_now)
+            sizing_meta["budget_cash"] = int(refreshed_budget_cash)
+            sizing_meta["max_qty"] = int(refreshed_sizing.max_qty) if refreshed_sizing.max_qty is not None else None
+            sizing_meta["requested_qty"] = int(next_qty)
+            continue
+
+        return None
 
     if resp is None:
         return None
@@ -207,10 +283,13 @@ def enter_position(
     )
     if filled_qty <= 0 or avg_price is None or avg_price <= 0:
         logger.info(
-            "enter_position: order accepted but no confirmed fill yet code=%s qty=%d order_id=%s",
+            "enter_position: order accepted but no confirmed fill yet code=%s qty=%d order_type=%s price=%s order_id=%s msg=%s",
             code,
             attempted_qty,
+            order_type,
+            attempted_price,
             _extract_order_id(resp),
+            resp.get("msg"),
         )
         return None
 
@@ -344,6 +423,10 @@ def exit_position(
             exclude_after_losses,
             code in state.day_stoploss_excluded_codes,
         )
+        mark_day_stoploss_today(
+            state,
+            code=code,
+        )
     if pos.type == "S" and reason == "TIME":
         mark_swing_time_excluded(
             state,
@@ -427,6 +510,42 @@ def _extract_order_id(payload: dict[str, Any] | None) -> str | None:
         if value:
             return str(value)
     return None
+
+
+def _can_retry_buy_with_higher_price(*, order_type: str, price: int | None) -> bool:
+    normalized = str(order_type or "").strip().lower()
+    return price is not None and price > 0 and normalized in {"limit", "best"}
+
+
+def _next_buy_retry_price(price: int) -> int:
+    normalized_price = _normalize_buy_limit_price(int(price))
+    tick = _krx_tick_size(float(normalized_price))
+    return int(normalized_price) + tick
+
+
+def _normalize_buy_limit_price(price: int) -> int:
+    normalized = int(price)
+    tick = _krx_tick_size(float(normalized))
+    remainder = normalized % tick
+    if remainder == 0:
+        return normalized
+    return normalized + (tick - remainder)
+
+
+def _krx_tick_size(price: float) -> int:
+    if price < 2_000:
+        return 1
+    if price < 5_000:
+        return 5
+    if price < 20_000:
+        return 10
+    if price < 50_000:
+        return 50
+    if price < 200_000:
+        return 100
+    if price < 500_000:
+        return 500
+    return 1_000
 
 
 def _resolve_buy_sizing(

@@ -12,8 +12,12 @@ import requests
 from ..alarm.sanitizer import clean_exaone_tokens
 from ..prompt_loader import load_prompt
 from .config import TradeEngineConfig
+from .notification_text import (
+    format_candidate_window_title,
+    strategy_label as format_strategy_label,
+    summarize_rows,
+)
 from .risk import _is_in_window
-from .utils import parse_numeric
 
 logger = logging.getLogger(__name__)
 _SWING_SKIP_LLM_TIMEOUT_SEC = 4.0
@@ -156,20 +160,13 @@ def _build_candidate_notification_text(
     strategy_label: str | None,
     icon: str,
 ) -> str:
-    top_10 = candidate_rows.head(10)
-    label_suffix = f"[{strategy_label}] " if strategy_label else ""
-    lines = [f"{icon} [Entry Window] {label_suffix}Scanned Symbols ({regime})"]
+    title_strategy = format_strategy_label(strategy_label) if strategy_label else None
+    lines = [f"{icon} [진입창] {format_candidate_window_title(title_strategy, regime)}"]
     if regime == "RISK_OFF":
-        lines.append("※ RISK_OFF 상태: 후보 관찰 전용 (공격적 신규 진입 차단)")
+        lines.append("※ 위험회피 장세: 후보 관찰 전용 (공격적 신규 진입 차단)")
         if config.risk_off_parking_enabled and config.risk_off_parking_code:
             lines.append(f"※ 여유 현금 파킹 대상: {config.risk_off_parking_code}")
-    for i, (_, row) in enumerate(top_10.iterrows(), 1):
-        code = row["code"]
-        name = row["name"]
-        val5 = parse_numeric(row.get("avg_value_5d")) or 0
-        val20 = parse_numeric(row.get("avg_value_20d")) or 0
-        val = max(val5, val20)
-        lines.append(f"{i}. {name}({code}) | {val/1e8:.1f}억")
+    lines.extend(summarize_rows(candidate_rows))
     return "\n".join(lines)
 
 
@@ -204,7 +201,7 @@ def maybe_build_swing_skip_notification(
     else:
         tail = " 오늘은 무리해서 안 들어갈게."
 
-    fallback_message = f"[SWING][SKIP] {lead}{tail}"
+    fallback_message = f"[스윙][보류] {lead}{tail}"
     message = _rewrite_swing_skip_message(
         fallback_message=fallback_message,
         reason=reason,
@@ -294,8 +291,8 @@ def _rewrite_swing_skip_message(
         normalized = _normalize_swing_skip_message(raw_text)
         if not normalized:
             return fallback_message
-        if not normalized.startswith("[SWING][SKIP]"):
-            normalized = f"[SWING][SKIP] {normalized}"
+        if not normalized.startswith("[스윙][보류]"):
+            normalized = f"[스윙][보류] {normalized}"
         return normalized
     except Exception as exc:
         logger.info("swing skip LLM rewrite fallback: %s", exc)

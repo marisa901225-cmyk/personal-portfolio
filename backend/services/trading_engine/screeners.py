@@ -15,7 +15,7 @@ from .industry_trend import (
 from .industry_master import load_stock_industry_db_map
 from .interfaces import TradingAPI
 from .news_sentiment import NewsSentimentSignal, _load_sector_keywords
-from .stock_master import load_swing_universe_candidates
+from .stock_master import load_stock_master_map, load_swing_universe_candidates
 from .utils import (
     compute_avg_value,
     compute_sma,
@@ -71,6 +71,14 @@ def popular_screener(
         api.volume_rank("value", top_n=cfg.popular_value_candidate_top_n, asof=asof),
         rank_key="value_rank",
     )
+    hts_view_rank_map: dict[str, int] = {}
+    hts_top_view_fn = getattr(api, "hts_top_view_rank", None)
+    if callable(hts_top_view_fn) and int(getattr(cfg, "day_hts_top_view_top_n", 0)) > 0:
+        hts_view_df = standardize_rank_df(
+            hts_top_view_fn(top_n=cfg.day_hts_top_view_top_n, asof=asof),
+            rank_key="hts_view_rank",
+        )
+        hts_view_rank_map = _rank_map(hts_view_df, "hts_view_rank")
 
     candidate_df = pd.concat([vol_df, value_rank_df], ignore_index=True)
     if candidate_df.empty:
@@ -83,6 +91,11 @@ def popular_screener(
 
     rows: list[dict[str, Any]] = []
     volume_rank_map = _rank_map(vol_df, "volume_rank")
+    value_rank_map = _rank_map(value_rank_df, "value_rank")
+    stock_master_map = load_stock_master_map(
+        kospi_master_path=cfg.industry_kospi_master_path,
+        kosdaq_master_path=cfg.industry_kosdaq_master_path,
+    )
     industry_map = load_stock_industry_db_map(
         idxcode_path=cfg.industry_idx_master_path,
         kospi_master_path=cfg.industry_kospi_master_path,
@@ -120,6 +133,13 @@ def popular_screener(
                 "used_value_proxy": bool(used_proxy),
                 "asof_date": asof,
                 "volume_rank": volume_rank_map.get(code),
+                "value_rank": value_rank_map.get(code),
+                "hts_view_rank": hts_view_rank_map.get(code),
+                "master_market": (
+                    stock_master_map.get(code).market
+                    if code in stock_master_map
+                    else None
+                ),
                 "value_rank_5d_top10": None,
                 "close": close,
                 "change_pct": parse_numeric(row.get("change_pct")),
@@ -380,6 +400,9 @@ def _ensure_popular_columns(df: pd.DataFrame) -> pd.DataFrame:
         "used_value_proxy",
         "asof_date",
         "volume_rank",
+        "value_rank",
+        "hts_view_rank",
+        "master_market",
         "value_rank_5d_top10",
         "close",
         "change_pct",
@@ -548,8 +571,8 @@ def _select_sector_bucket_rows(
         if sector_rows.empty:
             continue
         sector_rows = sector_rows.sort_values(
-            by=["avg_value_5d", "volume_rank", "name"],
-            ascending=[False, True, True],
+            by=["value_rank", "avg_value_5d", "change_pct", "volume_rank", "name"],
+            ascending=[True, False, False, True, True],
             na_position="last",
         )
         taken = 0
@@ -581,7 +604,11 @@ def _select_legacy_popular_rows(
     if liquidity_df is None or liquidity_df.empty or top_n <= 0:
         return pd.DataFrame()
 
-    top_a = liquidity_df.head(top_n).copy()
+    top_a = liquidity_df.sort_values(
+        by=["value_rank", "avg_value_5d", "change_pct", "volume_rank", "name"],
+        ascending=[True, False, False, True, True],
+        na_position="last",
+    ).head(top_n).copy()
     top_a["value_rank_5d_top10"] = range(1, len(top_a) + 1)
     top_a["legacy_top10_selected"] = True
     top_a["sector_bucket_selected"] = False
@@ -591,7 +618,11 @@ def _select_legacy_popular_rows(
     if not inter.empty:
         return inter
 
-    fallback = liquidity_df[liquidity_df["code"].astype(str).isin(b_codes)].head(top_n).copy()
+    fallback = liquidity_df[liquidity_df["code"].astype(str).isin(b_codes)].sort_values(
+        by=["value_rank", "avg_value_5d", "change_pct", "volume_rank", "name"],
+        ascending=[True, False, False, True, True],
+        na_position="last",
+    ).head(top_n).copy()
     fallback["value_rank_5d_top10"] = range(1, len(fallback) + 1)
     fallback["fallback_selected"] = True
     fallback["legacy_top10_selected"] = True
@@ -634,8 +665,8 @@ def _combine_popular_rows(
         return pd.DataFrame()
     out = pd.DataFrame(combined_rows)
     return out.sort_values(
-        by=["legacy_top10_selected", "avg_value_5d"],
-        ascending=[False, False],
+        by=["legacy_top10_selected", "value_rank", "avg_value_5d", "change_pct"],
+        ascending=[False, True, False, False],
         na_position="last",
     ).reset_index(drop=True)
 

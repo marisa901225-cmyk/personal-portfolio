@@ -154,6 +154,22 @@ def _score_day_row(
         avg5 = parse_numeric(row.get("avg_value_5d")) or 0.0
     score += min(20.0, avg5 / 100_000_000_000)
 
+    value_rank = parse_numeric(row.get("value_rank"))
+    if value_rank is not None and value_rank > 0:
+        # Reward names that are already ranking near the top of today's traded-value list.
+        score += max(0.0, 14.0 - ((min(float(value_rank), 200.0) - 1.0) * 0.07))
+
+    volume_rank = parse_numeric(row.get("volume_rank"))
+    if volume_rank is not None and volume_rank > 0:
+        score += max(0.0, 4.0 - ((min(float(volume_rank), 120.0) - 1.0) * 0.03))
+
+    hts_view_rank = parse_numeric(row.get("hts_view_rank"))
+    if hts_view_rank is not None and hts_view_rank > 0:
+        hts_top_n = max(1.0, float(getattr(config, "day_hts_top_view_top_n", 20)))
+        hts_bonus_max = max(0.0, float(getattr(config, "day_hts_top_view_bonus_max", 0.0)))
+        rank_ratio = (min(float(hts_view_rank), hts_top_n) - 1.0) / max(1.0, hts_top_n - 1.0)
+        score += max(0.0, hts_bonus_max * (1.0 - rank_ratio))
+
     chg = _resolve_change_pct(row, quotes)
     if chg is not None:
         cap_pct = max(config.day_momentum_bonus_cap_pct, 1e-9)
@@ -182,7 +198,8 @@ def _score_day_row(
     if not _as_bool(row.get("_is_etf", row.get("is_etf", False))):
         score += 5.0
 
-    score += _day_intraday_structure_score(q)
+    intraday_strength_score = _day_intraday_structure_score(q)
+    score += intraday_strength_score * float(getattr(config, "day_intraday_strength_weight", 1.0))
     score += _day_industry_trend_score(row, config)
     score += _news_score_bonus(
         row,
@@ -267,6 +284,10 @@ def _day_intraday_structure_score(quote: dict[str, Any]) -> float:
         location_ratio = (price - low_price) / (high_price - low_price)
         location_ratio = min(1.0, max(0.0, location_ratio))
         score += (location_ratio - 0.5) * 6.0
+
+        intraday_range_pct = ((high_price / low_price) - 1.0) * 100.0
+        if intraday_range_pct > 0:
+            score += min(4.0, intraday_range_pct * location_ratio * 0.6)
 
     return score
 

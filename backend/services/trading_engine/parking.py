@@ -7,6 +7,7 @@ from typing import Any
 from .config import TradeEngineConfig
 from .execution import enter_position, exit_position
 from .interfaces import TradingAPI
+from .notification_text import format_entry_message, format_exit_message
 from .state import TradeState
 from .utils import parse_hhmm
 
@@ -73,7 +74,14 @@ def exit_risk_off_parking_positions(
             strategy_type="P",
         )
         notify_text(
-            f"[EXIT][P][{reason}] {code} qty={result.qty} avg={result.avg_price:.0f} pnl={pnl_pct:+.2f}%"
+            format_exit_message(
+                strategy="P",
+                reason=reason,
+                code=code,
+                qty=result.qty,
+                avg_price=result.avg_price,
+                pnl_pct=pnl_pct,
+            )
         )
 
 
@@ -156,4 +164,12 @@ def manage_risk_off_parking(
         regime=regime,
         **dict(sizing),
     )
-    notify_text(f"[ENTRY][P][RISK_OFF] {parking_code} qty={result.qty} avg={result.avg_price:.0f}")
+    notify_text(
+        format_entry_message(
+            strategy="P",
+            code=parking_code,
+            qty=result.qty,
+            avg_price=result.avg_price,
+            regime=regime,
+        )
+    )

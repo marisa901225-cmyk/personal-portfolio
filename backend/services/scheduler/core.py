@@ -28,14 +28,38 @@ logger = logging.getLogger(__name__)
 KST = ZoneInfo("Asia/Seoul")
 scheduler = AsyncIOScheduler(timezone=KST)
 
+_SCHEDULER_ROLES = {"all", "news", "trading"}
+
 
 def _trading_interval_minutes() -> int:
-    raw = os.getenv("TRADING_ENGINE_SCHEDULE_INTERVAL_MIN", "4")
+    raw = os.getenv("TRADING_ENGINE_SCHEDULE_INTERVAL_MIN", "2")
     try:
         value = int(raw)
     except ValueError:
-        return 4
+        return 2
     return max(1, min(15, value))
+
+
+def _periodic_minute_field(*, interval: int, exclude_minutes: set[int] | None = None) -> str:
+    excluded = {minute for minute in (exclude_minutes or set()) if 0 <= minute <= 59}
+    minutes = [str(minute) for minute in range(0, 60, max(1, interval)) if minute not in excluded]
+    return ",".join(minutes)
+
+
+def _scheduler_role() -> str:
+    raw = str(os.getenv("SCHEDULER_ROLE", "all") or "").strip().lower()
+    if raw in _SCHEDULER_ROLES:
+        return raw
+    logger.warning("Unknown SCHEDULER_ROLE=%r. Falling back to 'all'.", raw)
+    return "all"
+
+
+def _runs_news_jobs(role: str) -> bool:
+    return role in {"all", "news"}
+
+
+def _runs_trading_jobs(role: str) -> bool:
+    return role in {"all", "trading"}
 
 
 async def job_collect_news():
@@ -288,93 +312,102 @@ async def job_rotate_backend_auth_secrets():
 
 def start_scheduler():
     if not scheduler.running:
-        scheduler.add_job(
-            job_collect_news,
-            CronTrigger(minute="7,37"),
-            id="collect_game_news",
-            replace_existing=True,
-            max_instances=1,
-        )
+        role = _scheduler_role()
+        logger.info("Scheduler role=%s", role)
 
-        scheduler.add_job(
-            job_prefetch_weather_05,
-            CronTrigger(hour=5, minute=12),
-            id="prefetch_weather_05",
-            replace_existing=True,
-            max_instances=1,
-        )
-
-        scheduler.add_job(
-            job_prefetch_economy_0620,
-            CronTrigger(hour=6, minute=20),
-            id="prefetch_economy_0620",
-            replace_existing=True,
-            max_instances=1,
-        )
-
-        scheduler.add_job(
-            job_collect_premarket_news,
-            CronTrigger(hour=6, minute=55),
-            id="collect_premarket_news",
-            replace_existing=True,
-            max_instances=1,
-        )
-
-        scheduler.add_job(
-            job_check_index_oversold,
-            CronTrigger(hour=12, minute=30),
-            id="check_index_oversold",
-            replace_existing=True,
-            max_instances=1,
-        )
-
-        scheduler.add_job(
-            job_morning_briefing,
-            CronTrigger(hour=7, minute=0),
-            id="morning_briefing",
-            replace_existing=True,
-            max_instances=1,
-        )
-
-        scheduler.add_job(
-            job_check_rate_changes,
-            CronTrigger(hour=9, minute=5),
-            id="check_rate_changes",
-            replace_existing=True,
-            max_instances=1,
-        )
-
-        scheduler.add_job(
-            job_collect_kr_option_snapshot,
-            CronTrigger(day_of_week="mon-fri", hour=15, minute=50),
-            id="collect_kr_option_snapshot",
-            replace_existing=True,
-            max_instances=1,
-        )
-
-        auth_rotation_config = load_auth_secret_rotation_config_from_env()
-        if auth_rotation_config.enabled:
+        if _runs_news_jobs(role):
             scheduler.add_job(
-                job_rotate_backend_auth_secrets,
-                CronTrigger(
-                    hour=auth_rotation_config.check_hour,
-                    minute=auth_rotation_config.check_minute,
-                ),
-                id="rotate_backend_auth_secrets",
+                job_collect_news,
+                CronTrigger(minute="7,37"),
+                id="collect_game_news",
                 replace_existing=True,
                 max_instances=1,
             )
-            logger.info(
-                "Backend auth rotation job registered (%02d:%02d KST, interval=%s days)",
-                auth_rotation_config.check_hour,
-                auth_rotation_config.check_minute,
-                auth_rotation_config.interval_days,
-            )
-        else:
-            logger.info("Backend auth rotation job skipped (BACKEND_AUTH_ROTATE_ENABLED != true)")
 
-        if trading_engine_enabled():
+            scheduler.add_job(
+                job_prefetch_weather_05,
+                CronTrigger(hour=5, minute=12),
+                id="prefetch_weather_05",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            scheduler.add_job(
+                job_prefetch_economy_0620,
+                CronTrigger(hour=6, minute=20),
+                id="prefetch_economy_0620",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            scheduler.add_job(
+                job_collect_premarket_news,
+                CronTrigger(hour=6, minute=55),
+                id="collect_premarket_news",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            scheduler.add_job(
+                job_check_index_oversold,
+                CronTrigger(hour=12, minute=30),
+                id="check_index_oversold",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            scheduler.add_job(
+                job_morning_briefing,
+                CronTrigger(hour=7, minute=0),
+                id="morning_briefing",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            scheduler.add_job(
+                job_check_rate_changes,
+                CronTrigger(hour=9, minute=5),
+                id="check_rate_changes",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            scheduler.add_job(
+                job_collect_kr_option_snapshot,
+                CronTrigger(day_of_week="mon-fri", hour=15, minute=50),
+                id="collect_kr_option_snapshot",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            auth_rotation_config = load_auth_secret_rotation_config_from_env()
+            if auth_rotation_config.enabled:
+                scheduler.add_job(
+                    job_rotate_backend_auth_secrets,
+                    CronTrigger(
+                        hour=auth_rotation_config.check_hour,
+                        minute=auth_rotation_config.check_minute,
+                    ),
+                    id="rotate_backend_auth_secrets",
+                    replace_existing=True,
+                    max_instances=1,
+                )
+                logger.info(
+                    "Backend auth rotation job registered (%02d:%02d KST, interval=%s days)",
+                    auth_rotation_config.check_hour,
+                    auth_rotation_config.check_minute,
+                    auth_rotation_config.interval_days,
+                )
+            else:
+                logger.info("Backend auth rotation job skipped (BACKEND_AUTH_ROTATE_ENABLED != true)")
+        else:
+            logger.info("News scheduler jobs skipped (SCHEDULER_ROLE=%s)", role)
+
+        if _runs_trading_jobs(role) and trading_engine_enabled():
             interval = _trading_interval_minutes()
+            morning_periodic_minutes = _periodic_minute_field(interval=interval, exclude_minutes={5, 55})
+            midday_periodic_minutes = _periodic_minute_field(interval=interval)
+            afternoon_periodic_minutes = _periodic_minute_field(interval=interval, exclude_minutes={0, 55})
 
             scheduler.add_job(
                 job_trading_engine_cycle,
@@ -386,8 +419,40 @@ def start_scheduler():
 
             scheduler.add_job(
                 job_trading_engine_cycle,
-                CronTrigger(day_of_week="mon-fri", hour="9-14", minute=f"*/{interval}"),
-                id="trading_engine_cycle_intraday_1",
+                CronTrigger(day_of_week="mon-fri", hour=9, minute="5,55"),
+                id="trading_engine_cycle_entry_window_open_1",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            scheduler.add_job(
+                job_trading_engine_cycle,
+                CronTrigger(day_of_week="mon-fri", hour=13, minute="0,55"),
+                id="trading_engine_cycle_entry_window_open_2",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            scheduler.add_job(
+                job_trading_engine_cycle,
+                CronTrigger(day_of_week="mon-fri", hour=9, minute=morning_periodic_minutes),
+                id="trading_engine_cycle_intraday_morning",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            scheduler.add_job(
+                job_trading_engine_cycle,
+                CronTrigger(day_of_week="mon-fri", hour="10-12,14", minute=midday_periodic_minutes),
+                id="trading_engine_cycle_intraday_midday",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            scheduler.add_job(
+                job_trading_engine_cycle,
+                CronTrigger(day_of_week="mon-fri", hour=13, minute=afternoon_periodic_minutes),
+                id="trading_engine_cycle_intraday_afternoon",
                 replace_existing=True,
                 max_instances=1,
             )
@@ -395,7 +460,7 @@ def start_scheduler():
             scheduler.add_job(
                 job_trading_engine_cycle,
                 CronTrigger(day_of_week="mon-fri", hour=15, minute="0,4,8,12,16,20,24,28"),
-                id="trading_engine_cycle_intraday_2",
+                id="trading_engine_cycle_intraday_close",
                 replace_existing=True,
                 max_instances=1,
             )
@@ -417,7 +482,11 @@ def start_scheduler():
             )
             logger.info("Trading engine scheduler jobs registered (interval=%s min)", interval)
         else:
-            logger.info("Trading engine scheduler jobs skipped (TRADING_ENGINE_ENABLED != true)")
+            logger.info(
+                "Trading engine scheduler jobs skipped (SCHEDULER_ROLE=%s, TRADING_ENGINE_ENABLED=%s)",
+                role,
+                trading_engine_enabled(),
+            )
 
         scheduler.start()
         logger.info("AsyncIOScheduler started.")

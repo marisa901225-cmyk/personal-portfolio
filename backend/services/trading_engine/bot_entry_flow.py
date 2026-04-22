@@ -4,9 +4,15 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from .execution import enter_position
+from .execution import FillResult, enter_position
 from .intraday import passes_day_intraday_confirmation
-from .risk import can_enter
+from .notification_text import (
+    format_candidate_review_message,
+    format_entry_message,
+    format_pending_entry_message,
+)
+from .risk import can_enter, current_entry_window_index
+from .state import PositionState
 from .utils import parse_numeric
 
 logger = logging.getLogger(__name__)
@@ -16,6 +22,39 @@ def _bot_module():
     from . import bot as bot_module
 
     return bot_module
+
+
+def _krx_tick_size(price: float) -> int:
+    if price < 2_000:
+        return 1
+    if price < 5_000:
+        return 5
+    if price < 20_000:
+        return 10
+    if price < 50_000:
+        return 50
+    if price < 200_000:
+        return 100
+    if price < 500_000:
+        return 500
+    return 1_000
+
+
+def _resolve_day_entry_order(
+    *,
+    quote: dict[str, Any] | None,
+    configured_order_type: str,
+) -> tuple[str, int | None]:
+    normalized = str(configured_order_type or "").strip().lower()
+    if normalized != "best":
+        return configured_order_type, None
+
+    price_now = parse_numeric((quote or {}).get("price"))
+    if price_now is None or price_now <= 0:
+        return "limit", None
+
+    tick = _krx_tick_size(float(price_now))
+    return "limit", int(price_now) + tick
 
 
 class BotEntryFlowMixin:
@@ -63,6 +102,11 @@ class BotEntryFlowMixin:
         code = ranked_codes[0] if ranked_codes else None
         if not code:
             self._pass("SWING_LLM_VETO" if review_applied else "NO_SWING_PICK", regime)
+            if review_applied:
+                self._notify_chart_review_skip(
+                    strategy_label="SWING",
+                    reason="SWING_LLM_VETO",
+                )
             if not review_applied:
                 self._maybe_notify_swing_skip(
                     now=now,
@@ -84,8 +128,25 @@ class BotEntryFlowMixin:
             order_type=self.config.swing_entry_order_type,
         )
         if not result:
-            self._pass("SWING_ENTRY_FAILED", regime)
-            return
+            synced_result, pending_order = self._recover_failed_buy_attempt(
+                code=code,
+                strategy_type="S",
+                now=now,
+                regime=regime,
+            )
+            if synced_result is not None:
+                result = synced_result
+            elif pending_order is not None:
+                return
+            else:
+                self._pass("SWING_ENTRY_FAILED", regime)
+                if review_applied:
+                    self._notify_chart_review_skip(
+                        strategy_label="SWING",
+                        reason="SWING_ENTRY_FAILED",
+                        code=code,
+                    )
+                return
 
         self._journal(
             "ENTRY_FILL",
@@ -98,7 +159,27 @@ class BotEntryFlowMixin:
             regime=regime,
             **self._entry_sizing_fields(result),
         )
-        self._notify_text(f"[ENTRY][S] {code} qty={result.qty} avg={result.avg_price:.0f} regime={regime}")
+        if result.reason == "BROKER_SYNC":
+            self._notify_text(
+                format_entry_message(
+                    strategy="S",
+                    code=code,
+                    qty=result.qty,
+                    avg_price=result.avg_price,
+                    regime=regime,
+                    sync=True,
+                )
+            )
+        else:
+            self._notify_text(
+                format_entry_message(
+                    strategy="S",
+                    code=code,
+                    qty=result.qty,
+                    avg_price=result.avg_price,
+                    regime=regime,
+                )
+            )
 
     def _try_enter_day(
         self,
@@ -140,11 +221,21 @@ class BotEntryFlowMixin:
         )
         if not ranked_codes:
             self._pass("DAY_LLM_VETO" if review_applied else "NO_DAY_PICK", regime)
+            if review_applied:
+                self._notify_chart_review_skip(
+                    strategy_label="DAY",
+                    reason="DAY_LLM_VETO",
+                )
             return
 
         result = None
         code = ""
         for ranked_code in ranked_codes:
+            quote = quotes.get(ranked_code) if isinstance(quotes, dict) else None
+            order_type, price = _resolve_day_entry_order(
+                quote=quote,
+                configured_order_type=self.config.day_entry_order_type,
+            )
             attempt = enter_position(
                 self.api,
                 self.state,
@@ -154,15 +245,37 @@ class BotEntryFlowMixin:
                 budget_cash_cap=self._strategy_budget_cash_cap(cash_ratio=self.config.day_cash_ratio),
                 asof_date=self.state.trade_date,
                 now=now,
-                order_type=self.config.day_entry_order_type,
+                order_type=order_type,
+                price=price,
             )
             if attempt:
                 result = attempt
                 code = ranked_code
                 break
+            synced_result, pending_order = self._recover_failed_buy_attempt(
+                code=ranked_code,
+                strategy_type="T",
+                now=now,
+                regime=regime,
+            )
+            if synced_result is not None:
+                result = synced_result
+                code = ranked_code
+                break
+            if pending_order is not None:
+                return
         if not result:
             self._pass("DAY_ENTRY_FAILED", regime)
+            if review_applied:
+                self._notify_chart_review_skip(
+                    strategy_label="DAY",
+                    reason="DAY_ENTRY_FAILED",
+                    code=ranked_codes[0] if ranked_codes else None,
+                )
             return
+        window_index = current_entry_window_index(now, self.config)
+        if window_index is not None:
+            self.state.day_entry_windows_used_today.add(window_index)
 
         self._journal(
             "ENTRY_FILL",
@@ -175,7 +288,27 @@ class BotEntryFlowMixin:
             regime=regime,
             **self._entry_sizing_fields(result),
         )
-        self._notify_text(f"[ENTRY][T] {code} qty={result.qty} avg={result.avg_price:.0f} regime={regime}")
+        if result.reason == "BROKER_SYNC":
+            self._notify_text(
+                format_entry_message(
+                    strategy="T",
+                    code=code,
+                    qty=result.qty,
+                    avg_price=result.avg_price,
+                    regime=regime,
+                    sync=True,
+                )
+            )
+        else:
+            self._notify_text(
+                format_entry_message(
+                    strategy="T",
+                    code=code,
+                    qty=result.qty,
+                    avg_price=result.avg_price,
+                    regime=regime,
+                )
+            )
 
     def _apply_day_intraday_confirmation(
         self,
@@ -269,11 +402,16 @@ class BotEntryFlowMixin:
         summary = review.summary or "차트 구조 기준으로 shortlist 재검토 완료"
         selected = review.selected_code or (review.approved_codes[0] if review.approved_codes else "NONE")
         self._notify_text(
-            f"[DAY][LLM] 후보={','.join(review.shortlisted_codes) or 'NONE'} "
-            f"선택={selected} 승인={','.join(review.approved_codes) or 'NONE'} {summary}"
+            format_candidate_review_message(
+                strategy="DAY",
+                shortlisted_codes=review.shortlisted_codes,
+                selected_code=selected,
+                approved_codes=review.approved_codes,
+                summary=summary,
+            )
         )
         for path in review.chart_paths:
-            self._notify_file(path, caption="[DAY][LLM][CHART]")
+            self._notify_file(path, caption="[단타][LLM][차트]")
         return review.approved_codes, True
 
     def _apply_swing_chart_review(
@@ -312,9 +450,152 @@ class BotEntryFlowMixin:
         summary = review.summary or "차트 구조 기준으로 swing shortlist 재검토 완료"
         selected = review.selected_code or (review.approved_codes[0] if review.approved_codes else "NONE")
         self._notify_text(
-            f"[SWING][LLM] 후보={','.join(review.shortlisted_codes) or 'NONE'} "
-            f"선택={selected} 승인={','.join(review.approved_codes) or 'NONE'} {summary}"
+            format_candidate_review_message(
+                strategy="SWING",
+                shortlisted_codes=review.shortlisted_codes,
+                selected_code=selected,
+                approved_codes=review.approved_codes,
+                summary=summary,
+            )
         )
         for path in review.chart_paths:
-            self._notify_file(path, caption="[SWING][LLM][CHART]")
+            self._notify_file(path, caption="[스윙][LLM][차트]")
         return review.approved_codes, True
+
+    def _recover_failed_buy_attempt(
+        self,
+        *,
+        code: str,
+        strategy_type: str,
+        now: datetime,
+        regime: str,
+    ) -> tuple[FillResult | None, dict[str, Any] | None]:
+        synced_result = self._sync_broker_filled_position(
+            code=code,
+            strategy_type=strategy_type,
+            now=now,
+            regime=regime,
+        )
+        if synced_result is not None:
+            return synced_result, None
+
+        pending_order = self._find_pending_buy_order(code=code)
+        if pending_order is not None:
+            order_id = str(pending_order.get("order_id") or "")
+            order_qty = int(parse_numeric(pending_order.get("qty")) or 0)
+            remaining_qty = int(parse_numeric(pending_order.get("remaining_qty")) or 0)
+            order_price = parse_numeric(pending_order.get("price"))
+            self._notify_text(
+                format_pending_entry_message(
+                    strategy=strategy_type,
+                    code=code,
+                    order_id=order_id or "",
+                    qty=order_qty,
+                    remaining_qty=remaining_qty,
+                    price=int(order_price) if order_price else 0,
+                )
+            )
+            return None, pending_order
+
+        return None, None
+
+    def _sync_broker_filled_position(
+        self,
+        *,
+        code: str,
+        strategy_type: str,
+        now: datetime,
+        regime: str,
+    ) -> FillResult | None:
+        normalized_code = str(code or "").strip()
+        if not normalized_code:
+            return None
+
+        try:
+            broker_positions = self.api.positions() or []
+        except Exception:
+            logger.warning("broker position recheck failed code=%s", normalized_code, exc_info=True)
+            return None
+
+        for item in broker_positions:
+            broker_code = str(item.get("code") or item.get("pdno") or "").strip()
+            qty = int(parse_numeric(item.get("qty") or item.get("hldg_qty")) or 0)
+            if broker_code != normalized_code or qty <= 0:
+                continue
+
+            avg_price = parse_numeric(item.get("avg_price") or item.get("pchs_avg_pric"))
+            current_price = parse_numeric(item.get("current_price") or item.get("prpr"))
+            resolved_price = float(avg_price or current_price or 0.0)
+            if resolved_price <= 0:
+                quote = self.api.quote(normalized_code)
+                resolved_price = float(parse_numeric(quote.get("price")) or 0.0)
+            if resolved_price <= 0:
+                return None
+
+            existing = self.state.open_positions.get(normalized_code)
+            if existing is None:
+                self.state.open_positions[normalized_code] = PositionState(
+                    type=strategy_type,
+                    entry_time=now.isoformat(timespec="seconds"),
+                    entry_price=resolved_price,
+                    qty=qty,
+                    highest_price=resolved_price,
+                    entry_date=self.state.trade_date,
+                    locked_profit_pct=None,
+                    bars_held=0,
+                )
+                if strategy_type == "S":
+                    self.state.swing_entries_today += 1
+                    self.state.swing_entries_week += 1
+                elif strategy_type == "T":
+                    self.state.day_entries_today += 1
+                self.state.blacklist_today.add(normalized_code)
+                self._journal(
+                    "STATE_RECONCILE_ADD",
+                    asof_date=self.state.trade_date,
+                    code=normalized_code,
+                    qty=qty,
+                    avg_price=resolved_price,
+                    reason="BROKER_POSITION_FOUND_AFTER_ENTRY_ATTEMPT",
+                    strategy_type=strategy_type,
+                    regime=regime,
+                )
+            else:
+                existing.qty = qty
+                existing.entry_price = resolved_price
+                existing.highest_price = max(float(existing.highest_price or 0.0), resolved_price)
+
+            return FillResult(
+                code=normalized_code,
+                side="BUY",
+                qty=qty,
+                avg_price=resolved_price,
+                reason="BROKER_SYNC",
+                raw=dict(item) if isinstance(item, dict) else None,
+            )
+
+        return None
+
+    def _find_pending_buy_order(self, *, code: str) -> dict[str, Any] | None:
+        normalized_code = str(code or "").strip()
+        if not normalized_code:
+            return None
+
+        try:
+            open_orders = self.api.open_orders() or []
+        except Exception:
+            logger.warning("open_orders recheck failed code=%s", normalized_code, exc_info=True)
+            return None
+
+        for order in open_orders:
+            order_code = str(order.get("code") or order.get("pdno") or "").strip()
+            if order_code != normalized_code:
+                continue
+            side = str(order.get("side") or order.get("sll_buy_dvsn_cd") or "").strip().lower()
+            if side not in {"buy", "02"}:
+                continue
+            remaining_qty = parse_numeric(order.get("remaining_qty") or order.get("psbl_qty"))
+            if remaining_qty is not None and remaining_qty <= 0:
+                continue
+            return dict(order)
+        return None

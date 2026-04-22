@@ -12,6 +12,9 @@ class TradingAPI(Protocol):
     def volume_rank(self, kind: str, top_n: int, asof: str) -> list[dict[str, Any]]:
         ...
 
+    def hts_top_view_rank(self, top_n: int, asof: str) -> list[dict[str, Any]]:
+        ...
+
     def market_cap_rank(self, top_k: int, asof: str) -> list[dict[str, Any]]:
         ...
 
