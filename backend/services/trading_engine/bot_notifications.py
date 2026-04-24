@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
@@ -10,6 +10,9 @@ from .candidate_notifications import (
     maybe_build_swing_skip_notification,
 )
 from .notification_text import format_chart_review_skip_message
+
+if TYPE_CHECKING:
+    from .strategy import Candidates
 
 
 class BotNotificationsMixin:
@@ -37,9 +40,9 @@ class BotNotificationsMixin:
     def _maybe_notify_candidates(
         self,
         now: datetime,
-        candidates: Any,
+        candidates: Candidates,
         regime: str,
-        display_candidates: Any | None = None,
+        display_candidates: pd.DataFrame | None = None,
     ) -> None:
         updated_idx, messages = maybe_build_candidate_notifications(
             now=now,
@@ -53,7 +56,7 @@ class BotNotificationsMixin:
         for message in messages:
             self._notify_text(message)
 
-    def _build_notification_candidates(self, *, candidates: Any, ranked_codes: list[str]) -> pd.DataFrame:
+    def _build_notification_candidates(self, *, candidates: Candidates | None, ranked_codes: list[str]) -> pd.DataFrame:
         if not ranked_codes or candidates is None:
             return pd.DataFrame()
 
@@ -87,7 +90,7 @@ class BotNotificationsMixin:
         now: datetime,
         regime: str,
         reason: str,
-        candidates: Any,
+        candidates: Candidates,
     ) -> None:
         if any(position.type == "S" for position in self.state.open_positions.values()):
             return

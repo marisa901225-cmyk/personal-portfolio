@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 import pandas as pd
 
@@ -41,7 +40,7 @@ def passes_day_intraday_confirmation(
     code: str,
     config: TradeEngineConfig,
     logger: logging.Logger | None = None,
-) -> tuple[bool, dict[str, Any]]:
+) -> tuple[bool, dict[str, object]]:
     intraday_fn = getattr(api, "intraday_bars", None)
     if not callable(intraday_fn):
         return True, {"reason": "UNSUPPORTED"}

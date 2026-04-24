@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-from typing import Any
-
 import pandas as pd
 
 from .config import TradeEngineConfig
 from .news_sentiment import NewsSentimentSignal
+from .types import Quote, QuoteMap
 from .utils import parse_numeric
 
 
 def _score_swing_row(
     row: pd.Series,
-    quotes: dict[str, dict[str, Any]],
+    quotes: QuoteMap,
     config: TradeEngineConfig,
     news_signal: NewsSentimentSignal | None = None,
 ) -> float:
@@ -51,6 +50,7 @@ def _score_swing_row(
             score -= float(config.swing_negative_penalty_max) * penalty_ratio
 
     score += _swing_quote_structure_score(q)
+    score += _swing_popular_liquidity_score(row)
     score += _swing_industry_trend_score(row, config)
     score += _news_score_bonus(
         row,
@@ -58,6 +58,23 @@ def _score_swing_row(
         weight=config.news_swing_weight,
         market_fallback_ratio=config.news_market_fallback_ratio,
     )
+    return score
+
+
+def _swing_popular_liquidity_score(row: pd.Series) -> float:
+    score = 0.0
+
+    liquidity_rank = parse_numeric(row.get("popular_liquidity_rank"))
+    if liquidity_rank is not None and liquidity_rank > 0:
+        score += max(0.0, 10.0 - ((min(float(liquidity_rank), 100.0) - 1.0) * 0.09))
+
+    legacy_rank = parse_numeric(row.get("value_rank_5d_top10"))
+    if legacy_rank is not None and legacy_rank > 0:
+        score += max(0.0, 5.0 - ((min(float(legacy_rank), 15.0) - 1.0) * 0.3))
+
+    if bool(row.get("legacy_top10_selected", False)):
+        score += 2.0
+
     return score
 
 
@@ -100,7 +117,7 @@ def _swing_industry_trend_score(
     return score
 
 
-def _swing_quote_structure_score(quote: dict[str, Any]) -> float:
+def _swing_quote_structure_score(quote: Quote) -> float:
     price = parse_numeric(quote.get("price"))
     open_price = parse_numeric(quote.get("open"))
     high_price = parse_numeric(quote.get("high"))
@@ -141,7 +158,7 @@ def _swing_quote_structure_score(quote: dict[str, Any]) -> float:
 
 def _score_day_row(
     row: pd.Series,
-    quotes: dict[str, dict[str, Any]],
+    quotes: QuoteMap,
     config: TradeEngineConfig,
     news_signal: NewsSentimentSignal | None = None,
 ) -> float:
@@ -249,7 +266,7 @@ def _day_industry_trend_score(
     return score
 
 
-def _day_intraday_structure_score(quote: dict[str, Any]) -> float:
+def _day_intraday_structure_score(quote: Quote) -> float:
     price = parse_numeric(quote.get("price"))
     open_price = parse_numeric(quote.get("open"))
     high_price = parse_numeric(quote.get("high"))
@@ -308,7 +325,7 @@ def _news_score_bonus(
     return float(sentiment) * float(weight)
 
 
-def _resolve_change_pct(row: pd.Series, quotes: dict[str, dict[str, Any]]) -> float | None:
+def _resolve_change_pct(row: pd.Series, quotes: QuoteMap) -> float | None:
     code = str(row.get("code"))
     q = quotes.get(code, {})
     chg = parse_numeric(q.get("change_pct"))
@@ -323,7 +340,7 @@ def _resolve_change_pct(row: pd.Series, quotes: dict[str, dict[str, Any]]) -> fl
     return chg
 
 
-def _as_bool(value: Any) -> bool:
+def _as_bool(value: object) -> bool:
     if isinstance(value, bool):
         return value
     if value is None:

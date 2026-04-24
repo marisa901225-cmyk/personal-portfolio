@@ -49,17 +49,17 @@ def can_enter(
             return False, "MAX_SWING_ENTRIES_DAY"
         if state.swing_entries_week >= config.max_swing_entries_per_week:
             return False, "MAX_SWING_ENTRIES_WEEK"
-        if _count_positions(state, "S") >= config.max_swing_positions:
+        if _count_reserved_positions(state, "S") >= config.max_swing_positions:
             return False, "MAX_SWING_POSITIONS"
     else:
         if state.day_entries_today >= config.max_day_entries_per_day:
             return False, "MAX_DAY_ENTRIES_DAY"
-        if _count_positions(state, "T") >= config.max_day_positions:
+        if _count_reserved_positions(state, "T") >= config.max_day_positions:
             return False, "MAX_DAY_POSITIONS"
         if _should_block_day_afternoon_entry(state=state, now=now, cfg=config):
             return False, "DAY_AFTERNOON_LOSS_LIMIT"
 
-    if len(state.open_positions) >= config.max_total_positions:
+    if _count_total_reserved_slots(state) >= config.max_total_positions:
         return False, "MAX_TOTAL_POSITIONS"
 
     if not _is_entry_window_open(
@@ -240,5 +240,19 @@ def _day_afternoon_loss_limit_amount(cfg: TradeEngineConfig) -> float | None:
     return initial_capital * cash_ratio * stop_loss_pct * loss_count
 
 
-def _count_positions(state: TradeState, position_type: str) -> int:
-    return sum(1 for pos in state.open_positions.values() if pos.type == position_type)
+def _count_reserved_positions(state: TradeState, position_type: str) -> int:
+    reserved_codes = {
+        code
+        for code, pos in state.open_positions.items()
+        if pos.type == position_type
+    }
+    reserved_codes.update(
+        code
+        for code, pending_type in state.pending_entry_orders.items()
+        if pending_type == position_type and code not in state.open_positions
+    )
+    return len(reserved_codes)
+
+
+def _count_total_reserved_slots(state: TradeState) -> int:
+    return len(set(state.open_positions) | set(state.pending_entry_orders))

@@ -207,10 +207,16 @@ def format_state_sync_drop_message(
     code: str,
     local_qty: int,
     last_price: float | None,
+    exit_reason: str | None = None,
+    exit_order_id: str | None = None,
 ) -> str:
     parts = [f"[상태동기화][정리] {code} 로컬수량={local_qty} 브로커수량=0 기준=브로커계좌조회"]
     if last_price is not None:
         parts.append(f"마지막가={float(last_price):.0f}")
+    if exit_reason:
+        parts.append(f"주문사유={reason_label(exit_reason)}")
+    if exit_order_id:
+        parts.append(f"주문번호={exit_order_id}")
     return " ".join(parts)
 
 

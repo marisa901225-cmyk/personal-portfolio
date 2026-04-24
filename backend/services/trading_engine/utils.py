@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
-from typing import Any
-
 import pandas as pd
 
 
@@ -67,7 +65,7 @@ _BROAD_MARKET_ETF_KEYWORDS = [
 _DISQUALIFY_MARKET_WARNING_CODES = {"02", "03"}
 
 
-def parse_numeric(value: Any) -> float | None:
+def parse_numeric(value: object) -> float | None:
     if value is None:
         return None
     if isinstance(value, (int, float)):
@@ -86,7 +84,7 @@ def parse_numeric(value: Any) -> float | None:
     return v
 
 
-def normalize_code(value: Any) -> str:
+def normalize_code(value: object) -> str:
     if value is None:
         return ""
     text = str(value).strip()
@@ -95,7 +93,7 @@ def normalize_code(value: Any) -> str:
     return text
 
 
-def _pick_first(record: dict[str, Any], keys: list[str]) -> Any:
+def _pick_first(record: dict[str, object], keys: list[str]) -> object:
     for key in keys:
         if key in record and record[key] not in (None, ""):
             return record[key]
@@ -106,8 +104,8 @@ def _pick_first(record: dict[str, Any], keys: list[str]) -> Any:
     return None
 
 
-def standardize_rank_df(records: list[dict[str, Any]], rank_key: str = "rank") -> pd.DataFrame:
-    rows: list[dict[str, Any]] = []
+def standardize_rank_df(records: list[dict[str, object]], rank_key: str = "rank") -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
     for idx, raw in enumerate(records or [], start=1):
         if not isinstance(raw, dict):
             continue
@@ -117,14 +115,14 @@ def standardize_rank_df(records: list[dict[str, Any]], rank_key: str = "rank") -
         base_rank = parse_numeric(_pick_first(raw, [rank_key] + _RANK_KEYS))
         row = {
             "code": code,
-            "name": (_pick_first(raw, _NAME_KEYS) or "").strip(),
+            "name": str(_pick_first(raw, _NAME_KEYS) or "").strip(),
             rank_key: int(base_rank) if base_rank is not None else idx,
             "mcap": parse_numeric(_pick_first(raw, _MCAP_KEYS)),
             "close": parse_numeric(_pick_first(raw, _CLOSE_KEYS)),
             "change_pct": parse_numeric(_pick_first(raw, _CHANGE_KEYS)),
             "value": parse_numeric(_pick_first(raw, _VALUE_KEYS)),
             "volume": parse_numeric(_pick_first(raw, _VOLUME_KEYS)),
-            "product_type": (_pick_first(raw, _PRODUCT_TYPE_KEYS) or "").strip(),
+            "product_type": str(_pick_first(raw, _PRODUCT_TYPE_KEYS) or "").strip(),
             "is_etf": _to_bool(_pick_first(raw, _ETF_FLAG_KEYS)),
         }
         row["raw"] = raw
@@ -151,7 +149,7 @@ def standardize_rank_df(records: list[dict[str, Any]], rank_key: str = "rank") -
     return df.drop_duplicates(subset=["code"], keep="first").reset_index(drop=True)
 
 
-def _to_bool(value: Any) -> bool:
+def _to_bool(value: object) -> bool:
     if isinstance(value, bool):
         return value
     if value is None:
@@ -160,7 +158,7 @@ def _to_bool(value: Any) -> bool:
     return text in {"y", "yes", "true", "1", "etf"}
 
 
-def normalize_market_warning_code(value: Any) -> str:
+def normalize_market_warning_code(value: object) -> str:
     text = str(value or "").strip()
     if not text:
         return ""
@@ -169,7 +167,7 @@ def normalize_market_warning_code(value: Any) -> str:
     return text.upper()
 
 
-def is_live_status_disqualified(row: dict[str, Any] | pd.Series) -> bool:
+def is_live_status_disqualified(row: dict[str, object] | pd.Series) -> bool:
     data = row.to_dict() if hasattr(row, "to_dict") else dict(row)
     management_issue = (
         data.get("management_issue_code")
@@ -183,7 +181,7 @@ def is_live_status_disqualified(row: dict[str, Any] | pd.Series) -> bool:
     return _to_bool(management_issue) or market_warning_code in _DISQUALIFY_MARKET_WARNING_CODES
 
 
-def is_etf_row(row: dict[str, Any] | pd.Series) -> bool:
+def is_etf_row(row: dict[str, object] | pd.Series) -> bool:
     data = row.to_dict() if hasattr(row, "to_dict") else dict(row)
     if _to_bool(data.get("is_etf")):
         return True
@@ -197,7 +195,7 @@ def is_etf_row(row: dict[str, Any] | pd.Series) -> bool:
     return "etf" in name or "etf" in product_type or is_provider
 
 
-def is_excluded_etf(row: dict[str, Any] | pd.Series) -> bool:
+def is_excluded_etf(row: dict[str, object] | pd.Series) -> bool:
     data = row.to_dict() if hasattr(row, "to_dict") else dict(row)
     name = str(data.get("name") or "").lower()
     product_type = str(data.get("product_type") or "").lower()
@@ -205,7 +203,7 @@ def is_excluded_etf(row: dict[str, Any] | pd.Series) -> bool:
     return any(keyword in text for keyword in _LEVERAGE_ETF_KEYWORDS)
 
 
-def is_broad_market_etf(row: dict[str, Any] | pd.Series) -> bool:
+def is_broad_market_etf(row: dict[str, object] | pd.Series) -> bool:
     data = row.to_dict() if hasattr(row, "to_dict") else dict(row)
     name = str(data.get("name") or "").strip().lower()
     product_type = str(data.get("product_type") or "").strip().lower()
@@ -266,7 +264,7 @@ def kst_iso_now() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def normalize_bar_date(value: Any) -> str:
+def normalize_bar_date(value: object) -> str:
     if value is None:
         return ""
     text = str(value)

@@ -5,7 +5,6 @@ import logging
 import os
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any
 
 from .config import TradeEngineConfig
 from .interfaces import TradingAPI
@@ -15,6 +14,7 @@ from .notification_text import (
     format_state_sync_update_message,
 )
 from .state import PositionState, TradeState
+from .types import BrokerPosition, QuoteMap
 from .utils import compute_sma, parse_numeric
 
 
@@ -38,7 +38,7 @@ def reconcile_state_with_broker_positions(
             logger.warning("positions reconcile skipped: failed to load broker positions: %s", exc)
         return
 
-    broker_position_map: dict[str, dict[str, Any]] = {}
+    broker_position_map: dict[str, BrokerPosition] = {}
     for item in broker_positions:
         code = str(item.get("code") or item.get("pdno") or "").strip()
         qty = int(parse_numeric(item.get("qty") or item.get("hldg_qty")) or 0)
@@ -67,6 +67,10 @@ def reconcile_state_with_broker_positions(
             api,
             code=code,
         )
+        pending_exit = state.pending_exit_orders.pop(code, None)
+        if isinstance(pending_exit, dict):
+            drop_meta["exit_reason"] = str(pending_exit.get("reason") or "").strip() or None
+            drop_meta["exit_order_id"] = str(pending_exit.get("order_id") or "").strip() or None
         if logger is not None:
             logger.warning(
                 "state reconcile dropped stale position code=%s type=%s qty=%s broker_qty=0 last_price=%s",
@@ -83,6 +87,8 @@ def reconcile_state_with_broker_positions(
             reason="BROKER_POSITION_MISSING",
             strategy_type=pos.type,
             last_quote_price=drop_meta["last_quote_price"],
+            exit_reason=drop_meta.get("exit_reason"),
+            exit_order_id=drop_meta.get("exit_order_id"),
         )
         notify_text(_format_drop_notification(code=code, position=pos, drop_meta=drop_meta, config=config))
 
@@ -149,11 +155,16 @@ def reconcile_state_with_broker_positions(
                 avg_price=float(resolved_price),
             )
         )
+        state.pending_entry_orders.pop(code, None)
+        state.pending_exit_orders.pop(code, None)
 
     for code, pos in state.open_positions.items():
         broker_snapshot = broker_position_map.get(code)
         if broker_snapshot is None:
             continue
+
+        state.pending_entry_orders.pop(code, None)
+        state.pending_exit_orders.pop(code, None)
 
         broker_qty = int(broker_snapshot["qty"])
         broker_avg_price = broker_snapshot.get("avg_price")
@@ -235,7 +246,7 @@ def _load_position_type_hints(
     return hints
 
 
-def _apply_position_type_hint(hints: dict[str, str], row: dict[str, Any]) -> None:
+def _apply_position_type_hint(hints: dict[str, str], row: dict[str, object]) -> None:
     event = str(row.get("event") or "").strip()
     if not event:
         return
@@ -263,7 +274,7 @@ def _apply_position_type_hint(hints: dict[str, str], row: dict[str, Any]) -> Non
             hints[selected_code] = "S"
 
 
-def _split_hint_codes(raw: Any) -> list[str]:
+def _split_hint_codes(raw: object) -> list[str]:
     if raw is None:
         return []
     text = str(raw).strip()
@@ -272,7 +283,7 @@ def _split_hint_codes(raw: Any) -> list[str]:
     return [code for code in (_normalize_hint_code(part) for part in text.split(",")) if code]
 
 
-def _normalize_hint_code(raw: Any) -> str:
+def _normalize_hint_code(raw: object) -> str:
     text = str(raw or "").strip()
     if not text or text.upper() == "NONE":
         return ""
@@ -292,6 +303,8 @@ def _collect_drop_meta(
     last_price = parse_numeric(quote.get("price"))
     return {
         "last_quote_price": float(last_price) if last_price is not None and last_price > 0 else None,
+        "exit_reason": None,
+        "exit_order_id": None,
     }
 
 
@@ -303,11 +316,15 @@ def _format_drop_notification(
     config: TradeEngineConfig | None,
 ) -> str:
     last_quote_price = drop_meta.get("last_quote_price")
+    exit_reason = str(drop_meta.get("exit_reason") or "").strip()
+    exit_order_id = str(drop_meta.get("exit_order_id") or "").strip()
 
     return format_state_sync_drop_message(
         code=code,
         local_qty=position.qty,
         last_price=float(last_quote_price) if last_quote_price is not None else None,
+        exit_reason=exit_reason or None,
+        exit_order_id=exit_order_id or None,
     )
 
 
@@ -353,7 +370,7 @@ def lock_profitable_existing_position(
     *,
     trade_date: str,
     code: str,
-    quotes: dict[str, Any],
+    quotes: QuoteMap,
     candidate_type: str,
     now: datetime,
     logger: logging.Logger | None = None,

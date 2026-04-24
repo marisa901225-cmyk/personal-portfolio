@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Callable
 
 from .config import TradeEngineConfig
 from .interfaces import BuyOrderInfoAPI, SellOrderInfoAPI, TradingAPI
@@ -15,6 +15,7 @@ from .state import (
     mark_swing_time_excluded,
     record_day_stoploss_failure,
 )
+from .types import OrderPayload
 from .utils import parse_numeric
 
 logger = logging.getLogger(__name__)
@@ -40,8 +41,8 @@ class FillResult:
     avg_price: float
     reason: str | None = None
     order_id: str | None = None
-    raw: dict[str, Any] | None = None
-    sizing: dict[str, Any] | None = None
+    raw: OrderPayload | None = None
+    sizing: OrderPayload | None = None
 
 
 @dataclass(slots=True)
@@ -87,6 +88,16 @@ def enter_position(
         return None
 
     normalized_order_type = str(order_type or "").strip().lower()
+    if normalized_order_type == "limit" and (price is None or int(price) <= 0):
+        fallback_limit_price = _normalize_buy_limit_price(int(price_now))
+        logger.warning(
+            "enter_position: missing limit price; using quote-derived fallback code=%s order_type=%s quote_price=%s->%s",
+            code,
+            order_type,
+            price_now,
+            fallback_limit_price,
+        )
+        price = fallback_limit_price
     if price is not None and price > 0 and normalized_order_type in {"limit", "best"}:
         normalized_price = _normalize_buy_limit_price(int(price))
         if normalized_price != int(price):
@@ -143,7 +154,7 @@ def enter_position(
     attempted_price = int(price) if price is not None else None
     cash_retry_count = 0
     price_retry_count = 0
-    resp: dict[str, Any] | None = None
+    resp: OrderPayload | None = None
     while True:
         resp = api.place_order(
             side="BUY",
@@ -344,6 +355,7 @@ def exit_position(
     config: TradeEngineConfig | None = None,
     order_type: str = "MKT",
     price: int | None = None,
+    on_order_accepted: Callable[[OrderPayload], None] | None = None,
 ) -> FillResult | None:
     pos = state.open_positions.get(code)
     if not pos:
@@ -386,6 +398,20 @@ def exit_position(
         fallback_price=float(market_price),
     )
     if filled_qty <= 0 or avg_price is None or avg_price <= 0:
+        if on_order_accepted is not None:
+            on_order_accepted(
+                {
+                    "code": code,
+                    "side": "SELL",
+                    "qty": requested_qty,
+                    "reason": reason,
+                    "order_id": _extract_order_id(resp),
+                    "order_time": resp.get("order_time") or resp.get("ord_tmd"),
+                    "order_type": order_type,
+                    "price": price,
+                    "raw": resp,
+                }
+            )
         logger.info(
             "exit_position: order accepted but no confirmed sell fill yet code=%s qty=%d order_id=%s",
             code,
@@ -502,7 +528,7 @@ def increment_bars_held(state: TradeState) -> None:
             pos.bars_held += 1
 
 
-def _extract_order_id(payload: dict[str, Any] | None) -> str | None:
+def _extract_order_id(payload: OrderPayload | None) -> str | None:
     if not payload:
         return None
     for key in ("order_id", "odno", "id", "ord_no"):
@@ -687,7 +713,7 @@ def _resolve_buy_fill(
     api: TradingAPI,
     code: str,
     fallback_price: float,
-    response: dict[str, Any],
+    response: OrderPayload,
     broker_before_qty: int,
 ) -> tuple[int, float | None]:
     broker_after_qty, broker_avg_price = _get_broker_position_snapshot(api=api, code=code)
@@ -707,7 +733,7 @@ def _resolve_sell_fill(
     *,
     api: TradingAPI,
     code: str,
-    response: dict[str, Any],
+    response: OrderPayload,
     broker_before_qty: int,
     requested_qty: int,
     fallback_price: float,
@@ -732,7 +758,7 @@ def _resolve_sell_fill(
     return 0, None
 
 
-def _parse_order_time(order: dict[str, Any], *, now: datetime) -> datetime | None:
+def _parse_order_time(order: OrderPayload, *, now: datetime) -> datetime | None:
     raw = str(order.get("order_time") or order.get("ord_tmd") or "").strip()
     if not raw:
         return None

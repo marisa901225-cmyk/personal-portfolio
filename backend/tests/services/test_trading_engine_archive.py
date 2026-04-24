@@ -160,3 +160,29 @@ def test_finalize_day_no_longer_creates_backup_zip(tmp_path) -> None:
     assert summary_text.startswith("[마감] 20260418")
     assert notifier.files == []
     assert list((tmp_path / "output").glob("*.zip")) == []
+
+
+def test_finalize_day_prefers_account_realized_pnl_summary(tmp_path) -> None:
+    class _RealizedPnlAPI:
+        def inquire_realized_pnl(self) -> dict:
+            return {
+                "output1": [],
+                "output2": [{"rlzt_pfls": "12345"}],
+            }
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+    )
+    notifier = _SpyNotifier()
+    bot = HybridTradingBot(_RealizedPnlAPI(), config=cfg, notifier=notifier)  # type: ignore[arg-type]
+    bot.state.trade_date = "20260422"
+    bot.state.realized_pnl_today = 0.0
+    bot.journal = TradeJournal(output_dir=cfg.output_dir, asof_date="20260422")
+
+    summary_text = bot.finalize_day()
+
+    assert summary_text is not None
+    assert "실현손익: 12,345원" in summary_text
+    assert bot.state.realized_pnl_today == 12345.0

@@ -4,7 +4,6 @@ import logging
 import os
 import time
 from datetime import datetime
-from typing import Any
 
 from .bot_entry_flow import BotEntryFlowMixin
 from .bot_notifications import BotNotificationsMixin
@@ -35,6 +34,7 @@ from .strategy import (
     rank_daytrade_codes,
     rank_swing_codes,
 )
+from .types import OrderPayload
 from .utils import parse_numeric
 
 logger = logging.getLogger(__name__)
@@ -73,11 +73,12 @@ class HybridTradingBot(
             return None
 
         today = self.state.trade_date
+        realized_pnl = self._finalize_realized_pnl()
 
         self._journal(
             "RUN_END",
             asof_date=today,
-            realized_pnl=self.state.realized_pnl_today,
+            realized_pnl=realized_pnl,
             pass_reasons=self.state.pass_reasons_today,
             open_positions=len(self.state.open_positions),
         )
@@ -85,11 +86,11 @@ class HybridTradingBot(
 
         realized_pct = 0.0
         if self.config.initial_capital > 0:
-            realized_pct = self.state.realized_pnl_today / self.config.initial_capital * 100.0
+            realized_pct = realized_pnl / self.config.initial_capital * 100.0
         summary_text = (
             f"[마감] {today}\n"
             f"{self.journal.summary()}\n"
-            f"실현손익: {self.state.realized_pnl_today:,.0f}원 ({realized_pct:+.2f}%)"
+            f"실현손익: {realized_pnl:,.0f}원 ({realized_pct:+.2f}%)"
         )
         self._notify_text(summary_text)
         self.notifier.flush(timeout_sec=2.0)
@@ -107,7 +108,7 @@ class HybridTradingBot(
                 return
             self._notify_text(format_pass_message(reason, self.state.trade_date))
 
-    def _pass_and_return(self, reason: str, now: datetime, regime: str) -> dict[str, Any]:
+    def _pass_and_return(self, reason: str, now: datetime, regime: str) -> dict[str, object]:
         self._pass(reason, regime)
         self.state.last_run_timestamp = now.isoformat(timespec="seconds")
         save_state(self.config.state_path, self.state)
@@ -119,13 +120,13 @@ class HybridTradingBot(
             return
         self.journal = TradeJournal(output_dir=self.config.output_dir, asof_date=today)
 
-    def _journal(self, event: str, **fields: Any) -> None:
+    def _journal(self, event: str, **fields: object) -> None:
         if not self.journal:
             return
         self.journal.log(event, **fields)
 
     @staticmethod
-    def _entry_sizing_fields(result: Any) -> dict[str, Any]:
+    def _entry_sizing_fields(result: object) -> OrderPayload:
         sizing = getattr(result, "sizing", None) or {}
         if not isinstance(sizing, dict):
             return {}
@@ -164,7 +165,55 @@ class HybridTradingBot(
 
         return self._principal_buffer_snapshot
 
-    def run_once(self, now: datetime | None = None) -> dict[str, Any]:
+    def _finalize_realized_pnl(self) -> float:
+        broker_realized_pnl = self._fetch_account_realized_pnl()
+        if broker_realized_pnl is not None:
+            self.state.realized_pnl_today = broker_realized_pnl
+        return float(self.state.realized_pnl_today)
+
+    def _fetch_account_realized_pnl(self) -> float | None:
+        inquire_realized_pnl = getattr(self.api, "inquire_realized_pnl", None)
+        if not callable(inquire_realized_pnl):
+            return None
+
+        try:
+            data = inquire_realized_pnl()
+        except Exception:
+            logger.warning("account realized pnl fetch failed; using state fallback", exc_info=True)
+            return None
+
+        if not isinstance(data, dict):
+            return None
+
+        total_realized_pnl = self._extract_realized_pnl(data.get("output2"))
+        if total_realized_pnl is not None:
+            return total_realized_pnl
+
+        output1 = data.get("output1", [])
+        if isinstance(output1, list):
+            realized_values = [
+                value
+                for value in (self._extract_realized_pnl(row) for row in output1)
+                if value is not None
+            ]
+            if realized_values:
+                return float(sum(realized_values))
+
+        logger.warning("account realized pnl not found in broker response; using state fallback")
+        return None
+
+    @staticmethod
+    def _extract_realized_pnl(payload: object) -> float | None:
+        row = payload[0] if isinstance(payload, list) and payload else payload
+        if not isinstance(row, dict):
+            return None
+        for key in ("rlzt_pfls", "tot_rlzt_pfls"):
+            value = parse_numeric(row.get(key))
+            if value is not None:
+                return float(value)
+        return None
+
+    def run_once(self, now: datetime | None = None) -> dict[str, object]:
         now = now or datetime.now()
         today = now.strftime("%Y%m%d")
         self.state = rollover_state_for_date(self.state, today)
@@ -254,6 +303,7 @@ class HybridTradingBot(
 
             handle_open_orders(self.api, timeout_sec=30, now=now)
             self._reconcile_state_with_broker_positions(now=now)
+            self._refresh_pending_entry_orders()
             self.monitor_positions(now=now)
             self._manage_risk_off_parking(now=now, regime=regime)
 

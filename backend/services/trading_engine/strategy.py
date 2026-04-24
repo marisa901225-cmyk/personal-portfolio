@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Hashable
 from dataclasses import dataclass
-from typing import Any
 
 import pandas as pd
 
@@ -16,6 +16,7 @@ from .config import TradeEngineConfig
 from .interfaces import TradingAPI
 from .news_sentiment import NewsSentimentSignal, _load_sector_keywords
 from .screeners import etf_swing_screener, model_screener, popular_screener
+from .types import QuoteMap
 from .utils import is_broad_market_etf, is_live_status_disqualified, match_name_to_sectors, parse_numeric
 
 _PREFERRED_THEME_ETF_NAME_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -95,8 +96,8 @@ def exclude_candidate_codes(candidates: Candidates, excluded_codes: set[str]) ->
     )
 
 
-def fetch_quotes_subset(api: TradingAPI, codes: list[str]) -> dict[str, dict[str, Any]]:
-    out: dict[str, dict[str, Any]] = {}
+def fetch_quotes_subset(api: TradingAPI, codes: list[str]) -> QuoteMap:
+    out: QuoteMap = {}
     for code in codes:
         try:
             out[code] = api.quote(code)
@@ -107,7 +108,7 @@ def fetch_quotes_subset(api: TradingAPI, codes: list[str]) -> dict[str, dict[str
 
 def pick_swing(
     candidates: Candidates,
-    quotes: dict[str, dict[str, Any]],
+    quotes: QuoteMap,
     config: TradeEngineConfig,
     news_signal: NewsSentimentSignal | None = None,
 ) -> str | None:
@@ -117,7 +118,7 @@ def pick_swing(
 
 def rank_swing_codes(
     candidates: Candidates,
-    quotes: dict[str, dict[str, Any]],
+    quotes: QuoteMap,
     config: TradeEngineConfig,
     news_signal: NewsSentimentSignal | None = None,
 ) -> list[str]:
@@ -136,6 +137,8 @@ def rank_swing_codes(
 
     if primary.empty:
         return []
+
+    primary = _attach_popular_liquidity_signals(primary, candidates.popular)
 
     if "is_etf" in primary.columns and primary["is_etf"].fillna(False).any():
         primary = primary[~primary.apply(lambda r: is_broad_market_etf(r.to_dict()), axis=1)]
@@ -191,9 +194,92 @@ def rank_swing_codes(
     return deduped_codes
 
 
+def _attach_popular_liquidity_signals(
+    primary: pd.DataFrame,
+    popular: pd.DataFrame,
+) -> pd.DataFrame:
+    if primary.empty or popular is None or popular.empty or "code" not in primary.columns or "code" not in popular.columns:
+        return primary
+
+    working = primary.copy()
+    signal_cols = [
+        "code",
+        "value_rank",
+        "volume_rank",
+        "avg_value_5d",
+        "change_pct",
+        "legacy_top10_selected",
+        "value_rank_5d_top10",
+    ]
+    existing_cols = [col for col in signal_cols if col in popular.columns]
+    if "code" not in existing_cols:
+        return working
+
+    liquidity = popular[existing_cols].copy()
+    if liquidity.empty:
+        return working
+
+    if "legacy_top10_selected" not in liquidity.columns:
+        liquidity["legacy_top10_selected"] = False
+    else:
+        liquidity["legacy_top10_selected"] = liquidity["legacy_top10_selected"].map(_to_bool)
+
+    sort_working = liquidity.copy()
+    sort_working["_value_rank_5d_top10_num"] = (
+        sort_working["value_rank_5d_top10"].map(parse_numeric)
+        if "value_rank_5d_top10" in sort_working.columns
+        else None
+    )
+    sort_working["_value_rank_num"] = (
+        sort_working["value_rank"].map(parse_numeric)
+        if "value_rank" in sort_working.columns
+        else None
+    )
+    sort_working["_avg_value_5d_num"] = (
+        sort_working["avg_value_5d"].map(parse_numeric)
+        if "avg_value_5d" in sort_working.columns
+        else None
+    )
+    sort_working["_change_pct_num"] = (
+        sort_working["change_pct"].map(parse_numeric)
+        if "change_pct" in sort_working.columns
+        else None
+    )
+    sort_working["_volume_rank_num"] = (
+        sort_working["volume_rank"].map(parse_numeric)
+        if "volume_rank" in sort_working.columns
+        else None
+    )
+
+    sort_working = sort_working.sort_values(
+        by=[
+            "legacy_top10_selected",
+            "_value_rank_5d_top10_num",
+            "_value_rank_num",
+            "_avg_value_5d_num",
+            "_change_pct_num",
+            "_volume_rank_num",
+            "code",
+        ],
+        ascending=[False, True, True, False, False, True, True],
+        na_position="last",
+    ).reset_index(drop=True)
+    sort_working["popular_liquidity_rank"] = range(1, len(sort_working) + 1)
+
+    merge_cols = [
+        col
+        for col in ("code", "legacy_top10_selected", "value_rank_5d_top10", "popular_liquidity_rank")
+        if col in sort_working.columns
+    ]
+    if len(merge_cols) <= 1:
+        return working
+
+    return working.merge(sort_working[merge_cols], on="code", how="left")
+
+
 def pick_daytrade(
     candidates: Candidates,
-    quotes: dict[str, dict[str, Any]],
+    quotes: QuoteMap,
     config: TradeEngineConfig,
     news_signal: NewsSentimentSignal | None = None,
 ) -> str | None:
@@ -203,7 +289,7 @@ def pick_daytrade(
 
 def rank_daytrade_codes(
     candidates: Candidates,
-    quotes: dict[str, dict[str, Any]],
+    quotes: QuoteMap,
     config: TradeEngineConfig,
     news_signal: NewsSentimentSignal | None = None,
 ) -> list[str]:
@@ -502,11 +588,11 @@ def _diversify_candidate_rows_by_sector(
     if len(classified_sectors) <= 1:
         return working.drop(columns=["_primary_sector"], errors="ignore")
 
-    ordered_indices: list[Any] = []
+    ordered_indices: list[Hashable] = []
     seen_codes: set[str] = set()
     seen_sectors: set[str] = set()
 
-    def _append_row(idx: Any) -> None:
+    def _append_row(idx: Hashable) -> None:
         row = working.loc[idx]
         code = str(row.get("code") or "")
         if not code or code in seen_codes:
@@ -574,7 +660,7 @@ def _pick_theme_day_swing_etf(
     *,
     stock_scored: pd.DataFrame,
     etf_candidates: pd.DataFrame,
-    quotes: dict[str, dict[str, Any]],
+    quotes: QuoteMap,
     config: TradeEngineConfig,
     news_signal: NewsSentimentSignal | None,
 ) -> str | None:
@@ -679,13 +765,13 @@ def _theme_etf_name_preference_rank(name: str, sector: str) -> int:
     return len(preferred_keywords) + 1
 
 
-def _resolve_market_warning_code(row: pd.Series, quotes: dict[str, dict[str, Any]]) -> Any:
+def _resolve_market_warning_code(row: pd.Series, quotes: QuoteMap) -> object:
     code = str(row.get("code"))
     q = quotes.get(code, {})
     return q.get("market_warning_code") or row.get("market_warning_code") or row.get("mrkt_warn_cls_code")
 
 
-def _resolve_management_issue_code(row: pd.Series, quotes: dict[str, dict[str, Any]]) -> Any:
+def _resolve_management_issue_code(row: pd.Series, quotes: QuoteMap) -> object:
     code = str(row.get("code"))
     q = quotes.get(code, {})
     return (
@@ -709,7 +795,7 @@ def _drop_excluded_codes(df: pd.DataFrame, excluded_codes: set[str]) -> pd.DataF
     return out.reset_index(drop=True)
 
 
-def _to_bool(value: Any) -> bool:
+def _to_bool(value: object) -> bool:
     if isinstance(value, bool):
         return value
     if value is None:
@@ -726,7 +812,7 @@ def _to_bool(value: Any) -> bool:
     return bool(value)
 
 
-def _clean_text(value: Any) -> str:
+def _clean_text(value: object) -> str:
     if value is None:
         return ""
     try:

@@ -6,7 +6,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, TypeAlias
 
 import pandas as pd
 
@@ -15,10 +15,18 @@ from ..prompt_loader import load_prompt
 from .candidate_scoring import _day_intraday_structure_score
 from .chart_review_renderer import render_candidate_chart_png
 from .config import TradeEngineConfig
+from .interfaces import TradingAPI
 from .intraday import sort_intraday_bars
+from .types import Quote, QuoteMap
 from .utils import parse_numeric
 
+if TYPE_CHECKING:
+    from .strategy import Candidates
+
 logger = logging.getLogger(__name__)
+
+ReviewPayload: TypeAlias = dict[str, object]
+ReviewMessage: TypeAlias = dict[str, object]
 
 _REVIEW_MAX_TOKENS = 700
 _CHART_REVIEW_RESPONSE_FORMAT = {
@@ -67,7 +75,7 @@ class DayChartReviewResult:
     selected_code: str | None
     summary: str
     chart_paths: list[str]
-    raw_response: dict[str, Any] | None = None
+    raw_response: ReviewPayload | None = None
 
 
 @dataclass(slots=True)
@@ -79,11 +87,11 @@ class _ReviewAsset:
 
 def review_day_candidates_with_llm(
     *,
-    api: Any,
+    api: TradingAPI,
     trade_date: str,
     ranked_codes: list[str],
-    candidates: Any,
-    quotes: dict[str, dict[str, Any]],
+    candidates: Candidates,
+    quotes: QuoteMap,
     config: TradeEngineConfig,
     output_dir: str,
 ) -> DayChartReviewResult | None:
@@ -142,18 +150,19 @@ def review_day_candidates_with_llm(
             "각 후보에 대해 ENTER/PASS/UNSURE를 주고, selected_code는 가장 나은 1개만 선택해줘."
         ),
         system_prompt_name="trading_day_chart_review_system",
-        paid_model=str(config.day_chart_review_model or "gpt-5.4"),
+        paid_min_candidates=max(2, int(getattr(config, "day_chart_review_paid_min_candidates", 2))),
+        paid_model=str(config.day_chart_review_model or "gpt-5.5"),
         paid_reasoning_effort=str(config.day_chart_review_reasoning_effort or "high"),
     )
 
 
 def review_swing_candidates_with_llm(
     *,
-    api: Any,
+    api: TradingAPI,
     trade_date: str,
     ranked_codes: list[str],
-    candidates: Any,
-    quotes: dict[str, dict[str, Any]],
+    candidates: Candidates,
+    quotes: QuoteMap,
     config: TradeEngineConfig,
     output_dir: str,
 ) -> DayChartReviewResult | None:
@@ -208,7 +217,8 @@ def review_swing_candidates_with_llm(
             "각 후보에 대해 ENTER/PASS/UNSURE를 주고, 스윙 관점에서 가장 나은 1개만 selected_code로 골라줘."
         ),
         system_prompt_name="trading_swing_chart_review_system",
-        paid_model=str(config.swing_chart_review_model or "gpt-5.4"),
+        paid_min_candidates=max(2, int(getattr(config, "swing_chart_review_paid_min_candidates", 2))),
+        paid_model=str(config.swing_chart_review_model or "gpt-5.5"),
         paid_reasoning_effort=str(config.swing_chart_review_reasoning_effort or "high"),
     )
 
@@ -230,7 +240,7 @@ def _build_shortlist(ranked_codes: list[str], *, max_count: int) -> list[str]:
 def _build_day_shortlist(
     *,
     ranked_codes: list[str],
-    quotes: dict[str, dict[str, Any]],
+    quotes: QuoteMap,
     config: TradeEngineConfig,
 ) -> list[str]:
     base_count = max(1, int(config.day_chart_review_top_n))
@@ -265,7 +275,7 @@ def _build_day_shortlist(
     return extended
 
 
-def _find_candidate_row(candidates: Any, code: str) -> pd.Series | None:
+def _find_candidate_row(candidates: Candidates, code: str) -> pd.Series | None:
     for attr_name in ("popular", "model", "etf", "merged"):
         frame = getattr(candidates, attr_name, None)
         if frame is None or getattr(frame, "empty", True) or "code" not in frame.columns:
@@ -277,7 +287,7 @@ def _find_candidate_row(candidates: Any, code: str) -> pd.Series | None:
     return None
 
 
-def _safe_daily_bars(api: Any, *, code: str, trade_date: str, lookback: int) -> pd.DataFrame:
+def _safe_daily_bars(api: TradingAPI, *, code: str, trade_date: str, lookback: int) -> pd.DataFrame:
     try:
         bars = api.daily_bars(code=code, end=trade_date, lookback=lookback)
     except Exception:
@@ -286,7 +296,7 @@ def _safe_daily_bars(api: Any, *, code: str, trade_date: str, lookback: int) -> 
     return bars.copy() if isinstance(bars, pd.DataFrame) else pd.DataFrame()
 
 
-def _safe_intraday_bars(api: Any, *, code: str, trade_date: str, lookback: int) -> pd.DataFrame:
+def _safe_intraday_bars(api: TradingAPI, *, code: str, trade_date: str, lookback: int) -> pd.DataFrame:
     intraday_fn = getattr(api, "intraday_bars", None)
     if not callable(intraday_fn):
         return pd.DataFrame()
@@ -305,14 +315,14 @@ def _candidate_meta_text(
     rank: int,
     code: str,
     row: pd.Series | None,
-    quote: dict[str, Any],
+    quote: Quote,
 ) -> str:
     name = str(row.get("name") if row is not None else quote.get("name") or "").strip() or code
     avg_value_5d = parse_numeric(row.get("avg_value_5d")) if row is not None else None
     change_pct = parse_numeric(quote.get("change_pct"))
     if change_pct is None and row is not None:
         change_pct = parse_numeric(row.get("change_pct"))
-    retrace = parse_numeric(row.get("retrace_from_high_10d_pct")) if row is not None else None
+    breakout_vs_prev_high = parse_numeric(row.get("breakout_vs_prev_high_10d_pct")) if row is not None else None
     close = parse_numeric(quote.get("price"))
     if close is None and row is not None:
         close = parse_numeric(row.get("close"))
@@ -322,7 +332,7 @@ def _candidate_meta_text(
         f"- 등락률: {change_pct if change_pct is not None else 'N/A'}%\n"
         f"- 5일 평균 거래대금: "
         f"{round(avg_value_5d / 1e8, 1) if avg_value_5d is not None else 'N/A'}억\n"
-        f"- 최근 10일 고점 대비: {retrace if retrace is not None else 'N/A'}%"
+        f"- 직전 10일 최고 종가 대비: {breakout_vs_prev_high if breakout_vs_prev_high is not None else 'N/A'}%"
     )
 
 
@@ -337,8 +347,8 @@ def _build_review_messages(
     system_prompt_name: str,
     header_text: str,
     assets: list[_ReviewAsset],
-) -> list[dict[str, Any]]:
-    content: list[dict[str, Any]] = [{"type": "text", "text": header_text}]
+) -> list[ReviewMessage]:
+    content: list[ReviewMessage] = [{"type": "text", "text": header_text}]
     for asset in assets:
         content.append({"type": "text", "text": asset.meta_text})
         content.append(
@@ -359,7 +369,7 @@ def _build_review_messages(
 def _build_review_result(
     *,
     assets: list[_ReviewAsset],
-    parsed: dict[str, Any],
+    parsed: ReviewPayload,
     route: str,
     summary_prefix: str | None = None,
 ) -> DayChartReviewResult:
@@ -389,6 +399,7 @@ def _run_chart_review_hybrid(
     assets: list[_ReviewAsset],
     header_text: str,
     system_prompt_name: str,
+    paid_min_candidates: int,
     paid_model: str,
     paid_reasoning_effort: str,
 ) -> DayChartReviewResult | None:
@@ -444,14 +455,18 @@ def _run_chart_review_hybrid(
     if len(local_result.approved_codes) <= 1 or not paid_available:
         return local_result
 
-    finalist_assets = [asset for asset in assets if asset.code in set(local_result.approved_codes)]
+    finalist_assets, reference_codes = _build_paid_finalist_assets(
+        assets=assets,
+        approved_codes=local_result.approved_codes,
+        min_count=paid_min_candidates,
+    )
     if len(finalist_assets) <= 1:
         return local_result
 
-    finalist_header = (
-        f"{header_text}\n"
-        f"로컬 1차 검토 통과 후보: {','.join(asset.code for asset in finalist_assets)}\n"
-        "통과 후보들 중 최종 1개만 더 엄격하게 선택해줘."
+    finalist_header = _build_paid_finalist_header(
+        header_text=header_text,
+        approved_codes=local_result.approved_codes,
+        reference_codes=reference_codes,
     )
     paid_messages = _build_review_messages(
         system_prompt_name=system_prompt_name,
@@ -477,6 +492,11 @@ def _run_chart_review_hybrid(
         route="hybrid_paid_tiebreak",
         summary_prefix="로컬 1차 통과 후보를 유료 2차로 재정렬. ",
     )
+    if reference_codes:
+        paid_result = _restrict_paid_result_to_local_approvals(
+            paid_result=paid_result,
+            local_result=local_result,
+        )
     return DayChartReviewResult(
         shortlisted_codes=local_result.shortlisted_codes,
         approved_codes=paid_result.approved_codes,
@@ -487,7 +507,76 @@ def _run_chart_review_hybrid(
     )
 
 
-def _parse_review_response(raw_text: str) -> dict[str, Any] | None:
+def _build_paid_finalist_assets(
+    *,
+    assets: list[_ReviewAsset],
+    approved_codes: list[str],
+    min_count: int,
+) -> tuple[list[_ReviewAsset], list[str]]:
+    approved_set = {str(code).strip() for code in approved_codes if str(code).strip()}
+    finalists = [asset for asset in assets if asset.code in approved_set]
+    reference_codes: list[str] = []
+    target_count = max(2, int(min_count))
+    if len(finalists) >= target_count:
+        return finalists, reference_codes
+
+    for asset in assets:
+        if asset.code in approved_set:
+            continue
+        finalists.append(asset)
+        reference_codes.append(asset.code)
+        if len(finalists) >= target_count:
+            break
+    return finalists, reference_codes
+
+
+def _build_paid_finalist_header(
+    *,
+    header_text: str,
+    approved_codes: list[str],
+    reference_codes: list[str],
+) -> str:
+    approved_text = ",".join(str(code).strip() for code in approved_codes if str(code).strip())
+    header_lines = [
+        header_text,
+        f"로컬 1차 검토 통과 후보: {approved_text}",
+    ]
+    if reference_codes:
+        header_lines.append(f"추가 비교 후보: {','.join(reference_codes)}")
+        header_lines.append(
+            "selected_code는 로컬 1차 검토 통과 후보 중에서만 골라줘. 추가 비교 후보는 상대 비교 참고용이다."
+        )
+    else:
+        header_lines.append("통과 후보들 중 최종 1개만 더 엄격하게 선택해줘.")
+    return "\n".join(header_lines)
+
+
+def _restrict_paid_result_to_local_approvals(
+    *,
+    paid_result: DayChartReviewResult,
+    local_result: DayChartReviewResult,
+) -> DayChartReviewResult:
+    allowed_codes = {str(code).strip() for code in local_result.approved_codes if str(code).strip()}
+    approved_codes = [code for code in paid_result.approved_codes if code in allowed_codes]
+    selected_code = paid_result.selected_code if paid_result.selected_code in allowed_codes else None
+    if selected_code is None:
+        if approved_codes:
+            selected_code = approved_codes[0]
+        elif local_result.selected_code in allowed_codes:
+            selected_code = local_result.selected_code
+        elif local_result.approved_codes:
+            selected_code = local_result.approved_codes[0]
+    return DayChartReviewResult(
+        shortlisted_codes=paid_result.shortlisted_codes,
+        approved_codes=approved_codes,
+        selected_code=selected_code,
+        summary=paid_result.summary,
+        chart_paths=paid_result.chart_paths,
+        raw_response=paid_result.raw_response,
+    )
+
+
+def _parse_review_response(raw_text: str) -> ReviewPayload | None:
     text = str(raw_text or "").strip()
     if not text:
         return None
@@ -509,7 +598,7 @@ def _parse_review_response(raw_text: str) -> dict[str, Any] | None:
     return None
 
 
-def _approved_codes_from_review(*, shortlist: list[str], parsed: dict[str, Any]) -> list[str]:
+def _approved_codes_from_review(*, shortlist: list[str], parsed: ReviewPayload) -> list[str]:
     decisions_raw = parsed.get("candidates") or []
     decision_map: dict[str, str] = {}
     if isinstance(decisions_raw, list):

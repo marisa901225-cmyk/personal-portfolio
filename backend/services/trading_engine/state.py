@@ -5,7 +5,8 @@ import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from tempfile import NamedTemporaryFile
-from typing import Any
+
+from .types import PendingExitOrder
 
 
 def _today_yyyymmdd() -> str:
@@ -42,14 +43,17 @@ class TradeState:
     consecutive_losses_today: int = 0
     blacklist_today: set[str] = field(default_factory=set)
     open_positions: dict[str, PositionState] = field(default_factory=dict)
+    pending_entry_orders: dict[str, str] = field(default_factory=dict)
+    pending_exit_orders: dict[str, PendingExitOrder] = field(default_factory=dict)
     last_run_timestamp: str | None = None
     last_bar_date_seen: str | None = None
     last_panic_date: str | None = None
     pass_reasons_today: dict[str, int] = field(default_factory=dict)
-    pending_notifications: list[dict[str, Any]] = field(default_factory=list)
+    pending_notifications: list[dict[str, object]] = field(default_factory=list)
     day_stoploss_fail_counts: dict[str, int] = field(default_factory=dict)
     day_stoploss_excluded_codes: set[str] = field(default_factory=set)
     day_stoploss_codes_today: set[str] = field(default_factory=set)
+    day_stop_llm_reviewed_positions: set[str] = field(default_factory=set)
     day_entry_windows_used_today: set[int] = field(default_factory=set)
     swing_time_excluded_codes: set[str] = field(default_factory=set)
 
@@ -77,6 +81,8 @@ def load_state(path: str) -> TradeState:
         consecutive_losses_today=int(raw.get("consecutive_losses_today", 0)),
         blacklist_today=set(raw.get("blacklist_today", [])),
         open_positions=_parse_open_positions(raw.get("open_positions", {})),
+        pending_entry_orders=_parse_pending_entry_orders(raw.get("pending_entry_orders", {})),
+        pending_exit_orders=_parse_pending_exit_orders(raw.get("pending_exit_orders", {})),
         last_run_timestamp=raw.get("last_run_timestamp"),
         last_bar_date_seen=raw.get("last_bar_date_seen"),
         last_panic_date=raw.get("last_panic_date"),
@@ -90,6 +96,9 @@ def load_state(path: str) -> TradeState:
         ),
         day_stoploss_codes_today=_parse_day_stoploss_excluded_codes(
             raw.get("day_stoploss_codes_today", [])
+        ),
+        day_stop_llm_reviewed_positions=_parse_day_stoploss_excluded_codes(
+            raw.get("day_stop_llm_reviewed_positions", [])
         ),
         day_entry_windows_used_today=_parse_int_set(
             raw.get("day_entry_windows_used_today", [])
@@ -109,6 +118,16 @@ def save_state(path: str, state: TradeState) -> None:
         code: asdict(pos)
         for code, pos in state.open_positions.items()
     }
+    payload["pending_entry_orders"] = {
+        code: strategy_type
+        for code, strategy_type in sorted(state.pending_entry_orders.items())
+        if str(code).strip() and str(strategy_type).strip() in {"S", "T", "P"}
+    }
+    payload["pending_exit_orders"] = {
+        code: dict(order)
+        for code, order in sorted(state.pending_exit_orders.items())
+        if str(code).strip() and isinstance(order, dict)
+    }
     payload["day_stoploss_fail_counts"] = {
         code: int(count)
         for code, count in sorted(state.day_stoploss_fail_counts.items())
@@ -116,6 +135,7 @@ def save_state(path: str, state: TradeState) -> None:
     }
     payload["day_stoploss_excluded_codes"] = sorted(state.day_stoploss_excluded_codes)
     payload["day_stoploss_codes_today"] = sorted(state.day_stoploss_codes_today)
+    payload["day_stop_llm_reviewed_positions"] = sorted(state.day_stop_llm_reviewed_positions)
     payload["day_entry_windows_used_today"] = sorted(
         int(idx) for idx in state.day_entry_windows_used_today
     )
@@ -146,7 +166,10 @@ def rollover_state_for_date(state: TradeState, today: str) -> TradeState:
     state.consecutive_losses_today = 0
     state.blacklist_today.clear()
     state.pass_reasons_today.clear()
+    state.pending_entry_orders.clear()
+    state.pending_exit_orders.clear()
     state.day_stoploss_codes_today.clear()
+    state.day_stop_llm_reviewed_positions.clear()
     state.day_entry_windows_used_today.clear()
     state.swing_time_excluded_codes.clear()
 
@@ -245,7 +268,10 @@ def get_swing_time_excluded_codes(state: TradeState) -> set[str]:
     return {str(code) for code in state.swing_time_excluded_codes}
 
 
-def _parse_open_positions(raw: dict[str, Any]) -> dict[str, PositionState]:
+def _parse_open_positions(raw: object) -> dict[str, PositionState]:
+    if not isinstance(raw, dict):
+        return {}
+
     out: dict[str, PositionState] = {}
     for code, item in (raw or {}).items():
         if not isinstance(item, dict):
@@ -263,7 +289,40 @@ def _parse_open_positions(raw: dict[str, Any]) -> dict[str, PositionState]:
     return out
 
 
-def _parse_day_stoploss_excluded_codes(raw: Any) -> set[str]:
+def _parse_pending_entry_orders(raw: object) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        return {}
+
+    out: dict[str, str] = {}
+    for code, strategy_type in (raw or {}).items():
+        normalized_code = str(code or "").strip()
+        normalized_type = str(strategy_type or "").strip().upper()
+        if not normalized_code or normalized_type not in {"S", "T", "P"}:
+            continue
+        out[normalized_code] = normalized_type
+    return out
+
+
+def _parse_pending_exit_orders(raw: object) -> dict[str, PendingExitOrder]:
+    if not isinstance(raw, dict):
+        return {}
+
+    out: dict[str, PendingExitOrder] = {}
+    for code, item in raw.items():
+        normalized_code = str(code or "").strip()
+        if not normalized_code or not isinstance(item, dict):
+            continue
+        order: PendingExitOrder = {}
+        for key in ("strategy_type", "reason", "order_id", "qty", "order_time"):
+            value = item.get(key)
+            if value is not None:
+                order[key] = value
+        if order:
+            out[normalized_code] = order
+    return out
+
+
+def _parse_day_stoploss_excluded_codes(raw: object) -> set[str]:
     if isinstance(raw, dict):
         items = raw.keys()
     elif isinstance(raw, (list, tuple, set)):
@@ -278,7 +337,7 @@ def _parse_day_stoploss_excluded_codes(raw: Any) -> set[str]:
     }
 
 
-def _parse_day_stoploss_fail_counts(raw: Any) -> dict[str, int]:
+def _parse_day_stoploss_fail_counts(raw: object) -> dict[str, int]:
     if not isinstance(raw, dict):
         return {}
 
@@ -296,7 +355,7 @@ def _parse_day_stoploss_fail_counts(raw: Any) -> dict[str, int]:
     return out
 
 
-def _parse_int_set(raw: Any) -> set[int]:
+def _parse_int_set(raw: object) -> set[int]:
     if isinstance(raw, dict):
         items = raw.keys()
     elif isinstance(raw, (list, tuple, set)):

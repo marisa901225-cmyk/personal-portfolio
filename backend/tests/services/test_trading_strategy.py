@@ -30,10 +30,15 @@ class TradingStrategyTests(unittest.TestCase):
             quote_codes=[],
         )
 
-    def _candidates_with_swing(self, model: pd.DataFrame, etf: pd.DataFrame) -> Candidates:
+    def _candidates_with_swing(
+        self,
+        model: pd.DataFrame,
+        etf: pd.DataFrame,
+        popular: pd.DataFrame | None = None,
+    ) -> Candidates:
         return Candidates(
             asof="20260227",
-            popular=pd.DataFrame(),
+            popular=popular if popular is not None else pd.DataFrame(),
             model=model,
             etf=etf,
             merged=pd.DataFrame(),
@@ -844,6 +849,58 @@ class TradingStrategyTests(unittest.TestCase):
 
         picked = pick_swing(candidates, quotes={}, config=TradeEngineConfig())
         self.assertEqual(picked, "STRONG01")
+
+    def test_pick_swing_prefers_popular_liquidity_leader_when_trend_scores_are_similar(self) -> None:
+        model_pool = pd.DataFrame(
+            [
+                {
+                    "code": "LIQ001",
+                    "name": "LiquidityLeader",
+                    "avg_value_20d": 600_000_000_000,
+                    "ma20": 100,
+                    "ma60": 95,
+                    "close": 104,
+                    "change_pct": 1.5,
+                    "is_etf": False,
+                    "trend_tier": "strict",
+                },
+                {
+                    "code": "PLAIN1",
+                    "name": "PlainStock",
+                    "avg_value_20d": 600_000_000_000,
+                    "ma20": 100,
+                    "ma60": 95,
+                    "close": 104,
+                    "change_pct": 1.5,
+                    "is_etf": False,
+                    "trend_tier": "strict",
+                },
+            ]
+        )
+        popular_pool = pd.DataFrame(
+            [
+                {
+                    "code": "LIQ001",
+                    "name": "LiquidityLeader",
+                    "avg_value_5d": 140_000_000_000,
+                    "change_pct": 3.0,
+                    "legacy_top10_selected": True,
+                    "value_rank_5d_top10": 1,
+                },
+                {
+                    "code": "PLAIN1",
+                    "name": "PlainStock",
+                    "avg_value_5d": 70_000_000_000,
+                    "change_pct": 1.0,
+                    "legacy_top10_selected": False,
+                    "value_rank_5d_top10": None,
+                },
+            ]
+        )
+        candidates = self._candidates_with_swing(model=model_pool, etf=pd.DataFrame(), popular=popular_pool)
+
+        picked = pick_swing(candidates, quotes={}, config=TradeEngineConfig())
+        self.assertEqual(picked, "LIQ001")
 
     def test_score_day_row_applies_sector_news_bonus(self) -> None:
         row = pd.Series(

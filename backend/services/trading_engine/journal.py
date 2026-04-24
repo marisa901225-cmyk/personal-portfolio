@@ -17,6 +17,7 @@ _SUMMARY_EVENT_LABELS = {
     "ERROR": "오류",
     "EXIT": "청산",
     "EXIT_FILL": "청산 체결",
+    "EXIT_ORDER_ACCEPTED": "청산 주문 접수",
     "FORCE_EXIT": "강제 청산",
     "HOLD_MATCH": "기보유 유지",
     "NEWS_SENTIMENT": "뉴스 심리",

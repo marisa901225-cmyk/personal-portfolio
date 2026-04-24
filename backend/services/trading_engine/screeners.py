@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
-
 import pandas as pd
 
 from .config import TradeEngineConfig
@@ -47,7 +45,7 @@ def _rank_map(df: pd.DataFrame, rank_col: str) -> dict[str, int]:
     return out
 
 
-def _is_allowed_by_etf_policy(row: dict[str, Any], include_etf: bool) -> bool:
+def _is_allowed_by_etf_policy(row: dict[str, object], include_etf: bool) -> bool:
     if not include_etf and is_etf_row(row):
         return False
     if include_etf and is_etf_row(row) and is_excluded_etf(row):
@@ -89,7 +87,7 @@ def popular_screener(
     if candidate_df.empty:
         return _empty_popular_df()
 
-    rows: list[dict[str, Any]] = []
+    rows: list[dict[str, object]] = []
     volume_rank_map = _rank_map(vol_df, "volume_rank")
     value_rank_map = _rank_map(value_rank_df, "value_rank")
     stock_master_map = load_stock_master_map(
@@ -118,12 +116,18 @@ def popular_screener(
         close = parse_numeric(bars.iloc[-1].get("close")) if "close" in bars.columns else row.get("close")
         recent_high_10d = None
         retrace_from_high_10d_pct = None
+        breakout_vs_prev_high_10d_pct = None
         if "close" in bars.columns:
             close_s = pd.to_numeric(bars.get("close"), errors="coerce")
             if not close_s.dropna().empty:
                 recent_high_10d = parse_numeric(close_s.max())
                 if close is not None and recent_high_10d and recent_high_10d > 0:
                     retrace_from_high_10d_pct = ((float(close) / float(recent_high_10d)) - 1.0) * 100.0
+                prev_close_s = close_s.iloc[:-1].dropna()
+                if close is not None and not prev_close_s.empty:
+                    prev_high_10d = parse_numeric(prev_close_s.max())
+                    if prev_high_10d and prev_high_10d > 0:
+                        breakout_vs_prev_high_10d_pct = ((float(close) / float(prev_high_10d)) - 1.0) * 100.0
         rows.append(
             {
                 "code": code,
@@ -148,6 +152,7 @@ def popular_screener(
                 "theme_injected": False,
                 "theme_sector": None,
                 "retrace_from_high_10d_pct": retrace_from_high_10d_pct,
+                "breakout_vs_prev_high_10d_pct": breakout_vs_prev_high_10d_pct,
                 **industry_columns(code, industry_map),
             }
         )
@@ -221,7 +226,7 @@ def model_screener(
         kosdaq_master_path=cfg.industry_kosdaq_master_path,
     )
 
-    rows: list[dict[str, Any]] = []
+    rows: list[dict[str, object]] = []
     for _, row in mcap_df.iterrows():
         code = str(row["code"])
         mcap = parse_numeric(row.get("mcap")) or parse_numeric(row.get("master_market_cap"))
@@ -341,7 +346,7 @@ def etf_swing_screener(
     if etf_only.empty:
         return _empty_etf_df()
 
-    rows: list[dict[str, Any]] = []
+    rows: list[dict[str, object]] = []
     for _, row in etf_only.iterrows():
         code = str(row["code"])
         try:
@@ -425,6 +430,7 @@ def _ensure_popular_columns(df: pd.DataFrame) -> pd.DataFrame:
         "market_warning_code",
         "management_issue_code",
         "retrace_from_high_10d_pct",
+        "breakout_vs_prev_high_10d_pct",
     ]
     for col in cols:
         if col not in df.columns:
@@ -565,7 +571,7 @@ def _select_sector_bucket_rows(
     if working.empty:
         return pd.DataFrame()
 
-    selected_rows: list[dict[str, Any]] = []
+    selected_rows: list[dict[str, object]] = []
     seen_codes: set[str] = set()
     for bucket_name, sector_rows in working.groupby("_bucket_key", sort=False):
         if sector_rows.empty:
@@ -634,8 +640,8 @@ def _combine_popular_rows(
     sector_bucket: pd.DataFrame,
     legacy_top: pd.DataFrame,
 ) -> pd.DataFrame:
-    combined_rows: list[dict[str, Any]] = []
-    by_code: dict[str, dict[str, Any]] = {}
+    combined_rows: list[dict[str, object]] = []
+    by_code: dict[str, dict[str, object]] = {}
 
     for block in (sector_bucket, legacy_top):
         if block is None or block.empty:
@@ -714,7 +720,7 @@ def _inject_theme_candidates(
     )
 
     seen_codes = set(base["code"].astype(str)) if not base.empty and "code" in base.columns else set()
-    injected_rows: list[dict[str, Any]] = []
+    injected_rows: list[dict[str, object]] = []
     for sector in strong_sectors:
         sector_rows = candidates[
             ~candidates["code"].astype(str).isin(seen_codes)

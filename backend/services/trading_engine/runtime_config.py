@@ -238,6 +238,38 @@ def _apply_daytrade_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_DAY_STOPLOSS_EXCLUDE_AFTER_LOSSES",
         cfg.day_stoploss_exclude_after_losses,
     )
+    cfg.day_stop_llm_review_enabled = _env_bool(
+        "TRADING_ENGINE_DAY_STOP_LLM_REVIEW_ENABLED",
+        cfg.day_stop_llm_review_enabled,
+    )
+    cfg.day_stop_llm_review_use_paid = _env_bool(
+        "TRADING_ENGINE_DAY_STOP_LLM_REVIEW_USE_PAID",
+        cfg.day_stop_llm_review_use_paid,
+    )
+    cfg.day_stop_llm_review_model = _env_text(
+        "TRADING_ENGINE_DAY_STOP_LLM_REVIEW_MODEL",
+        cfg.day_stop_llm_review_model,
+    )
+    cfg.day_stop_llm_review_reasoning_effort = _env_text(
+        "TRADING_ENGINE_DAY_STOP_LLM_REVIEW_REASONING_EFFORT",
+        cfg.day_stop_llm_review_reasoning_effort,
+    )
+    cfg.day_stop_llm_min_day_change_pct = _env_float(
+        "TRADING_ENGINE_DAY_STOP_LLM_MIN_DAY_CHANGE_PCT",
+        cfg.day_stop_llm_min_day_change_pct,
+    )
+    cfg.day_stop_llm_max_retrace_from_high_pct = _env_float(
+        "TRADING_ENGINE_DAY_STOP_LLM_MAX_RETRACE_FROM_HIGH_PCT",
+        cfg.day_stop_llm_max_retrace_from_high_pct,
+    )
+    cfg.day_stop_llm_hard_stop_pct = _env_float(
+        "TRADING_ENGINE_DAY_STOP_LLM_HARD_STOP_PCT",
+        cfg.day_stop_llm_hard_stop_pct,
+    )
+    cfg.day_stop_llm_hold_confidence_min = _env_float(
+        "TRADING_ENGINE_DAY_STOP_LLM_HOLD_CONFIDENCE_MIN",
+        cfg.day_stop_llm_hold_confidence_min,
+    )
     cfg.day_chart_review_enabled = _env_bool(
         "TRADING_ENGINE_DAY_CHART_REVIEW_ENABLED",
         cfg.day_chart_review_enabled,
@@ -245,6 +277,14 @@ def _apply_daytrade_overrides(cfg: TradeEngineConfig) -> None:
     cfg.day_chart_review_top_n = _env_int(
         "TRADING_ENGINE_DAY_CHART_REVIEW_TOP_N",
         cfg.day_chart_review_top_n,
+    )
+    cfg.day_chart_review_chart_wildcard_slots = _env_int(
+        "TRADING_ENGINE_DAY_CHART_REVIEW_CHART_WILDCARD_SLOTS",
+        cfg.day_chart_review_chart_wildcard_slots,
+    )
+    cfg.day_chart_review_paid_min_candidates = _env_int(
+        "TRADING_ENGINE_DAY_CHART_REVIEW_PAID_MIN_CANDIDATES",
+        cfg.day_chart_review_paid_min_candidates,
     )
     cfg.day_chart_review_model = _env_text(
         "TRADING_ENGINE_DAY_CHART_REVIEW_MODEL",
@@ -324,6 +364,10 @@ def _apply_swing_overrides(cfg: TradeEngineConfig) -> None:
     cfg.swing_chart_review_top_n = _env_int(
         "TRADING_ENGINE_SWING_CHART_REVIEW_TOP_N",
         cfg.swing_chart_review_top_n,
+    )
+    cfg.swing_chart_review_paid_min_candidates = _env_int(
+        "TRADING_ENGINE_SWING_CHART_REVIEW_PAID_MIN_CANDIDATES",
+        cfg.swing_chart_review_paid_min_candidates,
     )
     cfg.swing_chart_review_model = _env_text(
         "TRADING_ENGINE_SWING_CHART_REVIEW_MODEL",

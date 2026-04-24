@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING
 
 from .execution import FillResult, enter_position
 from .intraday import passes_day_intraday_confirmation
@@ -13,7 +13,12 @@ from .notification_text import (
 )
 from .risk import can_enter, current_entry_window_index
 from .state import PositionState
+from .types import OrderPayload, Quote, QuoteMap
 from .utils import parse_numeric
+
+if TYPE_CHECKING:
+    from .news_sentiment import NewsSentimentSignal
+    from .strategy import Candidates
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +47,7 @@ def _krx_tick_size(price: float) -> int:
 
 def _resolve_day_entry_order(
     *,
-    quote: dict[str, Any] | None,
+    quote: Quote | None,
     configured_order_type: str,
 ) -> tuple[str, int | None]:
     normalized = str(configured_order_type or "").strip().lower()
@@ -63,9 +68,9 @@ class BotEntryFlowMixin:
         *,
         now: datetime,
         regime: str,
-        candidates: Any,
-        quotes: dict[str, Any],
-        news_signal: Any | None = None,
+        candidates: Candidates,
+        quotes: QuoteMap,
+        news_signal: NewsSentimentSignal | None = None,
     ) -> None:
         bot_module = _bot_module()
         ranked_codes = bot_module.rank_swing_codes(candidates, quotes, self.config, news_signal=news_signal)
@@ -186,9 +191,9 @@ class BotEntryFlowMixin:
         *,
         now: datetime,
         regime: str,
-        candidates: Any,
-        quotes: dict[str, Any],
-        news_signal: Any | None = None,
+        candidates: Candidates,
+        quotes: QuoteMap,
+        news_signal: NewsSentimentSignal | None = None,
     ) -> None:
         bot_module = _bot_module()
         ranked_codes = bot_module.rank_daytrade_codes(candidates, quotes, self.config, news_signal=news_signal)
@@ -346,7 +351,7 @@ class BotEntryFlowMixin:
         self,
         *,
         code: str,
-    ) -> tuple[bool, dict[str, Any]]:
+    ) -> tuple[bool, dict[str, object]]:
         return passes_day_intraday_confirmation(
             self.api,
             trade_date=self.state.trade_date,
@@ -372,8 +377,8 @@ class BotEntryFlowMixin:
         self,
         *,
         ranked_codes: list[str],
-        candidates: Any,
-        quotes: dict[str, Any],
+        candidates: Candidates,
+        quotes: QuoteMap,
     ) -> tuple[list[str], bool]:
         if not ranked_codes or not self.config.day_chart_review_enabled:
             return ranked_codes, False
@@ -418,8 +423,8 @@ class BotEntryFlowMixin:
         self,
         *,
         ranked_codes: list[str],
-        candidates: Any,
-        quotes: dict[str, Any],
+        candidates: Candidates,
+        quotes: QuoteMap,
     ) -> tuple[list[str], bool]:
         if not ranked_codes or not self.config.swing_chart_review_enabled:
             return ranked_codes, False
@@ -469,7 +474,7 @@ class BotEntryFlowMixin:
         strategy_type: str,
         now: datetime,
         regime: str,
-    ) -> tuple[FillResult | None, dict[str, Any] | None]:
+    ) -> tuple[FillResult | None, OrderPayload | None]:
         synced_result = self._sync_broker_filled_position(
             code=code,
             strategy_type=strategy_type,
@@ -481,6 +486,7 @@ class BotEntryFlowMixin:
 
         pending_order = self._find_pending_buy_order(code=code)
         if pending_order is not None:
+            self.state.pending_entry_orders[str(code).strip()] = str(strategy_type).strip().upper()
             order_id = str(pending_order.get("order_id") or "")
             order_qty = int(parse_numeric(pending_order.get("qty")) or 0)
             remaining_qty = int(parse_numeric(pending_order.get("remaining_qty")) or 0)
@@ -565,6 +571,8 @@ class BotEntryFlowMixin:
                 existing.entry_price = resolved_price
                 existing.highest_price = max(float(existing.highest_price or 0.0), resolved_price)
 
+            self.state.pending_entry_orders.pop(normalized_code, None)
+
             return FillResult(
                 code=normalized_code,
                 side="BUY",
@@ -576,7 +584,7 @@ class BotEntryFlowMixin:
 
         return None
 
-    def _find_pending_buy_order(self, *, code: str) -> dict[str, Any] | None:
+    def _find_pending_buy_order(self, *, code: str) -> OrderPayload | None:
         normalized_code = str(code or "").strip()
         if not normalized_code:
             return None
@@ -599,3 +607,31 @@ class BotEntryFlowMixin:
                 continue
             return dict(order)
         return None
+
+    def _refresh_pending_entry_orders(self) -> None:
+        if not self.state.pending_entry_orders:
+            return
+
+        try:
+            open_orders = self.api.open_orders() or []
+        except Exception:
+            logger.warning("open_orders refresh failed for pending entry sync", exc_info=True)
+            return
+
+        pending_codes: set[str] = set()
+        for order in open_orders:
+            order_code = str(order.get("code") or order.get("pdno") or "").strip()
+            if not order_code:
+                continue
+            side = str(order.get("side") or order.get("sll_buy_dvsn_cd") or "").strip().lower()
+            if side not in {"buy", "02"}:
+                continue
+            remaining_qty = parse_numeric(order.get("remaining_qty") or order.get("psbl_qty"))
+            if remaining_qty is not None and remaining_qty <= 0:
+                continue
+            pending_codes.add(order_code)
+
+        for code in list(self.state.pending_entry_orders):
+            if code in self.state.open_positions or code in pending_codes:
+                continue
+            self.state.pending_entry_orders.pop(code, None)

@@ -3,7 +3,13 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+from .day_stop_review import (
+    DayStopReviewResult,
+    is_day_stop_review_candidate,
+    review_day_stop_with_llm,
+)
 from .execution import exit_position
+from .intraday import passes_day_intraday_confirmation
 from .notification_text import format_exit_message
 from .parking import manage_risk_off_parking
 from .position_helpers import (
@@ -12,6 +18,7 @@ from .position_helpers import (
     reconcile_state_with_broker_positions,
 )
 from .risk import should_exit_position
+from .state import PositionState
 from .utils import parse_numeric
 
 logger = logging.getLogger(__name__)
@@ -58,6 +65,15 @@ class BotPositionManagementMixin:
             )
             if not exit_now:
                 continue
+            if self._should_hold_day_stop_after_llm(
+                code=code,
+                pos=pos,
+                quote_price=price,
+                pnl_pct=pnl_pct,
+                reason=reason,
+                now=now,
+            ):
+                continue
 
             result = exit_position(
                 self.api,
@@ -66,10 +82,15 @@ class BotPositionManagementMixin:
                 reason=reason,
                 now=now,
                 config=self.config,
+                on_order_accepted=lambda order, pos=pos: self._record_pending_exit_order(
+                    order,
+                    strategy_type=pos.type,
+                ),
             )
             if not result:
                 continue
 
+            self.state.pending_exit_orders.pop(code, None)
             self._journal(
                 "EXIT_FILL",
                 asof_date=self.state.trade_date,
@@ -108,9 +129,14 @@ class BotPositionManagementMixin:
                 reason="FORCE",
                 now=now,
                 config=self.config,
+                on_order_accepted=lambda order, pos=pos: self._record_pending_exit_order(
+                    order,
+                    strategy_type=pos.type,
+                ),
             )
             if not result:
                 continue
+            self.state.pending_exit_orders.pop(code, None)
             self._journal(
                 "FORCE_EXIT",
                 asof_date=self.state.trade_date,
@@ -133,6 +159,113 @@ class BotPositionManagementMixin:
             journal=self._journal,
             notify_text=self._notify_text,
         )
+
+    def _record_pending_exit_order(self, order: dict, *, strategy_type: str) -> None:
+        code = str(order.get("code") or "").strip()
+        if not code:
+            return
+        reason = str(order.get("reason") or "").strip().upper()
+        order_id = str(order.get("order_id") or "").strip()
+        qty = int(parse_numeric(order.get("qty")) or 0)
+        self.state.pending_exit_orders[code] = {
+            "strategy_type": str(strategy_type or "").strip().upper(),
+            "reason": reason,
+            "order_id": order_id,
+            "qty": qty,
+            "order_time": str(order.get("order_time") or "").strip(),
+        }
+        self._journal(
+            "EXIT_ORDER_ACCEPTED",
+            asof_date=self.state.trade_date,
+            code=code,
+            side="SELL",
+            qty=qty,
+            reason=reason,
+            order_id=order_id,
+            strategy_type=str(strategy_type or "").strip().upper(),
+        )
+
+    def _should_hold_day_stop_after_llm(
+        self,
+        *,
+        code: str,
+        pos: PositionState,
+        quote_price: float,
+        pnl_pct: float,
+        reason: str,
+        now: datetime,
+    ) -> bool:
+        del now
+        if reason != "SL" or pos.type != "T":
+            return False
+
+        review_key = self._day_stop_llm_review_key(code=code, pos=pos)
+        already_reviewed = review_key in self.state.day_stop_llm_reviewed_positions
+        intraday_meta = self._day_stop_intraday_meta(code=code)
+        if not is_day_stop_review_candidate(
+            config=self.config,
+            position=pos,
+            pnl_pct=pnl_pct,
+            intraday_meta=intraday_meta,
+            already_reviewed=already_reviewed,
+        ):
+            return False
+
+        self.state.day_stop_llm_reviewed_positions.add(review_key)
+        review = review_day_stop_with_llm(
+            code=code,
+            position=pos,
+            quote_price=quote_price,
+            intraday_meta=intraday_meta,
+            config=self.config,
+        )
+        self._journal_day_stop_llm_review(
+            code=code,
+            review=review,
+            intraday_meta=intraday_meta,
+        )
+        return review is not None and review.decision == "HOLD"
+
+    def _day_stop_intraday_meta(self, *, code: str) -> dict[str, object]:
+        try:
+            _, meta = passes_day_intraday_confirmation(
+                self.api,
+                trade_date=self.state.trade_date,
+                code=code,
+                config=self.config,
+                logger=logger,
+            )
+            return dict(meta)
+        except Exception:
+            logger.warning("day stop intraday meta failed code=%s", code, exc_info=True)
+            return {"reason": "FETCH_FAILED"}
+
+    def _journal_day_stop_llm_review(
+        self,
+        *,
+        code: str,
+        review: DayStopReviewResult | None,
+        intraday_meta: dict[str, object],
+    ) -> None:
+        decision = review.decision if review is not None else "EXIT"
+        self._journal(
+            "DAY_STOP_LLM_REVIEW",
+            asof_date=self.state.trade_date,
+            code=code,
+            decision=decision,
+            confidence=round(float(review.confidence), 4) if review is not None else 0.0,
+            route=review.route if review is not None else "unavailable",
+            review_reason=review.reason if review is not None else "LLM_UNAVAILABLE_OR_INVALID",
+            intraday_reason=str(intraday_meta.get("reason") or ""),
+            day_change_pct=intraday_meta.get("day_change_pct"),
+            window_change_pct=intraday_meta.get("window_change_pct"),
+            last_bar_change_pct=intraday_meta.get("last_bar_change_pct"),
+            retrace_from_high_pct=intraday_meta.get("retrace_from_high_pct"),
+        )
+
+    @staticmethod
+    def _day_stop_llm_review_key(*, code: str, pos: PositionState) -> str:
+        return f"{str(code).strip()}:{str(getattr(pos, 'entry_time', '')).strip()}"
 
     def _is_swing_trend_broken(self, *, code: str, quote_price: float, now: datetime) -> bool:
         return is_swing_trend_broken(

@@ -129,6 +129,36 @@ def test_popular_screener_prefers_current_value_rank_over_avg5_when_compressing_
     row = out.iloc[0]
     assert int(row["value_rank"]) == 1
 
+def test_popular_screener_exposes_breakout_vs_previous_10d_high_for_prompting() -> None:
+    asof = "20260213"
+    api = FakeAPI()
+    api._volume_rank[("volume", asof)] = [
+        {"code": "000001", "name": "Alpha", "rank": 1},
+    ]
+    api._volume_rank[("value", asof)] = [
+        {"code": "000001", "name": "Alpha", "rank": 1},
+    ]
+    api._bars[("000001", asof)] = _make_bars_from_closes(
+        asof,
+        [100, 101, 102, 103, 104, 105, 106, 107, 108, 110],
+        value=20_000_000_000,
+    )
+
+    out = popular_screener(
+        api,
+        asof=asof,
+        include_etf=False,
+        config=TradeEngineConfig(
+            day_stock_min_avg_value_5d=0,
+            day_stock_min_mcap=0,
+        ),
+    )
+
+    assert not out.empty
+    row = out.iloc[0]
+    assert round(float(row["retrace_from_high_10d_pct"]), 4) == 0.0
+    assert round(float(row["breakout_vs_prev_high_10d_pct"]), 4) == round((110 / 108 - 1.0) * 100.0, 4)
+
 @patch("backend.services.trading_engine.screeners.load_swing_universe_candidates")
 def test_model_screener_filters_etf_and_applies_ma_chain(mock_load_universe) -> None:
     asof = "20260213"

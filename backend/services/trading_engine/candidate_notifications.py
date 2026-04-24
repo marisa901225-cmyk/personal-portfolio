@@ -4,7 +4,7 @@ import logging
 import os
 import re
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING
 
 import pandas as pd
 import requests
@@ -19,6 +19,9 @@ from .notification_text import (
 )
 from .risk import _is_in_window
 
+if TYPE_CHECKING:
+    from .strategy import Candidates
+
 logger = logging.getLogger(__name__)
 _SWING_SKIP_LLM_TIMEOUT_SEC = 4.0
 _SWING_SKIP_LLM_MAX_TOKENS = 80
@@ -27,11 +30,11 @@ _SWING_SKIP_LLM_MAX_TOKENS = 80
 def maybe_build_candidate_notifications(
     *,
     now: datetime,
-    candidates: Any,
+    candidates: Candidates,
     regime: str,
     config: TradeEngineConfig,
     last_notified_window_idx: int | None,
-    display_candidates: Any | None = None,
+    display_candidates: pd.DataFrame | None = None,
 ) -> tuple[int | None, list[str]]:
     merged = getattr(candidates, "merged", None)
     if merged is None or getattr(merged, "empty", True):
@@ -91,11 +94,11 @@ def maybe_build_candidate_notifications(
 def maybe_build_candidate_notification(
     *,
     now: datetime,
-    candidates: Any,
+    candidates: Candidates,
     regime: str,
     config: TradeEngineConfig,
     last_notified_window_idx: int | None,
-    display_candidates: Any | None = None,
+    display_candidates: pd.DataFrame | None = None,
 ) -> tuple[int | None, str | None]:
     updated_idx, messages = maybe_build_candidate_notifications(
         now=now,
@@ -110,7 +113,9 @@ def maybe_build_candidate_notification(
     return updated_idx, "\n\n".join(messages)
 
 
-def _resolve_day_notification_rows(*, candidates: Any, display_candidates: Any | None) -> Any | None:
+def _resolve_day_notification_rows(
+    *, candidates: Candidates, display_candidates: pd.DataFrame | None
+) -> pd.DataFrame | None:
     if display_candidates is not None and not getattr(display_candidates, "empty", True):
         return display_candidates
     popular = getattr(candidates, "popular", None)
@@ -119,7 +124,7 @@ def _resolve_day_notification_rows(*, candidates: Any, display_candidates: Any |
     return None
 
 
-def _resolve_swing_notification_rows(*, candidates: Any) -> Any | None:
+def _resolve_swing_notification_rows(*, candidates: Candidates) -> pd.DataFrame | None:
     model = getattr(candidates, "model", None)
     etf = getattr(candidates, "etf", None)
 
@@ -143,7 +148,7 @@ def _resolve_swing_notification_rows(*, candidates: Any) -> Any | None:
     return _concat_rows([model, etf_only])
 
 
-def _concat_rows(frames: list[Any]) -> Any | None:
+def _concat_rows(frames: list[pd.DataFrame | None]) -> pd.DataFrame | None:
     valid_frames = [frame for frame in frames if frame is not None and not getattr(frame, "empty", True)]
     if not valid_frames:
         return None
@@ -154,7 +159,7 @@ def _concat_rows(frames: list[Any]) -> Any | None:
 
 def _build_candidate_notification_text(
     *,
-    candidate_rows: Any,
+    candidate_rows: pd.DataFrame,
     regime: str,
     config: TradeEngineConfig,
     strategy_label: str | None,
