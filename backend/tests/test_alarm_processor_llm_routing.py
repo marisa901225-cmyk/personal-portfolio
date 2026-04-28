@@ -132,6 +132,43 @@ class TestAlarmProcessorLlmRouting(unittest.IsolatedAsyncioTestCase):
         sent_text = mock_send.await_args.args[0]
         self.assertTrue(sent_text.startswith("NOTICE\n💰 "))
 
+    async def test_spam_llm_receives_app_context_for_webnovel_notifications(self):
+        alarm = SimpleNamespace(
+            id=1,
+            raw_text="흰토끼노데 전역했더니 재벌가에 결혼당함 - 미래를 생각해보죠...",
+            masked_text=None,
+            sender="흰토끼노데",
+            app_name="문피아",
+            package="com.munpia.app",
+            app_title="신작 알림",
+            conversation=None,
+            status="pending",
+            classification=None,
+        )
+        db = MagicMock()
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [alarm]
+
+        with (
+            patch.object(processor, "check_upcoming_matches", new=AsyncMock()),
+            patch.object(processor, "_get_nb_pipeline", return_value=None),
+            patch("backend.services.users.get_or_create_single_user", return_value=MagicMock(id=1)),
+            patch.object(processor, "is_whitelisted", return_value=False),
+            patch.object(processor, "is_review_spam", return_value=False),
+            patch.object(processor, "is_spam", return_value=(False, "")),
+            patch.object(processor, "is_promo_spam", return_value=False),
+            patch.object(processor, "is_spam_llm", return_value=(False, "llm_ham")) as mock_is_spam_llm,
+            patch.object(processor, "parse_card_approval", return_value=None),
+            patch.object(processor, "summarize_with_llm", new=AsyncMock(return_value="중요 알림 요약")),
+            patch.object(processor, "generate_random_message_payload", new=AsyncMock()),
+            patch.object(processor, "send_telegram_message", new=AsyncMock()),
+        ):
+            await processor.process_pending_alarms(db)
+
+        spam_input = mock_is_spam_llm.call_args.args[0]
+        self.assertIn("[app:문피아]", spam_input)
+        self.assertIn("[pkg:com.munpia.app]", spam_input)
+        self.assertIn("흰토끼노데", spam_input)
+
 
 if __name__ == "__main__":
     unittest.main()

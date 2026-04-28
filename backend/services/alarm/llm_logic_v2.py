@@ -41,6 +41,7 @@ from .random_categories import (
 )
 from .random_topic_policy import (
     _hourly_reset_llm_context as _hourly_reset_llm_context_impl,
+    record_random_topic_llm_usage as _record_random_topic_llm_usage_impl,
     _should_send_random_topic as _should_send_random_topic_impl,
 )
 from .random_topic_service import (
@@ -69,6 +70,10 @@ def _should_send_random_topic(now: datetime) -> bool:
 
 
 def _make_random_topic_deps() -> _RandomTopicDeps:
+    def _record_main_llm_usage_tokens() -> None:
+        metrics = getattr(LLMService.get_instance(), "consume_last_remote_token_metrics", lambda: None)()
+        _record_random_topic_llm_usage_impl(metrics)
+
     return _RandomTopicDeps(
         get_all_categories=get_all_categories,
         get_formats=get_formats,
@@ -92,6 +97,7 @@ def _make_random_topic_deps() -> _RandomTopicDeps:
         postprocess_llm_text=_postprocess_llm_text,
         compact_reason=_compact_reason,
         hourly_reset_llm_context=_hourly_reset_llm_context,
+        record_main_llm_usage_tokens=_record_main_llm_usage_tokens,
         last_used_paid=lambda: bool(LLMService.get_instance().last_used_paid()),
         random_module=random,
     )

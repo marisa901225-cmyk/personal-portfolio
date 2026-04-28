@@ -134,6 +134,7 @@ class OpenAIPaidBackend(LLMBackend):
         response_format: Any,
         current_tier: Optional[str],
         is_gpt5: bool,
+        extra_body: Optional[Dict[str, Any]] = None,
     ) -> dict:
         payload: Dict[str, Any] = {"model": model, "messages": messages}
         if not is_gpt5:
@@ -149,6 +150,8 @@ class OpenAIPaidBackend(LLMBackend):
             payload["response_format"] = response_format
         if current_tier:
             payload["service_tier"] = current_tier
+        if extra_body:
+            payload.update(extra_body)
         return payload
 
     def _extract_chat_output(self, data: Any) -> str:
@@ -456,6 +459,10 @@ class OpenAIPaidBackend(LLMBackend):
         service_tier = kwargs.get("service_tier")
         response_format = kwargs.get("response_format")
         reasoning_effort = kwargs.get("reasoning_effort")
+        extra_body = kwargs.get("extra_body")
+        if extra_body is not None and not isinstance(extra_body, dict):
+            self._last_error = "extra_body must be a dict"
+            return ""
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         is_gpt5 = self._is_gpt5_model(model)
         extra_paid_system_prompt = kwargs.get("paid_system_prompt")
@@ -486,6 +493,7 @@ class OpenAIPaidBackend(LLMBackend):
                     response_format=response_format,
                     current_tier=current_tier,
                     is_gpt5=is_gpt5,
+                    extra_body=extra_body,
                 )
                 response = self._post(url, payload=payload, headers=headers)
 

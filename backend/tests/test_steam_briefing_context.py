@@ -248,6 +248,32 @@ class SteamBriefingContextTests(unittest.TestCase):
 
         self.assertEqual(enriched, original)
 
+    def test_weather_snapshot_prefix_is_added_when_weather_details_are_only_later(self):
+        original = (
+            "파생 쪽은 아직 조심스럽게 봐야 해. 옵션 시장에서도 확인 심리가 강해 보여.\n\n"
+            "정리하자면 오늘은 날씨는 구름많고 기온은 12°C 정도야. 낮 최고기온은 20°C고 강수확률은 30%야."
+        )
+
+        enriched = _ensure_weather_snapshot_prefix(
+            text=original,
+            temp="12",
+            weather_status="구름많음 ☁️",
+            pop="30",
+            max_temp="20",
+        )
+
+        self.assertTrue(
+            enriched.startswith(
+                _build_weather_snapshot_prefix(
+                    temp="12",
+                    weather_status="구름많음 ☁️",
+                    pop="30",
+                    max_temp="20",
+                )
+            )
+        )
+        self.assertIn(original, enriched)
+
     def test_load_persona_profile_uses_weekday_override_in_kst(self):
         config_path = self._make_persona_config(
             {

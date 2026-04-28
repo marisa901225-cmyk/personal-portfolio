@@ -120,6 +120,24 @@ def _collapse_mail_batch_notifications(items: List[dict]) -> Tuple[List[dict], L
     return kept, dropped
 
 
+def _build_alarm_filter_text(
+    *,
+    sender: Optional[str],
+    app_name: Optional[str],
+    package: Optional[str],
+    app_title: Optional[str],
+    body: str,
+) -> str:
+    parts = [
+        f"[{sender or ''}]",
+        f"[app:{app_name or ''}]",
+        f"[pkg:{package or ''}]",
+        app_title or "",
+        body or "",
+    ]
+    return " ".join(part for part in parts if part).strip()
+
+
 async def process_pending_alarms(db: Session, model_override: Optional[str] = None, **llm_kwargs):
     """
     수신된 알림들을 5분 배차로 처리한다.
@@ -208,8 +226,20 @@ async def process_pending_alarms(db: Session, model_override: Optional[str] = No
                     continue
 
                 # 1.3 스팸 필터링
-                full_check_text = f"[{alarm.sender or ''}] {alarm.app_title or ''} {original_text}"
-                full_check_text_llm = f"[{mask_sensitive_info(alarm.sender or '')}] {mask_sensitive_info(alarm.app_title or '')} {masked_text}"
+                full_check_text = _build_alarm_filter_text(
+                    sender=alarm.sender,
+                    app_name=alarm.app_name,
+                    package=alarm.package,
+                    app_title=alarm.app_title,
+                    body=original_text,
+                )
+                full_check_text_llm = _build_alarm_filter_text(
+                    sender=mask_sensitive_info(alarm.sender or ""),
+                    app_name=alarm.app_name,
+                    package=alarm.package,
+                    app_title=mask_sensitive_info(alarm.app_title or ""),
+                    body=masked_text,
+                )
                 
                 is_spam_result = False
                 discard_reason = ""

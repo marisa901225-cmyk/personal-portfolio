@@ -43,6 +43,7 @@ class RemoteLlamaBackend(LLMBackend):
 
         self._model_id_cache: Dict[str, str] = {}
         self._last_error: Optional[str] = None
+        self._last_token_metrics: Optional[Dict[str, int]] = None
 
     def close(self) -> None:
         """프로세스 종료나 테스트에서 명시적으로 닫고 싶을 때."""
@@ -61,9 +62,18 @@ class RemoteLlamaBackend(LLMBackend):
         """캐시/에러 상태 초기화."""
         self._model_id_cache = {}
         self._last_error = None
+        self._last_token_metrics = None
 
     def is_loaded(self) -> bool:
         return True
+
+    def clear_last_token_metrics(self) -> None:
+        self._last_token_metrics = None
+
+    def consume_last_token_metrics(self) -> Optional[Dict[str, int]]:
+        metrics = self._last_token_metrics
+        self._last_token_metrics = None
+        return metrics
 
     # -------------------------
     # Internal helpers
@@ -198,6 +208,69 @@ class RemoteLlamaBackend(LLMBackend):
         except Exception:
             return ""
 
+    def _extract_token_metrics(self, resp_json: dict) -> Optional[Dict[str, int]]:
+        metrics: Dict[str, int] = {}
+
+        try:
+            usage = resp_json.get("usage")
+            if isinstance(usage, dict):
+                for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                    value = usage.get(key)
+                    if isinstance(value, (int, float)):
+                        metrics[key] = int(value)
+                if "total_tokens" not in metrics and {"prompt_tokens", "completion_tokens"} <= set(metrics):
+                    metrics["total_tokens"] = metrics["prompt_tokens"] + metrics["completion_tokens"]
+        except Exception:
+            pass
+
+        try:
+            timings = resp_json.get("timings")
+            if isinstance(timings, dict):
+                cache_n = timings.get("cache_n")
+                prompt_n = timings.get("prompt_n")
+                predicted_n = timings.get("predicted_n")
+                if all(isinstance(value, (int, float)) for value in (cache_n, prompt_n, predicted_n)):
+                    metrics["context_tokens"] = int(cache_n) + int(prompt_n) + int(predicted_n)
+        except Exception:
+            pass
+
+        return metrics or None
+
+    def _resolve_slot_id(self, base_url: str, preferred_slot_id: int = 0) -> int:
+        url = f"{base_url}/slots"
+        try:
+            data = self._request_json_with_retries("GET", url)
+            if isinstance(data, list):
+                for slot in data:
+                    if isinstance(slot, dict) and int(slot.get("id", -1)) == preferred_slot_id:
+                        return preferred_slot_id
+                if data and isinstance(data[0], dict):
+                    first_id = data[0].get("id")
+                    if isinstance(first_id, (int, float)):
+                        return int(first_id)
+        except Exception as e:
+            logger.warning("Failed to resolve llama slot id from %s: %s", url, e)
+        return preferred_slot_id
+
+    def reset_context(self, slot_id: int = 0, *, base_url_override: Optional[str] = None) -> bool:
+        base_url = self._base_url(base_url_override)
+        if not base_url:
+            return False
+
+        resolved_slot_id = self._resolve_slot_id(base_url, preferred_slot_id=slot_id)
+        url = f"{base_url}/slots/{resolved_slot_id}?action=erase"
+
+        try:
+            self._request_json_with_retries("POST", url, payload={})
+            self._last_error = None
+            self._last_token_metrics = None
+            logger.info("Remote llama slot reset succeeded (slot=%s).", resolved_slot_id)
+            return True
+        except Exception as e:
+            self._last_error = f"Remote llama slot reset failed: {e}"
+            logger.warning("%s (url=%s)", self._last_error, url)
+            return False
+
     # -------------------------
     # Public API
     # -------------------------
@@ -223,6 +296,7 @@ class RemoteLlamaBackend(LLMBackend):
         seed: Optional[int] = None,
         **kwargs,
     ) -> str:
+        self._last_token_metrics = None
         base_url = self._base_url(kwargs.get("base_url_override"))
         if not base_url:
             return ""
@@ -258,6 +332,7 @@ class RemoteLlamaBackend(LLMBackend):
 
         try:
             resp = self._request_json_with_retries("POST", url, payload=payload)
+            self._last_token_metrics = self._extract_token_metrics(resp)
             content = self._extract_content(resp)
             if not content:
                 # 빈 content면 원인 추적용 에러만 남기고 반환은 빈 문자열 유지

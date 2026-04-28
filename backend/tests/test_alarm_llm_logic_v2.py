@@ -1,9 +1,17 @@
 import unittest
 from contextlib import ExitStack
 from datetime import datetime as real_datetime
+import os
+import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend.services.alarm import llm_logic, llm_logic_v2
+from backend.services.alarm.random_topic_policy import _hourly_reset_llm_context, record_random_topic_llm_usage
+from backend.services.alarm.random_topic_service import _format_random_body_for_telegram
+
+
+def _sentence_lines(text: str) -> str:
+    return text.replace(". ", ".\n")
 
 
 class _StubLLM:
@@ -90,6 +98,85 @@ class AlarmLlmLogicV2ParityTests(unittest.IsolatedAsyncioTestCase):
             result_v2 = await llm_logic_v2.summarize_with_llm([])
 
         self.assertEqual(result_v1, result_v2)
+
+    def test_random_body_formatter_merges_short_exclamations(self):
+        text = (
+            "관리실 공지보다 먼저 알려드립니다! "
+            "자, 모두 집중하시라! "
+            "지금 이 심야 편의점, 대형 사건이 터졌습니다! "
+            "냉장고 앞에서 춤추는 고양이와 마스크 쓴 손님이 대치하는 이 기묘한 장면, 여러분도 보셨습니까?"
+        )
+
+        formatted = _format_random_body_for_telegram(text)
+        lines = formatted.splitlines()
+
+        self.assertLessEqual(len(lines), 3)
+        self.assertIn("자, 모두 집중하시라!", formatted)
+        self.assertTrue(any("관리실 공지보다 먼저 알려드립니다! 자, 모두 집중하시라!" in line for line in lines))
+
+    def test_random_body_formatter_preserves_multiline_for_long_body(self):
+        text = (
+            "방금 복도 끝에서 이상한 장면이 목격됐습니다. "
+            "변수 하나 잘못 꽂힌 듯, 비 오는 골목에서 우산 둘이 서로를 밀어내며 운명을 디버깅하던데, 저는 분실물 센터 서류를 쓰다가 순간 지렸습니다. "
+            "검은 우산은 오른쪽으로만, 노란 우산은 왼쪽으로만 튀어 나가서 거의 결투 같았고, 지나가던 아저씨가 또 시작이네 하고 고개를 숙이는 바람에 장면이 더 수상해졌습니다. "
+            "알고 보니 둘 다 같은 집 현관에 꽂아 둔 우산이었고, 주인이 비 오는 날만 이상하다가 자기 우산을 자기 발로 차서 꺼내는 생활 습관 때문에 그렇게 휘청였답니다."
+        )
+
+        formatted = _format_random_body_for_telegram(text)
+        lines = formatted.splitlines()
+
+        self.assertGreaterEqual(len(lines), 2)
+        self.assertLessEqual(len(lines), 4)
+
+    def test_random_topic_session_resets_after_threshold(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = os.path.join(tmpdir, "random_topic_llm_session_state.json")
+            with patch.dict(
+                os.environ,
+                {
+                    "RANDOM_TOPIC_LLM_SESSION_STATE_FILE": state_path,
+                    "RANDOM_TOPIC_LLM_RESET_THRESHOLD_TOKENS": "40000",
+                },
+                clear=False,
+            ):
+                record_random_topic_llm_usage({"context_tokens": 41000}, now=real_datetime(2026, 4, 20, 12, 0, 0))
+
+                llm_service_cls = MagicMock()
+                llm_service_cls.get_instance.return_value.reset_context.return_value = True
+
+                _hourly_reset_llm_context(
+                    real_datetime(2026, 4, 20, 12, 10, 0),
+                    llm_service_cls=llm_service_cls,
+                )
+
+                llm_service_cls.get_instance.return_value.reset_context.assert_called_once()
+
+                with open(state_path, "r", encoding="utf-8") as f:
+                    state_text = f.read()
+
+        self.assertIn('"context_tokens": 0', state_text)
+
+    def test_random_topic_session_does_not_reset_below_threshold(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_path = os.path.join(tmpdir, "random_topic_llm_session_state.json")
+            with patch.dict(
+                os.environ,
+                {
+                    "RANDOM_TOPIC_LLM_SESSION_STATE_FILE": state_path,
+                    "RANDOM_TOPIC_LLM_RESET_THRESHOLD_TOKENS": "40000",
+                },
+                clear=False,
+            ):
+                record_random_topic_llm_usage({"context_tokens": 12000}, now=real_datetime(2026, 4, 20, 12, 0, 0))
+
+                llm_service_cls = MagicMock()
+
+                _hourly_reset_llm_context(
+                    real_datetime(2026, 4, 20, 12, 10, 0),
+                    llm_service_cls=llm_service_cls,
+                )
+
+                llm_service_cls.get_instance.assert_not_called()
 
     async def test_alarm_summary_matches_v1_behavior(self):
         stub = _StubLLM(loaded=True)
@@ -181,7 +268,7 @@ class AlarmLlmLogicV2ParityTests(unittest.IsolatedAsyncioTestCase):
 
             result = await llm_logic_v2.summarize_with_llm([])
 
-        self.assertEqual(result, clean_draft)
+        self.assertEqual(result, _sentence_lines(clean_draft))
         self.assertEqual(generate_mock.await_count, 3)
 
     async def test_random_message_retries_when_explanatory_tail_remains(self):
@@ -237,7 +324,7 @@ class AlarmLlmLogicV2ParityTests(unittest.IsolatedAsyncioTestCase):
 
             result = await llm_logic_v2.summarize_with_llm([])
 
-        self.assertEqual(result, punchline_draft)
+        self.assertEqual(result, _sentence_lines(punchline_draft))
         self.assertEqual(generate_mock.await_count, 3)
 
     async def test_generate_random_message_payload_uses_paid_single_call_title_and_body(self):
@@ -286,11 +373,61 @@ class AlarmLlmLogicV2ParityTests(unittest.IsolatedAsyncioTestCase):
 
             payload = await llm_logic_v2.generate_random_message_payload(now=fixed_now)
 
-        self.assertEqual(payload, {"title": title, "body": draft})
+        self.assertEqual(payload, {"title": title, "body": _sentence_lines(draft)})
         self.assertEqual(generate_mock.await_args_list[0].kwargs["paid_system_prompt"], "random_topic_gpt5_paid_system prompt")
         self.assertEqual(generate_mock.await_count, 1)
 
-    async def test_generate_random_message_payload_keeps_second_title_call_for_local_route(self):
+    async def test_generate_random_message_payload_uses_single_call_title_and_body_for_local_route(self):
+        stub = _StubLLM(loaded=True, used_paid=False)
+        fixed_now = real_datetime(2026, 3, 12, 12, 20, 0)
+        draft = (
+            "폴라로이드 사진이 미래 뉴스를 들고 와 버렸다는 식으로 시작한다. "
+            "키워드 하나와 키워드 둘을 묶어 황당한 사건처럼 풀어내고, 마지막은 핫픽스 완료 같은 식으로 끝낸다. "
+            "테스트용이라도 충분히 길게 적어서 길이 제한을 무난히 통과하게 만든다."
+        )
+        title = "폴라로이드 핫픽스"
+        local_payload = f"제목: {title}\n본문:\n{draft}"
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(llm_logic_v2.LLMService, "get_instance", return_value=stub))
+            stack.enter_context(patch.object(llm_logic_v2, "get_all_categories", return_value=["폴라로이드 추억/기묘한 타임슬립"]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_formats", return_value=["미래 뉴스 속보 형식으로 시작해라"]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_openers", return_value=["자, 지금이 아니면 절대 들을 수 없는 이야기!"]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_twists", return_value=["마지막 문장에서 이야기를 갑자기 철학적으로 뒤집어라."]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_voices", return_value={"코딩하는 점술가": "핫픽스 완료 같은 선언으로 끝낸다."}))
+            stack.enter_context(patch.object(llm_logic_v2, "load_recent_categories", return_value=[]))
+            stack.enter_context(patch.object(llm_logic_v2, "pick_keywords_for_constraints", return_value=["키워드 하나", "키워드 둘"]))
+            stack.enter_context(patch.object(llm_logic_v2, "get_category_keywords", return_value={}))
+            stack.enter_context(
+                patch.object(
+                    llm_logic_v2,
+                    "load_prompt",
+                    side_effect=lambda key, **kwargs: f"{key} prompt",
+                )
+            )
+            stack.enter_context(patch.object(llm_logic_v2, "dump_llm_draft", MagicMock()))
+            stack.enter_context(patch.object(llm_logic_v2, "save_recent_category", MagicMock()))
+            stack.enter_context(patch.object(llm_logic_v2, "save_last_random_topic_sent_at", MagicMock()))
+            stack.enter_context(patch.object(llm_logic_v2.random, "choice", side_effect=lambda seq: seq[0]))
+            stack.enter_context(patch.object(llm_logic_v2.random, "shuffle", side_effect=lambda seq: None))
+            generate_mock = AsyncMock(return_value=local_payload)
+            stack.enter_context(
+                patch.object(
+                    llm_logic_v2,
+                    "generate_with_main_llm_async",
+                    new=generate_mock,
+                )
+            )
+            stack.enter_context(patch.object(llm_logic_v2, "refine_draft_with_light_llm_async", new=AsyncMock(return_value=draft)))
+            stack.enter_context(patch.object(llm_logic_v2, "has_category_anchor", return_value=True))
+
+            payload = await llm_logic_v2.generate_random_message_payload(now=fixed_now)
+
+        self.assertEqual(payload, {"title": title, "body": _sentence_lines(draft)})
+        self.assertEqual(generate_mock.await_args_list[0].kwargs["paid_system_prompt"], "random_topic_gpt5_paid_system prompt")
+        self.assertEqual(generate_mock.await_count, 1)
+
+    async def test_generate_random_message_payload_falls_back_to_second_title_call_when_body_only(self):
         stub = _StubLLM(loaded=True, used_paid=False)
         fixed_now = real_datetime(2026, 3, 12, 12, 20, 0)
         draft = (
@@ -335,8 +472,8 @@ class AlarmLlmLogicV2ParityTests(unittest.IsolatedAsyncioTestCase):
 
             payload = await llm_logic_v2.generate_random_message_payload(now=fixed_now)
 
-        self.assertEqual(payload, {"title": title, "body": draft})
-        self.assertEqual(generate_mock.await_args_list[0].kwargs["paid_system_prompt"], "random_topic_gpt5_paid_system prompt")
+        self.assertEqual(payload, {"title": title, "body": _sentence_lines(draft)})
+        self.assertEqual(generate_mock.await_count, 2)
         self.assertEqual(generate_mock.await_args_list[1].kwargs["reasoning_effort"], "none")
         self.assertEqual(generate_mock.await_args_list[1].kwargs["paid_system_prompt"], "random_topic_title_gpt5_paid_system prompt")
 

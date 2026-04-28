@@ -78,6 +78,7 @@ class LLMService:
         # 호출 시작 시 라우팅 상태 초기화
         self._last_used_paid = False
         self._last_route = None
+        self.backend.clear_last_token_metrics()
 
         requested_model = kwargs.get("model")
         paid_kwargs = dict(kwargs)
@@ -219,8 +220,20 @@ class LLMService:
     def is_loaded(self) -> bool:
         return True
 
-    def reset_context(self):
-        pass
+    def reset_context(self) -> bool:
+        if not self.settings.is_remote_configured():
+            self._last_error = "Remote LLM is not configured"
+            return False
+
+        ok = self.backend.reset_context()
+        if ok:
+            self._last_error = None
+        else:
+            self._last_error = self.backend.get_last_error() or "Remote LLM reset failed"
+        return ok
+
+    def consume_last_remote_token_metrics(self) -> Optional[dict]:
+        return self.backend.consume_last_token_metrics()
 
     def get_current_model(self) -> str:
         path = self.settings.load_remote_model_path()

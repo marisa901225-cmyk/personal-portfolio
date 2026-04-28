@@ -197,24 +197,50 @@ def _ensure_weather_snapshot_prefix(
     if not normalized:
         return normalized
 
-    status_core = _normalize_weather_status(weather_status)
-    weather_markers = [
-        "날씨" in normalized,
-        "기온" in normalized,
-        "강수" in normalized,
-        (temp or "") in normalized,
-        (pop or "") in normalized,
-        bool(status_core and status_core in normalized),
-    ]
-    if sum(1 for matched in weather_markers if matched) >= 3:
-        return normalized
-
     prefix = _build_weather_snapshot_prefix(
         temp=temp,
         weather_status=weather_status,
         pop=pop,
         max_temp=max_temp,
     )
+    if normalized.startswith(prefix):
+        return normalized
+
+    # 초반 2~3문장 안에 "기온 숫자까지 포함된 날씨 정보"가 없으면
+    # 앞에 고정 스냅샷을 붙여 텔레그램에서 무심코 넘기지 않도록 한다.
+    lead_text = normalized.split("\n\n", 1)[0].strip()
+    if not lead_text:
+        lead_text = normalized[:220]
+    else:
+        lead_text = lead_text[:220]
+
+    status_core = _normalize_weather_status(weather_status)
+    temp_patterns = []
+    if temp:
+        temp_patterns.extend(
+            [
+                rf"{re.escape(str(temp))}\s*°C",
+                rf"{re.escape(str(temp))}\s*도",
+                rf"기온[^0-9]{{0,10}}{re.escape(str(temp))}",
+                rf"현재[^0-9]{{0,10}}{re.escape(str(temp))}",
+            ]
+        )
+    has_temp_near_front = any(re.search(pattern, lead_text) for pattern in temp_patterns)
+    has_weather_context_near_front = any(
+        marker in lead_text
+        for marker in (
+            "날씨",
+            "기온",
+            "강수",
+            "하늘",
+            status_core or "",
+        )
+        if marker
+    )
+
+    if has_temp_near_front and has_weather_context_near_front:
+        return normalized
+
     return f"{prefix}\n\n{normalized}"
 
 

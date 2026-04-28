@@ -504,6 +504,61 @@ class TestLLMService(unittest.TestCase):
         finally:
             backend.close()
 
+    def test_remote_backend_consumes_context_tokens_from_timings(self):
+        settings = SimpleNamespace(
+            llm_base_url="http://default-server:8080",
+            llm_api_key=None,
+            llm_timeout=30,
+        )
+        backend = RemoteLlamaBackend(settings)
+
+        try:
+            with patch.object(backend, "_get_model_id", return_value="gemma-test"):
+                with patch.object(
+                    backend,
+                    "_request_json_with_retries",
+                    return_value={
+                        "choices": [{"message": {"content": "ok"}}],
+                        "usage": {"prompt_tokens": 120, "completion_tokens": 30, "total_tokens": 150},
+                        "timings": {"cache_n": 900, "prompt_n": 120, "predicted_n": 30},
+                    },
+                ):
+                    out = backend.chat([{"role": "user", "content": "hi"}])
+
+            self.assertEqual(out, "ok")
+            self.assertEqual(
+                backend.consume_last_token_metrics(),
+                {
+                    "prompt_tokens": 120,
+                    "completion_tokens": 30,
+                    "total_tokens": 150,
+                    "context_tokens": 1050,
+                },
+            )
+            self.assertIsNone(backend.consume_last_token_metrics())
+        finally:
+            backend.close()
+
+    def test_llm_service_reset_context_uses_remote_backend(self):
+        with patch("backend.services.llm.config.settings") as mock_settings:
+            mock_settings.llm_base_url = "http://localhost:8080"
+            mock_settings.llm_api_key = None
+            mock_settings.llm_timeout = 30
+            mock_settings.open_api_key = None
+            mock_settings.ai_report_api_key = None
+            mock_settings.ai_report_base_url = None
+            mock_settings.ai_report_model = None
+            mock_settings.ai_report_fallback_model = None
+            mock_settings.ai_report_timeout_sec = 30
+            mock_settings.llm_remote_model_path_file = None
+            mock_settings.llm_remote_model_dir = "/data"
+            mock_settings.llm_remote_default_model = "dummy.gguf"
+
+            with patch.object(RemoteLlamaBackend, "reset_context", return_value=True) as reset_mock:
+                llm = LLMService.get_instance()
+                self.assertTrue(llm.reset_context())
+                reset_mock.assert_called_once()
+
     def test_telegram_paid_prefix_announces_fan_guard_cooldown_only_once(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = os.path.join(tmpdir, "llm_fan_guard_state.json")

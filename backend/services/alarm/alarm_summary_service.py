@@ -137,7 +137,9 @@ async def _generate_alarm_summary_async(
     model: str | None = None,
     **llm_kwargs,
 ) -> str | None:
-    stop = deps.build_stop_tokens(extra=["\n\n\n", "...", "aaaa", "----"])
+    # `...` can legitimately appear in nicknames/titles (e.g. truncated live titles),
+    # so treating it as a hard stop can cut summaries mid-sentence.
+    stop = deps.build_stop_tokens(extra=["\n\n\n", "aaaa", "----"])
     options = deps.resolve_llm_options(llm_kwargs, default_max_tokens=512, default_temperature=0.05)
     extra_guard = (
         "\n\n[추가 규칙]\n"

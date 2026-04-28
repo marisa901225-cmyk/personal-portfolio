@@ -69,6 +69,7 @@ class _RandomTopicDeps:
     postprocess_llm_text: Any
     compact_reason: Any
     hourly_reset_llm_context: Any
+    record_main_llm_usage_tokens: Any
     last_used_paid: Any
     random_module: Any
 
@@ -96,6 +97,57 @@ def _has_non_korean_cjk_chars(text: str) -> bool:
 
 def _has_replacement_char(text: str) -> bool:
     return _REPLACEMENT_CHAR in (text or "")
+
+
+def _format_random_body_for_telegram(text: str) -> str:
+    parts = [part.strip() for part in _RE_SENTENCE_BOUNDARY.split(text or "") if part and part.strip()]
+    if len(parts) < 2:
+        return (text or "").strip()
+
+    merged: List[str] = []
+    pending_prefix = ""
+
+    for part in parts:
+        sentence = f"{pending_prefix} {part}".strip() if pending_prefix else part
+        pending_prefix = ""
+
+        if len(sentence) <= 14:
+            if merged and len(merged[-1]) <= 36:
+                merged[-1] = f"{merged[-1]} {sentence}".strip()
+            else:
+                pending_prefix = sentence
+            continue
+
+        merged.append(sentence)
+
+    if pending_prefix:
+        if merged:
+            merged[-1] = f"{merged[-1]} {pending_prefix}".strip()
+        else:
+            merged.append(pending_prefix)
+
+    if len(merged) < 2:
+        return "\n".join(merged).strip()
+
+    def _pack_lines(max_chars: int) -> List[str]:
+        lines: List[str] = []
+        current = ""
+        for sentence in merged:
+            candidate = f"{current} {sentence}".strip() if current else sentence
+            if current and len(candidate) > max_chars:
+                lines.append(current)
+                current = sentence
+            else:
+                current = candidate
+        if current:
+            lines.append(current)
+        return lines
+
+    lines = _pack_lines(max_chars=46)
+    if len(lines) > 4:
+        lines = _pack_lines(max_chars=64)
+
+    return "\n".join(lines).strip()
 
 
 def _get_last_sentence(text: str) -> str:
@@ -179,7 +231,7 @@ def _log_random_plan(now: datetime, plan: _RandomTopicPlan, deps: _RandomTopicDe
 
 
 def _build_random_topic_messages(plan: _RandomTopicPlan, deps: _RandomTopicDeps) -> Optional[List[Dict[str, str]]]:
-    system_prompt = deps.load_prompt("random_topic_system")
+    system_prompt = deps.load_prompt("random_topic_full_system") or deps.load_prompt("random_topic_system")
     user_prompt = deps.load_prompt(
         "random_topic_user",
         voice=plan.voice,
@@ -247,7 +299,7 @@ async def _finalize_random_message(raw: str, attempt_no: int, deps: _RandomTopic
             temperature=0.0,
             dump_tag="random_wisdom_refined",
         )
-    return deps.postprocess_llm_text(final_text)
+    return _format_random_body_for_telegram(deps.postprocess_llm_text(final_text))
 
 
 def _prepare_random_draft(raw: str, deps: _RandomTopicDeps) -> str:
@@ -280,10 +332,10 @@ def _postprocess_random_body(raw: str, deps: _RandomTopicDeps) -> str:
         if re.match(r"^(본문|body)\s*:\s*$", stripped, re.IGNORECASE):
             continue
         cleaned_lines.append(stripped)
-    return "\n".join(cleaned_lines).strip()
+    return _format_random_body_for_telegram("\n".join(cleaned_lines).strip())
 
 
-def _extract_paid_random_payload(raw: str, deps: _RandomTopicDeps) -> Optional[_RandomMessagePayload]:
+def _extract_random_payload(raw: str, deps: _RandomTopicDeps) -> Optional[_RandomMessagePayload]:
     text = (raw or "").strip()
     if not text:
         return None
@@ -353,6 +405,7 @@ async def _generate_random_title_async(
             model=model,
             **options.extra_kwargs,
         )
+        deps.record_main_llm_usage_tokens()
     except Exception as exc:
         logger.warning("Random title generation failed: %s", exc)
         return None
@@ -417,16 +470,17 @@ async def _generate_random_message_payload_async(
                 model=model,
                 **options.extra_kwargs,
             )
+            deps.record_main_llm_usage_tokens()
         except Exception as exc:
             reason = f"{attempt_no}회차: LLM 예외 ({deps.compact_reason(str(exc))})"
             failure_reasons.append(reason)
             logger.warning("Random wisdom generation failed (Attempt %s/2): %s", attempt_no, exc)
             continue
 
-        paid_payload = _extract_paid_random_payload(raw, deps) if deps.last_used_paid() else None
-        if paid_payload:
-            deps.dump_llm_draft("random_wisdom_title_draft", paid_payload.title)
-            draft = _prepare_random_draft(paid_payload.body, deps)
+        parsed_payload = _extract_random_payload(raw, deps)
+        if parsed_payload:
+            deps.dump_llm_draft("random_wisdom_title_draft", parsed_payload.title)
+            draft = _prepare_random_draft(parsed_payload.body, deps)
         else:
             draft = _prepare_random_draft(raw, deps)
         if not draft.strip():
@@ -444,12 +498,10 @@ async def _generate_random_message_payload_async(
             failure_reasons.append(f"{attempt_no}회차: {reason}")
             continue
 
-        title = paid_payload.title if paid_payload else ""
+        title = parsed_payload.title if parsed_payload else ""
         title_ok, _ = _validate_random_title(title, deps)
-        if not title_ok and not paid_payload:
+        if not title_ok:
             title = await _generate_random_title_async(plan, final_text, deps=deps, model=model, **llm_kwargs)
-        if not title_ok and paid_payload:
-            title = ""
         if not title:
             title = _default_random_title(now)
 

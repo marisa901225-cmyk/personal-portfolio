@@ -136,7 +136,9 @@ def clean_exaone_tokens(text: str) -> str:
     content_start_idx = 0
     for i, line in enumerate(lines):
         stripped = line.strip()
-        if stripped.startswith(('-', '•', '*')) or re.match(r'^\d+\.', stripped):
+        # "17.48" 같은 소수/날짜 표기를 번호 목록으로 오인하면
+        # 앞 문단 전체를 사고과정으로 잘라내는 오탐이 생길 수 있다.
+        if stripped.startswith(('-', '•', '*')) or re.match(r'^\d+\.\s+', stripped):
             content_start_idx = i
             break
         if any(marker in stripped for marker in ['💳', '💰', '📱', '🔔', '주요 알림', '결제', '배달', '카카오톡']):
@@ -145,7 +147,23 @@ def clean_exaone_tokens(text: str) -> str:
     
     if content_start_idx > 0:
         potential_cot = '\n'.join(lines[:content_start_idx]).lower()
-        thinking_keywords = ['생각', '분석', 'hmm', 'let me', '확인', '보면', '같아', '같네', '것 같', '추측', '판단', '음...', '사용자가']
+        # 정상 본문에 흔한 단어("생각", "보면", "같네")까지 잡으면
+        # 첫 번째 번호/불릿 문단 앞의 일반 설명을 COT로 오인할 수 있다.
+        thinking_keywords = [
+            'hmm',
+            'let me',
+            '사용자가',
+            '사용자 요청',
+            '요청한 형식',
+            '원하는 형식',
+            '질문에 답',
+            '답변하면',
+            '정리하면',
+            '정리해보면',
+            '이렇게 정리',
+            '다음과 같이 정리',
+            '음...',
+        ]
         if any(kw in potential_cot for kw in thinking_keywords):
             text = '\n'.join(lines[content_start_idx:])
             logger.debug("[COT REMOVAL] Removed %d lines of suspected thinking process", content_start_idx)
