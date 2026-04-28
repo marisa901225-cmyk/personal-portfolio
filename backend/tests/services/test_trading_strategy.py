@@ -265,6 +265,29 @@ class TradingStrategyTests(unittest.TestCase):
         self.assertEqual(ranked, ["EXPENSIVE", "AFFORD01", "ETF01"])
 
     @patch("backend.services.trading_engine.strategy._score_day_row")
+    def test_pick_daytrade_excludes_candidates_above_day_slot_budget(self, mock_score) -> None:
+        pool = pd.DataFrame(
+            [
+                {"code": "051910", "name": "LG화학", "is_etf": False, "avg_value_5d": "90000000000", "change_pct": "3.0", "mock_score": 130.0},
+                {"code": "AFFORD1", "name": "Affordable", "is_etf": False, "avg_value_5d": "80000000000", "change_pct": "2.5", "mock_score": 90.0},
+            ]
+        )
+        mock_score.side_effect = lambda row, quotes, config: float(row["mock_score"])
+
+        cfg = TradeEngineConfig(
+            initial_capital=1_000_000,
+            day_cash_ratio=0.20,
+            include_etf=False,
+        )
+        quotes = {
+            "051910": {"price": 320_000},
+            "AFFORD1": {"price": 80_000},
+        }
+
+        picked = pick_daytrade(self._candidates_with_popular(pool), quotes=quotes, config=cfg)
+        self.assertEqual(picked, "AFFORD1")
+
+    @patch("backend.services.trading_engine.strategy._score_day_row")
     def test_rank_daytrade_codes_excludes_small_stock_under_quality_floor(self, mock_score) -> None:
         pool = pd.DataFrame(
             [

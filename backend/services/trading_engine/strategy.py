@@ -322,6 +322,15 @@ def rank_daytrade_codes(
     )
     pool["_market_warning_code"] = pool.apply(lambda r: _resolve_market_warning_code(r, quotes), axis=1)
     pool["_management_issue_code"] = pool.apply(lambda r: _resolve_management_issue_code(r, quotes), axis=1)
+    pool["_day_price_num"] = pool.apply(lambda r: _resolve_candidate_price(r, quotes), axis=1)
+    max_day_entry_price = _resolve_day_entry_budget_cash(config)
+    if max_day_entry_price > 0:
+        pool = pool[
+            pool["_day_price_num"].isna()
+            | (pool["_day_price_num"] <= max_day_entry_price)
+        ]
+        if pool.empty:
+            return []
 
     if config.include_etf:
         pool = pool[
@@ -471,6 +480,22 @@ def _resolve_day_max_change_pct(row: pd.Series, config: TradeEngineConfig) -> fl
     ):
         return max(base_cap, chase_cap)
     return base_cap
+
+
+def _resolve_candidate_price(row: pd.Series, quotes: QuoteMap) -> float | None:
+    code = str(row.get("code") or "")
+    quote = quotes.get(code, {}) if code else {}
+    return (
+        parse_numeric(quote.get("price"))
+        or parse_numeric(row.get("price"))
+        or parse_numeric(row.get("close"))
+    )
+
+
+def _resolve_day_entry_budget_cash(config: TradeEngineConfig) -> float:
+    initial_capital = max(0.0, float(getattr(config, "initial_capital", 0.0)))
+    day_cash_ratio = max(0.0, float(getattr(config, "day_cash_ratio", 0.0)))
+    return initial_capital * day_cash_ratio
 
 
 def _merge_candidates(
