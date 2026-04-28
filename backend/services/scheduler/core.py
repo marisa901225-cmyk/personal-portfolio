@@ -16,6 +16,7 @@ from backend.services.news_collector import NewsCollector
 from backend.services.retry import async_retry, sync_retry
 from backend.services.scheduler_monitor import monitor_job_async
 from backend.services.trading_engine.archive import archive_trading_engine_weekly
+from backend.services.trading_engine.parking import is_regular_market_open
 from backend.services.trading_engine.runtime import (
     close_bot as close_trading_bot,
     get_or_create_bot,
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 KST = ZoneInfo("Asia/Seoul")
 scheduler = AsyncIOScheduler(timezone=KST)
 _trading_engine_cycle_lock = asyncio.Lock()
+_trading_engine_lock_monitor_lock = asyncio.Lock()
 
 _SCHEDULER_ROLES = {"all", "news", "trading"}
 
@@ -45,6 +47,15 @@ def _periodic_minute_field(*, interval: int, exclude_minutes: set[int] | None = 
     excluded = {minute for minute in (exclude_minutes or set()) if 0 <= minute <= 59}
     minutes = [str(minute) for minute in range(0, 60, max(1, interval)) if minute not in excluded]
     return ",".join(minutes)
+
+
+def _trading_lock_monitor_interval_seconds() -> int:
+    raw = os.getenv("TRADING_ENGINE_LOCK_MONITOR_INTERVAL_SEC", "10")
+    try:
+        value = int(raw)
+    except ValueError:
+        return 10
+    return max(5, min(30, value))
 
 
 def _scheduler_role() -> str:
@@ -267,6 +278,34 @@ async def _run_trading_engine_cycle(bot):
             logger.info("trading_engine_cycle result=%s", result)
 
 
+async def job_trading_engine_lock_monitor():
+    """
+    LOCK arm 상태의 단타 포지션만 장중에 더 촘촘히 감시한다.
+
+    - 본 사이클이 돌고 있으면 충돌 방지를 위해 스킵
+    - 장중 정규장 시간 외에는 실행하지 않음
+    """
+    bot = get_or_create_bot()
+    if bot is None:
+        return
+
+    now = datetime.now(KST)
+    if not is_regular_market_open(now):
+        return
+    if not bot.has_armed_day_profit_locks():
+        return
+    if _trading_engine_cycle_lock.locked():
+        logger.debug("trading_engine_lock_monitor skipped: cycle in progress")
+        return
+    if _trading_engine_lock_monitor_lock.locked():
+        logger.debug("trading_engine_lock_monitor skipped: previous monitor still running")
+        return
+
+    async with _trading_engine_lock_monitor_lock:
+        result = await asyncio.to_thread(bot.run_locked_profit_monitor, now)
+        logger.info("trading_engine_lock_monitor result=%s", result)
+
+
 async def job_trading_engine_finalize():
     """
     장 종료 후 거래일지 요약 알림 전송.
@@ -415,6 +454,7 @@ def start_scheduler():
 
         if _runs_trading_jobs(role) and trading_engine_enabled():
             interval = _trading_interval_minutes()
+            lock_monitor_interval_sec = _trading_lock_monitor_interval_seconds()
             morning_periodic_minutes = _periodic_minute_field(interval=interval, exclude_minutes={5, 55})
             midday_periodic_minutes = _periodic_minute_field(interval=interval)
             afternoon_periodic_minutes = _periodic_minute_field(interval=interval, exclude_minutes={0, 55})
@@ -447,6 +487,14 @@ def start_scheduler():
                 job_trading_engine_cycle,
                 CronTrigger(day_of_week="mon-fri", hour=13, minute=afternoon_periodic_minutes),
                 id="trading_engine_cycle_intraday_afternoon",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            scheduler.add_job(
+                job_trading_engine_lock_monitor,
+                CronTrigger(day_of_week="mon-fri", hour="9-15", second=f"*/{lock_monitor_interval_sec}"),
+                id="trading_engine_lock_monitor",
                 replace_existing=True,
                 max_instances=1,
             )

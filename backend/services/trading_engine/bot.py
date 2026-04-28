@@ -213,6 +213,30 @@ class HybridTradingBot(
                 return float(value)
         return None
 
+    def has_armed_day_profit_locks(self) -> bool:
+        return any(
+            pos.type == "T" and pos.qty > 0 and pos.locked_profit_pct is not None
+            for pos in self.state.open_positions.values()
+        )
+
+    def run_locked_profit_monitor(self, now: datetime | None = None) -> dict[str, object]:
+        now = now or datetime.now()
+        today = now.strftime("%Y%m%d")
+        self.state = rollover_state_for_date(self.state, today)
+
+        if not self.has_armed_day_profit_locks():
+            return {"status": "SKIP", "reason": "NO_ARMED_DAY_LOCKS"}
+
+        self._ensure_journal(today)
+        self.monitor_positions(now=now)
+        self.state.last_run_timestamp = now.isoformat(timespec="seconds")
+        save_state(self.config.state_path, self.state)
+        return {
+            "status": "OK",
+            "reason": "ARMED_DAY_LOCKS_MONITORED",
+            "open_positions": len(self.state.open_positions),
+        }
+
     def run_once(self, now: datetime | None = None) -> dict[str, object]:
         now = now or datetime.now()
         today = now.strftime("%Y%m%d")
