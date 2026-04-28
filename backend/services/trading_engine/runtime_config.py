@@ -78,6 +78,10 @@ def _apply_general_overrides(cfg: TradeEngineConfig) -> None:
 
 
 def _apply_daytrade_overrides(cfg: TradeEngineConfig) -> None:
+    cfg.day_stop_loss_pct = _env_float(
+        "TRADING_ENGINE_DAY_STOP_LOSS_PCT",
+        cfg.day_stop_loss_pct,
+    )
     cfg.day_stock_min_avg_value_5d = _env_int(
         "TRADING_ENGINE_DAY_STOCK_MIN_AVG_VALUE_5D",
         cfg.day_stock_min_avg_value_5d,
@@ -234,6 +238,14 @@ def _apply_daytrade_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_DAY_LOCK_VOLATILITY_GAP_MULTIPLIER",
         cfg.day_lock_volatility_gap_multiplier,
     )
+    cfg.day_stop_loss_volatility_multiplier = _env_float(
+        "TRADING_ENGINE_DAY_STOP_LOSS_VOLATILITY_MULTIPLIER",
+        cfg.day_stop_loss_volatility_multiplier,
+    )
+    cfg.day_stop_loss_max_pct = _env_float(
+        "TRADING_ENGINE_DAY_STOP_LOSS_MAX_PCT",
+        cfg.day_stop_loss_max_pct,
+    )
     cfg.day_stoploss_exclude_after_losses = _env_int(
         "TRADING_ENGINE_DAY_STOPLOSS_EXCLUDE_AFTER_LOSSES",
         cfg.day_stoploss_exclude_after_losses,
@@ -269,6 +281,22 @@ def _apply_daytrade_overrides(cfg: TradeEngineConfig) -> None:
     cfg.day_stop_llm_hold_confidence_min = _env_float(
         "TRADING_ENGINE_DAY_STOP_LLM_HOLD_CONFIDENCE_MIN",
         cfg.day_stop_llm_hold_confidence_min,
+    )
+    cfg.day_overnight_carry_enabled = _env_bool(
+        "TRADING_ENGINE_DAY_OVERNIGHT_CARRY_ENABLED",
+        cfg.day_overnight_carry_enabled,
+    )
+    cfg.day_overnight_carry_model = _env_text(
+        "TRADING_ENGINE_DAY_OVERNIGHT_CARRY_MODEL",
+        cfg.day_overnight_carry_model,
+    )
+    cfg.day_overnight_carry_reasoning_effort = _env_text(
+        "TRADING_ENGINE_DAY_OVERNIGHT_CARRY_REASONING_EFFORT",
+        cfg.day_overnight_carry_reasoning_effort,
+    )
+    cfg.day_overnight_carry_hold_confidence_min = _env_float(
+        "TRADING_ENGINE_DAY_OVERNIGHT_CARRY_HOLD_CONFIDENCE_MIN",
+        cfg.day_overnight_carry_hold_confidence_min,
     )
     cfg.day_chart_review_enabled = _env_bool(
         "TRADING_ENGINE_DAY_CHART_REVIEW_ENABLED",

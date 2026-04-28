@@ -613,6 +613,74 @@ def test_day_position_volatility_aware_lock_allows_early_pullback() -> None:
     assert reason == ""
     assert round(pnl_pct, 4) == 0.009
 
+def test_day_stop_loss_default_is_one_point_five_percent() -> None:
+    cfg = TradeEngineConfig()
+    position = PositionState(
+        type="T",
+        entry_time="2026-02-16T09:05:00",
+        entry_price=100_000.0,
+        qty=5,
+        highest_price=100_000.0,
+        entry_date="20260216",
+    )
+
+    exit_now, reason, pnl_pct = should_exit_position(
+        position,
+        quote_price=98_600.0,
+        now=datetime(2026, 2, 16, 9, 24),
+        config=cfg,
+    )
+
+    assert exit_now is False
+    assert reason == ""
+    assert round(pnl_pct, 4) == -0.014
+
+    exit_now, reason, pnl_pct = should_exit_position(
+        position,
+        quote_price=98_500.0,
+        now=datetime(2026, 2, 16, 9, 25),
+        config=cfg,
+    )
+
+    assert exit_now is True
+    assert reason == "SL"
+    assert round(pnl_pct, 4) == -0.015
+
+def test_day_stop_loss_can_use_intraday_volatility_override() -> None:
+    cfg = TradeEngineConfig(day_stop_loss_pct=-0.015)
+    position = PositionState(
+        type="T",
+        entry_time="2026-02-16T09:05:00",
+        entry_price=100_000.0,
+        qty=5,
+        highest_price=100_000.0,
+        entry_date="20260216",
+    )
+
+    exit_now, reason, pnl_pct = should_exit_position(
+        position,
+        quote_price=98_400.0,
+        now=datetime(2026, 2, 16, 9, 24),
+        config=cfg,
+        day_stop_loss_pct_override=-0.020,
+    )
+
+    assert exit_now is False
+    assert reason == ""
+    assert round(pnl_pct, 4) == -0.016
+
+    exit_now, reason, pnl_pct = should_exit_position(
+        position,
+        quote_price=98_000.0,
+        now=datetime(2026, 2, 16, 9, 25),
+        config=cfg,
+        day_stop_loss_pct_override=-0.020,
+    )
+
+    assert exit_now is True
+    assert reason == "SL"
+    assert round(pnl_pct, 4) == -0.02
+
 def test_day_hold_match_does_not_tighten_lock_to_full_profit(tmp_path) -> None:
     api = FakeAPI()
     api._quotes["005880"] = {"price": 101_800, "change_pct": 1.8}
@@ -748,7 +816,7 @@ def test_day_afternoon_entry_blocks_after_two_stoploss_sized_losses() -> None:
     cfg = TradeEngineConfig()
     state = new_state("20260216")
     state.day_entries_today = 2
-    state.realized_pnl_today = -4_800.0
+    state.realized_pnl_today = -6_000.0
 
     ok_afternoon_blocked, reason_afternoon_blocked = can_enter(
         "T",
@@ -759,7 +827,7 @@ def test_day_afternoon_entry_blocks_after_two_stoploss_sized_losses() -> None:
         config=cfg,
     )
 
-    state.realized_pnl_today = -4_700.0
+    state.realized_pnl_today = -5_900.0
     ok_afternoon_allowed, reason_afternoon_allowed = can_enter(
         "T",
         state,

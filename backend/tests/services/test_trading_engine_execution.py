@@ -1,6 +1,9 @@
 from .trading_engine_support import *  # noqa: F401,F403
 
-from backend.services.trading_engine.day_stop_review import DayStopReviewResult
+from backend.services.trading_engine.day_stop_review import (
+    DayOvernightCarryReviewResult,
+    DayStopReviewResult,
+)
 
 def test_exit_position_caps_sell_qty_by_broker_sellable_amount() -> None:
     class SellableAPI(FakeAPI):
@@ -258,6 +261,125 @@ def test_monitor_positions_exits_day_stop_without_llm_at_hard_stop(tmp_path) -> 
     mocked_review.assert_not_called()
     assert any(call["side"] == "SELL" and call["code"] == "027360" for call in api.order_calls)
     assert "027360" not in bot.state.open_positions
+
+def test_monitor_positions_carries_last_day_position_once_when_llm_approves(tmp_path) -> None:
+    class IntradayAPI(FakeAPI):
+        def __init__(self) -> None:
+            super().__init__()
+            self._intraday: dict[tuple[str, str], pd.DataFrame] = {}
+
+        def intraday_bars(self, code: str, asof: str, lookback: int = 120) -> pd.DataFrame:
+            del lookback
+            return self._intraday.get((code, asof), pd.DataFrame())
+
+    api = IntradayAPI()
+    api._quotes["009830"] = {"price": 49_200, "change_pct": 5.0}
+    api._intraday[("009830", "20260424")] = _make_intraday_bars(
+        "20260424",
+        [49_000.0, 49_100.0, 49_200.0],
+        start_time="151300",
+        last_change_pct=5.0,
+    )
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        day_overnight_carry_enabled=True,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.trade_date = "20260424"
+    bot.state.open_positions["009830"] = PositionState(
+        type="T",
+        entry_time="2026-04-24T13:55:00+09:00",
+        entry_price=49_150.0,
+        qty=4,
+        highest_price=49_300.0,
+        entry_date="20260424",
+    )
+
+    review = DayOvernightCarryReviewResult(
+        decision="CARRY",
+        confidence=0.78,
+        reason="종가 흐름이 무너지지 않아 하루 유예 가능",
+        route="paid",
+        raw_response={},
+    )
+    with patch(
+        "backend.services.trading_engine.bot_position_management.review_day_overnight_carry_with_llm",
+        return_value=review,
+    ) as mocked_review:
+        bot.monitor_positions(now=datetime(2026, 4, 24, 15, 16))
+        bot.force_exit_day_positions(now=datetime(2026, 4, 24, 15, 16))
+
+    mocked_review.assert_called_once()
+    assert api.order_calls == []
+    assert bot.state.open_positions["009830"].type == "T"
+    key = "009830:2026-04-24T13:55:00+09:00"
+    assert bot.state.day_overnight_carry_positions[key] == "20260424"
+
+def test_force_exit_day_position_sells_next_day_after_overnight_carry(tmp_path) -> None:
+    api = FakeAPI()
+    api._quotes["009830"] = {"price": 49_200, "change_pct": 0.2}
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        day_overnight_carry_enabled=True,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.trade_date = "20260427"
+    key = "009830:2026-04-24T13:55:00+09:00"
+    bot.state.day_overnight_carry_positions[key] = "20260424"
+    bot.state.open_positions["009830"] = PositionState(
+        type="T",
+        entry_time="2026-04-24T13:55:00+09:00",
+        entry_price=49_150.0,
+        qty=4,
+        highest_price=49_300.0,
+        entry_date="20260424",
+    )
+
+    with patch(
+        "backend.services.trading_engine.bot_position_management.review_day_overnight_carry_with_llm"
+    ) as mocked_review:
+        bot.force_exit_day_positions(now=datetime(2026, 4, 27, 15, 16))
+
+    mocked_review.assert_not_called()
+    assert any(call["side"] == "SELL" and call["code"] == "009830" for call in api.order_calls)
+    assert "009830" not in bot.state.open_positions
+
+def test_day_stop_loss_still_wins_over_force_exit_time(tmp_path) -> None:
+    api = FakeAPI()
+    api._quotes["009830"] = {"price": 48_400, "change_pct": -1.5}
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        day_stop_loss_pct=-0.012,
+        day_overnight_carry_enabled=True,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.trade_date = "20260424"
+    bot.state.open_positions["009830"] = PositionState(
+        type="T",
+        entry_time="2026-04-24T13:55:00+09:00",
+        entry_price=49_150.0,
+        qty=4,
+        highest_price=49_300.0,
+        entry_date="20260424",
+    )
+
+    with patch(
+        "backend.services.trading_engine.bot_position_management.review_day_overnight_carry_with_llm"
+    ) as mocked_review:
+        bot.monitor_positions(now=datetime(2026, 4, 24, 15, 16))
+
+    mocked_review.assert_not_called()
+    assert any(call["side"] == "SELL" and call["code"] == "009830" for call in api.order_calls)
+    assert "009830" not in bot.state.open_positions
 
 def test_bot_skips_daytrade_reentry_after_same_day_stoploss_even_before_threshold(tmp_path) -> None:
     asof = "20260408"

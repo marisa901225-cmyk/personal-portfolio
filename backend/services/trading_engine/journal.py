@@ -12,6 +12,7 @@ from typing import Any
 _SUMMARY_EVENT_LABELS = {
     "DAY_CHART_REVIEW": "단타 차트 LLM 검토",
     "DAY_CANDIDATE_FILTERED": "단타 후보 제외",
+    "DAY_OVERNIGHT_CARRY_REVIEW": "단타 오버나잇 LLM 검토",
     "ENTER": "진입",
     "ENTRY_FILL": "진입 체결",
     "ERROR": "오류",

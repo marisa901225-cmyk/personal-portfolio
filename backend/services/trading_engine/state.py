@@ -54,6 +54,8 @@ class TradeState:
     day_stoploss_excluded_codes: set[str] = field(default_factory=set)
     day_stoploss_codes_today: set[str] = field(default_factory=set)
     day_stop_llm_reviewed_positions: set[str] = field(default_factory=set)
+    day_overnight_carry_reviewed_positions: set[str] = field(default_factory=set)
+    day_overnight_carry_positions: dict[str, str] = field(default_factory=dict)
     day_entry_windows_used_today: set[int] = field(default_factory=set)
     swing_time_excluded_codes: set[str] = field(default_factory=set)
 
@@ -100,6 +102,12 @@ def load_state(path: str) -> TradeState:
         day_stop_llm_reviewed_positions=_parse_day_stoploss_excluded_codes(
             raw.get("day_stop_llm_reviewed_positions", [])
         ),
+        day_overnight_carry_reviewed_positions=_parse_day_stoploss_excluded_codes(
+            raw.get("day_overnight_carry_reviewed_positions", [])
+        ),
+        day_overnight_carry_positions=_parse_string_map(
+            raw.get("day_overnight_carry_positions", {})
+        ),
         day_entry_windows_used_today=_parse_int_set(
             raw.get("day_entry_windows_used_today", [])
         ),
@@ -136,6 +144,14 @@ def save_state(path: str, state: TradeState) -> None:
     payload["day_stoploss_excluded_codes"] = sorted(state.day_stoploss_excluded_codes)
     payload["day_stoploss_codes_today"] = sorted(state.day_stoploss_codes_today)
     payload["day_stop_llm_reviewed_positions"] = sorted(state.day_stop_llm_reviewed_positions)
+    payload["day_overnight_carry_reviewed_positions"] = sorted(
+        state.day_overnight_carry_reviewed_positions
+    )
+    payload["day_overnight_carry_positions"] = {
+        key: value
+        for key, value in sorted(state.day_overnight_carry_positions.items())
+        if str(key).strip() and str(value).strip()
+    }
     payload["day_entry_windows_used_today"] = sorted(
         int(idx) for idx in state.day_entry_windows_used_today
     )
@@ -170,6 +186,7 @@ def rollover_state_for_date(state: TradeState, today: str) -> TradeState:
     state.pending_exit_orders.clear()
     state.day_stoploss_codes_today.clear()
     state.day_stop_llm_reviewed_positions.clear()
+    state.day_overnight_carry_reviewed_positions.clear()
     state.day_entry_windows_used_today.clear()
     state.swing_time_excluded_codes.clear()
 
@@ -319,6 +336,20 @@ def _parse_pending_exit_orders(raw: object) -> dict[str, PendingExitOrder]:
                 order[key] = value
         if order:
             out[normalized_code] = order
+    return out
+
+
+def _parse_string_map(raw: object) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        return {}
+
+    out: dict[str, str] = {}
+    for key, value in raw.items():
+        normalized_key = str(key or "").strip()
+        normalized_value = str(value or "").strip()
+        if not normalized_key or not normalized_value:
+            continue
+        out[normalized_key] = normalized_value
     return out
 
 

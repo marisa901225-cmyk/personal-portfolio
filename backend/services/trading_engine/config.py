@@ -45,9 +45,11 @@ class TradeEngineConfig:
     swing_take_profit_mode: str = "both"  # fixed|trailing|both
 
     # Day-trade exits
-    day_stop_loss_pct: float = -0.012
+    day_stop_loss_pct: float = -0.015
     day_take_profit_pct: float = 0.03
     day_force_exit_at: str = "15:15"
+    day_stop_loss_volatility_multiplier: float = 0.45
+    day_stop_loss_max_pct: float = -0.022
     day_lock_profit_trigger_pct: float = 0.012
     day_lock_profit_floor_pct: float = 0.005
     day_lock_retrace_gap_pct: float = 0.006
@@ -61,6 +63,10 @@ class TradeEngineConfig:
     day_stop_llm_max_retrace_from_high_pct: float = -3.0
     day_stop_llm_hard_stop_pct: float = -0.022
     day_stop_llm_hold_confidence_min: float = 0.55
+    day_overnight_carry_enabled: bool = True
+    day_overnight_carry_model: str = "gpt-5.5"
+    day_overnight_carry_reasoning_effort: str = "low"
+    day_overnight_carry_hold_confidence_min: float = 0.65
     day_chart_review_enabled: bool = True
     day_chart_review_top_n: int = 3
     day_chart_review_chart_wildcard_slots: int = 1

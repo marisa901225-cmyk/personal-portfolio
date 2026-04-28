@@ -82,6 +82,7 @@ def should_exit_position(
     config: TradeEngineConfig,
     swing_trend_broken: bool | None = None,
     day_lock_retrace_gap_pct_override: float | None = None,
+    day_stop_loss_pct_override: float | None = None,
 ) -> tuple[bool, str, float]:
     if position.entry_price <= 0:
         return False, "", 0.0
@@ -127,13 +128,16 @@ def should_exit_position(
 
         return False, "", pnl_pct
 
-    force_h, force_m = parse_hhmm(config.day_force_exit_at)
-    if (now.hour, now.minute) >= (force_h, force_m):
-        return True, "FORCE", pnl_pct
-    if pnl_pct <= config.day_stop_loss_pct:
+    day_stop_loss_pct = float(config.day_stop_loss_pct)
+    if day_stop_loss_pct_override is not None:
+        day_stop_loss_pct = min(day_stop_loss_pct, float(day_stop_loss_pct_override))
+    if pnl_pct <= day_stop_loss_pct:
         return True, "SL", pnl_pct
     if pnl_pct >= config.day_take_profit_pct:
         return True, "TP", pnl_pct
+    force_h, force_m = parse_hhmm(config.day_force_exit_at)
+    if (now.hour, now.minute) >= (force_h, force_m):
+        return True, "FORCE", pnl_pct
     return False, "", pnl_pct
 
 

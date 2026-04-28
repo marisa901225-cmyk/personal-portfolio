@@ -233,6 +233,20 @@ class BotEntryFlowMixin:
                 )
             return
 
+        self._reconcile_state_with_broker_positions(now=now)
+        ok, reason = can_enter(
+            "T",
+            self.state,
+            regime=regime,
+            candidates_count=len(ranked_codes),
+            now=now,
+            config=self.config,
+            is_trading_day_value=True,
+        )
+        if not ok:
+            self._pass(reason, regime)
+            return
+
         result = None
         code = ""
         for ranked_code in ranked_codes:

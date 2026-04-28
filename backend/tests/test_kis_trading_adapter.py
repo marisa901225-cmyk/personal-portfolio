@@ -1,8 +1,11 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 import requests
 
+from backend.integrations.kis import rest_rate_limiter
 from backend.integrations.kis.trading_adapter import KISTradingAPI
 
 
@@ -318,6 +321,47 @@ class KISTradingAdapterTests(unittest.TestCase):
         self.assertEqual(api._session.get.call_count, 2)
         self.assertEqual(api._rest_throttle.call_count, 2)
         api._ka.force_reauth_current_env.assert_called_once_with()
+
+    def test_get_waits_on_nineteenth_request_when_global_limit_is_eighteen(self) -> None:
+        api = object.__new__(KISTradingAPI)
+        now = {"value": 0.0}
+        sleep_calls: list[float] = []
+
+        def fake_clock() -> float:
+            return now["value"]
+
+        def fake_sleep(seconds: float) -> None:
+            sleep_calls.append(seconds)
+            now["value"] += seconds
+
+        api._core = Mock()
+        api._base_url = Mock(return_value="https://example.test")
+        api._headers = Mock(return_value={"Authorization": "Bearer token"})
+        api._throttle_path_min_gap = Mock()
+
+        ok_response = Mock()
+        ok_response.raise_for_status.return_value = None
+        ok_response.json.return_value = {"rt_cd": "0", "output": []}
+
+        api._session = Mock()
+        api._session.get.return_value = ok_response
+
+        with TemporaryDirectory() as temp_dir:
+            config_dir = Path(temp_dir)
+            api._rest_throttle = lambda: rest_rate_limiter.throttle_rest_requests(  # noqa: E731
+                limit_per_sec=18,
+                window_sec=1.0,
+                config_dir=config_dir,
+                clock=fake_clock,
+                sleeper=fake_sleep,
+            )
+
+            for _ in range(19):
+                api._get("/path", "TRID", {"a": "b"})
+
+        self.assertEqual(api._session.get.call_count, 19)
+        self.assertEqual(len(sleep_calls), 1)
+        self.assertGreaterEqual(sleep_calls[0], 0.999)
 
     def test_post_force_reauths_once_on_expired_token_response(self) -> None:
         api = object.__new__(KISTradingAPI)
