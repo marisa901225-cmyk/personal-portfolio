@@ -219,6 +219,46 @@ async def run_coupon_registration_reminder():
             db.close()
             logger.info("--- Coupon Registration Reminder Job Finished ---")
 
+
+async def run_kodex_kospi100_daily_warning():
+    """
+    KODEX 코스피100(237350) 일봉 조기경보 확인.
+    """
+    db = SessionLocal()
+    async with monitor_job_async("kodex_kospi100_daily_warning", db):
+        logger.info("--- Starting KODEX KOSPI100 Daily Warning Check ---")
+        try:
+            from backend.services.kodex_exit_alerts import check_kodex_kospi100_daily_warning
+
+            sent = await check_kodex_kospi100_daily_warning()
+            logger.info("KODEX KOSPI100 daily warning sent=%s", sent)
+        except Exception as e:
+            logger.error(f"KODEX KOSPI100 daily warning job failed: {e}")
+            raise e
+        finally:
+            db.close()
+            logger.info("--- KODEX KOSPI100 Daily Warning Check Finished ---")
+
+
+async def run_kodex_kospi100_weekly_confirmation():
+    """
+    KODEX 코스피100(237350) 주봉 확인 신호 점검.
+    """
+    db = SessionLocal()
+    async with monitor_job_async("kodex_kospi100_weekly_confirmation", db):
+        logger.info("--- Starting KODEX KOSPI100 Weekly Confirmation Check ---")
+        try:
+            from backend.services.kodex_exit_alerts import check_kodex_kospi100_weekly_confirmation
+
+            sent = await check_kodex_kospi100_weekly_confirmation()
+            logger.info("KODEX KOSPI100 weekly confirmation sent=%s", sent)
+        except Exception as e:
+            logger.error(f"KODEX KOSPI100 weekly confirmation job failed: {e}")
+            raise e
+        finally:
+            db.close()
+            logger.info("--- KODEX KOSPI100 Weekly Confirmation Check Finished ---")
+
 async def main():
     logger.info(f"Current System Time: {datetime.now(KST)}")
     
@@ -283,6 +323,22 @@ async def main():
         CronTrigger(day=1, hour=9, minute=10, timezone=KST),
         id="coupon_registration_reminder",
         name="Monthly Coupon Registration Reminder (1st of Month)"
+    )
+
+    # 5-1. KODEX 코스피100(237350) 일봉 조기경보: 장중 10분 간격
+    scheduler.add_job(
+        run_kodex_kospi100_daily_warning,
+        CronTrigger(day_of_week='mon-fri', hour='9-15', minute='5,15,25,35,45,55', timezone=KST),
+        id="kodex_kospi100_daily_warning",
+        name="KODEX KOSPI100 Daily Warning (Every 10 mins, market hours)"
+    )
+
+    # 5-2. KODEX 코스피100(237350) 주봉 확인: 장 마감 후 1회
+    scheduler.add_job(
+        run_kodex_kospi100_weekly_confirmation,
+        CronTrigger(day_of_week='mon-fri', hour=15, minute=37, timezone=KST),
+        id="kodex_kospi100_weekly_confirmation",
+        name="KODEX KOSPI100 Weekly Confirmation (15:37 KST)"
     )
     
     # 6. Weekly Spam Retraining: Every Sunday at 04:00 KST (도라 제안 💖)

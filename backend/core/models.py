@@ -26,6 +26,7 @@ from .models_misc import (
     EconRateState,
     KrOptionBoardSnapshot,
     TradingEngineArchive,
+    SyncSchedulerLogArchive,
     EsportsMatch,
 )
 from .time_utils import utcnow

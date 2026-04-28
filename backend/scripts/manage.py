@@ -450,6 +450,28 @@ def process_alarms_cmd(args):
     asyncio.run(_process_alarms_async())
 
 
+def archive_sync_scheduler_log_cmd(args):
+    """Archive high-signal sync scheduler log events into DB and trim the log file."""
+    from backend.core.db_migrations import ensure_schema
+    from backend.services.sync_scheduler_log_archive import archive_sync_scheduler_log
+
+    ensure_schema()
+    log_path = args.log_path or str(Path(__file__).resolve().parent.parent / "logs" / "sync_prices_scheduler.log")
+
+    with session_scope() as db:
+        result = archive_sync_scheduler_log(
+            db,
+            log_path=log_path,
+            retain_tail_lines=args.retain_tail_lines,
+        )
+
+    print(
+        f"status={result.status} archive_id={result.archive_id} total={result.total_line_count} "
+        f"kept={result.kept_line_count} retained_tail={result.retained_tail_line_count} "
+        f"dropped={result.dropped_line_count}"
+    )
+
+
 def listen_esports_cmd(args):
     """Run the esports smart polling monitor."""
     import asyncio
@@ -516,6 +538,22 @@ def main():
 
     p_proc = subparsers.add_parser("process-alarms", help="Manually process pending alarms")
     p_proc.set_defaults(func=process_alarms_cmd)
+
+    p_sync_log = subparsers.add_parser(
+        "archive-sync-scheduler-log",
+        help="Archive high-signal sync scheduler log events into DB and trim the log file",
+    )
+    p_sync_log.add_argument(
+        "--log-path",
+        help="Target sync scheduler log path",
+    )
+    p_sync_log.add_argument(
+        "--retain-tail-lines",
+        type=int,
+        default=400,
+        help="Number of raw log lines to keep in the file after archival",
+    )
+    p_sync_log.set_defaults(func=archive_sync_scheduler_log_cmd)
 
     p_esports = subparsers.add_parser("listen-esports", help="Run the esports smart polling monitor")
     p_esports.add_argument("--dry-run", action="store_true", help="Dry run mode (no notifications)")

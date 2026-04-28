@@ -290,6 +290,40 @@ class TradingEngineArchive(Base):
     )
 
 
+class SyncSchedulerLogArchive(Base):
+    """sync_prices_scheduler.log 중요 이벤트 아카이브"""
+
+    __tablename__ = "sync_scheduler_log_archives"
+    __table_args__ = (
+        Index("idx_sync_scheduler_log_archives_archive_date", "archive_date"),
+        Index("idx_sync_scheduler_log_archives_source_name", "source_name"),
+        Index("idx_sync_scheduler_log_archives_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    archive_date: Mapped[str] = mapped_column(String(8), nullable=False)
+    source_name: Mapped[str] = mapped_column(String(50), nullable=False, default="sync_prices_scheduler")
+    log_path: Mapped[str] = mapped_column(String(255), nullable=False)
+    total_line_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    kept_line_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    retained_tail_line_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    dropped_line_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    manifest_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    cleanup_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    cleanup_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow,
+        onupdate=utcnow,
+        nullable=False,
+    )
+
+
 class TradingEngineIndustrySyncState(Base):
     """트레이딩 엔진 업종 마스터 적재 상태"""
 

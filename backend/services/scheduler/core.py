@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 KST = ZoneInfo("Asia/Seoul")
 scheduler = AsyncIOScheduler(timezone=KST)
+_trading_engine_cycle_lock = asyncio.Lock()
 
 _SCHEDULER_ROLES = {"all", "news", "trading"}
 
@@ -251,6 +252,15 @@ async def job_trading_engine_cycle():
     if bot is None:
         return
 
+    if _trading_engine_cycle_lock.locked():
+        logger.warning("trading_engine_cycle skipped: previous cycle still running")
+        return
+
+    async with _trading_engine_cycle_lock:
+        await _run_trading_engine_cycle(bot)
+
+
+async def _run_trading_engine_cycle(bot):
     with SessionLocal() as db:
         async with monitor_job_async("trading_engine_cycle", db):
             result = await asyncio.to_thread(bot.run_once, datetime.now(KST))
@@ -413,22 +423,6 @@ def start_scheduler():
                 job_trading_engine_cycle,
                 CronTrigger(day_of_week="mon-fri", hour=8, minute="50,54,58"),
                 id="trading_engine_cycle_preopen",
-                replace_existing=True,
-                max_instances=1,
-            )
-
-            scheduler.add_job(
-                job_trading_engine_cycle,
-                CronTrigger(day_of_week="mon-fri", hour=9, minute="5,55"),
-                id="trading_engine_cycle_entry_window_open_1",
-                replace_existing=True,
-                max_instances=1,
-            )
-
-            scheduler.add_job(
-                job_trading_engine_cycle,
-                CronTrigger(day_of_week="mon-fri", hour=13, minute="0,55"),
-                id="trading_engine_cycle_entry_window_open_2",
                 replace_existing=True,
                 max_instances=1,
             )

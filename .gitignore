@@ -89,6 +89,7 @@ backend/data/random_topic_llm_session_state.json
 backend/data/recent_categories.json
 backend/data/llm_model_path_*.txt
 backend/igt-gpu-tools/
+backend/scripts/shell/switch_vulkan_model.sh
 
 # Local Codex working files
 .codex

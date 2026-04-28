@@ -17,5 +17,17 @@ class TestPromptFix(unittest.TestCase):
         # 현재 로직상 순차적으로 제거됨
         self.assertEqual(clean_exaone_tokens(text3), "실험해본 적 있어?")
 
+    def test_clean_exaone_tokens_keeps_decimal_paragraphs(self):
+        text = (
+            "시장 흐름을 생각해 보면 오늘은 급하게 낙관할 날은 아니야.\n\n"
+            "17.48라는 숫자는 VIX가 완전 안심 구간은 아니라는 뜻이지.\n\n"
+            "파생 쪽 숫자도 같이 봐야 해."
+        )
+        self.assertEqual(clean_exaone_tokens(text), text)
+
+    def test_clean_exaone_tokens_still_trims_meta_before_numbered_list(self):
+        text = "사용자가 원하는 형식으로 정리해 보면 이렇다.\n1. 첫째 줄\n2. 둘째 줄"
+        self.assertEqual(clean_exaone_tokens(text), "1. 첫째 줄\n2. 둘째 줄")
+
 if __name__ == "__main__":
     unittest.main()

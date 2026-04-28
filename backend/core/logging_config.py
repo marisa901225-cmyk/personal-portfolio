@@ -3,7 +3,6 @@ import json
 import traceback
 import re
 import os
-import httpx
 from datetime import datetime, timedelta, timezone
 
 class SensitiveDataFormatter(logging.Formatter):
@@ -13,6 +12,7 @@ class SensitiveDataFormatter(logging.Formatter):
     
     PATTERNS = [
         (r'sk-[a-zA-Z0-9]{20,}', 'sk-[MASKED]'),
+        (r'https://api\.telegram\.org/bot[0-9]{6,12}:[a-zA-Z0-9_-]{20,}/', 'https://api.telegram.org/bot[TELEGRAM_TOKEN_MASKED]/'),
         (r'[0-9]{9,12}:[a-zA-Z0-9_-]{32,}', '[TELEGRAM_TOKEN_MASKED]'),
         (r'(?i)bearer\s+[a-zA-Z0-9.\-_]{20,}', 'Bearer [MASKED]'),
         (r'(?i)("api[-_]key"|"secret"|"token")\s*:\s*"[^"]{10,}"', r'\1: "[MASKED]"'),
