@@ -54,6 +54,8 @@ backend/storage/weather_cache/
 backend/storage/kis_config/
 backend/storage/trading_engine/
 backend/storage/market_sentiment/
+backend/storage/charts/
+backend/storage/llm_compare_local/
 
 # Tokens & Sensitive Data
 token*.json
@@ -83,7 +85,9 @@ backend/data/llm_paid_fallback_notice_state.json
 backend/data/kis_rate_limit_restore_state.json
 backend/data/auth_secret_rotation_state.json
 backend/data/random_topic_state.json
+backend/data/random_topic_llm_session_state.json
 backend/data/recent_categories.json
+backend/data/llm_model_path_*.txt
 backend/igt-gpu-tools/
 
 # Local Codex working files
