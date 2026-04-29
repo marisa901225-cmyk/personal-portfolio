@@ -1,4 +1,5 @@
 from .trading_engine_support import *  # noqa: F401,F403
+from backend.services.trading_engine.day_chart_review import _candidate_meta_text
 
 def test_day_entry_falls_back_to_next_affordable_candidate(tmp_path) -> None:
     api = FakeAPI()
@@ -884,6 +885,28 @@ def test_day_chart_review_uses_paid_tiebreak_after_local_filter(tmp_path) -> Non
     paid_message = stub.paid_calls[0]["messages"][1]["content"][0]["text"]
     assert "로컬 1차 검토 통과 후보: KEEP01,NEXT01" in paid_message
     assert "추가 비교 후보: PASS01" in paid_message
+
+
+def test_candidate_meta_text_uses_change_and_liquidity_fallbacks() -> None:
+    row = pd.Series(
+        {
+            "name": "에코프로비엠",
+            "avg_value_20d": 210_000_000_000,
+        }
+    )
+
+    text = _candidate_meta_text(
+        rank=5,
+        code="247540",
+        row=row,
+        quote={"price": 211500.0, "change_rate": 4.2},
+    )
+
+    assert "후보 5: 에코프로비엠(247540)" in text
+    assert "- 현재가: 211500.0" in text
+    assert "- 등락률: 4.2%" in text
+    assert "- 20일 평균 거래대금: 2100.0억" in text
+    assert "- 직전 10일 최고 종가 대비: N/A%" in text
 
 def test_day_chart_review_limits_paid_selection_to_local_approvals_when_reference_added(tmp_path) -> None:
     asof = "20260216"

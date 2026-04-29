@@ -12,7 +12,7 @@ import pandas as pd
 
 from ..llm.service import LLMService
 from ..prompt_loader import load_prompt
-from .candidate_scoring import _day_intraday_structure_score
+from .candidate_scoring import _day_intraday_structure_score, _resolve_change_pct
 from .chart_review_renderer import render_candidate_chart_png
 from .config import TradeEngineConfig
 from .interfaces import TradingAPI
@@ -318,10 +318,10 @@ def _candidate_meta_text(
     quote: Quote,
 ) -> str:
     name = str(row.get("name") if row is not None else quote.get("name") or "").strip() or code
-    avg_value_5d = parse_numeric(row.get("avg_value_5d")) if row is not None else None
-    change_pct = parse_numeric(quote.get("change_pct"))
-    if change_pct is None and row is not None:
-        change_pct = parse_numeric(row.get("change_pct"))
+    avg_value_label, avg_value = _resolve_candidate_avg_value(row)
+    change_pct = _resolve_change_pct(row, {str(code): quote}) if row is not None else None
+    if change_pct is None:
+        change_pct = parse_numeric(quote.get("change_pct")) or parse_numeric(quote.get("change_rate"))
     breakout_vs_prev_high = parse_numeric(row.get("breakout_vs_prev_high_10d_pct")) if row is not None else None
     close = parse_numeric(quote.get("price"))
     if close is None and row is not None:
@@ -330,10 +330,22 @@ def _candidate_meta_text(
         f"후보 {rank}: {name}({code})\n"
         f"- 현재가: {close if close is not None else 'N/A'}\n"
         f"- 등락률: {change_pct if change_pct is not None else 'N/A'}%\n"
-        f"- 5일 평균 거래대금: "
-        f"{round(avg_value_5d / 1e8, 1) if avg_value_5d is not None else 'N/A'}억\n"
+        f"- {avg_value_label}: "
+        f"{round(avg_value / 1e8, 1) if avg_value is not None else 'N/A'}억\n"
         f"- 직전 10일 최고 종가 대비: {breakout_vs_prev_high if breakout_vs_prev_high is not None else 'N/A'}%"
     )
+
+
+def _resolve_candidate_avg_value(row: pd.Series | None) -> tuple[str, float | None]:
+    if row is None:
+        return "평균 거래대금", None
+    avg_value_5d = parse_numeric(row.get("avg_value_5d"))
+    if avg_value_5d is not None:
+        return "5일 평균 거래대금", avg_value_5d
+    avg_value_20d = parse_numeric(row.get("avg_value_20d"))
+    if avg_value_20d is not None:
+        return "20일 평균 거래대금", avg_value_20d
+    return "평균 거래대금", None
 
 
 def _file_to_data_url(path: str) -> str:

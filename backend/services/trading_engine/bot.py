@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from datetime import datetime
 
@@ -62,6 +63,7 @@ class HybridTradingBot(
         self.state: TradeState = load_state(self.config.state_path)
         self.notifier = notifier or BestEffortNotifier(max_retry=self.config.telegram_retry_max)
         self.journal: TradeJournal | None = None
+        self._state_lock = threading.RLock()
         self._run_started = False
         self._last_notified_window_idx: int | None = None  # To prevent candidate spam
         self._last_swing_skip_notified_window_idx: int | None = None
@@ -82,7 +84,8 @@ class HybridTradingBot(
             pass_reasons=self.state.pass_reasons_today,
             open_positions=len(self.state.open_positions),
         )
-        save_state(self.config.state_path, self.state)
+        with self._state_lock:
+            save_state(self.config.state_path, self.state)
 
         realized_pct = 0.0
         if self.config.initial_capital > 0:
@@ -110,8 +113,9 @@ class HybridTradingBot(
 
     def _pass_and_return(self, reason: str, now: datetime, regime: str) -> dict[str, object]:
         self._pass(reason, regime)
-        self.state.last_run_timestamp = now.isoformat(timespec="seconds")
-        save_state(self.config.state_path, self.state)
+        with self._state_lock:
+            self.state.last_run_timestamp = now.isoformat(timespec="seconds")
+            save_state(self.config.state_path, self.state)
         return {"status": "PASS", "reason": reason}
 
     def _ensure_journal(self, today: str) -> None:
@@ -222,15 +226,17 @@ class HybridTradingBot(
     def run_locked_profit_monitor(self, now: datetime | None = None) -> dict[str, object]:
         now = now or datetime.now()
         today = now.strftime("%Y%m%d")
-        self.state = rollover_state_for_date(self.state, today)
+        with self._state_lock:
+            self.state = rollover_state_for_date(self.state, today)
 
         if not self.has_armed_day_profit_locks():
             return {"status": "SKIP", "reason": "NO_ARMED_DAY_LOCKS"}
 
         self._ensure_journal(today)
-        self.monitor_positions(now=now)
-        self.state.last_run_timestamp = now.isoformat(timespec="seconds")
-        save_state(self.config.state_path, self.state)
+        with self._state_lock:
+            self.monitor_positions(now=now)
+            self.state.last_run_timestamp = now.isoformat(timespec="seconds")
+            save_state(self.config.state_path, self.state)
         return {
             "status": "OK",
             "reason": "ARMED_DAY_LOCKS_MONITORED",
@@ -370,8 +376,9 @@ class HybridTradingBot(
 
             if regime == "RISK_OFF":
                 self._pass("RISK_OFF", regime)
-                self.state.last_run_timestamp = now.isoformat(timespec="seconds")
-                save_state(self.config.state_path, self.state)
+                with self._state_lock:
+                    self.state.last_run_timestamp = now.isoformat(timespec="seconds")
+                    save_state(self.config.state_path, self.state)
                 return {"status": "OK", "regime": regime, "asof": asof}
 
             self._try_enter_swing(
@@ -390,14 +397,16 @@ class HybridTradingBot(
             )
 
             self.force_exit_day_positions(now)
-            self.state.last_run_timestamp = now.isoformat(timespec="seconds")
-            save_state(self.config.state_path, self.state)
+            with self._state_lock:
+                self.state.last_run_timestamp = now.isoformat(timespec="seconds")
+                save_state(self.config.state_path, self.state)
             return {"status": "OK", "regime": regime, "asof": asof}
         except Exception as exc:
             logger.exception("bot run failed: %s", exc)
             self._journal("ERROR", asof_date=today, reason=str(exc))
             self._notify_text(format_error_message(today, str(exc)[:180]))
-            save_state(self.config.state_path, self.state)
+            with self._state_lock:
+                save_state(self.config.state_path, self.state)
             return {"status": "ERROR", "error": str(exc)}
 
     def run_until_close(self, *, sleep_sec: int | None = None) -> None:

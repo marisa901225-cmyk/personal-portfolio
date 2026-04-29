@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from .execution import FillResult, enter_position
 from .intraday import passes_day_intraday_confirmation
+from .news_sentiment import _load_sector_keywords
 from .notification_text import (
     format_candidate_review_message,
     format_entry_message,
@@ -14,7 +15,7 @@ from .notification_text import (
 from .risk import can_enter, current_entry_window_index
 from .state import PositionState
 from .types import OrderPayload, Quote, QuoteMap
-from .utils import parse_numeric
+from .utils import match_name_to_sectors, parse_numeric
 
 if TYPE_CHECKING:
     from .news_sentiment import NewsSentimentSignal
@@ -60,6 +61,128 @@ def _resolve_day_entry_order(
 
     tick = _krx_tick_size(float(price_now))
     return "limit", int(price_now) + tick
+
+
+def _swing_retry_codes_with_sector_peers(
+    *,
+    ranked_codes: list[str],
+    candidates: "Candidates",
+    config,
+    news_signal: "NewsSentimentSignal | None" = None,
+) -> list[str]:
+    if len(ranked_codes) < 2:
+        return ranked_codes
+
+    sector_keywords = (
+        news_signal.sector_keywords
+        if news_signal is not None and getattr(news_signal, "sector_keywords", None)
+        else _load_sector_keywords(config.news_sector_queries_path)
+    )
+    candidate_frame = _build_swing_retry_candidate_frame(candidates)
+    if candidate_frame.empty:
+        return ranked_codes
+
+    anchor_code = str(ranked_codes[0]).strip()
+    second_code = str(ranked_codes[1]).strip()
+    anchor_sector = _resolve_swing_candidate_sector(
+        code=anchor_code,
+        candidate_frame=candidate_frame,
+        sector_keywords=sector_keywords,
+        news_signal=news_signal,
+    )
+    if not anchor_sector:
+        return ranked_codes
+
+    peer_codes: list[str] = []
+    for _, row in candidate_frame.iterrows():
+        code = str(row.get("code") or "").strip()
+        if not code or code == anchor_code:
+            continue
+        if _resolve_swing_row_sector(
+            row=row,
+            sector_keywords=sector_keywords,
+            news_signal=news_signal,
+        ) != anchor_sector:
+            continue
+        peer_codes.append(code)
+        if len(peer_codes) >= 3:
+            break
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for code in [anchor_code, second_code, *peer_codes, *ranked_codes[2:]]:
+        normalized = str(code or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(normalized)
+    return ordered
+
+
+def _build_swing_retry_candidate_frame(candidates: "Candidates"):
+    import pandas as pd
+
+    frames = [
+        getattr(candidates, "model", pd.DataFrame()),
+        getattr(candidates, "merged", pd.DataFrame()),
+        getattr(candidates, "popular", pd.DataFrame()),
+        getattr(candidates, "etf", pd.DataFrame()),
+    ]
+    usable = [frame for frame in frames if frame is not None and not frame.empty and "code" in frame.columns]
+    if not usable:
+        return pd.DataFrame()
+
+    merged = pd.concat(usable, ignore_index=True, sort=False)
+    sort_cols = [col for col in ("score", "avg_value_20d", "avg_value_5d", "change_pct") if col in merged.columns]
+    if sort_cols:
+        ascending = [False] * len(sort_cols)
+        merged = merged.sort_values(by=sort_cols, ascending=ascending, na_position="last")
+    return merged.drop_duplicates(subset=["code"], keep="first").reset_index(drop=True)
+
+
+def _resolve_swing_candidate_sector(
+    *,
+    code: str,
+    candidate_frame,
+    sector_keywords: dict[str, tuple[str, ...]],
+    news_signal: "NewsSentimentSignal | None" = None,
+) -> str:
+    matches = candidate_frame[candidate_frame["code"].astype(str) == str(code)]
+    if matches.empty:
+        return ""
+    return _resolve_swing_row_sector(
+        row=matches.iloc[0],
+        sector_keywords=sector_keywords,
+        news_signal=news_signal,
+    )
+
+
+def _resolve_swing_row_sector(
+    *,
+    row,
+    sector_keywords: dict[str, tuple[str, ...]],
+    news_signal: "NewsSentimentSignal | None" = None,
+) -> str:
+    for key in (
+        "industry_bucket_name",
+        "theme_sector",
+        "industry_small_name",
+        "industry_medium_name",
+        "industry_large_name",
+    ):
+        value = str(row.get(key) or "").strip()
+        if value:
+            return value
+
+    matched = match_name_to_sectors(str(row.get("name") or ""), sector_keywords)
+    if not matched:
+        return ""
+    if news_signal is None:
+        return sorted(matched)[0]
+    return max(
+        matched,
+        key=lambda sector: (float(news_signal.sector_scores.get(sector, 0.0)), str(sector)),
+    )
 
 
 class BotEntryFlowMixin:
@@ -121,37 +244,52 @@ class BotEntryFlowMixin:
                 )
             return
 
-        result = enter_position(
-            self.api,
-            self.state,
-            position_type="S",
-            code=code,
-            cash_ratio=self.config.swing_cash_ratio,
-            budget_cash_cap=self._strategy_budget_cash_cap(cash_ratio=self.config.swing_cash_ratio),
-            asof_date=self.state.trade_date,
-            now=now,
-            order_type=self.config.swing_entry_order_type,
+        ranked_codes = _swing_retry_codes_with_sector_peers(
+            ranked_codes=ranked_codes,
+            candidates=candidates,
+            config=self.config,
+            news_signal=news_signal,
         )
-        if not result:
+
+        result = None
+        code = ""
+        for ranked_code in ranked_codes:
+            attempt = enter_position(
+                self.api,
+                self.state,
+                position_type="S",
+                code=ranked_code,
+                cash_ratio=self.config.swing_cash_ratio,
+                budget_cash_cap=self._strategy_budget_cash_cap(cash_ratio=self.config.swing_cash_ratio),
+                asof_date=self.state.trade_date,
+                now=now,
+                order_type=self.config.swing_entry_order_type,
+            )
+            if attempt:
+                result = attempt
+                code = ranked_code
+                break
             synced_result, pending_order = self._recover_failed_buy_attempt(
-                code=code,
+                code=ranked_code,
                 strategy_type="S",
                 now=now,
                 regime=regime,
             )
             if synced_result is not None:
                 result = synced_result
-            elif pending_order is not None:
+                code = ranked_code
+                break
+            if pending_order is not None:
                 return
-            else:
-                self._pass("SWING_ENTRY_FAILED", regime)
-                if review_applied:
-                    self._notify_chart_review_skip(
-                        strategy_label="SWING",
-                        reason="SWING_ENTRY_FAILED",
-                        code=code,
-                    )
-                return
+        if not result:
+            self._pass("SWING_ENTRY_FAILED", regime)
+            if review_applied:
+                self._notify_chart_review_skip(
+                    strategy_label="SWING",
+                    reason="SWING_ENTRY_FAILED",
+                    code=ranked_codes[0] if ranked_codes else None,
+                )
+            return
 
         self._journal(
             "ENTRY_FILL",

@@ -29,102 +29,104 @@ logger = logging.getLogger(__name__)
 
 class BotPositionManagementMixin:
     def _reconcile_state_with_broker_positions(self, *, now: datetime | None = None) -> None:
-        reconcile_state_with_broker_positions(
-            self.api,
-            self.state,
-            trade_date=self.state.trade_date,
-            journal=self._journal,
-            notify_text=self._notify_text,
-            config=self.config,
-            now=now,
-            logger=logger,
-        )
+        with self._state_lock:
+            reconcile_state_with_broker_positions(
+                self.api,
+                self.state,
+                trade_date=self.state.trade_date,
+                journal=self._journal,
+                notify_text=self._notify_text,
+                config=self.config,
+                now=now,
+                logger=logger,
+            )
 
     def monitor_positions(self, *, now: datetime | None = None) -> None:
         now = now or datetime.now()
-        for code, pos in list(self.state.open_positions.items()):
-            try:
-                q = self.api.quote(code)
-            except Exception:
-                continue
-            price = parse_numeric(q.get("price"))
-            if price is None:
-                continue
+        with self._state_lock:
+            for code, pos in list(self.state.open_positions.items()):
+                try:
+                    q = self.api.quote(code)
+                except Exception:
+                    continue
+                price = parse_numeric(q.get("price"))
+                if price is None:
+                    continue
 
-            swing_trend_broken: bool | None = None
-            day_lock_retrace_gap_pct_override: float | None = None
-            day_stop_loss_pct_override: float | None = None
-            if pos.type == "S" and self.config.swing_sl_requires_trend_break:
-                swing_trend_broken = self._is_swing_trend_broken(code=code, quote_price=price, now=now)
-            elif pos.type == "T":
-                day_lock_retrace_gap_pct_override = self._resolve_day_lock_retrace_gap_pct(code=code)
-                day_stop_loss_pct_override = self._resolve_day_stop_loss_pct(code=code)
+                swing_trend_broken: bool | None = None
+                day_lock_retrace_gap_pct_override: float | None = None
+                day_stop_loss_pct_override: float | None = None
+                if pos.type == "S" and self.config.swing_sl_requires_trend_break:
+                    swing_trend_broken = self._is_swing_trend_broken(code=code, quote_price=price, now=now)
+                elif pos.type == "T":
+                    day_lock_retrace_gap_pct_override = self._resolve_day_lock_retrace_gap_pct(code=code)
+                    day_stop_loss_pct_override = self._resolve_day_stop_loss_pct(code=code)
 
-            exit_now, reason, pnl_pct = should_exit_position(
-                pos,
-                quote_price=price,
-                now=now,
-                config=self.config,
-                swing_trend_broken=swing_trend_broken,
-                day_lock_retrace_gap_pct_override=day_lock_retrace_gap_pct_override,
-                day_stop_loss_pct_override=day_stop_loss_pct_override,
-            )
-            if not exit_now:
-                continue
-            if self._should_hold_day_stop_after_llm(
-                code=code,
-                pos=pos,
-                quote_price=price,
-                pnl_pct=pnl_pct,
-                reason=reason,
-                now=now,
-            ):
-                continue
-            if self._should_carry_day_force_exit(
-                code=code,
-                pos=pos,
-                quote_price=price,
-                reason=reason,
-            ):
-                continue
-
-            result = exit_position(
-                self.api,
-                self.state,
-                code=code,
-                reason=reason,
-                now=now,
-                config=self.config,
-                on_order_accepted=lambda order, pos=pos: self._record_pending_exit_order(
-                    order,
-                    strategy_type=pos.type,
-                ),
-            )
-            if not result:
-                continue
-
-            self.state.pending_exit_orders.pop(code, None)
-            self._journal(
-                "EXIT_FILL",
-                asof_date=self.state.trade_date,
-                code=code,
-                side="SELL",
-                qty=result.qty,
-                avg_price=result.avg_price,
-                pnl_pct=round(pnl_pct * 100.0, 4),
-                reason=reason,
-                strategy_type=pos.type,
-            )
-            self._notify_text(
-                format_exit_message(
-                    strategy=pos.type,
-                    reason=reason,
+                exit_now, reason, pnl_pct = should_exit_position(
+                    pos,
+                    quote_price=price,
+                    now=now,
+                    config=self.config,
+                    swing_trend_broken=swing_trend_broken,
+                    day_lock_retrace_gap_pct_override=day_lock_retrace_gap_pct_override,
+                    day_stop_loss_pct_override=day_stop_loss_pct_override,
+                )
+                if not exit_now:
+                    continue
+                if self._should_hold_day_stop_after_llm(
                     code=code,
+                    pos=pos,
+                    quote_price=price,
+                    pnl_pct=pnl_pct,
+                    reason=reason,
+                    now=now,
+                ):
+                    continue
+                if self._should_carry_day_force_exit(
+                    code=code,
+                    pos=pos,
+                    quote_price=price,
+                    reason=reason,
+                ):
+                    continue
+
+                result = exit_position(
+                    self.api,
+                    self.state,
+                    code=code,
+                    reason=reason,
+                    now=now,
+                    config=self.config,
+                    on_order_accepted=lambda order, pos=pos: self._record_pending_exit_order(
+                        order,
+                        strategy_type=pos.type,
+                    ),
+                )
+                if not result:
+                    continue
+
+                self.state.pending_exit_orders.pop(code, None)
+                self._journal(
+                    "EXIT_FILL",
+                    asof_date=self.state.trade_date,
+                    code=code,
+                    side="SELL",
                     qty=result.qty,
                     avg_price=result.avg_price,
-                    pnl_pct=pnl_pct * 100,
+                    pnl_pct=round(pnl_pct * 100.0, 4),
+                    reason=reason,
+                    strategy_type=pos.type,
                 )
-            )
+                self._notify_text(
+                    format_exit_message(
+                        strategy=pos.type,
+                        reason=reason,
+                        code=code,
+                        qty=result.qty,
+                        avg_price=result.avg_price,
+                        pnl_pct=pnl_pct * 100,
+                    )
+                )
 
     def force_exit_day_positions(self, now: datetime | None = None) -> None:
         now = now or datetime.now()
@@ -132,46 +134,47 @@ class BotPositionManagementMixin:
         if (now.hour, now.minute) < (force_h, force_m):
             return
 
-        for code, pos in list(self.state.open_positions.items()):
-            if pos.type != "T":
-                continue
-            try:
-                q = self.api.quote(code)
-            except Exception:
-                q = {}
-            price = parse_numeric(q.get("price"))
-            if price is not None and self._should_carry_day_force_exit(
-                code=code,
-                pos=pos,
-                quote_price=price,
-                reason="FORCE",
-            ):
-                continue
-            result = exit_position(
-                self.api,
-                self.state,
-                code=code,
-                reason="FORCE",
-                now=now,
-                config=self.config,
-                on_order_accepted=lambda order, pos=pos: self._record_pending_exit_order(
-                    order,
-                    strategy_type=pos.type,
-                ),
-            )
-            if not result:
-                continue
-            self.state.pending_exit_orders.pop(code, None)
-            self._journal(
-                "FORCE_EXIT",
-                asof_date=self.state.trade_date,
-                code=code,
-                side="SELL",
-                qty=result.qty,
-                avg_price=result.avg_price,
-                reason="FORCE",
-                strategy_type="T",
-            )
+        with self._state_lock:
+            for code, pos in list(self.state.open_positions.items()):
+                if pos.type != "T":
+                    continue
+                try:
+                    q = self.api.quote(code)
+                except Exception:
+                    q = {}
+                price = parse_numeric(q.get("price"))
+                if price is not None and self._should_carry_day_force_exit(
+                    code=code,
+                    pos=pos,
+                    quote_price=price,
+                    reason="FORCE",
+                ):
+                    continue
+                result = exit_position(
+                    self.api,
+                    self.state,
+                    code=code,
+                    reason="FORCE",
+                    now=now,
+                    config=self.config,
+                    on_order_accepted=lambda order, pos=pos: self._record_pending_exit_order(
+                        order,
+                        strategy_type=pos.type,
+                    ),
+                )
+                if not result:
+                    continue
+                self.state.pending_exit_orders.pop(code, None)
+                self._journal(
+                    "FORCE_EXIT",
+                    asof_date=self.state.trade_date,
+                    code=code,
+                    side="SELL",
+                    qty=result.qty,
+                    avg_price=result.avg_price,
+                    reason="FORCE",
+                    strategy_type="T",
+                )
 
     def _manage_risk_off_parking(self, *, now: datetime, regime: str) -> None:
         manage_risk_off_parking(
@@ -192,23 +195,24 @@ class BotPositionManagementMixin:
         reason = str(order.get("reason") or "").strip().upper()
         order_id = str(order.get("order_id") or "").strip()
         qty = int(parse_numeric(order.get("qty")) or 0)
-        self.state.pending_exit_orders[code] = {
-            "strategy_type": str(strategy_type or "").strip().upper(),
-            "reason": reason,
-            "order_id": order_id,
-            "qty": qty,
-            "order_time": str(order.get("order_time") or "").strip(),
-        }
-        self._journal(
-            "EXIT_ORDER_ACCEPTED",
-            asof_date=self.state.trade_date,
-            code=code,
-            side="SELL",
-            qty=qty,
-            reason=reason,
-            order_id=order_id,
-            strategy_type=str(strategy_type or "").strip().upper(),
-        )
+        with self._state_lock:
+            self.state.pending_exit_orders[code] = {
+                "strategy_type": str(strategy_type or "").strip().upper(),
+                "reason": reason,
+                "order_id": order_id,
+                "qty": qty,
+                "order_time": str(order.get("order_time") or "").strip(),
+            }
+            self._journal(
+                "EXIT_ORDER_ACCEPTED",
+                asof_date=self.state.trade_date,
+                code=code,
+                side="SELL",
+                qty=qty,
+                reason=reason,
+                order_id=order_id,
+                strategy_type=str(strategy_type or "").strip().upper(),
+            )
 
     def _should_hold_day_stop_after_llm(
         self,

@@ -294,9 +294,6 @@ async def job_trading_engine_lock_monitor():
         return
     if not bot.has_armed_day_profit_locks():
         return
-    if _trading_engine_cycle_lock.locked():
-        logger.debug("trading_engine_lock_monitor skipped: cycle in progress")
-        return
     if _trading_engine_lock_monitor_lock.locked():
         logger.debug("trading_engine_lock_monitor skipped: previous monitor still running")
         return

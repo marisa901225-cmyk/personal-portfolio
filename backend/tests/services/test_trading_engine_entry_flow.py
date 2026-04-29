@@ -492,6 +492,123 @@ def test_swing_hold_skips_rebuy_when_same_symbol_is_already_profitable(tmp_path)
     assert bot.state.open_positions["005930"].qty == 7
     assert abs(float(bot.state.open_positions["005930"].locked_profit_pct or 0.0) - 0.05) < 1e-9
 
+def test_swing_entry_falls_back_to_next_candidate_when_top_pick_is_too_expensive(tmp_path) -> None:
+    class BuyableAPI(FakeAPI):
+        def buy_order_capacity(self, code: str, order_type: str, price: int | None) -> dict:
+            assert order_type == "best"
+            assert price is not None
+            if code == "EXPENSIVE":
+                return {
+                    "ord_psbl_cash": 200_000,
+                    "nrcvb_buy_amt": 200_000,
+                    "nrcvb_buy_qty": 0,
+                    "max_buy_qty": 0,
+                    "psbl_qty_calc_unpr": price,
+                }
+            return {
+                "ord_psbl_cash": 200_000,
+                "nrcvb_buy_amt": 200_000,
+                "nrcvb_buy_qty": 10,
+                "max_buy_qty": 10,
+                "psbl_qty_calc_unpr": price,
+            }
+
+    api = BuyableAPI()
+    api._cash_available = 200_000
+    api._quotes["EXPENSIVE"] = {"price": 300_000, "change_pct": 2.0}
+    api._quotes["CHEAP"] = {"price": 20_000, "change_pct": 1.5}
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        swing_entry_order_type="best",
+        swing_chart_review_enabled=False,
+        swing_cash_ratio=1.0,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.trade_date = "20260216"
+
+    candidates = SimpleNamespace(
+        model=pd.DataFrame(
+            [
+                {"code": "EXPENSIVE", "name": "비싼종목"},
+                {"code": "CHEAP", "name": "싼종목"},
+            ]
+        ),
+        etf=pd.DataFrame(),
+    )
+
+    with patch("backend.services.trading_engine.bot.rank_swing_codes", return_value=["EXPENSIVE", "CHEAP"]):
+        bot._try_enter_swing(
+            now=datetime(2026, 2, 16, 13, 10),
+            regime="RISK_ON",
+            candidates=candidates,
+            quotes={
+                "EXPENSIVE": api.quote("EXPENSIVE"),
+                "CHEAP": api.quote("CHEAP"),
+            },
+        )
+
+    assert api.order_calls == [
+        {"side": "BUY", "code": "CHEAP", "qty": 10, "order_type": "best", "price": None}
+    ]
+    assert "CHEAP" in bot.state.open_positions
+    assert "EXPENSIVE" not in bot.state.open_positions
+    assert bot.state.pass_reasons_today == {}
+
+def test_swing_entry_sweeps_same_sector_peer_when_top_and_second_pick_fail_budget(tmp_path) -> None:
+    api = FakeAPI()
+    api._cash_available = 200_000
+    api._quotes["LIGTOP"] = {"price": 300_000, "change_pct": 3.0}
+    api._quotes["RANK2"] = {"price": 250_000, "change_pct": 2.0}
+    api._quotes["DEFPEER"] = {"price": 40_000, "change_pct": 1.8}
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        swing_entry_order_type="best",
+        swing_chart_review_enabled=False,
+        swing_cash_ratio=1.0,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.trade_date = "20260216"
+
+    model = pd.DataFrame(
+        [
+            {"code": "LIGTOP", "name": "LIG디펜스", "industry_bucket_name": "방산"},
+            {"code": "RANK2", "name": "2위후보", "industry_bucket_name": "반도체"},
+            {"code": "DEFPEER", "name": "한화방산", "industry_bucket_name": "방산", "avg_value_20d": 500_000_000_000},
+        ]
+    )
+    candidates = Candidates(
+        asof="20260216",
+        popular=pd.DataFrame(),
+        model=model,
+        etf=pd.DataFrame(),
+        merged=model.copy(),
+        quote_codes=["LIGTOP", "RANK2", "DEFPEER"],
+    )
+
+    with patch("backend.services.trading_engine.bot.rank_swing_codes", return_value=["LIGTOP", "RANK2"]):
+        bot._try_enter_swing(
+            now=datetime(2026, 2, 16, 13, 10),
+            regime="RISK_ON",
+            candidates=candidates,
+            quotes={
+                "LIGTOP": api.quote("LIGTOP"),
+                "RANK2": api.quote("RANK2"),
+                "DEFPEER": api.quote("DEFPEER"),
+            },
+        )
+
+    assert api.order_calls == [
+        {"side": "BUY", "code": "DEFPEER", "qty": 5, "order_type": "best", "price": None}
+    ]
+    assert "DEFPEER" in bot.state.open_positions
+    assert "LIGTOP" not in bot.state.open_positions
+    assert "RANK2" not in bot.state.open_positions
+    assert bot.state.pass_reasons_today == {}
+
 def test_locked_profit_position_exits_immediately_after_profit_floor_break(tmp_path) -> None:
     api = FakeAPI()
     api._quotes["005930"] = {"price": 105_000, "change_pct": 1.2}
@@ -726,6 +843,50 @@ def test_day_hold_match_does_not_tighten_lock_to_full_profit(tmp_path) -> None:
     assert "005880" in bot.state.open_positions
     assert abs(float(bot.state.open_positions["005880"].locked_profit_pct or 0.0) - 0.005) < 1e-9
     assert abs(float(bot.state.open_positions["005880"].highest_price or 0.0) - 101_800.0) < 1e-9
+
+def test_day_position_keeps_day_lock_rules_when_matching_swing_candidate(tmp_path) -> None:
+    api = FakeAPI()
+    api._quotes["475150"] = {"price": 100_800, "change_pct": 0.8}
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        swing_chart_review_enabled=False,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.trade_date = "20260216"
+    bot.state.open_positions["475150"] = PositionState(
+        type="T",
+        entry_time="2026-02-16T09:08:00",
+        entry_price=100_000.0,
+        qty=3,
+        highest_price=100_000.0,
+        entry_date="20260216",
+    )
+
+    candidates = SimpleNamespace(
+        model=pd.DataFrame([{"code": "475150", "name": "후보종목"}]),
+        etf=pd.DataFrame(),
+    )
+
+    with patch("backend.services.trading_engine.bot.rank_swing_codes", return_value=["475150"]):
+        bot._try_enter_swing(
+            now=datetime(2026, 2, 16, 9, 20),
+            regime="RISK_ON",
+            candidates=candidates,
+            quotes={"475150": api.quote("475150")},
+        )
+
+    assert api.order_calls == []
+    assert "475150" in bot.state.open_positions
+    assert bot.state.open_positions["475150"].locked_profit_pct is None
+    assert abs(float(bot.state.open_positions["475150"].highest_price or 0.0) - 100_800.0) < 1e-9
+
+    api._quotes["475150"] = {"price": 100_700, "change_pct": 0.7}
+    bot.monitor_positions(now=datetime(2026, 2, 16, 9, 22))
+
+    assert not any(call["side"] == "SELL" and call["code"] == "475150" for call in api.order_calls)
+    assert "475150" in bot.state.open_positions
 
 def test_day_entry_windows_progress_across_four_intraday_slots() -> None:
     cfg = TradeEngineConfig()
