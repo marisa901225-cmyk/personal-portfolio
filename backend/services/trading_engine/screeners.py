@@ -11,16 +11,14 @@ from .interfaces import TradingAPI
 from .news_sentiment import NewsSentimentSignal
 from .screener_collectors import (
     _combine_popular_rows,
+    _enrich_model_quote_fields,
+    _enrich_popular_industry_trend_fields,
+    _enrich_popular_quote_fields,
     _inject_theme_candidates,
     _popular_sector_keywords,
     _rank_map,
     _select_legacy_popular_rows,
     _select_sector_bucket_rows,
-)
-from .screener_enrichment import (
-    _enrich_model_quote_fields,
-    _enrich_popular_industry_trend_fields,
-    _enrich_popular_quote_fields,
 )
 from .stock_master import load_stock_master_map, load_swing_universe_candidates
 from .utils import (

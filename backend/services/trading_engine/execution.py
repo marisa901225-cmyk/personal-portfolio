@@ -6,7 +6,7 @@ from .execution_operations import (
     handle_open_orders,
     increment_bars_held,
 )
-from .execution_types import FillResult
+from .execution_support import FillResult
 
 __all__ = [
     "FillResult",

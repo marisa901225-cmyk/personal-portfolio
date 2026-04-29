@@ -14,11 +14,11 @@ from .day_chart_review import review_day_candidates_with_llm, review_swing_candi
 from .execution import handle_open_orders
 from .interfaces import TradingAPI
 from .journal import TradeJournal
-from .market_calendar import get_last_trading_day, is_trading_day
 from .news_sentiment import build_news_sentiment_signal
 from .notifier import BestEffortNotifier
 from .notification_text import format_error_message, format_pass_message, format_run_start_message
 from .regime import detect_intraday_circuit_breaker, get_regime
+from .runtime import get_last_trading_day, is_trading_day
 from .state import (
     TradeState,
     add_pass_reason,

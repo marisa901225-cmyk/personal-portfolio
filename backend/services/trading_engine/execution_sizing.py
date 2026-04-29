@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from .execution_types import BuySizingSnapshot, SellSizingSnapshot
+from .execution_support import BuySizingSnapshot, SellSizingSnapshot
 from .interfaces import BuyOrderInfoAPI, SellOrderInfoAPI, TradingAPI
 from .utils import parse_numeric
 

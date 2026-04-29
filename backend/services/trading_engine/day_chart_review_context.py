@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
+from typing import TypeAlias
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -11,13 +13,32 @@ from .chart_review_renderer import render_candidate_chart_png
 from .intraday import sort_intraday_bars
 from .types import Quote, QuoteMap
 from .utils import parse_numeric
-from .day_chart_review_types import ReviewAsset
 
 if TYPE_CHECKING:
     from .interfaces import TradingAPI
     from .strategy import Candidates
 
 logger = logging.getLogger(__name__)
+
+ReviewPayload: TypeAlias = dict[str, object]
+ReviewMessage: TypeAlias = dict[str, object]
+
+
+@dataclass(slots=True)
+class DayChartReviewResult:
+    shortlisted_codes: list[str]
+    approved_codes: list[str]
+    selected_code: str | None
+    summary: str
+    chart_paths: list[str]
+    raw_response: ReviewPayload | None = None
+
+
+@dataclass(slots=True)
+class ReviewAsset:
+    code: str
+    meta_text: str
+    chart_path: str
 
 
 def build_shortlist(ranked_codes: list[str], *, max_count: int) -> list[str]:
@@ -236,6 +257,10 @@ def resolve_candidate_avg_value(row: pd.Series | None) -> tuple[str, float | Non
 
 
 __all__ = [
+    "DayChartReviewResult",
+    "ReviewAsset",
+    "ReviewMessage",
+    "ReviewPayload",
     "build_day_review_assets",
     "build_day_shortlist",
     "build_shortlist",

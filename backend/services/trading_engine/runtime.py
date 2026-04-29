@@ -4,13 +4,18 @@ import asyncio
 import importlib
 import logging
 import os
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
-from .bot import HybridTradingBot
 from .config import TradeEngineConfig
 from .interfaces import TradingAPI
 from .notifier import BestEffortNotifier
 from .runtime_config import _env_bool, load_trade_engine_config_from_env
+from .utils import normalize_bar_date
+
+if TYPE_CHECKING:
+    from .bot import HybridTradingBot
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +29,60 @@ def trading_engine_enabled() -> bool:
 
 def load_config_from_env() -> TradeEngineConfig:
     return _load_config_from_env()
+
+
+def is_trading_day(
+    api: TradingAPI,
+    date: str,
+    *,
+    config: TradeEngineConfig | None = None,
+) -> bool:
+    cfg = config or TradeEngineConfig()
+
+    if hasattr(api, "is_trading_day") and callable(getattr(api, "is_trading_day")):
+        try:
+            return bool(getattr(api, "is_trading_day")(date))
+        except Exception:
+            pass
+
+    bars = api.daily_bars(code=cfg.market_proxy_code, end=date, lookback=3)
+    if bars is None or bars.empty:
+        return False
+
+    last_row = bars.iloc[-1]
+    last_date = normalize_bar_date(last_row.get("date"))
+    return last_date == date
+
+
+def get_last_trading_day(
+    api: TradingAPI,
+    date: str,
+    *,
+    max_lookback_days: int = 14,
+    config: TradeEngineConfig | None = None,
+) -> str:
+    base = datetime.strptime(date, "%Y%m%d")
+    for offset in range(0, max_lookback_days + 1):
+        target = (base - timedelta(days=offset)).strftime("%Y%m%d")
+        if is_trading_day(api, target, config=config):
+            return target
+    return date
+
+
+def get_market_session(
+    date: str,
+    *,
+    config: TradeEngineConfig | None = None,
+    is_trading_day_value: bool | None = None,
+) -> dict[str, str | bool | None]:
+    cfg = config or TradeEngineConfig()
+    return {
+        "date": date,
+        "is_trading_day": bool(is_trading_day_value) if is_trading_day_value is not None else None,
+        "open": "09:00",
+        "close": "15:30",
+        "force_exit": cfg.day_force_exit_at,
+    }
 
 
 def get_or_create_bot() -> HybridTradingBot | None:
@@ -53,6 +112,8 @@ def get_or_create_bot() -> HybridTradingBot | None:
         send_text=_send_text_sync,
         max_retry=cfg.telegram_retry_max,
     )
+    from .bot import HybridTradingBot
+
     _BOT = HybridTradingBot(api, config=cfg, notifier=notifier)
     logger.info("trading engine bot initialized")
     return _BOT
@@ -70,7 +131,7 @@ def close_bot() -> None:
         _BOT = None
 
 
-def _load_api_factory() -> Callable[[], Any] | None:
+def _load_api_factory() -> Callable[[], object] | None:
     global _FACTORY_LOAD_FAILED
 
     factory_path = os.getenv("TRADING_ENGINE_API_FACTORY", "").strip()
