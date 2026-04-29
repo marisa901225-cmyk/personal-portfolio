@@ -94,9 +94,13 @@ backend/scripts/shell/switch_vulkan_model.sh
 # Local Codex working files
 .codex
 .skill-build/
+.agents/
+.claude/
 .subagents/
+skills-lock.json
 subagent-runs/
 .worker2.last.txt
+프롬프트
 
 # Local translation workspace
 translations/
