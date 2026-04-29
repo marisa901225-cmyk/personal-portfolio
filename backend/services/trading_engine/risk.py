@@ -27,6 +27,9 @@ def can_enter(
     config: TradeEngineConfig,
     is_trading_day_value: bool = True,
 ) -> tuple[bool, str]:
+    normalized_entry_type = str(entry_type or "").strip().upper()
+    if normalized_entry_type not in {"S", "T"}:
+        return False, "INVALID_ENTRY_TYPE"
     if not is_trading_day_value:
         return False, "HOLIDAY"
     if regime == "RISK_OFF":
@@ -44,7 +47,7 @@ def can_enter(
     if now_minute >= _hhmm_to_minutes(config.no_new_entry_after):
         return False, "NO_NEW_ENTRY_AFTER"
 
-    if entry_type == "S":
+    if normalized_entry_type == "S":
         if state.swing_entries_today >= config.max_swing_entries_per_day:
             return False, "MAX_SWING_ENTRIES_DAY"
         if state.swing_entries_week >= config.max_swing_entries_per_week:
@@ -63,7 +66,7 @@ def can_enter(
         return False, "MAX_TOTAL_POSITIONS"
 
     if not _is_entry_window_open(
-        entry_type,
+        normalized_entry_type,
         now,
         config,
         day_entries_today=state.day_entries_today,

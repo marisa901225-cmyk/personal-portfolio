@@ -47,9 +47,21 @@ def archive_trading_engine_weekly(
     runlog_path = Path(config.runlog_path)
 
     output_files = _list_output_files(output_dir)
-    output_entries = [_serialize_file(path, logical_path=f"output/{path.name}") for path in output_files]
-    state_entry = _serialize_file(state_path, logical_path="state.json") if state_path.exists() else None
-    runlog_entry = _serialize_file(runlog_path, logical_path="runlog_current.log") if _has_content(runlog_path) else None
+    inline_limit = max(1, int(getattr(config, "archive_inline_max_bytes", 1_000_000)))
+    output_entries = [
+        _serialize_file(path, logical_path=f"output/{path.name}", inline_max_bytes=inline_limit)
+        for path in output_files
+    ]
+    state_entry = (
+        _serialize_file(state_path, logical_path="state.json", inline_max_bytes=inline_limit)
+        if state_path.exists()
+        else None
+    )
+    runlog_entry = (
+        _serialize_file(runlog_path, logical_path="runlog_current.log", inline_max_bytes=inline_limit)
+        if _has_content(runlog_path)
+        else None
+    )
     covered_trade_dates = _covered_trade_dates(output_files)
     week_id = _load_week_id(state_path)
 
@@ -94,10 +106,13 @@ def archive_trading_engine_weekly(
     cleanup_error: str | None = None
     try:
         for path in output_files:
+            entry = next((item for item in output_entries if item.get("name") == path.name), None)
+            if not entry or not entry.get("inline_archived", False):
+                continue
             path.unlink(missing_ok=True)
             removed_output_file_count += 1
 
-        if runlog_entry is not None:
+        if runlog_entry is not None and runlog_entry.get("inline_archived", False):
             runlog_path.parent.mkdir(parents=True, exist_ok=True)
             runlog_path.write_text("", encoding="utf-8")
             runlog_truncated = True
@@ -139,25 +154,33 @@ def _list_output_files(output_dir: Path) -> list[Path]:
     return sorted(path for path in output_dir.iterdir() if path.is_file())
 
 
-def _serialize_file(path: Path, *, logical_path: str) -> dict[str, Any]:
+def _serialize_file(path: Path, *, logical_path: str, inline_max_bytes: int) -> dict[str, Any]:
     raw = path.read_bytes()
+    stat = path.stat()
+    entry = {
+        "name": path.name,
+        "path": logical_path,
+        "size_bytes": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+        "inline_archived": len(raw) <= inline_max_bytes,
+    }
+    if len(raw) > inline_max_bytes:
+        entry["encoding"] = "omitted"
+        entry["omitted_reason"] = f"size_exceeds_inline_limit:{inline_max_bytes}"
+        entry["retained_on_disk"] = True
+        return entry
+
     encoding = "utf-8"
     try:
         content = raw.decode("utf-8")
     except UnicodeDecodeError:
         encoding = "base64"
         content = base64.b64encode(raw).decode("ascii")
-
-    stat = path.stat()
-    return {
-        "name": path.name,
-        "path": logical_path,
-        "encoding": encoding,
-        "size_bytes": len(raw),
-        "sha256": hashlib.sha256(raw).hexdigest(),
-        "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
-        "content": content,
-    }
+    entry["encoding"] = encoding
+    entry["content"] = content
+    entry["retained_on_disk"] = False
+    return entry
 
 
 def _without_content(entry: dict[str, Any]) -> dict[str, Any]:

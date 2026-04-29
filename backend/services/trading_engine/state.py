@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from tempfile import NamedTemporaryFile
@@ -9,11 +10,11 @@ from tempfile import NamedTemporaryFile
 from .types import PendingExitOrder
 
 
-def _today_yyyymmdd() -> str:
+def today_yyyymmdd() -> str:
     return datetime.now().strftime("%Y%m%d")
 
 
-def _week_id(yyyymmdd: str) -> str:
+def week_id(yyyymmdd: str) -> str:
     d = datetime.strptime(yyyymmdd, "%Y%m%d")
     year, week, _ = d.isocalendar()
     return f"{year}-W{week:02d}"
@@ -50,6 +51,7 @@ class TradeState:
     last_panic_date: str | None = None
     pass_reasons_today: dict[str, int] = field(default_factory=dict)
     pending_notifications: list[dict[str, object]] = field(default_factory=list)
+    unknown_broker_positions: dict[str, str] = field(default_factory=dict)
     day_stoploss_fail_counts: dict[str, int] = field(default_factory=dict)
     day_stoploss_excluded_codes: set[str] = field(default_factory=set)
     day_stoploss_codes_today: set[str] = field(default_factory=set)
@@ -58,144 +60,13 @@ class TradeState:
     day_overnight_carry_positions: dict[str, str] = field(default_factory=dict)
     day_entry_windows_used_today: set[int] = field(default_factory=set)
     swing_time_excluded_codes: set[str] = field(default_factory=set)
+    state_recovery_required: bool = False
+    state_recovery_reason: str | None = None
 
 
 def new_state(trade_date: str | None = None) -> TradeState:
-    date = trade_date or _today_yyyymmdd()
-    return TradeState(trade_date=date, week_id=_week_id(date))
-
-
-def load_state(path: str) -> TradeState:
-    if not os.path.exists(path):
-        return new_state()
-
-    with open(path, "r", encoding="utf-8") as f:
-        raw = json.load(f)
-
-    st = TradeState(
-        trade_date=raw.get("trade_date") or _today_yyyymmdd(),
-        week_id=raw.get("week_id") or _week_id(raw.get("trade_date") or _today_yyyymmdd()),
-        swing_entries_today=int(raw.get("swing_entries_today", 0)),
-        swing_entries_week=int(raw.get("swing_entries_week", 0)),
-        day_entries_today=int(raw.get("day_entries_today", 0)),
-        realized_pnl_today=float(raw.get("realized_pnl_today", 0.0)),
-        realized_pnl_total=float(raw.get("realized_pnl_total", 0.0)),
-        consecutive_losses_today=int(raw.get("consecutive_losses_today", 0)),
-        blacklist_today=set(raw.get("blacklist_today", [])),
-        open_positions=_parse_open_positions(raw.get("open_positions", {})),
-        pending_entry_orders=_parse_pending_entry_orders(raw.get("pending_entry_orders", {})),
-        pending_exit_orders=_parse_pending_exit_orders(raw.get("pending_exit_orders", {})),
-        last_run_timestamp=raw.get("last_run_timestamp"),
-        last_bar_date_seen=raw.get("last_bar_date_seen"),
-        last_panic_date=raw.get("last_panic_date"),
-        pass_reasons_today=dict(raw.get("pass_reasons_today", {})),
-        pending_notifications=list(raw.get("pending_notifications", [])),
-        day_stoploss_fail_counts=_parse_day_stoploss_fail_counts(
-            raw.get("day_stoploss_fail_counts", {})
-        ),
-        day_stoploss_excluded_codes=_parse_day_stoploss_excluded_codes(
-            raw.get("day_stoploss_excluded_codes", [])
-        ),
-        day_stoploss_codes_today=_parse_day_stoploss_excluded_codes(
-            raw.get("day_stoploss_codes_today", [])
-        ),
-        day_stop_llm_reviewed_positions=_parse_day_stoploss_excluded_codes(
-            raw.get("day_stop_llm_reviewed_positions", [])
-        ),
-        day_overnight_carry_reviewed_positions=_parse_day_stoploss_excluded_codes(
-            raw.get("day_overnight_carry_reviewed_positions", [])
-        ),
-        day_overnight_carry_positions=_parse_string_map(
-            raw.get("day_overnight_carry_positions", {})
-        ),
-        day_entry_windows_used_today=_parse_int_set(
-            raw.get("day_entry_windows_used_today", [])
-        ),
-        swing_time_excluded_codes=_parse_day_stoploss_excluded_codes(
-            raw.get("swing_time_excluded_codes", [])
-        ),
-    )
-    return st
-
-
-def save_state(path: str, state: TradeState) -> None:
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    payload = asdict(state)
-    payload["blacklist_today"] = sorted(state.blacklist_today)
-    payload["open_positions"] = {
-        code: asdict(pos)
-        for code, pos in state.open_positions.items()
-    }
-    payload["pending_entry_orders"] = {
-        code: strategy_type
-        for code, strategy_type in sorted(state.pending_entry_orders.items())
-        if str(code).strip() and str(strategy_type).strip() in {"S", "T", "P"}
-    }
-    payload["pending_exit_orders"] = {
-        code: dict(order)
-        for code, order in sorted(state.pending_exit_orders.items())
-        if str(code).strip() and isinstance(order, dict)
-    }
-    payload["day_stoploss_fail_counts"] = {
-        code: int(count)
-        for code, count in sorted(state.day_stoploss_fail_counts.items())
-        if str(code).strip() and int(count) > 0
-    }
-    payload["day_stoploss_excluded_codes"] = sorted(state.day_stoploss_excluded_codes)
-    payload["day_stoploss_codes_today"] = sorted(state.day_stoploss_codes_today)
-    payload["day_stop_llm_reviewed_positions"] = sorted(state.day_stop_llm_reviewed_positions)
-    payload["day_overnight_carry_reviewed_positions"] = sorted(
-        state.day_overnight_carry_reviewed_positions
-    )
-    payload["day_overnight_carry_positions"] = {
-        key: value
-        for key, value in sorted(state.day_overnight_carry_positions.items())
-        if str(key).strip() and str(value).strip()
-    }
-    payload["day_entry_windows_used_today"] = sorted(
-        int(idx) for idx in state.day_entry_windows_used_today
-    )
-    payload["swing_time_excluded_codes"] = sorted(state.swing_time_excluded_codes)
-
-    original_mode: int | None = None
-    if os.path.exists(path):
-        original_mode = os.stat(path).st_mode & 0o777
-
-    with NamedTemporaryFile("w", encoding="utf-8", dir=os.path.dirname(path) or ".", delete=False) as tmp:
-        json.dump(payload, tmp, ensure_ascii=False, indent=2)
-        tmp.write("\n")
-        tmp_path = tmp.name
-
-    if original_mode is not None:
-        os.chmod(tmp_path, original_mode)
-    os.replace(tmp_path, path)
-
-
-def rollover_state_for_date(state: TradeState, today: str) -> TradeState:
-    if state.trade_date == today:
-        return state
-
-    state.trade_date = today
-    state.swing_entries_today = 0
-    state.day_entries_today = 0
-    state.realized_pnl_today = 0.0
-    state.consecutive_losses_today = 0
-    state.blacklist_today.clear()
-    state.pass_reasons_today.clear()
-    state.pending_entry_orders.clear()
-    state.pending_exit_orders.clear()
-    state.day_stoploss_codes_today.clear()
-    state.day_stop_llm_reviewed_positions.clear()
-    state.day_overnight_carry_reviewed_positions.clear()
-    state.day_entry_windows_used_today.clear()
-    state.swing_time_excluded_codes.clear()
-
-    new_week_id = _week_id(today)
-    if new_week_id != state.week_id:
-        state.week_id = new_week_id
-        state.swing_entries_week = 0
-
-    return state
+    date = trade_date or today_yyyymmdd()
+    return TradeState(trade_date=date, week_id=week_id(date))
 
 
 def add_pass_reason(state: TradeState, reason: str) -> None:
@@ -285,7 +156,169 @@ def get_swing_time_excluded_codes(state: TradeState) -> set[str]:
     return {str(code) for code in state.swing_time_excluded_codes}
 
 
-def _parse_open_positions(raw: object) -> dict[str, PositionState]:
+def rollover_state_for_date(state: TradeState, today: str) -> TradeState:
+    if state.trade_date == today:
+        return state
+
+    state.trade_date = today
+    state.swing_entries_today = 0
+    state.day_entries_today = 0
+    state.realized_pnl_today = 0.0
+    state.consecutive_losses_today = 0
+    state.blacklist_today.clear()
+    state.pass_reasons_today.clear()
+    state.pending_entry_orders.clear()
+    state.pending_exit_orders.clear()
+    state.day_stoploss_codes_today.clear()
+    state.day_stop_llm_reviewed_positions.clear()
+    state.day_overnight_carry_reviewed_positions.clear()
+    state.day_entry_windows_used_today.clear()
+    state.swing_time_excluded_codes.clear()
+    open_day_trade_keys = {
+        f"{code}:{pos.entry_time}"
+        for code, pos in state.open_positions.items()
+        if pos.type == "T" and str(pos.entry_time).strip()
+    }
+    state.day_overnight_carry_positions = {
+        key: value
+        for key, value in state.day_overnight_carry_positions.items()
+        if key in open_day_trade_keys
+    }
+
+    new_week = week_id(today)
+    if new_week != state.week_id:
+        state.week_id = new_week
+        state.swing_entries_week = 0
+
+    return state
+
+
+def load_state(path: str) -> TradeState:
+    if not os.path.exists(path):
+        return new_state()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+
+        return TradeState(
+            trade_date=raw.get("trade_date") or today_yyyymmdd(),
+            week_id=raw.get("week_id") or week_id(raw.get("trade_date") or today_yyyymmdd()),
+            swing_entries_today=int(raw.get("swing_entries_today", 0)),
+            swing_entries_week=int(raw.get("swing_entries_week", 0)),
+            day_entries_today=int(raw.get("day_entries_today", 0)),
+            realized_pnl_today=float(raw.get("realized_pnl_today", 0.0)),
+            realized_pnl_total=float(raw.get("realized_pnl_total", 0.0)),
+            consecutive_losses_today=int(raw.get("consecutive_losses_today", 0)),
+            blacklist_today=set(raw.get("blacklist_today", [])),
+            open_positions=parse_open_positions(raw.get("open_positions", {})),
+            pending_entry_orders=parse_pending_entry_orders(raw.get("pending_entry_orders", {})),
+            pending_exit_orders=parse_pending_exit_orders(raw.get("pending_exit_orders", {})),
+            last_run_timestamp=raw.get("last_run_timestamp"),
+            last_bar_date_seen=raw.get("last_bar_date_seen"),
+            last_panic_date=raw.get("last_panic_date"),
+            pass_reasons_today=dict(raw.get("pass_reasons_today", {})),
+            pending_notifications=list(raw.get("pending_notifications", [])),
+            unknown_broker_positions=parse_string_map(raw.get("unknown_broker_positions", {})),
+            day_stoploss_fail_counts=parse_day_stoploss_fail_counts(
+                raw.get("day_stoploss_fail_counts", {})
+            ),
+            day_stoploss_excluded_codes=parse_day_stoploss_excluded_codes(
+                raw.get("day_stoploss_excluded_codes", [])
+            ),
+            day_stoploss_codes_today=parse_day_stoploss_excluded_codes(
+                raw.get("day_stoploss_codes_today", [])
+            ),
+            day_stop_llm_reviewed_positions=parse_day_stoploss_excluded_codes(
+                raw.get("day_stop_llm_reviewed_positions", [])
+            ),
+            day_overnight_carry_reviewed_positions=parse_day_stoploss_excluded_codes(
+                raw.get("day_overnight_carry_reviewed_positions", [])
+            ),
+            day_overnight_carry_positions=parse_string_map(
+                raw.get("day_overnight_carry_positions", {})
+            ),
+            day_entry_windows_used_today=parse_int_set(raw.get("day_entry_windows_used_today", [])),
+            swing_time_excluded_codes=parse_day_stoploss_excluded_codes(
+                raw.get("swing_time_excluded_codes", [])
+            ),
+            state_recovery_required=bool(raw.get("state_recovery_required", False)),
+            state_recovery_reason=(
+                str(raw.get("state_recovery_reason")).strip()
+                if raw.get("state_recovery_reason") is not None
+                else None
+            ),
+        )
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        backup_corrupt_state_file(path)
+        recovered = new_state()
+        recovered.state_recovery_required = True
+        recovered.state_recovery_reason = "STATE_LOAD_CORRUPT"
+        return recovered
+
+
+def save_state(path: str, state: TradeState) -> None:
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    payload = asdict(state)
+    payload["blacklist_today"] = sorted(state.blacklist_today)
+    payload["open_positions"] = {
+        code: asdict(pos)
+        for code, pos in state.open_positions.items()
+    }
+    payload["pending_entry_orders"] = {
+        code: strategy_type
+        for code, strategy_type in sorted(state.pending_entry_orders.items())
+        if str(code).strip() and str(strategy_type).strip() in {"S", "T", "P"}
+    }
+    payload["pending_exit_orders"] = {
+        code: {
+            key: value
+            for key, value in dict(order).items()
+            if value is not None
+        }
+        for code, order in sorted(state.pending_exit_orders.items())
+        if str(code).strip() and isinstance(order, dict)
+    }
+    payload["day_stoploss_fail_counts"] = {
+        code: int(count)
+        for code, count in sorted(state.day_stoploss_fail_counts.items())
+        if str(code).strip() and int(count) > 0
+    }
+    payload["day_stoploss_excluded_codes"] = sorted(state.day_stoploss_excluded_codes)
+    payload["day_stoploss_codes_today"] = sorted(state.day_stoploss_codes_today)
+    payload["unknown_broker_positions"] = {
+        key: value
+        for key, value in sorted(state.unknown_broker_positions.items())
+        if str(key).strip() and str(value).strip()
+    }
+    payload["day_stop_llm_reviewed_positions"] = sorted(state.day_stop_llm_reviewed_positions)
+    payload["day_overnight_carry_reviewed_positions"] = sorted(
+        state.day_overnight_carry_reviewed_positions
+    )
+    payload["day_overnight_carry_positions"] = {
+        key: value
+        for key, value in sorted(state.day_overnight_carry_positions.items())
+        if str(key).strip() and str(value).strip()
+    }
+    payload["day_entry_windows_used_today"] = sorted(
+        int(idx) for idx in state.day_entry_windows_used_today
+    )
+    payload["swing_time_excluded_codes"] = sorted(state.swing_time_excluded_codes)
+
+    original_mode: int | None = None
+    if os.path.exists(path):
+        original_mode = os.stat(path).st_mode & 0o777
+
+    with NamedTemporaryFile("w", encoding="utf-8", dir=os.path.dirname(path) or ".", delete=False) as tmp:
+        json.dump(payload, tmp, ensure_ascii=False, indent=2)
+        tmp.write("\n")
+        tmp_path = tmp.name
+
+    if original_mode is not None:
+        os.chmod(tmp_path, original_mode)
+    os.replace(tmp_path, path)
+
+
+def parse_open_positions(raw: object) -> dict[str, PositionState]:
     if not isinstance(raw, dict):
         return {}
 
@@ -293,20 +326,23 @@ def _parse_open_positions(raw: object) -> dict[str, PositionState]:
     for code, item in (raw or {}).items():
         if not isinstance(item, dict):
             continue
-        out[str(code)] = PositionState(
-            type=str(item.get("type", "S")),
-            entry_time=str(item.get("entry_time", "")),
-            entry_price=float(item.get("entry_price", 0.0)),
-            qty=int(item.get("qty", 0)),
-            highest_price=float(item["highest_price"]) if item.get("highest_price") is not None else None,
-            entry_date=str(item.get("entry_date", "")),
-            locked_profit_pct=float(item["locked_profit_pct"]) if item.get("locked_profit_pct") is not None else None,
-            bars_held=int(item.get("bars_held", 0)),
-        )
+        try:
+            out[str(code)] = PositionState(
+                type=str(item.get("type", "S")),
+                entry_time=str(item.get("entry_time", "")),
+                entry_price=float(item.get("entry_price", 0.0)),
+                qty=int(item.get("qty", 0)),
+                highest_price=float(item["highest_price"]) if item.get("highest_price") is not None else None,
+                entry_date=str(item.get("entry_date", "")),
+                locked_profit_pct=float(item["locked_profit_pct"]) if item.get("locked_profit_pct") is not None else None,
+                bars_held=int(item.get("bars_held", 0)),
+            )
+        except (TypeError, ValueError):
+            continue
     return out
 
 
-def _parse_pending_entry_orders(raw: object) -> dict[str, str]:
+def parse_pending_entry_orders(raw: object) -> dict[str, str]:
     if not isinstance(raw, dict):
         return {}
 
@@ -320,7 +356,7 @@ def _parse_pending_entry_orders(raw: object) -> dict[str, str]:
     return out
 
 
-def _parse_pending_exit_orders(raw: object) -> dict[str, PendingExitOrder]:
+def parse_pending_exit_orders(raw: object) -> dict[str, PendingExitOrder]:
     if not isinstance(raw, dict):
         return {}
 
@@ -330,7 +366,7 @@ def _parse_pending_exit_orders(raw: object) -> dict[str, PendingExitOrder]:
         if not normalized_code or not isinstance(item, dict):
             continue
         order: PendingExitOrder = {}
-        for key in ("strategy_type", "reason", "order_id", "qty", "order_time"):
+        for key in ("strategy_type", "reason", "order_id", "qty", "order_time", "last_stale_notice_date"):
             value = item.get(key)
             if value is not None:
                 order[key] = value
@@ -339,7 +375,7 @@ def _parse_pending_exit_orders(raw: object) -> dict[str, PendingExitOrder]:
     return out
 
 
-def _parse_string_map(raw: object) -> dict[str, str]:
+def parse_string_map(raw: object) -> dict[str, str]:
     if not isinstance(raw, dict):
         return {}
 
@@ -353,7 +389,7 @@ def _parse_string_map(raw: object) -> dict[str, str]:
     return out
 
 
-def _parse_day_stoploss_excluded_codes(raw: object) -> set[str]:
+def parse_day_stoploss_excluded_codes(raw: object) -> set[str]:
     if isinstance(raw, dict):
         items = raw.keys()
     elif isinstance(raw, (list, tuple, set)):
@@ -368,7 +404,7 @@ def _parse_day_stoploss_excluded_codes(raw: object) -> set[str]:
     }
 
 
-def _parse_day_stoploss_fail_counts(raw: object) -> dict[str, int]:
+def parse_day_stoploss_fail_counts(raw: object) -> dict[str, int]:
     if not isinstance(raw, dict):
         return {}
 
@@ -386,7 +422,7 @@ def _parse_day_stoploss_fail_counts(raw: object) -> dict[str, int]:
     return out
 
 
-def _parse_int_set(raw: object) -> set[int]:
+def parse_int_set(raw: object) -> set[int]:
     if isinstance(raw, dict):
         items = raw.keys()
     elif isinstance(raw, (list, tuple, set)):
@@ -401,3 +437,30 @@ def _parse_int_set(raw: object) -> set[int]:
         except (TypeError, ValueError):
             continue
     return out
+
+
+def backup_corrupt_state_file(path: str) -> None:
+    try:
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        shutil.move(path, f"{path}.corrupt.{timestamp}")
+    except OSError:
+        return
+
+__all__ = [
+    "PositionState",
+    "TradeState",
+    "add_pass_reason",
+    "get_day_reentry_blocked_codes",
+    "get_day_stoploss_codes_today",
+    "get_day_stoploss_excluded_codes",
+    "get_day_stoploss_fail_count",
+    "get_swing_time_excluded_codes",
+    "load_state",
+    "mark_day_stoploss_excluded",
+    "mark_day_stoploss_today",
+    "mark_swing_time_excluded",
+    "new_state",
+    "record_day_stoploss_failure",
+    "rollover_state_for_date",
+    "save_state",
+]

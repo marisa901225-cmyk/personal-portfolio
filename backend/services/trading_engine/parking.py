@@ -43,6 +43,8 @@ def exit_risk_off_parking_positions(
     notify_text: Callable[[str], None],
 ) -> None:
     for code in list(parking_position_codes(state)):
+        if code in state.pending_exit_orders:
+            continue
         pos = state.open_positions.get(code)
         if not pos:
             continue
@@ -54,6 +56,16 @@ def exit_risk_off_parking_positions(
             code=code,
             reason=reason,
             now=now,
+            on_order_accepted=lambda order, pos=pos: state.pending_exit_orders.__setitem__(
+                code,
+                {
+                    "strategy_type": pos.type,
+                    "reason": reason,
+                    "order_id": str(order.get("order_id") or "").strip(),
+                    "qty": int(order.get("qty") or 0),
+                    "order_time": str(order.get("order_time") or "").strip(),
+                },
+            ),
         )
         if not result:
             continue
@@ -133,6 +145,8 @@ def manage_risk_off_parking(
             return
 
     if not can_enter_risk_off_parking(config, now):
+        return
+    if existing_parking is not None or parking_code in state.pending_entry_orders:
         return
     if existing_parking is None and len(state.open_positions) >= config.max_total_positions:
         return

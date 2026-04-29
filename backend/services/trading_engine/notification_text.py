@@ -25,6 +25,8 @@ _REASON_LABELS = {
     "BROKER_POSITION_FOUND_DURING_POLLING_SYNC": "브로커 포지션을 폴링 중 발견",
     "BROKER_POSITION_FOUND_AFTER_ENTRY_ATTEMPT": "진입 재확인 중 브로커 포지션 확인",
     "BROKER_POSITION_MISMATCH": "브로커 수량/평단 불일치",
+    "BROKER_POSITION_QTY_DECREASED": "브로커 수량 감소 동기화",
+    "BROKER_POSITION_QTY_INCREASED": "브로커 수량 증가 동기화",
     "BROKER_SYNC": "브로커 동기화",
     "DAILY_MAX_LOSS": "일일 손실 한도 도달",
     "DAY_AFTERNOON_LOSS_LIMIT": "오후 단타 손실 제한",
@@ -62,6 +64,8 @@ _REASON_LABELS = {
     "STATE_RECONCILE_UPDATE": "상태 동기화 보정",
     "SWING_ENTRY_FAILED": "스윙 진입 실패",
     "SWING_LLM_VETO": "스윙 LLM 검토 보류",
+    "STATE_LOAD_CORRUPT": "상태 파일 손상 감지",
+    "STATE_RECOVERY_REQUIRED": "상태 복구 점검 필요",
     "TIME": "보유기간 만료",
     "TIGHT_INTRADAY_BASE": "강한 눌림목",
     "TP": "익절",
@@ -218,6 +222,10 @@ def format_state_sync_drop_message(
     if exit_order_id:
         parts.append(f"주문번호={exit_order_id}")
     return " ".join(parts)
+
+
+def format_unknown_broker_position_message(*, code: str, qty: int) -> str:
+    return f"[상태동기화][외부포지션감지] {code} 수량={qty} 힌트없음 수동확인필요"
 
 
 def format_candidate_window_title(strategy_label_text: str | None, regime: str) -> str:

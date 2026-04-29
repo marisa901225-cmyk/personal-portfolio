@@ -1,28 +1,35 @@
 from __future__ import annotations
 
 import logging
+
 import pandas as pd
 
 from .config import TradeEngineConfig
-from .industry_trend import (
-    clean_text,
-    enrich_industry_trend_fields,
-    industry_columns,
-    resolve_sector_bucket_name,
-)
+from .industry_trend import enrich_industry_trend_fields, industry_columns
 from .industry_master import load_stock_industry_db_map
 from .interfaces import TradingAPI
-from .news_sentiment import NewsSentimentSignal, _load_sector_keywords
+from .news_sentiment import NewsSentimentSignal
+from .screener_collectors import (
+    _combine_popular_rows,
+    _inject_theme_candidates,
+    _popular_sector_keywords,
+    _rank_map,
+    _select_legacy_popular_rows,
+    _select_sector_bucket_rows,
+)
+from .screener_enrichment import (
+    _enrich_model_quote_fields,
+    _enrich_popular_industry_trend_fields,
+    _enrich_popular_quote_fields,
+)
 from .stock_master import load_stock_master_map, load_swing_universe_candidates
 from .utils import (
     compute_avg_value,
     compute_sma,
     is_broad_market_etf,
-    is_live_status_disqualified,
     is_etf_row,
     is_excluded_etf,
-    match_name_to_sectors,
-    normalize_code,
+    is_live_status_disqualified,
     parse_numeric,
     standardize_rank_df,
 )
@@ -31,26 +38,6 @@ logger = logging.getLogger(__name__)
 
 _MODEL_RELAXED_MIN_BARS = 60
 _MODEL_RELAXED_MAX_PREMIUM_TO_MA20 = 0.15
-
-
-def _rank_map(df: pd.DataFrame, rank_col: str) -> dict[str, int]:
-    if df.empty or rank_col not in df.columns:
-        return {}
-    out: dict[str, int] = {}
-    for _, row in df.iterrows():
-        code = normalize_code(row.get("code"))
-        rank = parse_numeric(row.get(rank_col))
-        if code and rank is not None:
-            out[code] = int(rank)
-    return out
-
-
-def _is_allowed_by_etf_policy(row: dict[str, object], include_etf: bool) -> bool:
-    if not include_etf and is_etf_row(row):
-        return False
-    if include_etf and is_etf_row(row) and is_excluded_etf(row):
-        return False
-    return True
 
 
 def popular_screener(
@@ -196,7 +183,7 @@ def model_screener(
     include_etf: bool = False,
     config: TradeEngineConfig | None = None,
 ) -> pd.DataFrame:
-    del include_etf  # model screener remains stock-centric by policy.
+    del include_etf
 
     cfg = config or TradeEngineConfig()
     universe_rows = load_swing_universe_candidates(cfg)
@@ -396,6 +383,47 @@ def etf_swing_screener(
     return _ensure_etf_columns(out)
 
 
+def _is_allowed_by_etf_policy(row: dict[str, object], include_etf: bool) -> bool:
+    if not include_etf and is_etf_row(row):
+        return False
+    if include_etf and is_etf_row(row) and is_excluded_etf(row):
+        return False
+    return True
+
+
+def _apply_live_status_filter(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+    working = df.copy()
+    keep_mask = ~working.apply(is_live_status_disqualified, axis=1)
+    return working.loc[keep_mask].reset_index(drop=True)
+
+
+def _apply_day_stock_quality_floor(
+    df: pd.DataFrame,
+    config: TradeEngineConfig,
+) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+
+    working = df.copy()
+    if "is_etf" not in working.columns:
+        working["is_etf"] = False
+    if "mcap" not in working.columns:
+        working["mcap"] = None
+
+    stock_mask = ~working["is_etf"].fillna(False).map(bool)
+    if not stock_mask.any():
+        return working.reset_index(drop=True)
+
+    avg_value_ok = working["avg_value_5d"].fillna(0) >= float(config.day_stock_min_avg_value_5d)
+    mcap_series = pd.to_numeric(working["mcap"], errors="coerce").fillna(0)
+    stock_has_mcap = bool((stock_mask & mcap_series.gt(0)).any())
+    mcap_ok = mcap_series >= float(config.day_stock_min_mcap) if stock_has_mcap else True
+    keep_mask = (~stock_mask) | (avg_value_ok & mcap_ok)
+    return working.loc[keep_mask].reset_index(drop=True)
+
+
 def _ensure_popular_columns(df: pd.DataFrame) -> pd.DataFrame:
     cols = [
         "code",
@@ -436,317 +464,6 @@ def _ensure_popular_columns(df: pd.DataFrame) -> pd.DataFrame:
         if col not in df.columns:
             df[col] = None
     return df[cols].reset_index(drop=True)
-
-def _enrich_popular_industry_trend_fields(
-    api: TradingAPI,
-    df: pd.DataFrame,
-    *,
-    asof: str,
-    config: TradeEngineConfig,
-) -> pd.DataFrame:
-    return enrich_industry_trend_fields(
-        api,
-        df,
-        asof=asof,
-        lookback_bars=config.day_industry_lookback_bars,
-        log_prefix="popular_screener",
-    )
-
-
-def _enrich_quote_fields(
-    api: TradingAPI,
-    df: pd.DataFrame,
-) -> pd.DataFrame:
-    if df is None or df.empty:
-        return df
-
-    working = df.copy()
-    if "mcap" not in working.columns:
-        working["mcap"] = None
-    if "market_warning_code" not in working.columns:
-        working["market_warning_code"] = None
-    if "management_issue_code" not in working.columns:
-        working["management_issue_code"] = None
-
-    for idx, row in working.iterrows():
-        code = normalize_code(row.get("code"))
-        if not code:
-            continue
-        try:
-            quote = api.quote(code)
-        except Exception as exc:
-            logger.warning("popular_screener quote failed code=%s error=%s", code, exc)
-            continue
-        if not bool(row.get("is_etf", False)):
-            current_mcap = parse_numeric(row.get("mcap"))
-            quote_mcap = parse_numeric(quote.get("market_cap"))
-            if (current_mcap is None or current_mcap <= 0) and quote_mcap is not None and quote_mcap > 0:
-                working.at[idx, "mcap"] = float(quote_mcap)
-        quote_warning = str(quote.get("market_warning_code") or "").strip()
-        if quote_warning:
-            working.at[idx, "market_warning_code"] = quote_warning
-        quote_management = str(quote.get("management_issue_code") or "").strip()
-        if quote_management:
-            working.at[idx, "management_issue_code"] = quote_management
-
-    return working
-
-
-def _enrich_popular_quote_fields(
-    api: TradingAPI,
-    df: pd.DataFrame,
-) -> pd.DataFrame:
-    return _enrich_quote_fields(api, df)
-
-
-def _enrich_model_quote_fields(
-    api: TradingAPI,
-    df: pd.DataFrame,
-) -> pd.DataFrame:
-    return _enrich_quote_fields(api, df)
-
-
-def _apply_live_status_filter(df: pd.DataFrame) -> pd.DataFrame:
-    if df is None or df.empty:
-        return df
-    working = df.copy()
-    keep_mask = ~working.apply(is_live_status_disqualified, axis=1)
-    return working.loc[keep_mask].reset_index(drop=True)
-
-
-def _apply_day_stock_quality_floor(
-    df: pd.DataFrame,
-    config: TradeEngineConfig,
-) -> pd.DataFrame:
-    if df is None or df.empty:
-        return df
-
-    working = df.copy()
-    if "is_etf" not in working.columns:
-        working["is_etf"] = False
-    if "mcap" not in working.columns:
-        working["mcap"] = None
-
-    stock_mask = ~working["is_etf"].fillna(False).map(bool)
-    if not stock_mask.any():
-        return working.reset_index(drop=True)
-
-    avg_value_ok = working["avg_value_5d"].fillna(0) >= float(config.day_stock_min_avg_value_5d)
-    mcap_series = pd.to_numeric(working["mcap"], errors="coerce").fillna(0)
-    stock_has_mcap = bool((stock_mask & mcap_series.gt(0)).any())
-    mcap_ok = mcap_series >= float(config.day_stock_min_mcap) if stock_has_mcap else True
-    keep_mask = (~stock_mask) | (avg_value_ok & mcap_ok)
-    return working.loc[keep_mask].reset_index(drop=True)
-
-
-def _popular_sector_keywords(
-    config: TradeEngineConfig,
-    news_signal: NewsSentimentSignal | None,
-) -> dict[str, tuple[str, ...]]:
-    if news_signal is not None and news_signal.sector_keywords:
-        return news_signal.sector_keywords
-    return _load_sector_keywords(config.news_sector_queries_path)
-
-
-def _select_sector_bucket_rows(
-    liquidity_df: pd.DataFrame,
-    *,
-    sector_keywords: dict[str, tuple[str, ...]],
-    per_sector_top_n: int,
-    news_signal: NewsSentimentSignal | None = None,
-) -> pd.DataFrame:
-    if liquidity_df is None or liquidity_df.empty or per_sector_top_n <= 0:
-        return pd.DataFrame()
-
-    working = liquidity_df.copy()
-    working["_bucket_key"] = working.apply(
-        lambda row: resolve_sector_bucket_name(
-            row,
-            sector_keywords=sector_keywords,
-            news_signal=news_signal,
-        ),
-        axis=1,
-    )
-    working = working[working["_bucket_key"].astype(str).str.strip() != ""].copy()
-    if working.empty:
-        return pd.DataFrame()
-
-    selected_rows: list[dict[str, object]] = []
-    seen_codes: set[str] = set()
-    for bucket_name, sector_rows in working.groupby("_bucket_key", sort=False):
-        if sector_rows.empty:
-            continue
-        sector_rows = sector_rows.sort_values(
-            by=["value_rank", "avg_value_5d", "change_pct", "volume_rank", "name"],
-            ascending=[True, False, False, True, True],
-            na_position="last",
-        )
-        taken = 0
-        for _, row in sector_rows.iterrows():
-            code = str(row.get("code") or "")
-            if not code or code in seen_codes:
-                continue
-            payload = row.to_dict()
-            payload["sector_bucket_selected"] = True
-            payload["legacy_top10_selected"] = bool(payload.get("legacy_top10_selected", False))
-            payload["industry_bucket_name"] = clean_text(payload.get("industry_bucket_name")) or clean_text(bucket_name)
-            selected_rows.append(payload)
-            seen_codes.add(code)
-            taken += 1
-            if taken >= int(per_sector_top_n):
-                break
-
-    if not selected_rows:
-        return pd.DataFrame()
-    return pd.DataFrame(selected_rows)
-
-
-def _select_legacy_popular_rows(
-    liquidity_df: pd.DataFrame,
-    *,
-    volume_df: pd.DataFrame,
-    top_n: int,
-) -> pd.DataFrame:
-    if liquidity_df is None or liquidity_df.empty or top_n <= 0:
-        return pd.DataFrame()
-
-    top_a = liquidity_df.sort_values(
-        by=["value_rank", "avg_value_5d", "change_pct", "volume_rank", "name"],
-        ascending=[True, False, False, True, True],
-        na_position="last",
-    ).head(top_n).copy()
-    top_a["value_rank_5d_top10"] = range(1, len(top_a) + 1)
-    top_a["legacy_top10_selected"] = True
-    top_a["sector_bucket_selected"] = False
-
-    b_codes = set(volume_df["code"].astype(str)) if volume_df is not None and not volume_df.empty else set()
-    inter = top_a[top_a["code"].astype(str).isin(b_codes)].copy()
-    if not inter.empty:
-        return inter
-
-    fallback = liquidity_df[liquidity_df["code"].astype(str).isin(b_codes)].sort_values(
-        by=["value_rank", "avg_value_5d", "change_pct", "volume_rank", "name"],
-        ascending=[True, False, False, True, True],
-        na_position="last",
-    ).head(top_n).copy()
-    fallback["value_rank_5d_top10"] = range(1, len(fallback) + 1)
-    fallback["fallback_selected"] = True
-    fallback["legacy_top10_selected"] = True
-    fallback["sector_bucket_selected"] = False
-    return fallback
-
-
-def _combine_popular_rows(
-    sector_bucket: pd.DataFrame,
-    legacy_top: pd.DataFrame,
-) -> pd.DataFrame:
-    combined_rows: list[dict[str, object]] = []
-    by_code: dict[str, dict[str, object]] = {}
-
-    for block in (sector_bucket, legacy_top):
-        if block is None or block.empty:
-            continue
-        for _, row in block.iterrows():
-            payload = row.to_dict()
-            code = str(payload.get("code") or "")
-            if not code:
-                continue
-            if code not in by_code:
-                by_code[code] = payload
-                combined_rows.append(by_code[code])
-                continue
-            by_code[code]["fallback_selected"] = bool(by_code[code].get("fallback_selected", False)) or bool(
-                payload.get("fallback_selected", False)
-            )
-            by_code[code]["sector_bucket_selected"] = bool(by_code[code].get("sector_bucket_selected", False)) or bool(
-                payload.get("sector_bucket_selected", False)
-            )
-            by_code[code]["legacy_top10_selected"] = bool(by_code[code].get("legacy_top10_selected", False)) or bool(
-                payload.get("legacy_top10_selected", False)
-            )
-            if not by_code[code].get("value_rank_5d_top10") and payload.get("value_rank_5d_top10"):
-                by_code[code]["value_rank_5d_top10"] = payload.get("value_rank_5d_top10")
-
-    if not combined_rows:
-        return pd.DataFrame()
-    out = pd.DataFrame(combined_rows)
-    return out.sort_values(
-        by=["legacy_top10_selected", "value_rank", "avg_value_5d", "change_pct"],
-        ascending=[False, True, False, False],
-        na_position="last",
-    ).reset_index(drop=True)
-
-def _inject_theme_candidates(
-    base: pd.DataFrame,
-    liquidity_df: pd.DataFrame,
-    news_signal: NewsSentimentSignal | None,
-    config: TradeEngineConfig,
-) -> pd.DataFrame:
-    if (
-        news_signal is None
-        or base is None
-        or liquidity_df is None
-        or liquidity_df.empty
-        or not bool(config.day_theme_candidate_injection_enabled)
-    ):
-        return base
-
-    max_injections = max(0, int(config.day_theme_candidate_max_injections))
-    if max_injections <= 0:
-        return base
-
-    min_sector_score = float(config.day_theme_candidate_min_sector_score)
-    strong_sectors = [
-        sector
-        for sector, score in sorted(
-            news_signal.sector_scores.items(),
-            key=lambda item: float(item[1]),
-            reverse=True,
-        )
-        if float(score) >= min_sector_score
-    ]
-    if not strong_sectors:
-        return base
-
-    candidates = liquidity_df.copy()
-    candidates = candidates[
-        candidates["avg_value_5d"].fillna(0) >= float(config.day_theme_candidate_min_avg_value_5d)
-    ]
-    if candidates.empty:
-        return base
-
-    candidates["_matched_sectors"] = candidates["name"].fillna("").map(
-        lambda name: match_name_to_sectors(str(name), news_signal.sector_keywords)
-    )
-
-    seen_codes = set(base["code"].astype(str)) if not base.empty and "code" in base.columns else set()
-    injected_rows: list[dict[str, object]] = []
-    for sector in strong_sectors:
-        sector_rows = candidates[
-            ~candidates["code"].astype(str).isin(seen_codes)
-            & candidates["_matched_sectors"].map(lambda matched: sector in matched)
-        ].copy()
-        if sector_rows.empty:
-            continue
-
-        sector_rows = sector_rows.sort_values(
-            by=["avg_value_5d", "change_pct", "volume_rank"],
-            ascending=[False, False, True],
-            na_position="last",
-        )
-        top_row = sector_rows.iloc[0].to_dict()
-        top_row["theme_injected"] = True
-        top_row["theme_sector"] = sector
-        injected_rows.append(top_row)
-        seen_codes.add(str(top_row.get("code", "")))
-        if len(injected_rows) >= max_injections:
-            break
-
-    if not injected_rows:
-        return base
-
-    injected_df = pd.DataFrame(injected_rows)
-    return pd.concat([base, injected_df], ignore_index=True, sort=False)
 
 
 def _ensure_model_columns(df: pd.DataFrame) -> pd.DataFrame:

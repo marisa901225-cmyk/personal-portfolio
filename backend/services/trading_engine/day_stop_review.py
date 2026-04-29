@@ -10,7 +10,7 @@ from typing import Literal
 from ..llm.service import LLMService
 from .config import TradeEngineConfig
 from .state import PositionState
-from .utils import parse_hhmm, parse_numeric
+from .utils import parse_numeric
 
 logger = logging.getLogger(__name__)
 
@@ -113,8 +113,6 @@ def is_day_overnight_carry_candidate(
     if already_carried or position.type != "T":
         return False
     if str(position.entry_date or "").strip() != str(trade_date or "").strip():
-        return False
-    if not _is_last_day_entry_window(position.entry_time, config):
         return False
     if position.entry_price <= 0:
         return False
@@ -348,12 +346,13 @@ def _build_overnight_carry_messages(
     }
     system = (
         "You are a Korean intraday trading risk guard. Decide whether the last day-trade entry "
-        "may skip today's forced close exactly once and be monitored tomorrow with the same "
-        "day-trade stop, take-profit, and profit-lock rules. Choose CARRY only for constructive "
-        "late-day setups; if uncertain, choose EXIT."
+        "still open into the close may skip today's forced close exactly once and be monitored "
+        "tomorrow with the same day-trade stop, take-profit, and profit-lock rules. Choose "
+        "CARRY only for constructive setups that still look healthy into the close; if uncertain, "
+        "choose EXIT."
     )
     user = (
-        "마지막 단타 종목의 장마감 강제청산 시점입니다. 하루만 오버나잇 보유해도 되는지 판단하세요.\n"
+        "당일 단타 종목이 장마감 강제청산 시점까지 아직 열려 있습니다. 하루만 오버나잇 보유해도 되는지 판단하세요.\n"
         "규칙: 단타 손절/익절/락익절 기준은 그대로 유지됩니다. 유예는 오늘 FORCE에만 1회 허용됩니다. "
         "애매하거나 종가 흐름이 약하면 EXIT입니다.\n"
         f"데이터:\n{json.dumps(payload, ensure_ascii=False, sort_keys=True)}"
@@ -362,32 +361,6 @@ def _build_overnight_carry_messages(
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
-
-
-def _is_last_day_entry_window(entry_time: str, config: TradeEngineConfig) -> bool:
-    if not config.entry_windows:
-        return False
-    parsed_time = _parse_entry_time(entry_time)
-    if parsed_time is None:
-        return False
-
-    start, end = config.entry_windows[-1]
-    start_h, start_m = parse_hhmm(start)
-    end_h, end_m = parse_hhmm(end)
-    minute = parsed_time.hour * 60 + parsed_time.minute
-    return start_h * 60 + start_m <= minute <= end_h * 60 + end_m
-
-
-def _parse_entry_time(entry_time: str) -> datetime | None:
-    text = str(entry_time or "").strip()
-    if not text:
-        return None
-    try:
-        return datetime.fromisoformat(text)
-    except ValueError:
-        return None
-
-
 def _has_llm_backend(llm: LLMService) -> bool:
     settings = getattr(llm, "settings", None)
     if settings is None:

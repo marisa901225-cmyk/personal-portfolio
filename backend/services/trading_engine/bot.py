@@ -64,6 +64,7 @@ class HybridTradingBot(
         self.notifier = notifier or BestEffortNotifier(max_retry=self.config.telegram_retry_max)
         self.journal: TradeJournal | None = None
         self._state_lock = threading.RLock()
+        self._run_lock = threading.Lock()
         self._run_started = False
         self._last_notified_window_idx: int | None = None  # To prevent candidate spam
         self._last_swing_skip_notified_window_idx: int | None = None
@@ -224,40 +225,48 @@ class HybridTradingBot(
         )
 
     def run_locked_profit_monitor(self, now: datetime | None = None) -> dict[str, object]:
+        if not self._run_lock.acquire(blocking=False):
+            return {"status": "SKIP", "reason": "RUN_ALREADY_IN_PROGRESS"}
         now = now or datetime.now()
         today = now.strftime("%Y%m%d")
-        with self._state_lock:
-            self.state = rollover_state_for_date(self.state, today)
+        try:
+            with self._state_lock:
+                self.state = rollover_state_for_date(self.state, today)
 
-        if not self.has_armed_day_profit_locks():
-            return {"status": "SKIP", "reason": "NO_ARMED_DAY_LOCKS"}
+            if not self.has_armed_day_profit_locks():
+                return {"status": "SKIP", "reason": "NO_ARMED_DAY_LOCKS"}
 
-        self._ensure_journal(today)
-        with self._state_lock:
-            self.monitor_positions(now=now)
-            self.state.last_run_timestamp = now.isoformat(timespec="seconds")
-            save_state(self.config.state_path, self.state)
-        return {
-            "status": "OK",
-            "reason": "ARMED_DAY_LOCKS_MONITORED",
-            "open_positions": len(self.state.open_positions),
-        }
+            self._ensure_journal(today)
+            with self._state_lock:
+                self._refresh_pending_exit_orders()
+                self.monitor_positions(now=now)
+                self.state.last_run_timestamp = now.isoformat(timespec="seconds")
+                save_state(self.config.state_path, self.state)
+            return {
+                "status": "OK",
+                "reason": "ARMED_DAY_LOCKS_MONITORED",
+                "open_positions": len(self.state.open_positions),
+            }
+        finally:
+            self._run_lock.release()
 
     def run_once(self, now: datetime | None = None) -> dict[str, object]:
+        if not self._run_lock.acquire(blocking=False):
+            return {"status": "SKIP", "reason": "RUN_ALREADY_IN_PROGRESS"}
         now = now or datetime.now()
         today = now.strftime("%Y%m%d")
-        self.state = rollover_state_for_date(self.state, today)
-        self._reset_intraday_notification_state(today)
-        self._principal_buffer_snapshot = None
-
-        self._ensure_journal(today)
-
-        if not self._run_started:
-            self._journal("RUN_START", asof_date=today)
-            self._run_started = True
-            self._notify_text(format_run_start_message(today))
-
         try:
+            self.state = rollover_state_for_date(self.state, today)
+            self._reset_intraday_notification_state(today)
+            self._principal_buffer_snapshot = None
+
+            self._ensure_journal(today)
+
+            if not self._run_started:
+                self._journal("RUN_START", asof_date=today)
+                self._run_started = True
+                self._notify_text(format_run_start_message(today))
+
             if not is_trading_day(self.api, today, config=self.config):
                 return self._pass_and_return("HOLIDAY", now, regime="N/A")
 
@@ -334,8 +343,18 @@ class HybridTradingBot(
             handle_open_orders(self.api, timeout_sec=30, now=now)
             self._reconcile_state_with_broker_positions(now=now)
             self._refresh_pending_entry_orders()
+            self._refresh_pending_exit_orders()
             self.monitor_positions(now=now)
-            self._manage_risk_off_parking(now=now, regime=regime)
+
+            recovery_required = bool(getattr(self.state, "state_recovery_required", False))
+            if not recovery_required:
+                self._manage_risk_off_parking(now=now, regime=regime)
+            if recovery_required:
+                reason = str(getattr(self.state, "state_recovery_reason", None) or "STATE_RECOVERY_REQUIRED")
+                self._journal(reason, asof_date=today)
+                self._notify_text(format_pass_message(reason, today))
+                self.state.state_recovery_required = False
+                self.state.state_recovery_reason = None
 
             day_blocked_codes = get_day_reentry_blocked_codes(self.state)
             day_candidates = exclude_candidate_codes(eligible_candidates, day_blocked_codes)
@@ -381,20 +400,21 @@ class HybridTradingBot(
                     save_state(self.config.state_path, self.state)
                 return {"status": "OK", "regime": regime, "asof": asof}
 
-            self._try_enter_swing(
-                now=now,
-                regime=regime,
-                candidates=swing_candidates,
-                quotes=quotes,
-                news_signal=news_signal,
-            )
-            self._try_enter_day(
-                now=now,
-                regime=regime,
-                candidates=day_candidates,
-                quotes=quotes,
-                news_signal=news_signal,
-            )
+            if not recovery_required:
+                self._try_enter_swing(
+                    now=now,
+                    regime=regime,
+                    candidates=swing_candidates,
+                    quotes=quotes,
+                    news_signal=news_signal,
+                )
+                self._try_enter_day(
+                    now=now,
+                    regime=regime,
+                    candidates=day_candidates,
+                    quotes=quotes,
+                    news_signal=news_signal,
+                )
 
             self.force_exit_day_positions(now)
             with self._state_lock:
@@ -408,6 +428,8 @@ class HybridTradingBot(
             with self._state_lock:
                 save_state(self.config.state_path, self.state)
             return {"status": "ERROR", "error": str(exc)}
+        finally:
+            self._run_lock.release()
 
     def run_until_close(self, *, sleep_sec: int | None = None) -> None:
         interval = sleep_sec or self.config.monitor_interval_sec

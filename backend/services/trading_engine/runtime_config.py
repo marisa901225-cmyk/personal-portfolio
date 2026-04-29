@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 
 from .config import TradeEngineConfig
+from .utils import parse_hhmm
 
 
 def load_trade_engine_config_from_env() -> TradeEngineConfig:
@@ -23,6 +24,7 @@ def _apply_path_overrides(cfg: TradeEngineConfig) -> None:
 
 
 def _apply_general_overrides(cfg: TradeEngineConfig) -> None:
+    cfg.initial_capital = _env_int("TRADING_ENGINE_INITIAL_CAPITAL", cfg.initial_capital)
     cfg.include_etf = _env_bool("TRADING_ENGINE_INCLUDE_ETF", cfg.include_etf)
     cfg.monitor_interval_sec = _env_int("TRADING_ENGINE_MONITOR_SEC", cfg.monitor_interval_sec)
     cfg.telegram_retry_max = _env_int("TRADING_ENGINE_TELEGRAM_RETRY", cfg.telegram_retry_max)
@@ -75,6 +77,20 @@ def _apply_general_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_RISK_OFF_PARKING_CODE",
         cfg.risk_off_parking_code,
     )
+    cfg.daily_max_loss_pct = _env_float("TRADING_ENGINE_DAILY_MAX_LOSS_PCT", cfg.daily_max_loss_pct)
+    cfg.max_consecutive_losses = _env_int(
+        "TRADING_ENGINE_MAX_CONSECUTIVE_LOSSES",
+        cfg.max_consecutive_losses,
+    )
+    cfg.no_new_entry_after = _env_valid_hhmm(
+        "TRADING_ENGINE_NO_NEW_ENTRY_AFTER",
+        cfg.no_new_entry_after,
+    )
+    cfg.day_force_exit_at = _env_valid_hhmm(
+        "TRADING_ENGINE_DAY_FORCE_EXIT_AT",
+        cfg.day_force_exit_at,
+    )
+    cfg.entry_windows = _env_entry_windows("TRADING_ENGINE_ENTRY_WINDOWS", cfg.entry_windows)
 
 
 def _apply_daytrade_overrides(cfg: TradeEngineConfig) -> None:
@@ -513,3 +529,45 @@ def _env_float(name: str, default: float) -> float:
         return float(raw)
     except ValueError:
         return default
+
+
+def _env_valid_hhmm(name: str, default: str) -> str:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    text = str(raw).strip()
+    if not text:
+        return default
+    try:
+        parse_hhmm(text)
+    except (TypeError, ValueError):
+        return default
+    return text
+
+
+def _env_entry_windows(
+    name: str,
+    default: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+
+    text = str(raw).strip()
+    if not text:
+        return default
+
+    windows: list[tuple[str, str]] = []
+    try:
+        for chunk in text.split(","):
+            normalized = str(chunk).strip()
+            if not normalized:
+                return default
+            start, end = normalized.split("-", 1)
+            parse_hhmm(start)
+            parse_hhmm(end)
+            windows.append((start.strip(), end.strip()))
+    except (TypeError, ValueError):
+        return default
+
+    return windows or default

@@ -186,3 +186,59 @@ def test_finalize_day_prefers_account_realized_pnl_summary(tmp_path) -> None:
     assert summary_text is not None
     assert "실현손익: 12,345원" in summary_text
     assert bot.state.realized_pnl_today == 12345.0
+
+
+def test_archive_trading_engine_weekly_keeps_large_files_on_disk(tmp_path) -> None:
+    db_path = tmp_path / "archive.db"
+    engine = create_engine(
+        f"sqlite:///{db_path.as_posix()}",
+        connect_args={"check_same_thread": False},
+        future=True,
+    )
+    SessionLocal = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        future=True,
+    )
+    Base.metadata.create_all(bind=engine)
+
+    output_dir = tmp_path / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    large_path = output_dir / "trade_journal_20260418.jsonl"
+    large_path.write_text("x" * 32, encoding="utf-8")
+    state_path = tmp_path / "state.json"
+    save_state(str(state_path), new_state("20260418"))
+    runlog_path = tmp_path / "run.log"
+    runlog_path.write_text("y" * 32, encoding="utf-8")
+
+    cfg = TradeEngineConfig(
+        state_path=str(state_path),
+        output_dir=str(output_dir),
+        runlog_path=str(runlog_path),
+        archive_inline_max_bytes=8,
+    )
+
+    with SessionLocal() as db:
+        result = archive_trading_engine_weekly(
+            db,
+            config=cfg,
+            now=datetime(2026, 4, 18, 6, 40),
+        )
+        row = db.query(TradingEngineArchive).one()
+
+    payload = json.loads(row.payload_json)
+    output_entry = payload["output_files"][0]
+    runlog_entry = payload["runlog_snapshot"]
+
+    assert result.status == "ARCHIVED"
+    assert result.removed_output_file_count == 0
+    assert result.runlog_truncated is False
+    assert output_entry["encoding"] == "omitted"
+    assert output_entry["retained_on_disk"] is True
+    assert "content" not in output_entry
+    assert runlog_entry["encoding"] == "omitted"
+    assert large_path.exists()
+    assert runlog_path.read_text(encoding="utf-8") == "y" * 32
+
+    engine.dispose()

@@ -180,6 +180,7 @@ class TradeEngineConfig:
     state_path: str = "backend/storage/trading_engine/state.json"
     output_dir: str = "backend/storage/trading_engine/output"
     runlog_path: str = "backend/storage/trading_engine/runlog_current.log"
+    archive_inline_max_bytes: int = 1_000_000
 
     # Notifications
     telegram_retry_max: int = 3
