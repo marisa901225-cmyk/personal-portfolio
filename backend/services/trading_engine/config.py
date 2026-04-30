@@ -15,7 +15,7 @@ class TradeEngineConfig:
     max_total_positions: int = 2
 
     # Entry limits
-    max_swing_entries_per_week: int = 2
+    max_swing_entries_per_week: int = 10
     max_swing_entries_per_day: int = 1
     max_day_entries_per_day: int = 4
 
