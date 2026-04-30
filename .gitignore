@@ -90,6 +90,7 @@ backend/data/recent_categories.json
 backend/data/llm_model_path_*.txt
 backend/igt-gpu-tools/
 backend/scripts/shell/switch_vulkan_model.sh
+scripts/schedule_sleep_reboot.sh
 
 # Local Codex working files
 .codex
