@@ -178,6 +178,42 @@ class KISTradingAdapterTests(unittest.TestCase):
         self.assertEqual(result[0]["view_count"], 12345)
         self.assertEqual(result[0]["price"], 70200)
 
+    def test_overseas_new_highlow_rank_parses_output2_rows(self) -> None:
+        api = object.__new__(KISTradingAPI)
+        api._market_get = Mock(
+            return_value={
+                "output2": [
+                    {
+                        "symb": "NVDA",
+                        "name": "엔비디아",
+                        "ename": "NVIDIA CORP",
+                        "excd": "NAS",
+                        "last": "123.45",
+                        "rate": "3.21",
+                        "tvol": "987654",
+                        "pask": "123.50",
+                        "pbid": "123.40",
+                        "e_ordyn": "Y",
+                    }
+                ]
+            }
+        )
+
+        result = api.overseas_new_highlow_rank(
+            exchange_code="NAS",
+            high_low_type="1",
+            breakout_type="1",
+            nday="6",
+            volume_rank="2",
+        )
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["symbol"], "NVDA")
+        self.assertEqual(result[0]["name"], "엔비디아")
+        self.assertEqual(result[0]["exchange_code"], "NAS")
+        self.assertAlmostEqual(float(result[0]["price"]), 123.45)
+        self.assertEqual(int(result[0]["volume"]), 987654)
+
     def test_market_cap_rank_returns_empty_on_transport_error(self) -> None:
         api = object.__new__(KISTradingAPI)
 
@@ -511,6 +547,63 @@ class KISTradingAdapterTests(unittest.TestCase):
         self.assertEqual(first["date"].tolist(), ["20260317", "20260318"])
         self.assertEqual(second["date"].tolist(), ["20260317", "20260318"])
         self.assertIsNot(first, second)
+
+    def test_next_open_trading_day_uses_chk_holiday_opnd_yn_and_cache(self) -> None:
+        api = object.__new__(KISTradingAPI)
+        api._holiday_rows_cache = {}
+
+        with TemporaryDirectory() as tmpdir:
+            api._holiday_cache_dir = Path(tmpdir)
+            api._market_get = Mock(
+                return_value={
+                    "output": [
+                        {"bass_dt": "20260923", "opnd_yn": "Y"},
+                        {"bass_dt": "20260924", "opnd_yn": "N"},
+                        {"bass_dt": "20260925", "opnd_yn": "N"},
+                        {"bass_dt": "20260928", "opnd_yn": "Y"},
+                    ]
+                }
+            )
+
+            first = api.next_open_trading_day("20260923", max_lookahead_days=14)
+            second = api.next_open_trading_day("20260923", max_lookahead_days=14)
+
+        self.assertEqual(first, "20260928")
+        self.assertEqual(second, "20260928")
+        api._market_get.assert_called_once_with(
+            "/uapi/domestic-stock/v1/quotations/chk-holiday",
+            "CTCA0903R",
+            {
+                "BASS_DT": "20260923",
+                "CTX_AREA_FK": "",
+                "CTX_AREA_NK": "",
+            },
+        )
+
+    def test_domestic_holiday_rows_reuses_same_day_disk_cache(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            first_api = object.__new__(KISTradingAPI)
+            first_api._holiday_rows_cache = {}
+            first_api._holiday_cache_dir = Path(tmpdir)
+            first_api._market_get = Mock(
+                return_value={
+                    "output": [
+                        {"bass_dt": "20260924", "opnd_yn": "N"},
+                        {"bass_dt": "20260928", "opnd_yn": "Y"},
+                    ]
+                }
+            )
+            first_rows = first_api.domestic_holiday_rows("20260923")
+
+            second_api = object.__new__(KISTradingAPI)
+            second_api._holiday_rows_cache = {}
+            second_api._holiday_cache_dir = Path(tmpdir)
+            second_api._market_get = Mock(return_value={"output": []})
+            second_rows = second_api.domestic_holiday_rows("20260923")
+
+        self.assertEqual(first_rows, second_rows)
+        first_api._market_get.assert_called_once()
+        second_api._market_get.assert_not_called()
 
 
 if __name__ == "__main__":

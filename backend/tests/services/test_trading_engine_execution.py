@@ -350,6 +350,49 @@ def test_force_exit_day_position_sells_next_day_after_overnight_carry(tmp_path) 
     assert any(call["side"] == "SELL" and call["code"] == "009830" for call in api.order_calls)
     assert "009830" not in bot.state.open_positions
 
+
+def test_force_exit_day_position_skips_overnight_carry_before_long_market_closure(tmp_path) -> None:
+    class HolidayAPI(FakeAPI):
+        def __init__(self) -> None:
+            super().__init__()
+            self.next_open_calls: list[tuple[str, int]] = []
+
+        def next_open_trading_day(self, date: str, max_lookahead_days: int = 14) -> str:
+            self.next_open_calls.append((date, max_lookahead_days))
+            return "20260928"
+
+    api = HolidayAPI()
+    api._quotes["009830"] = {"price": 49_200, "change_pct": 2.0}
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        day_overnight_carry_enabled=True,
+        day_overnight_carry_max_calendar_gap_days=3,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.trade_date = "20260923"
+    bot.state.open_positions["009830"] = PositionState(
+        type="T",
+        entry_time="2026-09-23T13:55:00+09:00",
+        entry_price=49_150.0,
+        qty=4,
+        highest_price=49_300.0,
+        entry_date="20260923",
+    )
+
+    with patch(
+        "backend.services.trading_engine.bot_position_management.review_day_overnight_carry_with_llm"
+    ) as mocked_review:
+        bot.force_exit_day_positions(now=datetime(2026, 9, 23, 15, 16))
+
+    mocked_review.assert_not_called()
+    assert api.next_open_calls == [("20260923", 14)]
+    assert any(call["side"] == "SELL" and call["code"] == "009830" for call in api.order_calls)
+    assert "009830" not in bot.state.open_positions
+
+
 def test_day_stop_loss_still_wins_over_force_exit_time(tmp_path) -> None:
     api = FakeAPI()
     api._quotes["009830"] = {"price": 48_400, "change_pct": -1.5}
@@ -560,4 +603,3 @@ def test_bot_skips_blacklisted_symbol_on_same_day_reentry_candidate(tmp_path) ->
     ]
     assert "027360" not in bot.state.open_positions
     assert "005930" in bot.state.open_positions
-

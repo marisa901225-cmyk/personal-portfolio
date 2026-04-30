@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -62,6 +63,9 @@ _KIS_HTTP_PATH_MIN_GAP_SEC = {
 _KIS_DAILY_BARS_CACHE_TTL_SEC = max(0.0, _env_float("KIS_DAILY_BARS_CACHE_TTL_SEC", 300.0))
 _KIS_DAILY_INDEX_BARS_CACHE_TTL_SEC = max(0.0, _env_float("KIS_DAILY_INDEX_BARS_CACHE_TTL_SEC", 300.0))
 _KIS_QUOTE_CACHE_TTL_SEC = max(0.0, _env_float("KIS_QUOTE_CACHE_TTL_SEC", 20.0))
+_KIS_HOLIDAY_CACHE_DIR = Path(
+    os.getenv("KIS_HOLIDAY_CACHE_DIR", "backend/storage/kis_holiday_cache")
+)
 _KIS_RANK_MARKET_DIV_CODES: tuple[str, ...] = ("J", "NX")
 _KIS_VALUE_RANK_PRICE_BUCKETS: tuple[tuple[str, str], ...] = (
     ("0", "1000"),
@@ -101,6 +105,8 @@ class KISTradingBase:
         self._daily_bars_cache: dict[tuple[str, str, int], tuple[float, pd.DataFrame]] = {}
         self._daily_index_bars_cache: dict[tuple[str, str, int], tuple[float, pd.DataFrame]] = {}
         self._quote_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._holiday_rows_cache: dict[str, tuple[str, list[dict[str, Any]]]] = {}
+        self._holiday_cache_dir = _KIS_HOLIDAY_CACHE_DIR
         self._secondary_market_ctx = build_secondary_market_context(
             min_gap_by_path=_KIS_HTTP_PATH_MIN_GAP_SEC,
         )

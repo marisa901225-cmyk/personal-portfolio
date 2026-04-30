@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import json
 import logging
 from typing import Any
 
@@ -11,6 +12,187 @@ logger = logging.getLogger(__name__)
 
 
 class KISMarketDataMixin:
+    def next_open_trading_day(self, date: str, max_lookahead_days: int = 14) -> str | None:
+        """
+        국내휴장일조회(TCA0903R) 결과에서 기준일 이후 첫 개장일(opnd_yn=Y)을 찾는다.
+        KIS 권고에 맞춰 기준일별 조회 결과는 당일 파일 캐시로 재사용한다.
+        """
+        normalized_date = self._normalize_yyyymmdd(date)
+        if len(normalized_date) != 8:
+            return None
+
+        rows = self.domestic_holiday_rows(normalized_date)
+        if not rows:
+            return None
+
+        cutoff = datetime.strptime(normalized_date, "%Y%m%d") + timedelta(days=max_lookahead_days)
+        candidates: list[str] = []
+        for row in rows:
+            row_date = self._holiday_row_date(row)
+            if not row_date or row_date <= normalized_date:
+                continue
+            if datetime.strptime(row_date, "%Y%m%d") > cutoff:
+                continue
+            if str(row.get("opnd_yn") or "").strip().upper() == "Y":
+                candidates.append(row_date)
+
+        return min(candidates) if candidates else None
+
+    def domestic_holiday_rows(self, bass_dt: str) -> list[dict[str, Any]]:
+        """
+        국내휴장일조회(TCA0903R). 원장 서비스 보호를 위해 같은 기준일은 하루 1회만 호출한다.
+        """
+        normalized_date = self._normalize_yyyymmdd(bass_dt)
+        if len(normalized_date) != 8:
+            return []
+
+        today_key = datetime.now().strftime("%Y%m%d")
+        memory_cache = getattr(self, "_holiday_rows_cache", None)
+        if not isinstance(memory_cache, dict):
+            memory_cache = {}
+            setattr(self, "_holiday_rows_cache", memory_cache)
+        cached = memory_cache.get(normalized_date)
+        if cached and cached[0] == today_key:
+            return [dict(row) for row in cached[1]]
+
+        disk_rows = self._load_holiday_rows_cache(normalized_date, today_key)
+        if disk_rows is not None:
+            memory_cache[normalized_date] = (today_key, [dict(row) for row in disk_rows])
+            return disk_rows
+
+        data = self._market_get(
+            "/uapi/domestic-stock/v1/quotations/chk-holiday",
+            "CTCA0903R",
+            {
+                "BASS_DT": normalized_date,
+                "CTX_AREA_FK": "",
+                "CTX_AREA_NK": "",
+            },
+        )
+        rows = self._normalize_holiday_rows(data.get("output") or [])
+        memory_cache[normalized_date] = (today_key, [dict(row) for row in rows])
+        self._store_holiday_rows_cache(normalized_date, today_key, rows)
+        return [dict(row) for row in rows]
+
+    def _load_holiday_rows_cache(self, bass_dt: str, today_key: str) -> list[dict[str, Any]] | None:
+        path = self._holiday_cache_path(bass_dt)
+        if path is None or not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if str(payload.get("fetched_on") or "") != today_key:
+            return None
+        rows = payload.get("rows")
+        if not isinstance(rows, list):
+            return None
+        return [dict(row) for row in rows if isinstance(row, dict)]
+
+    def _store_holiday_rows_cache(self, bass_dt: str, today_key: str, rows: list[dict[str, Any]]) -> None:
+        path = self._holiday_cache_path(bass_dt)
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(
+                    {
+                        "bass_dt": bass_dt,
+                        "fetched_on": today_key,
+                        "rows": rows,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        except OSError:
+            logger.warning("failed to store KIS holiday cache bass_dt=%s path=%s", bass_dt, path, exc_info=True)
+
+    def _holiday_cache_path(self, bass_dt: str):
+        cache_dir = getattr(self, "_holiday_cache_dir", None)
+        if cache_dir is None:
+            return None
+        return cache_dir / f"{bass_dt}.json"
+
+    @staticmethod
+    def _normalize_holiday_rows(raw_rows: Any) -> list[dict[str, Any]]:
+        if isinstance(raw_rows, dict):
+            raw_rows = [raw_rows]
+        if not isinstance(raw_rows, list):
+            return []
+        return [dict(row) for row in raw_rows if isinstance(row, dict)]
+
+    def _holiday_row_date(self, row: dict[str, Any]) -> str:
+        for key in ("bass_dt", "bss_dt", "stck_bsop_date", "bsop_date", "date"):
+            normalized = self._normalize_yyyymmdd(str(row.get(key) or ""))
+            if len(normalized) == 8:
+                return normalized
+        return ""
+
+    def overseas_new_highlow_rank(
+        self,
+        *,
+        exchange_code: str,
+        high_low_type: str,
+        breakout_type: str = "1",
+        nday: str = "6",
+        volume_rank: str = "2",
+    ) -> list[dict[str, Any]]:
+        """
+        해외주식 신고/신저가 조회 [해외주식-042].
+        GET /uapi/overseas-stock/v1/ranking/new-highlow
+        """
+        params = {
+            "KEYB": "",
+            "AUTH": "",
+            "EXCD": str(exchange_code or "").strip().upper(),
+            "GUBN": str(high_low_type or "").strip(),
+            "GUBN2": str(breakout_type or "").strip(),
+            "NDAY": str(nday or "").strip(),
+            "VOL_RANG": str(volume_rank or "").strip(),
+        }
+        try:
+            data = self._market_get(
+                "/uapi/overseas-stock/v1/ranking/new-highlow",
+                "HHDFS76300000",
+                params,
+            )
+        except requests.exceptions.RequestException as exc:
+            logger.warning(
+                "overseas_new_highlow_rank request failed exchange=%s high_low=%s breakout=%s nday=%s vol=%s error=%s",
+                exchange_code,
+                high_low_type,
+                breakout_type,
+                nday,
+                volume_rank,
+                exc,
+            )
+            return []
+
+        rows = data.get("output2") or []
+        parsed_rows: list[dict[str, Any]] = []
+        for row in rows:
+            parsed_rows.append(
+                {
+                    "symbol": str(row.get("symb") or "").strip(),
+                    "symb": str(row.get("symb") or "").strip(),
+                    "code": str(row.get("symb") or "").strip(),
+                    "name": str(row.get("name") or "").strip(),
+                    "ename": str(row.get("ename") or "").strip(),
+                    "exchange_code": str(row.get("excd") or params["EXCD"]).strip(),
+                    "price": self._to_float(row.get("last")),
+                    "change_pct": self._to_float(row.get("rate")),
+                    "volume": self._to_int(row.get("tvol")),
+                    "ask": self._to_float(row.get("pask")),
+                    "bid": self._to_float(row.get("pbid")),
+                    "tradable": str(row.get("e_ordyn") or "").strip(),
+                    "raw": row,
+                }
+            )
+        return [row for row in parsed_rows if str(row.get("symbol") or "").strip()]
+
     def volume_rank(self, kind: str, top_n: int, asof: str) -> list[dict[str, Any]]:
         """
         거래량 랭킹 조회 [v1_국내주식-047].

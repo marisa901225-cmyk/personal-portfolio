@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timedelta
+
+import holidays
+
 from .day_stop_review import (
     is_day_overnight_carry_candidate,
     is_day_stop_review_candidate,
@@ -8,6 +13,8 @@ from .day_stop_review import (
 )
 from .intraday import passes_day_intraday_confirmation
 from .utils import parse_numeric
+
+logger = logging.getLogger(__name__)
 
 
 def should_hold_day_stop_after_llm(
@@ -85,6 +92,23 @@ def should_carry_day_force_exit(
     ):
         return False
 
+    gap_meta = day_overnight_carry_market_gap_meta(
+        bot.api,
+        config=bot.config,
+        trade_date=bot.state.trade_date,
+    )
+    if bool(gap_meta.get("blocked")):
+        bot._journal(
+            "DAY_OVERNIGHT_CARRY_BLOCKED",
+            asof_date=bot.state.trade_date,
+            code=code,
+            reason="LONG_MARKET_CLOSURE",
+            next_trading_date=gap_meta.get("next_trading_date"),
+            calendar_gap_days=gap_meta.get("calendar_gap_days"),
+            max_calendar_gap_days=gap_meta.get("max_calendar_gap_days"),
+        )
+        return False
+
     intraday_meta = day_stop_intraday_meta(bot, code=code, logger=logger)
     bot.state.day_overnight_carry_reviewed_positions.add(review_key)
     review = review_day_overnight_carry_with_llm_fn(
@@ -105,6 +129,67 @@ def should_carry_day_force_exit(
 
     bot.state.day_overnight_carry_positions[review_key] = bot.state.trade_date
     return True
+
+
+def day_overnight_carry_market_gap_meta(api, *, config, trade_date: str) -> dict[str, object]:
+    max_gap_days = int(getattr(config, "day_overnight_carry_max_calendar_gap_days", 3))
+    try:
+        base = datetime.strptime(str(trade_date), "%Y%m%d")
+    except ValueError:
+        return {"blocked": False, "max_calendar_gap_days": max_gap_days}
+
+    next_open = next_open_trading_day(api, trade_date, max_lookahead_days=max(14, max_gap_days + 1))
+    if next_open:
+        offset = (datetime.strptime(next_open, "%Y%m%d") - base).days
+        return {
+            "blocked": offset > max_gap_days,
+            "next_trading_date": next_open,
+            "calendar_gap_days": offset,
+            "max_calendar_gap_days": max_gap_days,
+        }
+
+    for offset in range(1, max(14, max_gap_days + 1) + 1):
+        candidate = (base + timedelta(days=offset)).strftime("%Y%m%d")
+        if not is_expected_next_trading_day(api, candidate):
+            continue
+
+        return {
+            "blocked": offset > max_gap_days,
+            "next_trading_date": candidate,
+            "calendar_gap_days": offset,
+            "max_calendar_gap_days": max_gap_days,
+        }
+
+    return {"blocked": False, "max_calendar_gap_days": max_gap_days}
+
+
+def next_open_trading_day(api, trade_date: str, *, max_lookahead_days: int) -> str | None:
+    lookup = getattr(api, "next_open_trading_day", None)
+    if not callable(lookup):
+        return None
+    try:
+        value = lookup(trade_date, max_lookahead_days=max_lookahead_days)
+    except Exception:
+        logger.warning("next open trading day lookup failed trade_date=%s", trade_date, exc_info=True)
+        return None
+    normalized = str(value or "").strip()
+    return normalized if len(normalized) == 8 else None
+
+
+def is_expected_next_trading_day(api, date: str) -> bool:
+    if hasattr(api, "is_trading_day") and callable(getattr(api, "is_trading_day")):
+        try:
+            return bool(getattr(api, "is_trading_day")(date))
+        except Exception:
+            logger.warning("direct trading day lookup failed date=%s", date, exc_info=True)
+
+    try:
+        parsed = datetime.strptime(str(date), "%Y%m%d").date()
+    except ValueError:
+        return False
+    if parsed.weekday() >= 5:
+        return False
+    return parsed not in holidays.country_holidays("KR", years=[parsed.year])
 
 
 def day_stop_intraday_meta(bot, *, code: str, logger) -> dict[str, object]:
@@ -202,7 +287,10 @@ def day_stop_llm_review_key(*, code: str, pos) -> str:
 
 __all__ = [
     "day_stop_intraday_meta",
+    "day_overnight_carry_market_gap_meta",
     "day_stop_llm_review_key",
+    "is_expected_next_trading_day",
+    "next_open_trading_day",
     "journal_day_overnight_carry_review",
     "journal_day_stop_llm_review",
     "resolve_day_stop_loss_pct",
