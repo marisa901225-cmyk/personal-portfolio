@@ -1,5 +1,13 @@
 # Repository Guidelines
 
+## Agent Operating Principles
+- Follow the user's requested outcome first; deliver a working change, not just a plan, unless the user explicitly asks for analysis only.
+- Keep work scoped and incremental. Make the smallest reliable change that solves the request, then verify it.
+- Gather repository context before editing, but avoid broad exploration. Prefer targeted reads and searches inside the repository.
+- State assumptions briefly when they affect implementation, verification, or user-facing behavior.
+- Ask clarifying questions only when a reasonable assumption would create hidden risk or materially change the outcome.
+- If work becomes blocked, stop cleanly with the blocker, what was tried, and the smallest next decision needed.
+
 ## Maintenance Mode
 - Prioritize safe, incremental maintenance work over broad refactors.
 - Prefer minimal diffs that preserve existing behavior unless a behavior change is explicitly requested.
@@ -52,3 +60,39 @@
 - `docker compose config`
 - `docker-compose config`
 - `env | grep API_TOKEN`
+
+## Tooling & Search Hygiene
+- Prefer `rg` for text search and `rg --files` for file discovery, always scoped to this repository.
+- Use targeted commands such as `ls backend`, `find backend -maxdepth 2 -type f`, or `rg 'pattern' frontend backend`.
+- Never rely on shell expansion or commands that may traverse outside the repository boundary.
+- Use patch/edit tools for file modifications instead of ad-hoc shell rewrites.
+- Do not run destructive commands such as `rm`, `git reset`, or checkout-based reverts unless the user explicitly approves.
+- When multiple independent reads are needed, parallelize them where the environment supports it.
+
+## Implementation Workflow
+- Inspect the existing architecture and naming patterns before introducing new files, abstractions, dependencies, or services.
+- Preserve behavior unless the requested change explicitly requires behavior changes.
+- Keep diffs focused on files directly related to the task.
+- Add or update tests around changed behavior when practical.
+- Prefer existing scripts, utilities, and conventions over new tooling.
+- For frontend work, preserve the current design system first. If no clear design exists, create intentional, responsive UI rather than generic boilerplate.
+
+## Commit Workflow
+- After completing code changes and verification, commit the completed work to the current branch unless the user explicitly says not to commit.
+- Before committing, inspect `git status` and stage only files that are part of the current task.
+- Never include unrelated user changes, generated artifacts, logs, secrets, or external files in the commit.
+- If unrelated changes are already present in the worktree, leave them untouched and mention that they were excluded.
+- Use a concise commit message that describes the user-facing outcome or maintenance fix.
+
+## Verification
+- Run the lightest meaningful verification before declaring work complete.
+- Use `npm run test:frontend` for frontend test changes when applicable.
+- Use `npm run test:backend` for backend test changes when applicable.
+- If a full test command is too expensive or blocked, run a narrower check and state the remaining risk.
+- Do not claim tests passed unless they were run successfully in this repository.
+
+## Communication
+- Keep progress updates concise and outcome-oriented.
+- Before editing files, briefly name what will change and why.
+- Final responses should summarize the outcome, list verification performed, and mention any unresolved risks.
+- Avoid long changelogs unless the user asks for detailed implementation notes.
