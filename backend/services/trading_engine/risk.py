@@ -55,7 +55,7 @@ def can_enter(
         if _count_reserved_positions(state, "S") >= config.max_swing_positions:
             return False, "MAX_SWING_POSITIONS"
     else:
-        if state.day_entries_today >= config.max_day_entries_per_day:
+        if state.day_entries_today >= _effective_max_day_entries_per_day(state, config):
             return False, "MAX_DAY_ENTRIES_DAY"
         if _count_reserved_positions(state, "T") >= config.max_day_positions:
             return False, "MAX_DAY_POSITIONS"
@@ -142,6 +142,41 @@ def should_exit_position(
     if (now.hour, now.minute) >= (force_h, force_m):
         return True, "FORCE", pnl_pct
     return False, "", pnl_pct
+
+
+def _effective_max_day_entries_per_day(
+    state: TradeState,
+    cfg: TradeEngineConfig,
+) -> int:
+    base_limit = max(0, int(cfg.max_day_entries_per_day))
+    if not bool(getattr(cfg, "day_conditional_extra_entries_enabled", True)):
+        return base_limit
+
+    extra_entries = max(0, int(getattr(cfg, "day_conditional_extra_entries", 0)))
+    if extra_entries <= 0:
+        return base_limit
+
+    wins = max(0, int(getattr(state, "day_wins_today", 0)))
+    losses = max(0, int(getattr(state, "day_losses_today", 0)))
+    closed_trades = wins + losses
+    min_closed_trades = max(0, int(getattr(cfg, "day_conditional_extra_min_closed_trades", 0)))
+    if closed_trades < min_closed_trades:
+        return base_limit
+
+    win_rate = wins / closed_trades if closed_trades else 0.0
+    min_win_rate = float(getattr(cfg, "day_conditional_extra_min_win_rate", 0.0))
+    if win_rate < min_win_rate:
+        return base_limit
+
+    min_realized_pnl = float(getattr(cfg, "day_conditional_extra_min_realized_pnl", 0.0))
+    if float(state.realized_pnl_today) < min_realized_pnl:
+        return base_limit
+
+    max_losses = max(0, int(getattr(cfg, "day_conditional_extra_max_consecutive_losses", 0)))
+    if int(state.consecutive_losses_today) > max_losses:
+        return base_limit
+
+    return base_limit + extra_entries
 
 
 def _update_day_profit_lock(

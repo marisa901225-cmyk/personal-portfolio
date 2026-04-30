@@ -18,6 +18,12 @@ class TradeEngineConfig:
     max_swing_entries_per_week: int = 10
     max_swing_entries_per_day: int = 1
     max_day_entries_per_day: int = 4
+    day_conditional_extra_entries_enabled: bool = True
+    day_conditional_extra_entries: int = 2
+    day_conditional_extra_min_closed_trades: int = 2
+    day_conditional_extra_min_win_rate: float = 0.55
+    day_conditional_extra_min_realized_pnl: float = 0.0
+    day_conditional_extra_max_consecutive_losses: int = 0
 
     # Sizing
     swing_cash_ratio: float = 0.80

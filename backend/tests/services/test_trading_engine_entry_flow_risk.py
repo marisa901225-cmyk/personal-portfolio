@@ -378,3 +378,59 @@ def test_day_afternoon_entry_blocks_after_two_stoploss_sized_losses() -> None:
     assert reason_afternoon_blocked == "DAY_AFTERNOON_LOSS_LIMIT"
     assert ok_afternoon_allowed is True
     assert reason_afternoon_allowed == "OK"
+
+
+def test_day_entry_limit_expands_when_intraday_win_rate_is_healthy() -> None:
+    cfg = TradeEngineConfig()
+    state = new_state("20260216")
+    state.day_entries_today = 4
+    state.day_wins_today = 2
+    state.day_losses_today = 0
+    state.realized_pnl_today = 8_000.0
+    state.day_entry_windows_used_today = {0, 1, 2}
+
+    ok_extra_slot, reason_extra_slot = can_enter(
+        "T",
+        state,
+        regime="RISK_ON",
+        candidates_count=1,
+        now=datetime(2026, 2, 16, 14, 0),
+        config=cfg,
+    )
+
+    state.day_entries_today = 6
+    ok_hard_cap, reason_hard_cap = can_enter(
+        "T",
+        state,
+        regime="RISK_ON",
+        candidates_count=1,
+        now=datetime(2026, 2, 16, 14, 0),
+        config=cfg,
+    )
+
+    assert ok_extra_slot is True
+    assert reason_extra_slot == "OK"
+    assert ok_hard_cap is False
+    assert reason_hard_cap == "MAX_DAY_ENTRIES_DAY"
+
+
+def test_day_entry_limit_stays_capped_when_intraday_win_rate_is_weak() -> None:
+    cfg = TradeEngineConfig()
+    state = new_state("20260216")
+    state.day_entries_today = 4
+    state.day_wins_today = 1
+    state.day_losses_today = 1
+    state.realized_pnl_today = 8_000.0
+    state.day_entry_windows_used_today = {0, 1, 2}
+
+    ok, reason = can_enter(
+        "T",
+        state,
+        regime="RISK_ON",
+        candidates_count=1,
+        now=datetime(2026, 2, 16, 14, 0),
+        config=cfg,
+    )
+
+    assert ok is False
+    assert reason == "MAX_DAY_ENTRIES_DAY"

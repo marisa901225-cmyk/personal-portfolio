@@ -43,6 +43,30 @@ def _apply_general_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_MAX_DAY_ENTRIES_PER_DAY",
         cfg.max_day_entries_per_day,
     )
+    cfg.day_conditional_extra_entries_enabled = _env_bool(
+        "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_ENTRIES_ENABLED",
+        cfg.day_conditional_extra_entries_enabled,
+    )
+    cfg.day_conditional_extra_entries = _env_int(
+        "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_ENTRIES",
+        cfg.day_conditional_extra_entries,
+    )
+    cfg.day_conditional_extra_min_closed_trades = _env_int(
+        "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_MIN_CLOSED_TRADES",
+        cfg.day_conditional_extra_min_closed_trades,
+    )
+    cfg.day_conditional_extra_min_win_rate = _env_float(
+        "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_MIN_WIN_RATE",
+        cfg.day_conditional_extra_min_win_rate,
+    )
+    cfg.day_conditional_extra_min_realized_pnl = _env_float(
+        "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_MIN_REALIZED_PNL",
+        cfg.day_conditional_extra_min_realized_pnl,
+    )
+    cfg.day_conditional_extra_max_consecutive_losses = _env_int(
+        "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_MAX_CONSECUTIVE_LOSSES",
+        cfg.day_conditional_extra_max_consecutive_losses,
+    )
     cfg.swing_cash_ratio = _env_float("TRADING_ENGINE_SWING_CASH_RATIO", cfg.swing_cash_ratio)
     cfg.day_cash_ratio = _env_float("TRADING_ENGINE_DAY_CASH_RATIO", cfg.day_cash_ratio)
     cfg.day_reuse_unused_swing_cash_enabled = _env_bool(

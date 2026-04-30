@@ -202,6 +202,12 @@ def test_runtime_loads_position_limit_overrides_from_env() -> None:
             "TRADING_ENGINE_MAX_SWING_ENTRIES_PER_WEEK": "4",
             "TRADING_ENGINE_MAX_SWING_ENTRIES_PER_DAY": "2",
             "TRADING_ENGINE_MAX_DAY_ENTRIES_PER_DAY": "2",
+            "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_ENTRIES_ENABLED": "1",
+            "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_ENTRIES": "3",
+            "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_MIN_CLOSED_TRADES": "4",
+            "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_MIN_WIN_RATE": "0.7",
+            "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_MIN_REALIZED_PNL": "5000",
+            "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_MAX_CONSECUTIVE_LOSSES": "1",
             "TRADING_ENGINE_DAY_AFTERNOON_ENTRY_START_WINDOW_INDEX": "3",
             "TRADING_ENGINE_DAY_AFTERNOON_LOSS_LIMIT_LOSS_COUNT": "1",
             "TRADING_ENGINE_DAY_STOPLOSS_EXCLUDE_AFTER_LOSSES": "3",
@@ -225,6 +231,12 @@ def test_runtime_loads_position_limit_overrides_from_env() -> None:
     assert cfg.max_swing_entries_per_week == 4
     assert cfg.max_swing_entries_per_day == 2
     assert cfg.max_day_entries_per_day == 2
+    assert cfg.day_conditional_extra_entries_enabled is True
+    assert cfg.day_conditional_extra_entries == 3
+    assert cfg.day_conditional_extra_min_closed_trades == 4
+    assert cfg.day_conditional_extra_min_win_rate == 0.7
+    assert cfg.day_conditional_extra_min_realized_pnl == 5000
+    assert cfg.day_conditional_extra_max_consecutive_losses == 1
     assert cfg.day_afternoon_entry_start_window_index == 3
     assert cfg.day_afternoon_loss_limit_loss_count == 1
     assert cfg.day_stoploss_exclude_after_losses == 3
