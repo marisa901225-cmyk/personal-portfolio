@@ -45,6 +45,14 @@ def _apply_general_overrides(cfg: TradeEngineConfig) -> None:
     )
     cfg.swing_cash_ratio = _env_float("TRADING_ENGINE_SWING_CASH_RATIO", cfg.swing_cash_ratio)
     cfg.day_cash_ratio = _env_float("TRADING_ENGINE_DAY_CASH_RATIO", cfg.day_cash_ratio)
+    cfg.day_reuse_unused_swing_cash_enabled = _env_bool(
+        "TRADING_ENGINE_DAY_REUSE_UNUSED_SWING_CASH_ENABLED",
+        cfg.day_reuse_unused_swing_cash_enabled,
+    )
+    cfg.day_reuse_unused_swing_cash_min_krw = _env_int(
+        "TRADING_ENGINE_DAY_REUSE_UNUSED_SWING_CASH_MIN_KRW",
+        cfg.day_reuse_unused_swing_cash_min_krw,
+    )
     cfg.popular_sector_top_n = _env_int(
         "TRADING_ENGINE_POPULAR_SECTOR_TOP_N",
         cfg.popular_sector_top_n,
@@ -91,6 +99,16 @@ def _apply_general_overrides(cfg: TradeEngineConfig) -> None:
         cfg.day_force_exit_at,
     )
     cfg.entry_windows = _env_entry_windows("TRADING_ENGINE_ENTRY_WINDOWS", cfg.entry_windows)
+    cfg.market_proxy_code = _env_text("TRADING_ENGINE_MARKET_PROXY_CODE", cfg.market_proxy_code)
+    cfg.kosdaq_proxy_code = _env_text("TRADING_ENGINE_KOSDAQ_PROXY_CODE", cfg.kosdaq_proxy_code)
+    cfg.use_kosdaq_confirmation = _env_bool(
+        "TRADING_ENGINE_USE_KOSDAQ_CONFIRMATION",
+        cfg.use_kosdaq_confirmation,
+    )
+    cfg.notify_on_core_pass_only = _env_bool(
+        "TRADING_ENGINE_NOTIFY_ON_CORE_PASS_ONLY",
+        cfg.notify_on_core_pass_only,
+    )
 
 
 def _apply_daytrade_overrides(cfg: TradeEngineConfig) -> None:
@@ -106,6 +124,10 @@ def _apply_daytrade_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_DAY_STOCK_MIN_MCAP",
         cfg.day_stock_min_mcap,
     )
+    cfg.day_stock_prefer_threshold = _env_float(
+        "TRADING_ENGINE_DAY_STOCK_PREFER_THRESHOLD",
+        cfg.day_stock_prefer_threshold,
+    )
     cfg.day_industry_lookback_bars = _env_int(
         "TRADING_ENGINE_DAY_INDUSTRY_LOOKBACK_BARS",
         cfg.day_industry_lookback_bars,
@@ -117,6 +139,26 @@ def _apply_daytrade_overrides(cfg: TradeEngineConfig) -> None:
     cfg.day_industry_negative_penalty_max = _env_float(
         "TRADING_ENGINE_DAY_INDUSTRY_NEGATIVE_PENALTY_MAX",
         cfg.day_industry_negative_penalty_max,
+    )
+    cfg.day_base_score = _env_float(
+        "TRADING_ENGINE_DAY_BASE_SCORE",
+        cfg.day_base_score,
+    )
+    cfg.day_avg_value_bonus_unit = _env_float(
+        "TRADING_ENGINE_DAY_AVG_VALUE_BONUS_UNIT",
+        cfg.day_avg_value_bonus_unit,
+    )
+    cfg.day_avg_value_bonus_max = _env_float(
+        "TRADING_ENGINE_DAY_AVG_VALUE_BONUS_MAX",
+        cfg.day_avg_value_bonus_max,
+    )
+    cfg.day_momentum_bonus_max = _env_float(
+        "TRADING_ENGINE_DAY_MOMENTUM_BONUS_MAX",
+        cfg.day_momentum_bonus_max,
+    )
+    cfg.day_momentum_bonus_cap_pct = _env_float(
+        "TRADING_ENGINE_DAY_MOMENTUM_BONUS_CAP_PCT",
+        cfg.day_momentum_bonus_cap_pct,
     )
     cfg.day_hard_drop_exclude_pct = _env_float(
         "TRADING_ENGINE_DAY_HARD_DROP_EXCLUDE_PCT",
@@ -186,9 +228,93 @@ def _apply_daytrade_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_DAY_NEGATIVE_PENALTY_MAX",
         cfg.day_negative_penalty_max,
     )
+    cfg.day_negative_penalty_full_pct = _env_float(
+        "TRADING_ENGINE_DAY_NEGATIVE_PENALTY_FULL_PCT",
+        cfg.day_negative_penalty_full_pct,
+    )
+    cfg.day_volatility_penalty_start_pct = _env_float(
+        "TRADING_ENGINE_DAY_VOLATILITY_PENALTY_START_PCT",
+        cfg.day_volatility_penalty_start_pct,
+    )
+    cfg.day_volatility_penalty_full_pct = _env_float(
+        "TRADING_ENGINE_DAY_VOLATILITY_PENALTY_FULL_PCT",
+        cfg.day_volatility_penalty_full_pct,
+    )
+    cfg.day_volatility_penalty_max = _env_float(
+        "TRADING_ENGINE_DAY_VOLATILITY_PENALTY_MAX",
+        cfg.day_volatility_penalty_max,
+    )
+    cfg.day_extreme_momentum_penalty = _env_float(
+        "TRADING_ENGINE_DAY_EXTREME_MOMENTUM_PENALTY",
+        cfg.day_extreme_momentum_penalty,
+    )
+    cfg.day_wide_spread_penalty = _env_float(
+        "TRADING_ENGINE_DAY_WIDE_SPREAD_PENALTY",
+        cfg.day_wide_spread_penalty,
+    )
+    cfg.day_fallback_penalty = _env_float(
+        "TRADING_ENGINE_DAY_FALLBACK_PENALTY",
+        cfg.day_fallback_penalty,
+    )
+    cfg.day_legacy_top10_bonus = _env_float(
+        "TRADING_ENGINE_DAY_LEGACY_TOP10_BONUS",
+        cfg.day_legacy_top10_bonus,
+    )
+    cfg.day_non_etf_bonus = _env_float(
+        "TRADING_ENGINE_DAY_NON_ETF_BONUS",
+        cfg.day_non_etf_bonus,
+    )
     cfg.day_intraday_strength_weight = _env_float(
         "TRADING_ENGINE_DAY_INTRADAY_STRENGTH_WEIGHT",
         cfg.day_intraday_strength_weight,
+    )
+    cfg.day_etf_momentum_bonus_scale = _env_float(
+        "TRADING_ENGINE_DAY_ETF_MOMENTUM_BONUS_SCALE",
+        cfg.day_etf_momentum_bonus_scale,
+    )
+    cfg.day_etf_volatility_penalty_scale = _env_float(
+        "TRADING_ENGINE_DAY_ETF_VOLATILITY_PENALTY_SCALE",
+        cfg.day_etf_volatility_penalty_scale,
+    )
+    cfg.day_etf_intraday_strength_weight = _env_float(
+        "TRADING_ENGINE_DAY_ETF_INTRADAY_STRENGTH_WEIGHT",
+        cfg.day_etf_intraday_strength_weight,
+    )
+    cfg.day_etf_industry_trend_scale = _env_float(
+        "TRADING_ENGINE_DAY_ETF_INDUSTRY_TREND_SCALE",
+        cfg.day_etf_industry_trend_scale,
+    )
+    cfg.day_etf_news_weight_scale = _env_float(
+        "TRADING_ENGINE_DAY_ETF_NEWS_WEIGHT_SCALE",
+        cfg.day_etf_news_weight_scale,
+    )
+    cfg.day_etf_sector_bucket_bonus = _env_float(
+        "TRADING_ENGINE_DAY_ETF_SECTOR_BUCKET_BONUS",
+        cfg.day_etf_sector_bucket_bonus,
+    )
+    cfg.day_etf_theme_sector_bonus = _env_float(
+        "TRADING_ENGINE_DAY_ETF_THEME_SECTOR_BONUS",
+        cfg.day_etf_theme_sector_bonus,
+    )
+    cfg.day_etf_positive_sector_news_bonus_max = _env_float(
+        "TRADING_ENGINE_DAY_ETF_POSITIVE_SECTOR_NEWS_BONUS_MAX",
+        cfg.day_etf_positive_sector_news_bonus_max,
+    )
+    cfg.day_etf_positive_market_breadth_bonus_max = _env_float(
+        "TRADING_ENGINE_DAY_ETF_POSITIVE_MARKET_BREADTH_BONUS_MAX",
+        cfg.day_etf_positive_market_breadth_bonus_max,
+    )
+    cfg.day_global_sector_positive_bonus_max = _env_float(
+        "TRADING_ENGINE_DAY_GLOBAL_SECTOR_POSITIVE_BONUS_MAX",
+        cfg.day_global_sector_positive_bonus_max,
+    )
+    cfg.day_global_sector_negative_penalty_max = _env_float(
+        "TRADING_ENGINE_DAY_GLOBAL_SECTOR_NEGATIVE_PENALTY_MAX",
+        cfg.day_global_sector_negative_penalty_max,
+    )
+    cfg.day_global_market_negative_penalty_max = _env_float(
+        "TRADING_ENGINE_DAY_GLOBAL_MARKET_NEGATIVE_PENALTY_MAX",
+        cfg.day_global_market_negative_penalty_max,
     )
     cfg.day_hts_top_view_top_n = _env_int(
         "TRADING_ENGINE_DAY_HTS_TOP_VIEW_TOP_N",
@@ -314,6 +440,10 @@ def _apply_daytrade_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_DAY_OVERNIGHT_CARRY_HOLD_CONFIDENCE_MIN",
         cfg.day_overnight_carry_hold_confidence_min,
     )
+    cfg.day_overnight_carry_max_calendar_gap_days = _env_int(
+        "TRADING_ENGINE_DAY_OVERNIGHT_CARRY_MAX_CALENDAR_GAP_DAYS",
+        cfg.day_overnight_carry_max_calendar_gap_days,
+    )
     cfg.day_chart_review_enabled = _env_bool(
         "TRADING_ENGINE_DAY_CHART_REVIEW_ENABLED",
         cfg.day_chart_review_enabled,
@@ -346,9 +476,41 @@ def _apply_daytrade_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_DAY_AFTERNOON_LOSS_LIMIT_LOSS_COUNT",
         cfg.day_afternoon_loss_limit_loss_count,
     )
+    cfg.defer_swing_scan_in_day_entry_window = _env_bool(
+        "TRADING_ENGINE_DEFER_SWING_SCAN_IN_DAY_ENTRY_WINDOW",
+        cfg.defer_swing_scan_in_day_entry_window,
+    )
 
 
 def _apply_swing_overrides(cfg: TradeEngineConfig) -> None:
+    cfg.swing_take_profit_mode = _env_text(
+        "TRADING_ENGINE_SWING_TAKE_PROFIT_MODE",
+        cfg.swing_take_profit_mode,
+    )
+    cfg.swing_source_model_strict_bonus = _env_float(
+        "TRADING_ENGINE_SWING_SOURCE_MODEL_STRICT_BONUS",
+        cfg.swing_source_model_strict_bonus,
+    )
+    cfg.swing_source_model_relaxed_bonus = _env_float(
+        "TRADING_ENGINE_SWING_SOURCE_MODEL_RELAXED_BONUS",
+        cfg.swing_source_model_relaxed_bonus,
+    )
+    cfg.swing_ma20_bonus = _env_float(
+        "TRADING_ENGINE_SWING_MA20_BONUS",
+        cfg.swing_ma20_bonus,
+    )
+    cfg.swing_ma20_cross_bonus = _env_float(
+        "TRADING_ENGINE_SWING_MA20_CROSS_BONUS",
+        cfg.swing_ma20_cross_bonus,
+    )
+    cfg.swing_avg_value_bonus_unit = _env_float(
+        "TRADING_ENGINE_SWING_AVG_VALUE_BONUS_UNIT",
+        cfg.swing_avg_value_bonus_unit,
+    )
+    cfg.swing_avg_value_bonus_max = _env_float(
+        "TRADING_ENGINE_SWING_AVG_VALUE_BONUS_MAX",
+        cfg.swing_avg_value_bonus_max,
+    )
     cfg.swing_momentum_bonus_max = _env_float(
         "TRADING_ENGINE_SWING_MOMENTUM_BONUS_MAX",
         cfg.swing_momentum_bonus_max,
@@ -360,6 +522,46 @@ def _apply_swing_overrides(cfg: TradeEngineConfig) -> None:
     cfg.swing_negative_penalty_max = _env_float(
         "TRADING_ENGINE_SWING_NEGATIVE_PENALTY_MAX",
         cfg.swing_negative_penalty_max,
+    )
+    cfg.swing_ma20_premium_penalty_start_pct = _env_float(
+        "TRADING_ENGINE_SWING_MA20_PREMIUM_PENALTY_START_PCT",
+        cfg.swing_ma20_premium_penalty_start_pct,
+    )
+    cfg.swing_ma20_premium_penalty_full_pct = _env_float(
+        "TRADING_ENGINE_SWING_MA20_PREMIUM_PENALTY_FULL_PCT",
+        cfg.swing_ma20_premium_penalty_full_pct,
+    )
+    cfg.swing_ma20_premium_penalty_max = _env_float(
+        "TRADING_ENGINE_SWING_MA20_PREMIUM_PENALTY_MAX",
+        cfg.swing_ma20_premium_penalty_max,
+    )
+    cfg.swing_structure_volume_ratio_start = _env_float(
+        "TRADING_ENGINE_SWING_STRUCTURE_VOLUME_RATIO_START",
+        cfg.swing_structure_volume_ratio_start,
+    )
+    cfg.swing_structure_volume_ratio_full = _env_float(
+        "TRADING_ENGINE_SWING_STRUCTURE_VOLUME_RATIO_FULL",
+        cfg.swing_structure_volume_ratio_full,
+    )
+    cfg.swing_structure_volume_weight_floor = _env_float(
+        "TRADING_ENGINE_SWING_STRUCTURE_VOLUME_WEIGHT_FLOOR",
+        cfg.swing_structure_volume_weight_floor,
+    )
+    cfg.swing_structure_volume_weight_ceiling = _env_float(
+        "TRADING_ENGINE_SWING_STRUCTURE_VOLUME_WEIGHT_CEILING",
+        cfg.swing_structure_volume_weight_ceiling,
+    )
+    cfg.swing_volatility_penalty_start_pct = _env_float(
+        "TRADING_ENGINE_SWING_VOLATILITY_PENALTY_START_PCT",
+        cfg.swing_volatility_penalty_start_pct,
+    )
+    cfg.swing_volatility_penalty_full_pct = _env_float(
+        "TRADING_ENGINE_SWING_VOLATILITY_PENALTY_FULL_PCT",
+        cfg.swing_volatility_penalty_full_pct,
+    )
+    cfg.swing_volatility_penalty_max = _env_float(
+        "TRADING_ENGINE_SWING_VOLATILITY_PENALTY_MAX",
+        cfg.swing_volatility_penalty_max,
     )
     cfg.swing_hard_drop_exclude_pct = _env_float(
         "TRADING_ENGINE_SWING_HARD_DROP_EXCLUDE_PCT",
@@ -400,6 +602,18 @@ def _apply_swing_overrides(cfg: TradeEngineConfig) -> None:
     cfg.swing_sector_etf_min_change_pct = _env_float(
         "TRADING_ENGINE_SWING_SECTOR_ETF_MIN_CHANGE_PCT",
         cfg.swing_sector_etf_min_change_pct,
+    )
+    cfg.swing_global_sector_positive_bonus_max = _env_float(
+        "TRADING_ENGINE_SWING_GLOBAL_SECTOR_POSITIVE_BONUS_MAX",
+        cfg.swing_global_sector_positive_bonus_max,
+    )
+    cfg.swing_global_sector_negative_penalty_max = _env_float(
+        "TRADING_ENGINE_SWING_GLOBAL_SECTOR_NEGATIVE_PENALTY_MAX",
+        cfg.swing_global_sector_negative_penalty_max,
+    )
+    cfg.swing_global_market_negative_penalty_max = _env_float(
+        "TRADING_ENGINE_SWING_GLOBAL_MARKET_NEGATIVE_PENALTY_MAX",
+        cfg.swing_global_market_negative_penalty_max,
     )
     cfg.swing_chart_review_enabled = _env_bool(
         "TRADING_ENGINE_SWING_CHART_REVIEW_ENABLED",
@@ -475,6 +689,42 @@ def _apply_regime_and_news_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_NEWS_MARKET_FALLBACK_RATIO",
         cfg.news_market_fallback_ratio,
     )
+    cfg.use_global_market_leadership = _env_bool(
+        "TRADING_ENGINE_USE_GLOBAL_MARKET_LEADERSHIP",
+        cfg.use_global_market_leadership,
+    )
+    cfg.global_market_signal_exchanges = _env_csv_tuple(
+        "TRADING_ENGINE_GLOBAL_MARKET_SIGNAL_EXCHANGES",
+        cfg.global_market_signal_exchanges,
+    )
+    cfg.global_market_signal_nday = _env_text(
+        "TRADING_ENGINE_GLOBAL_MARKET_SIGNAL_NDAY",
+        cfg.global_market_signal_nday,
+    )
+    cfg.global_market_signal_vol_rang = _env_text(
+        "TRADING_ENGINE_GLOBAL_MARKET_SIGNAL_VOL_RANG",
+        cfg.global_market_signal_vol_rang,
+    )
+    cfg.global_market_signal_breakout_mode = _env_text(
+        "TRADING_ENGINE_GLOBAL_MARKET_SIGNAL_BREAKOUT_MODE",
+        cfg.global_market_signal_breakout_mode,
+    )
+    cfg.global_market_signal_min_price = _env_float(
+        "TRADING_ENGINE_GLOBAL_MARKET_SIGNAL_MIN_PRICE",
+        cfg.global_market_signal_min_price,
+    )
+    cfg.global_market_signal_min_volume = _env_int(
+        "TRADING_ENGINE_GLOBAL_MARKET_SIGNAL_MIN_VOLUME",
+        cfg.global_market_signal_min_volume,
+    )
+    cfg.global_market_signal_max_abs_change_pct = _env_float(
+        "TRADING_ENGINE_GLOBAL_MARKET_SIGNAL_MAX_ABS_CHANGE_PCT",
+        cfg.global_market_signal_max_abs_change_pct,
+    )
+    cfg.global_market_signal_require_tradable = _env_bool(
+        "TRADING_ENGINE_GLOBAL_MARKET_SIGNAL_REQUIRE_TRADABLE",
+        cfg.global_market_signal_require_tradable,
+    )
 
 
 def _apply_master_path_overrides(cfg: TradeEngineConfig) -> None:
@@ -543,6 +793,19 @@ def _env_valid_hhmm(name: str, default: str) -> str:
     except (TypeError, ValueError):
         return default
     return text
+
+
+def _env_csv_tuple(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+
+    values = tuple(
+        part.strip().upper()
+        for part in str(raw).split(",")
+        if str(part).strip()
+    )
+    return values or default
 
 
 def _env_entry_windows(

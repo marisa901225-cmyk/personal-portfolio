@@ -173,6 +173,134 @@ def test_day_entry_uses_account_basis_buffer_without_unrealized_gain(tmp_path) -
     ]
     assert bot.state.open_positions["005930"].qty == 5
 
+
+def test_day_entry_reuses_unused_swing_budget_when_leftover_exceeds_threshold(tmp_path) -> None:
+    asof = "20260410"
+    api = FakeAPI()
+    api._cash_available = 400_000
+    api._quotes["005930"] = {"price": 50_000, "change_pct": 1.5}
+    api._positions = [{"code": "SWING01", "qty": 10, "avg_price": 66_000.0}]
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        use_news_sentiment=False,
+        use_intraday_circuit_breaker=False,
+        initial_capital=1_000_000,
+        swing_cash_ratio=0.80,
+        day_cash_ratio=0.20,
+        day_reuse_unused_swing_cash_enabled=True,
+        day_reuse_unused_swing_cash_min_krw=100_000,
+        use_realized_profit_buffer=False,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.trade_date = asof
+    bot.state.open_positions["SWING01"] = PositionState(
+        type="S",
+        entry_time="2026-04-10T09:05:00",
+        entry_price=66_000.0,
+        qty=10,
+        highest_price=66_000.0,
+        entry_date="20260410",
+        bars_held=0,
+    )
+
+    candidates = Candidates(
+        asof=asof,
+        popular=pd.DataFrame(
+            [
+                {"code": "005930", "name": "삼성전자", "avg_value_5d": "90000000000", "close": 50000, "change_pct": "1.5", "is_etf": False},
+            ]
+        ),
+        model=pd.DataFrame(),
+        etf=pd.DataFrame(),
+        merged=pd.DataFrame(
+            [
+                {"code": "005930", "name": "삼성전자", "avg_value_5d": "90000000000"},
+            ]
+        ),
+        quote_codes=["005930"],
+    )
+
+    with patch("backend.services.trading_engine.bot.rank_daytrade_codes", return_value=["005930"]):
+        bot._try_enter_day(
+            now=datetime(2026, 4, 10, 9, 10),
+            regime="RISK_ON",
+            candidates=candidates,
+            quotes={"005930": api.quote("005930")},
+            news_signal=None,
+        )
+
+    assert api.order_calls == [
+        {"side": "BUY", "code": "005930", "qty": 6, "order_type": "limit", "price": 50_100}
+    ]
+    assert bot.state.open_positions["005930"].qty == 6
+
+
+def test_day_entry_does_not_reuse_unused_swing_budget_below_threshold(tmp_path) -> None:
+    asof = "20260410"
+    api = FakeAPI()
+    api._cash_available = 400_000
+    api._quotes["005930"] = {"price": 50_000, "change_pct": 1.5}
+    api._positions = [{"code": "SWING01", "qty": 10, "avg_price": 71_000.0}]
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        use_news_sentiment=False,
+        use_intraday_circuit_breaker=False,
+        initial_capital=1_000_000,
+        swing_cash_ratio=0.80,
+        day_cash_ratio=0.20,
+        day_reuse_unused_swing_cash_enabled=True,
+        day_reuse_unused_swing_cash_min_krw=100_000,
+        use_realized_profit_buffer=False,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.trade_date = asof
+    bot.state.open_positions["SWING01"] = PositionState(
+        type="S",
+        entry_time="2026-04-10T09:05:00",
+        entry_price=71_000.0,
+        qty=10,
+        highest_price=71_000.0,
+        entry_date="20260410",
+        bars_held=0,
+    )
+
+    candidates = Candidates(
+        asof=asof,
+        popular=pd.DataFrame(
+            [
+                {"code": "005930", "name": "삼성전자", "avg_value_5d": "90000000000", "close": 50000, "change_pct": "1.5", "is_etf": False},
+            ]
+        ),
+        model=pd.DataFrame(),
+        etf=pd.DataFrame(),
+        merged=pd.DataFrame(
+            [
+                {"code": "005930", "name": "삼성전자", "avg_value_5d": "90000000000"},
+            ]
+        ),
+        quote_codes=["005930"],
+    )
+
+    with patch("backend.services.trading_engine.bot.rank_daytrade_codes", return_value=["005930"]):
+        bot._try_enter_day(
+            now=datetime(2026, 4, 10, 9, 10),
+            regime="RISK_ON",
+            candidates=candidates,
+            quotes={"005930": api.quote("005930")},
+            news_signal=None,
+        )
+
+    assert api.order_calls == [
+        {"side": "BUY", "code": "005930", "qty": 4, "order_type": "limit", "price": 50_100}
+    ]
+    assert bot.state.open_positions["005930"].qty == 4
+
 def test_enter_position_returns_sizing_metadata() -> None:
     class BuyableAPI(FakeAPI):
         def buy_order_capacity(self, code: str, order_type: str, price: int | None) -> dict:
@@ -493,4 +621,3 @@ def test_enter_position_fills_missing_limit_price_from_quote() -> None:
     assert api.order_calls == [
         {"side": "BUY", "code": "100790", "qty": 4, "order_type": "limit", "price": 60_300},
     ]
-

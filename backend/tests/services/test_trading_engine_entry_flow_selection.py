@@ -184,7 +184,7 @@ def test_swing_hold_skips_rebuy_when_same_symbol_is_already_profitable(tmp_path)
     assert api.order_calls == []
     assert bot.state.pass_reasons_today == {}
     assert bot.state.open_positions["005930"].qty == 7
-    assert abs(float(bot.state.open_positions["005930"].locked_profit_pct or 0.0) - 0.05) < 1e-9
+    assert bot.state.open_positions["005930"].locked_profit_pct is None
 
 def test_swing_entry_falls_back_to_next_candidate_when_top_pick_is_too_expensive(tmp_path) -> None:
     class BuyableAPI(FakeAPI):
@@ -302,4 +302,3 @@ def test_swing_entry_sweeps_same_sector_peer_when_top_and_second_pick_fail_budge
     assert "LIGTOP" not in bot.state.open_positions
     assert "RANK2" not in bot.state.open_positions
     assert bot.state.pass_reasons_today == {}
-

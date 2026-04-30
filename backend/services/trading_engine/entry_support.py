@@ -10,16 +10,21 @@ def apply_day_intraday_confirmation(bot, ranked_codes: list[str], *, logger) -> 
         return ranked_codes
 
     filtered_codes: list[str] = []
+    seen_codes: set[str] = set()
     for code in ranked_codes:
+        code_str = str(code or "").strip()
+        if not code_str or code_str in seen_codes:
+            continue
+        seen_codes.add(code_str)
         ok, meta = passes_day_intraday_confirmation_for_code(bot, code=code, logger=logger)
         if ok:
-            filtered_codes.append(code)
+            filtered_codes.append(code_str)
             continue
 
         bot._journal(
             "DAY_CANDIDATE_FILTERED",
             asof_date=bot.state.trade_date,
-            code=code,
+            code=code_str,
             reason=meta.get("reason"),
             bars=meta.get("bars"),
             window_change_pct=meta.get("window_change_pct"),

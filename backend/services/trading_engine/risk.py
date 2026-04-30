@@ -100,7 +100,7 @@ def should_exit_position(
         )
 
     locked_profit_pct = float(position.locked_profit_pct) if position.locked_profit_pct is not None else None
-    if locked_profit_pct is not None and pnl_pct < locked_profit_pct:
+    if position.type == "T" and locked_profit_pct is not None and pnl_pct < locked_profit_pct:
         return True, "LOCK", pnl_pct
 
     if position.type == "P":

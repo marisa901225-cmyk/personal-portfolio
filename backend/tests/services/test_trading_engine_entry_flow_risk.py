@@ -1,46 +1,31 @@
 from .trading_engine_support import *  # noqa: F401,F403
 
-def test_locked_profit_position_exits_immediately_after_profit_floor_break(tmp_path) -> None:
-    api = FakeAPI()
-    api._quotes["005930"] = {"price": 105_000, "change_pct": 1.2}
-
+def test_swing_position_does_not_exit_on_day_lock_retrace(tmp_path) -> None:
     cfg = TradeEngineConfig(
         state_path=str(tmp_path / "state.json"),
         output_dir=str(tmp_path / "output"),
         runlog_path=str(tmp_path / "run.log"),
-        swing_take_profit_mode="trailing",
-        swing_trail_start=0.50,
-        swing_chart_review_enabled=False,
     )
-    bot = HybridTradingBot(api, config=cfg)
-    bot.state.trade_date = "20260216"
-    bot.state.open_positions["005930"] = PositionState(
+    position = PositionState(
         type="S",
         entry_time="2026-02-16T09:10:00",
         entry_price=100_000.0,
         qty=7,
         highest_price=105_000.0,
         entry_date="20260216",
+        locked_profit_pct=0.043182,
     )
 
-    candidates = SimpleNamespace(
-        model=pd.DataFrame([{"code": "005930", "name": "삼성전자"}]),
-        etf=pd.DataFrame(),
+    exit_now, reason, pnl_pct = should_exit_position(
+        position,
+        quote_price=103_600.0,
+        now=datetime(2026, 2, 16, 13, 14),
+        config=cfg,
     )
 
-    with patch("backend.services.trading_engine.bot.rank_swing_codes", return_value=["005930"]):
-        bot._try_enter_swing(
-            now=datetime(2026, 2, 16, 13, 10),
-            regime="RISK_ON",
-            candidates=candidates,
-            quotes={"005930": api.quote("005930")},
-        )
-
-    api._quotes["005930"] = {"price": 104_000, "change_pct": 0.8}
-    bot.monitor_positions(now=datetime(2026, 2, 16, 13, 14))
-
-    assert any(call["side"] == "SELL" and call["code"] == "005930" for call in api.order_calls)
-    assert "005930" not in bot.state.open_positions
+    assert exit_now is False
+    assert reason == ""
+    assert round(pnl_pct, 4) == 0.036
 
 def test_day_position_arms_profit_lock_and_exits_on_retrace() -> None:
     cfg = TradeEngineConfig(
@@ -393,4 +378,3 @@ def test_day_afternoon_entry_blocks_after_two_stoploss_sized_losses() -> None:
     assert reason_afternoon_blocked == "DAY_AFTERNOON_LOSS_LIMIT"
     assert ok_afternoon_allowed is True
     assert reason_afternoon_allowed == "OK"
-

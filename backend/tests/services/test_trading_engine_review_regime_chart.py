@@ -413,5 +413,4 @@ def test_bot_holds_profitable_broker_position_when_same_symbol_is_picked(tmp_pat
     assert api.order_calls == []
     assert "005930" in bot.state.open_positions
     assert bot.state.open_positions["005930"].type == "S"
-    assert abs(float(bot.state.open_positions["005930"].locked_profit_pct or 0.0) - 0.05) < 1e-9
-
+    assert bot.state.open_positions["005930"].locked_profit_pct is None

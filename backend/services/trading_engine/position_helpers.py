@@ -183,7 +183,7 @@ def lock_profitable_existing_position(
 
 def _should_promote_locked_profit(*, position_type: str, candidate_type: str) -> bool:
     del candidate_type
-    return str(position_type).strip().upper() == "S"
+    return str(position_type).strip().upper() == "T"
 
 __all__ = [
     "is_swing_trend_broken",

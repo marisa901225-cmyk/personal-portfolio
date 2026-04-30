@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import perf_counter
 
 import pandas as pd
 
@@ -12,8 +13,10 @@ from .candidate_scoring import (
     _swing_quote_structure_score,
 )
 from .config import TradeEngineConfig
+from .global_market_signal import GlobalMarketSignal
 from .interfaces import TradingAPI
 from .news_sentiment import NewsSentimentSignal
+from .run_context import TradingRunMetrics
 from .screeners import etf_swing_screener, model_screener, popular_screener
 from .strategy_ranking import (
     _attach_popular_liquidity_signals,
@@ -49,46 +52,134 @@ def build_candidates(
     asof: str,
     config: TradeEngineConfig,
     news_signal: NewsSentimentSignal | None = None,
+    metrics: TradingRunMetrics | None = None,
 ) -> Candidates:
-    excluded_codes = _proxy_codes(config)
-    popular = _drop_excluded_codes(
-        popular_screener(
+    started_at = perf_counter()
+    try:
+        day_candidates = build_day_candidates(
             api,
             asof,
-            include_etf=config.include_etf,
-            config=config,
+            config,
             news_signal=news_signal,
-        ),
-        excluded_codes,
-    )
-    model = _drop_excluded_codes(
-        model_screener(api, asof, include_etf=False, config=config),
-        excluded_codes,
-    )
-    etf = (
-        _drop_excluded_codes(etf_swing_screener(api, asof, config=config), excluded_codes)
-        if config.include_etf
-        else pd.DataFrame()
-    )
+            metrics=metrics,
+        )
+        swing_candidates = build_swing_candidates(
+            api,
+            asof,
+            config,
+            news_signal=news_signal,
+            metrics=metrics,
+        )
 
-    sector_keywords = _candidate_sector_keywords(config, news_signal)
-    merged = _merge_candidates(
-        popular,
-        model,
-        etf,
-        sector_keywords=sector_keywords,
-        news_signal=news_signal,
-    )
-    merged = _drop_excluded_codes(merged, excluded_codes)
-    quote_codes = _build_quote_codes(merged, config.quote_score_limit)
-    return Candidates(
-        asof=asof,
-        popular=popular,
-        model=model,
-        etf=etf,
-        merged=merged,
-        quote_codes=quote_codes,
-    )
+        sector_keywords = _candidate_sector_keywords(config, news_signal)
+        merged = _merge_candidates(
+            day_candidates.popular,
+            swing_candidates.model,
+            swing_candidates.etf,
+            sector_keywords=sector_keywords,
+            news_signal=news_signal,
+        )
+        merged = _drop_excluded_codes(merged, _proxy_codes(config))
+        quote_codes = _build_quote_codes(merged, config.quote_score_limit)
+        return Candidates(
+            asof=asof,
+            popular=day_candidates.popular,
+            model=swing_candidates.model,
+            etf=swing_candidates.etf,
+            merged=merged,
+            quote_codes=quote_codes,
+        )
+    finally:
+        if metrics is not None:
+            metrics.observe("build_candidates_s", perf_counter() - started_at)
+
+
+def build_day_candidates(
+    api: TradingAPI,
+    asof: str,
+    config: TradeEngineConfig,
+    news_signal: NewsSentimentSignal | None = None,
+    metrics: TradingRunMetrics | None = None,
+) -> Candidates:
+    started_at = perf_counter()
+    try:
+        excluded_codes = _proxy_codes(config)
+        popular = _drop_excluded_codes(
+            popular_screener(
+                api,
+                asof,
+                include_etf=config.include_etf,
+                config=config,
+                news_signal=news_signal,
+                metrics=metrics,
+            ),
+            excluded_codes,
+        )
+
+        sector_keywords = _candidate_sector_keywords(config, news_signal)
+        merged = _merge_candidates(
+            popular,
+            pd.DataFrame(),
+            pd.DataFrame(),
+            sector_keywords=sector_keywords,
+            news_signal=news_signal,
+        )
+        merged = _drop_excluded_codes(merged, excluded_codes)
+        quote_codes = _build_quote_codes(merged, config.quote_score_limit)
+        return Candidates(
+            asof=asof,
+            popular=popular,
+            model=pd.DataFrame(),
+            etf=pd.DataFrame(),
+            merged=merged,
+            quote_codes=quote_codes,
+        )
+    finally:
+        if metrics is not None:
+            metrics.observe("build_day_candidates_s", perf_counter() - started_at)
+
+
+def build_swing_candidates(
+    api: TradingAPI,
+    asof: str,
+    config: TradeEngineConfig,
+    news_signal: NewsSentimentSignal | None = None,
+    metrics: TradingRunMetrics | None = None,
+) -> Candidates:
+    started_at = perf_counter()
+    try:
+        excluded_codes = _proxy_codes(config)
+        model = _drop_excluded_codes(
+            model_screener(api, asof, include_etf=False, config=config, metrics=metrics),
+            excluded_codes,
+        )
+        etf = (
+            _drop_excluded_codes(etf_swing_screener(api, asof, config=config, metrics=metrics), excluded_codes)
+            if config.include_etf
+            else pd.DataFrame()
+        )
+
+        sector_keywords = _candidate_sector_keywords(config, news_signal)
+        merged = _merge_candidates(
+            pd.DataFrame(),
+            model,
+            etf,
+            sector_keywords=sector_keywords,
+            news_signal=news_signal,
+        )
+        merged = _drop_excluded_codes(merged, excluded_codes)
+        quote_codes = _build_quote_codes(merged, config.quote_score_limit)
+        return Candidates(
+            asof=asof,
+            popular=pd.DataFrame(),
+            model=model,
+            etf=etf,
+            merged=merged,
+            quote_codes=quote_codes,
+        )
+    finally:
+        if metrics is not None:
+            metrics.observe("build_swing_candidates_s", perf_counter() - started_at)
 
 
 def exclude_candidate_codes(candidates: Candidates, excluded_codes: set[str]) -> Candidates:
@@ -120,8 +211,9 @@ def pick_swing(
     quotes: QuoteMap,
     config: TradeEngineConfig,
     news_signal: NewsSentimentSignal | None = None,
+    global_signal: GlobalMarketSignal | None = None,
 ) -> str | None:
-    ranked_codes = rank_swing_codes(candidates, quotes, config, news_signal=news_signal)
+    ranked_codes = rank_swing_codes(candidates, quotes, config, news_signal=news_signal, global_signal=global_signal)
     return ranked_codes[0] if ranked_codes else None
 
 
@@ -130,6 +222,7 @@ def rank_swing_codes(
     quotes: QuoteMap,
     config: TradeEngineConfig,
     news_signal: NewsSentimentSignal | None = None,
+    global_signal: GlobalMarketSignal | None = None,
 ) -> list[str]:
     primary = candidates.model.copy()
     use_etf_fallback = primary.empty and config.allow_etf_swing_fallback
@@ -172,9 +265,12 @@ def rank_swing_codes(
 
     scored = primary.copy()
     if news_signal is None:
-        scored["score"] = scored.apply(lambda r: _score_swing_row(r, quotes, config), axis=1)
+        scored["score"] = scored.apply(lambda r: _score_swing_row(r, quotes, config, global_signal=global_signal), axis=1)
     else:
-        scored["score"] = scored.apply(lambda r: _score_swing_row(r, quotes, config, news_signal), axis=1)
+        scored["score"] = scored.apply(
+            lambda r: _score_swing_row(r, quotes, config, news_signal, global_signal),
+            axis=1,
+        )
     scored = scored.sort_values("score", ascending=False)
     if scored.empty:
         return []
@@ -189,7 +285,13 @@ def rank_swing_codes(
             config=config,
             news_signal=news_signal,
             resolve_change_pct_fn=_resolve_change_pct,
-            score_swing_row_fn=_score_swing_row,
+            score_swing_row_fn=lambda row, quote_map, cfg, signal: _score_swing_row(
+                row,
+                quote_map,
+                cfg,
+                signal,
+                global_signal,
+            ),
         )
         if themed_etf_code:
             ordered_codes = [str(themed_etf_code)] + [code for code in ordered_codes if str(code) != str(themed_etf_code)]
@@ -210,8 +312,17 @@ def pick_daytrade(
     quotes: QuoteMap,
     config: TradeEngineConfig,
     news_signal: NewsSentimentSignal | None = None,
+    global_signal: GlobalMarketSignal | None = None,
+    global_signal_active: bool = True,
 ) -> str | None:
-    ranked_codes = rank_daytrade_codes(candidates, quotes, config, news_signal=news_signal)
+    ranked_codes = rank_daytrade_codes(
+        candidates,
+        quotes,
+        config,
+        news_signal=news_signal,
+        global_signal=global_signal,
+        global_signal_active=global_signal_active,
+    )
     return ranked_codes[0] if ranked_codes else None
 
 
@@ -220,6 +331,8 @@ def rank_daytrade_codes(
     quotes: QuoteMap,
     config: TradeEngineConfig,
     news_signal: NewsSentimentSignal | None = None,
+    global_signal: GlobalMarketSignal | None = None,
+    global_signal_active: bool = True,
 ) -> list[str]:
     pool = candidates.popular.copy()
     if pool.empty:
@@ -336,9 +449,26 @@ def rank_daytrade_codes(
         return []
 
     if news_signal is None:
-        pool["score"] = pool.apply(lambda r: _score_day_row(r, quotes, config), axis=1)
+        pool["score"] = pool.apply(
+            lambda r: _score_day_row(
+                r,
+                quotes,
+                config,
+                global_signal=global_signal if global_signal_active else None,
+            ),
+            axis=1,
+        )
     else:
-        pool["score"] = pool.apply(lambda r: _score_day_row(r, quotes, config, news_signal), axis=1)
+        pool["score"] = pool.apply(
+            lambda r: _score_day_row(
+                r,
+                quotes,
+                config,
+                news_signal,
+                global_signal if global_signal_active else None,
+            ),
+            axis=1,
+        )
     pool = pool.sort_values(
         by=["score", "_day_intraday_score", "_live_change_pct_num", "_avg_value_5d_num"],
         ascending=[False, False, False, False],

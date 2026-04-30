@@ -24,6 +24,7 @@ _SUMMARY_EVENT_LABELS = {
     "NEWS_SENTIMENT": "뉴스 심리",
     "OPEN_ORDERS": "미체결 처리",
     "PASS": "패스",
+    "RUN_METRICS": "실행 계측",
     "STATE_RECONCILE_ADD": "상태 동기화 신규 반영",
     "STATE_RECONCILE_DROP": "상태 동기화 정리",
     "STATE_RECONCILE_UPDATE": "상태 동기화 보정",

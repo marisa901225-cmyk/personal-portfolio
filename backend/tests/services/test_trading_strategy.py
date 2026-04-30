@@ -996,6 +996,24 @@ class TradingStrategyTests(unittest.TestCase):
 
         self.assertGreater(strong_score, weak_score)
 
+    def test_score_day_row_caps_liquidity_bonus_within_top_value_group(self) -> None:
+        base_row = {
+            "code": "000001",
+            "name": "알파컴퍼니",
+            "_avg_value_5d_num": 80_000_000_000,
+            "_change_pct_num": 2.0,
+            "_is_etf": False,
+            "volume_rank": 15,
+        }
+        top_row = pd.Series({**base_row, "value_rank": 1})
+        same_group_row = pd.Series({**base_row, "value_rank": 9})
+        cfg = TradeEngineConfig()
+
+        top_score = _score_day_row(top_row, quotes={}, config=cfg, news_signal=None)
+        same_group_score = _score_day_row(same_group_row, quotes={}, config=cfg, news_signal=None)
+
+        self.assertEqual(top_score, same_group_score)
+
     def test_score_day_row_rewards_high_hts_top_view_rank_softly(self) -> None:
         base_row = {
             "code": "000001",

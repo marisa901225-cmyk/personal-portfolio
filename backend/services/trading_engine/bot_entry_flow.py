@@ -32,6 +32,7 @@ from .risk import can_enter, current_entry_window_index
 from .types import OrderPayload, Quote, QuoteMap
 
 if TYPE_CHECKING:
+    from .global_market_signal import GlobalMarketSignal
     from .news_sentiment import NewsSentimentSignal
     from .strategy import Candidates
 
@@ -115,9 +116,16 @@ class BotEntryFlowMixin:
         candidates: Candidates,
         quotes: QuoteMap,
         news_signal: NewsSentimentSignal | None = None,
+        global_signal: GlobalMarketSignal | None = None,
     ) -> None:
         bot_module = _bot_module()
-        ranked_codes = bot_module.rank_swing_codes(candidates, quotes, self.config, news_signal=news_signal)
+        ranked_codes = bot_module.rank_swing_codes(
+            candidates,
+            quotes,
+            self.config,
+            news_signal=news_signal,
+            global_signal=global_signal,
+        )
         code = ranked_codes[0] if ranked_codes else None
         if code and self._should_hold_profitable_existing_position(
             code=code,
@@ -181,7 +189,10 @@ class BotEntryFlowMixin:
                 position_type="S",
                 code=ranked_code,
                 cash_ratio=self.config.swing_cash_ratio,
-                budget_cash_cap=self._strategy_budget_cash_cap(cash_ratio=self.config.swing_cash_ratio),
+                budget_cash_cap=self._strategy_budget_cash_cap(
+                    cash_ratio=self.config.swing_cash_ratio,
+                    position_type="S",
+                ),
                 asof_date=self.state.trade_date,
                 now=now,
                 order_type=self.config.swing_entry_order_type,
@@ -259,12 +270,23 @@ class BotEntryFlowMixin:
         candidates: Candidates,
         quotes: QuoteMap,
         news_signal: NewsSentimentSignal | None = None,
+        ranked_codes: list[str] | None = None,
+        intraday_confirmation_done: bool = False,
+        global_signal: GlobalMarketSignal | None = None,
     ) -> None:
         bot_module = _bot_module()
-        ranked_codes = bot_module.rank_daytrade_codes(candidates, quotes, self.config, news_signal=news_signal)
-        ranked_codes = self._apply_day_intraday_confirmation(ranked_codes, now=now)
-        if ranked_codes and self._should_hold_profitable_existing_position(
-            code=ranked_codes[0],
+        resolved_ranked_codes = list(ranked_codes) if ranked_codes is not None else bot_module.rank_daytrade_codes(
+            candidates,
+            quotes,
+            self.config,
+            news_signal=news_signal,
+            global_signal=global_signal,
+            global_signal_active=self._should_apply_day_global_signal(now),
+        )
+        if not intraday_confirmation_done:
+            resolved_ranked_codes = self._apply_day_intraday_confirmation(resolved_ranked_codes, now=now)
+        if resolved_ranked_codes and self._should_hold_profitable_existing_position(
+            code=resolved_ranked_codes[0],
             quotes=quotes,
             candidate_type="T",
             now=now,
@@ -284,12 +306,12 @@ class BotEntryFlowMixin:
             self._pass(reason, regime)
             return
 
-        ranked_codes, review_applied = self._apply_day_chart_review(
-            ranked_codes=ranked_codes,
+        resolved_ranked_codes, review_applied = self._apply_day_chart_review(
+            ranked_codes=resolved_ranked_codes,
             candidates=candidates,
             quotes=quotes,
         )
-        if not ranked_codes:
+        if not resolved_ranked_codes:
             self._pass("DAY_LLM_VETO" if review_applied else "NO_DAY_PICK", regime)
             if review_applied:
                 self._notify_chart_review_skip(
@@ -303,7 +325,7 @@ class BotEntryFlowMixin:
             "T",
             self.state,
             regime=regime,
-            candidates_count=len(ranked_codes),
+            candidates_count=len(resolved_ranked_codes),
             now=now,
             config=self.config,
             is_trading_day_value=True,
@@ -314,7 +336,7 @@ class BotEntryFlowMixin:
 
         result = None
         code = ""
-        for ranked_code in ranked_codes:
+        for ranked_code in resolved_ranked_codes:
             quote = quotes.get(ranked_code) if isinstance(quotes, dict) else None
             order_type, price = _resolve_day_entry_order(
                 quote=quote,
@@ -326,7 +348,10 @@ class BotEntryFlowMixin:
                 position_type="T",
                 code=ranked_code,
                 cash_ratio=self.config.day_cash_ratio,
-                budget_cash_cap=self._strategy_budget_cash_cap(cash_ratio=self.config.day_cash_ratio),
+                budget_cash_cap=self._strategy_budget_cash_cap(
+                    cash_ratio=self.config.day_cash_ratio,
+                    position_type="T",
+                ),
                 asof_date=self.state.trade_date,
                 now=now,
                 order_type=order_type,
@@ -360,7 +385,7 @@ class BotEntryFlowMixin:
                 self._notify_chart_review_skip(
                     strategy_label="DAY",
                     reason="DAY_ENTRY_FAILED",
-                    code=ranked_codes[0] if ranked_codes else None,
+                    code=resolved_ranked_codes[0] if resolved_ranked_codes else None,
                 )
             return
         window_index = current_entry_window_index(now, self.config)

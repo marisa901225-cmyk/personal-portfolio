@@ -16,6 +16,7 @@ from backend.services.news_collector import NewsCollector
 from backend.services.retry import async_retry, sync_retry
 from backend.services.scheduler_monitor import monitor_job_async
 from backend.services.trading_engine.archive import archive_trading_engine_weekly
+from backend.services.trading_engine.global_market_signal import get_or_build_global_market_signal
 from backend.services.trading_engine.parking import is_regular_market_open
 from backend.services.trading_engine.runtime import (
     close_bot as close_trading_bot,
@@ -278,6 +279,38 @@ async def _run_trading_engine_cycle(bot):
             logger.info("trading_engine_cycle result=%s", result)
 
 
+async def job_trading_engine_prefetch_global_signal():
+    """
+    장전 1회 미국장 참고점수를 메모리에 워밍한다.
+
+    - 전일 미국장 데이터 기반이므로 당일 중 반복 fetch 이점이 작다.
+    - 08:50 첫 preopen cycle 전에 미리 적재해 장초반 병목을 줄인다.
+    """
+    bot = get_or_create_bot()
+    if bot is None:
+        return
+
+    today = datetime.now(KST).strftime("%Y%m%d")
+    with SessionLocal() as db:
+        async with monitor_job_async("trading_engine_prefetch_global_signal", db):
+            signal, cache_hit = await asyncio.to_thread(
+                get_or_build_global_market_signal,
+                bot.api,
+                bot.config,
+                trade_date=today,
+            )
+            logger.info(
+                "trading_engine_prefetch_global_signal result=%s",
+                {
+                    "asof": today,
+                    "cache_hit": bool(cache_hit),
+                    "ready": signal is not None,
+                    "high_count": int(signal.high_count) if signal is not None else 0,
+                    "low_count": int(signal.low_count) if signal is not None else 0,
+                },
+            )
+
+
 async def job_trading_engine_lock_monitor():
     """
     LOCK arm 상태의 단타 포지션만 장중에 더 촘촘히 감시한다.
@@ -455,6 +488,14 @@ def start_scheduler():
             morning_periodic_minutes = _periodic_minute_field(interval=interval, exclude_minutes={5, 55})
             midday_periodic_minutes = _periodic_minute_field(interval=interval)
             afternoon_periodic_minutes = _periodic_minute_field(interval=interval, exclude_minutes={0, 55})
+
+            scheduler.add_job(
+                job_trading_engine_prefetch_global_signal,
+                CronTrigger(day_of_week="mon-fri", hour=8, minute=49),
+                id="trading_engine_prefetch_global_signal",
+                replace_existing=True,
+                max_instances=1,
+            )
 
             scheduler.add_job(
                 job_trading_engine_cycle,
