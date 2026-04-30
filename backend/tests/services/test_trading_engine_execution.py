@@ -116,6 +116,44 @@ def test_monitor_positions_tracks_day_stoploss_count_before_exclusion(tmp_path) 
     assert "011930" not in get_day_stoploss_excluded_codes(bot.state)
     assert "011930" in get_day_reentry_blocked_codes(bot.state)
 
+def test_monitor_positions_exits_day_position_without_touching_swing_position(tmp_path) -> None:
+    api = FakeAPI()
+    api._quotes["011930"] = {"price": 9_800, "change_pct": -2.0}
+    api._quotes["005930"] = {"price": 50_000, "change_pct": 0.0}
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.open_positions["011930"] = PositionState(
+        type="T",
+        entry_time="2026-04-07T09:05:00",
+        entry_price=10_000.0,
+        qty=10,
+        highest_price=10_000.0,
+        entry_date="20260407",
+    )
+    bot.state.open_positions["005930"] = PositionState(
+        type="S",
+        entry_time="2026-04-07T09:05:00",
+        entry_price=50_000.0,
+        qty=3,
+        highest_price=50_000.0,
+        entry_date="20260407",
+        bars_held=0,
+    )
+
+    bot.monitor_positions(now=datetime(2026, 4, 7, 9, 30))
+
+    assert api.order_calls == [
+        {"side": "SELL", "code": "011930", "qty": 10, "order_type": "MKT", "price": None}
+    ]
+    assert "011930" not in bot.state.open_positions
+    assert "005930" in bot.state.open_positions
+    assert bot.state.open_positions["005930"].type == "S"
+
 def test_monitor_positions_holds_day_stop_once_when_llm_approves_pullback(tmp_path) -> None:
     class IntradayAPI(FakeAPI):
         def __init__(self) -> None:

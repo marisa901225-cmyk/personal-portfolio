@@ -75,14 +75,6 @@ def lock_profitable_existing_position(
             pnl_ratio = (price / local_position.entry_price) - 1.0
             if pnl_ratio > 0:
                 local_position.highest_price = float(max(local_position.highest_price or 0.0, price))
-                if _should_promote_locked_profit(
-                    position_type=local_position.type,
-                    candidate_type=candidate_type,
-                ):
-                    local_position.locked_profit_pct = max(
-                        float(local_position.locked_profit_pct or pnl_ratio),
-                        pnl_ratio,
-                    )
                 return pnl_ratio, local_position
 
     try:
@@ -118,23 +110,12 @@ def lock_profitable_existing_position(
                         qty=qty,
                         highest_price=float(max(avg_price, current_price)),
                         entry_date=trade_date,
-                        locked_profit_pct=pnl_ratio if _should_promote_locked_profit(
-                            position_type=candidate_type,
-                            candidate_type=candidate_type,
-                        ) else None,
+                        locked_profit_pct=None,
                         bars_held=0,
                     )
                     state.open_positions[normalized_code] = position
                 else:
                     position.highest_price = float(max(position.highest_price or 0.0, current_price))
-                    if _should_promote_locked_profit(
-                        position_type=position.type,
-                        candidate_type=candidate_type,
-                    ):
-                        position.locked_profit_pct = max(
-                            float(position.locked_profit_pct or pnl_ratio),
-                            pnl_ratio,
-                        )
                 return pnl_ratio, position
 
         pnl_rate = parse_numeric(item.get("pnl_rate") or item.get("evlu_pfls_rt"))
@@ -157,33 +138,18 @@ def lock_profitable_existing_position(
                 qty=qty,
                 highest_price=float(max(avg_price, current_price or avg_price)),
                 entry_date=trade_date,
-                locked_profit_pct=pnl_ratio if _should_promote_locked_profit(
-                    position_type=candidate_type,
-                    candidate_type=candidate_type,
-                ) else None,
+                locked_profit_pct=None,
                 bars_held=0,
             )
             state.open_positions[normalized_code] = position
         elif position is not None:
             if current_price is not None and current_price > 0:
                 position.highest_price = float(max(position.highest_price or 0.0, current_price))
-            if _should_promote_locked_profit(
-                position_type=position.type,
-                candidate_type=candidate_type,
-            ):
-                position.locked_profit_pct = max(
-                    float(position.locked_profit_pct or pnl_ratio),
-                    pnl_ratio,
-                )
         if position is not None:
             return pnl_ratio, position
 
     return None, local_position
 
-
-def _should_promote_locked_profit(*, position_type: str, candidate_type: str) -> bool:
-    del candidate_type
-    return str(position_type).strip().upper() == "T"
 
 __all__ = [
     "is_swing_trend_broken",
