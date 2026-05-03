@@ -281,7 +281,7 @@ async def collect_stock_news_google(db: Session, ticker: str, company_name: str 
             category="economy", 
             hl="en", 
             gl="US",
-            summarize_english=True,  # 영문 → 한국어 요약
+            summarize_english=False,
             ticker=ticker
         )
         total_count += count
@@ -327,7 +327,7 @@ async def collect_all_google_macro_news(db: Session):
                 category="economy", 
                 hl=hl, 
                 gl=gl,
-                summarize_english=True  # 매크로 뉴스도 영문이면 요약
+                summarize_english=False
             )
             total_count += count
             await asyncio.sleep(0.5)
