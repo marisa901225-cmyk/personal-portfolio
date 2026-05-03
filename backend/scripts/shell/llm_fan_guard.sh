@@ -14,7 +14,6 @@ ENABLED="${LLM_FAN_GUARD_ENABLED:-1}"
 THRESHOLD_RPM="${LLM_FAN_GUARD_THRESHOLD_RPM:-1600}"
 COOLDOWN_SEC="${LLM_FAN_GUARD_COOLDOWN_SEC:-3600}"
 SENSOR_PATTERN="${LLM_FAN_GUARD_SENSOR_PATTERN:-}"
-STOP_MIN_TEMP_C="${LLM_FAN_GUARD_STOP_MIN_TEMP_C:-90}"
 START_MAX_TEMP_C="${LLM_FAN_GUARD_START_MAX_TEMP_C:-88}"
 START_RETRY_SEC="${LLM_FAN_GUARD_START_RETRY_SEC:-300}"
 TEMP_SENSOR_PATTERN="${LLM_FAN_GUARD_TEMP_SENSOR_PATTERN:-$SENSOR_PATTERN}"
@@ -228,25 +227,8 @@ if (( max_rpm < THRESHOLD_RPM )); then
   exit 0
 fi
 
-stop_temp_c=""
-if temp_threshold_enabled "$STOP_MIN_TEMP_C"; then
-  stop_temp_c="$(printf '%s\n' "$sensors_output" | max_temp_c_from_output)"
-  if [[ -n "$stop_temp_c" ]] && ! temp_is_at_or_above_threshold "$stop_temp_c" "$STOP_MIN_TEMP_C"; then
-    write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" "rpm_high_temp_ok"
-    exit 0
-  fi
-
-  if [[ -z "$stop_temp_c" ]]; then
-    log "stop temperature gate skipped; no temperature lines matched${TEMP_SENSOR_PATTERN:+ for pattern '$TEMP_SENSOR_PATTERN'}"
-  fi
-fi
-
 cooldown_until_epoch="$((NOW_EPOCH + COOLDOWN_SEC))"
-if [[ -n "$stop_temp_c" ]]; then
-  log "fan RPM $max_rpm exceeded threshold $THRESHOLD_RPM and sensor temp ${stop_temp_c}C reached stop limit ${STOP_MIN_TEMP_C}C; stopping LLM services for ${COOLDOWN_SEC}s"
-else
-  log "fan RPM $max_rpm exceeded threshold $THRESHOLD_RPM; stopping LLM services for ${COOLDOWN_SEC}s"
-fi
+log "fan RPM $max_rpm exceeded threshold $THRESHOLD_RPM; stopping LLM services for ${COOLDOWN_SEC}s"
 
 if run_schedule stop; then
   write_state 1 "$NOW_EPOCH" "$cooldown_until_epoch" "$max_rpm" "$max_rpm" "stop"

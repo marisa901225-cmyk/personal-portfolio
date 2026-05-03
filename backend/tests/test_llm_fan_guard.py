@@ -52,8 +52,7 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
         threshold_rpm: int = 1600,
         cooldown_sec: int = 3600,
         sensor_pattern: str = "",
-        stop_min_temp_c: str = "90",
-        start_max_temp_c: str = "0",
+        start_max_temp_c: str = "88",
         start_retry_sec: int = 300,
         temp_sensor_pattern: str = "",
     ) -> subprocess.CompletedProcess[str]:
@@ -71,7 +70,6 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
                 "LLM_FAN_GUARD_COOLDOWN_SEC": str(cooldown_sec),
                 "LLM_FAN_GUARD_NOW_EPOCH": str(now_epoch),
                 "LLM_FAN_GUARD_SENSOR_PATTERN": sensor_pattern,
-                "LLM_FAN_GUARD_STOP_MIN_TEMP_C": str(stop_min_temp_c),
                 "LLM_FAN_GUARD_START_MAX_TEMP_C": str(start_max_temp_c),
                 "LLM_FAN_GUARD_START_RETRY_SEC": str(start_retry_sec),
                 "LLM_FAN_GUARD_TEMP_SENSOR_PATTERN": temp_sensor_pattern,
@@ -111,7 +109,7 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
         self.assertIn('"last_trigger_rpm": 2350', state_text)
         self.assertIn('"last_action": "stop"', state_text)
 
-    def test_high_fan_rpm_does_not_stop_when_temperature_is_normal(self) -> None:
+    def test_high_fan_rpm_stops_even_when_temperature_is_normal(self) -> None:
         result = self._run_guard(
             sensors_output="""
                 xe-pci-0300
@@ -119,25 +117,6 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
                 fan1:        2350 RPM
                 pkg:         +72.0 C
                 vram:        +88.0 C
-            """,
-            now_epoch=1_000,
-            temp_sensor_pattern="xe-pci-0300",
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self._read_actions(), [])
-        state_text = self.state_file.read_text(encoding="utf-8")
-        self.assertIn('"last_seen_rpm": 2350', state_text)
-        self.assertIn('"last_action": "rpm_high_temp_ok"', state_text)
-
-    def test_stops_when_high_fan_rpm_and_temperature_reaches_arc_limit(self) -> None:
-        result = self._run_guard(
-            sensors_output="""
-                xe-pci-0300
-                Adapter: PCI adapter
-                fan1:        2350 RPM
-                pkg:         +74.0 C
-                vram:        +90.0 C
             """,
             now_epoch=1_000,
             temp_sensor_pattern="xe-pci-0300",
