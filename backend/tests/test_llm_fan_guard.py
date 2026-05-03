@@ -50,6 +50,7 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
         sensors_output: str,
         now_epoch: int,
         threshold_rpm: int = 1600,
+        stop_delay_sec: int = 120,
         cooldown_sec: int = 3600,
         sensor_pattern: str = "",
         start_max_temp_c: str = "88",
@@ -70,6 +71,7 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
                 "LLM_FAN_GUARD_COOLDOWN_SEC": str(cooldown_sec),
                 "LLM_FAN_GUARD_NOW_EPOCH": str(now_epoch),
                 "LLM_FAN_GUARD_SENSOR_PATTERN": sensor_pattern,
+                "LLM_FAN_GUARD_STOP_DELAY_SEC": str(stop_delay_sec),
                 "LLM_FAN_GUARD_START_MAX_TEMP_C": str(start_max_temp_c),
                 "LLM_FAN_GUARD_START_RETRY_SEC": str(start_retry_sec),
                 "LLM_FAN_GUARD_TEMP_SENSOR_PATTERN": temp_sensor_pattern,
@@ -89,7 +91,45 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
             return []
         return self.actions_log.read_text(encoding="utf-8").splitlines()
 
-    def test_enters_cooldown_and_stops_llm_services(self) -> None:
+    def test_initial_high_fan_rpm_observes_without_stopping(self) -> None:
+        result = self._run_guard(
+            sensors_output="""
+                xe-pci-0300
+                Adapter: PCI adapter
+                fan1:        2350 RPM
+                fan2:           0 RPM
+            """,
+            now_epoch=1_000,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self._read_actions(), [])
+        state_text = self.state_file.read_text(encoding="utf-8")
+        self.assertIn('"cooldown_active": 0', state_text)
+        self.assertIn('"last_seen_rpm": 2350', state_text)
+        self.assertIn('"high_rpm_started_epoch": 1000', state_text)
+        self.assertIn('"last_action": "observe_high_rpm"', state_text)
+
+    def test_sustained_high_fan_rpm_enters_cooldown_and_stops_llm_services(self) -> None:
+        self.state_file.write_text(
+            textwrap.dedent(
+                """
+                {
+                  "cooldown_active": 0,
+                  "cooldown_started_epoch": 0,
+                  "cooldown_until_epoch": 0,
+                  "last_trigger_rpm": 0,
+                  "last_seen_rpm": 2350,
+                  "high_rpm_started_epoch": 880,
+                  "last_action": "observe_high_rpm",
+                  "updated_at_epoch": 880
+                }
+                """
+            ).strip()
+            + "\n",
+            encoding="utf-8",
+        )
+
         result = self._run_guard(
             sensors_output="""
                 xe-pci-0300
@@ -107,27 +147,45 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
         self.assertIn('"cooldown_started_epoch": 1000', state_text)
         self.assertIn('"cooldown_until_epoch": 4600', state_text)
         self.assertIn('"last_trigger_rpm": 2350', state_text)
+        self.assertIn('"high_rpm_started_epoch": 0', state_text)
         self.assertIn('"last_action": "stop"', state_text)
 
-    def test_high_fan_rpm_stops_even_when_temperature_is_normal(self) -> None:
+    def test_sustained_high_fan_rpm_keeps_observing_before_delay_expires(self) -> None:
+        self.state_file.write_text(
+            textwrap.dedent(
+                """
+                {
+                  "cooldown_active": 0,
+                  "cooldown_started_epoch": 0,
+                  "cooldown_until_epoch": 0,
+                  "last_trigger_rpm": 0,
+                  "last_seen_rpm": 2350,
+                  "high_rpm_started_epoch": 900,
+                  "last_action": "observe_high_rpm",
+                  "updated_at_epoch": 900
+                }
+                """
+            ).strip()
+            + "\n",
+            encoding="utf-8",
+        )
+
         result = self._run_guard(
             sensors_output="""
                 xe-pci-0300
                 Adapter: PCI adapter
                 fan1:        2350 RPM
-                pkg:         +72.0 C
-                vram:        +88.0 C
             """,
             now_epoch=1_000,
-            temp_sensor_pattern="xe-pci-0300",
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self._read_actions(), ["stop|0"])
+        self.assertEqual(self._read_actions(), [])
         state_text = self.state_file.read_text(encoding="utf-8")
-        self.assertIn('"cooldown_active": 1', state_text)
-        self.assertIn('"last_trigger_rpm": 2350', state_text)
-        self.assertIn('"last_action": "stop"', state_text)
+        self.assertIn('"cooldown_active": 0', state_text)
+        self.assertIn('"last_seen_rpm": 2350', state_text)
+        self.assertIn('"high_rpm_started_epoch": 900', state_text)
+        self.assertIn('"last_action": "observe_high_rpm"', state_text)
 
     def test_does_not_retrigger_while_cooldown_is_active(self) -> None:
         self.state_file.write_text(

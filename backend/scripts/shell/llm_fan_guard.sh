@@ -12,6 +12,7 @@ SENSORS_BIN="${LLM_FAN_GUARD_SENSORS_BIN:-sensors}"
 
 ENABLED="${LLM_FAN_GUARD_ENABLED:-1}"
 THRESHOLD_RPM="${LLM_FAN_GUARD_THRESHOLD_RPM:-1600}"
+STOP_DELAY_SEC="${LLM_FAN_GUARD_STOP_DELAY_SEC:-120}"
 COOLDOWN_SEC="${LLM_FAN_GUARD_COOLDOWN_SEC:-3600}"
 SENSOR_PATTERN="${LLM_FAN_GUARD_SENSOR_PATTERN:-}"
 START_MAX_TEMP_C="${LLM_FAN_GUARD_START_MAX_TEMP_C:-88}"
@@ -55,7 +56,8 @@ write_state() {
   local cooldown_until_epoch="$3"
   local last_trigger_rpm="$4"
   local last_seen_rpm="$5"
-  local last_action="$6"
+  local high_rpm_started_epoch="$6"
+  local last_action="$7"
   local tmp_file
 
   tmp_file="$(mktemp "${STATE_FILE}.XXXXXX")"
@@ -65,6 +67,7 @@ write_state() {
   printf '  "cooldown_until_epoch": %s,\n' "$cooldown_until_epoch" >> "$tmp_file"
   printf '  "last_trigger_rpm": %s,\n' "$last_trigger_rpm" >> "$tmp_file"
   printf '  "last_seen_rpm": %s,\n' "$last_seen_rpm" >> "$tmp_file"
+  printf '  "high_rpm_started_epoch": %s,\n' "$high_rpm_started_epoch" >> "$tmp_file"
   printf '  "last_action": "%s",\n' "$last_action" >> "$tmp_file"
   printf '  "updated_at_epoch": %s\n' "$NOW_EPOCH" >> "$tmp_file"
   printf '}\n' >> "$tmp_file"
@@ -174,6 +177,8 @@ cooldown_active="$(read_state_number cooldown_active 0)"
 cooldown_started_epoch="$(read_state_number cooldown_started_epoch 0)"
 cooldown_until_epoch="$(read_state_number cooldown_until_epoch 0)"
 last_trigger_rpm="$(read_state_number last_trigger_rpm 0)"
+last_seen_rpm="$(read_state_number last_seen_rpm 0)"
+high_rpm_started_epoch="$(read_state_number high_rpm_started_epoch 0)"
 
 if [[ "$cooldown_active" == "1" ]]; then
   if (( NOW_EPOCH < cooldown_until_epoch )); then
@@ -185,7 +190,7 @@ if [[ "$cooldown_active" == "1" ]]; then
       start_temp_c="$(printf '%s\n' "$sensors_output" | max_temp_c_from_output)"
       if [[ -n "$start_temp_c" ]] && temp_is_at_or_above_threshold "$start_temp_c" "$START_MAX_TEMP_C"; then
         next_retry_epoch="$((NOW_EPOCH + START_RETRY_SEC))"
-        write_state 1 "$cooldown_started_epoch" "$next_retry_epoch" "$last_trigger_rpm" 0 "start_deferred_hot"
+        write_state 1 "$cooldown_started_epoch" "$next_retry_epoch" "$last_trigger_rpm" 0 0 "start_deferred_hot"
         log "restart deferred: sensor temp ${start_temp_c}C reached start limit ${START_MAX_TEMP_C}C; retry after $(format_epoch "$next_retry_epoch")"
         exit 0
       fi
@@ -200,42 +205,57 @@ if [[ "$cooldown_active" == "1" ]]; then
 
   log "cooldown expired at $(format_epoch "$cooldown_until_epoch"); restarting LLM services"
   if run_schedule start; then
-    write_state 0 0 0 "$last_trigger_rpm" 0 "start"
+    write_state 0 0 0 "$last_trigger_rpm" 0 0 "start"
     log "LLM services restarted after cooldown"
     exit 0
   fi
 
-  write_state 1 "$cooldown_started_epoch" "$cooldown_until_epoch" "$last_trigger_rpm" 0 "start_failed"
+  write_state 1 "$cooldown_started_epoch" "$cooldown_until_epoch" "$last_trigger_rpm" 0 0 "start_failed"
   log "failed to restart LLM services after cooldown"
   exit 1
 fi
 
 if ! sensors_output="$("$SENSORS_BIN" 2>/dev/null)"; then
   log "failed to read sensors output from $SENSORS_BIN"
-  write_state 0 0 0 0 0 "sensors_error"
+  write_state 0 0 0 0 0 0 "sensors_error"
   exit 0
 fi
 
 max_rpm="$(printf '%s\n' "$sensors_output" | max_fan_rpm_from_output)"
 if [[ -z "$max_rpm" ]]; then
   log "no fan RPM lines matched from sensors output${SENSOR_PATTERN:+ for pattern '$SENSOR_PATTERN'}"
-  write_state 0 0 0 0 0 "no_fan_data"
+  write_state 0 0 0 0 0 0 "no_fan_data"
   exit 0
 fi
 
 if (( max_rpm < THRESHOLD_RPM )); then
+  if (( high_rpm_started_epoch > 0 || last_seen_rpm >= THRESHOLD_RPM )); then
+    write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" 0 "rpm_normal"
+    log "fan RPM $max_rpm is below threshold $THRESHOLD_RPM; high RPM observation reset"
+  fi
+  exit 0
+fi
+
+if (( high_rpm_started_epoch == 0 )); then
+  high_rpm_started_epoch="$NOW_EPOCH"
+fi
+
+high_rpm_elapsed_sec="$((NOW_EPOCH - high_rpm_started_epoch))"
+if (( high_rpm_elapsed_sec < STOP_DELAY_SEC )); then
+  write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" "$high_rpm_started_epoch" "observe_high_rpm"
+  log "fan RPM $max_rpm exceeded threshold $THRESHOLD_RPM for ${high_rpm_elapsed_sec}s; waiting for ${STOP_DELAY_SEC}s before stop check"
   exit 0
 fi
 
 cooldown_until_epoch="$((NOW_EPOCH + COOLDOWN_SEC))"
-log "fan RPM $max_rpm exceeded threshold $THRESHOLD_RPM; stopping LLM services for ${COOLDOWN_SEC}s"
+log "fan RPM $max_rpm stayed above threshold $THRESHOLD_RPM for ${high_rpm_elapsed_sec}s; stopping LLM services for ${COOLDOWN_SEC}s"
 
 if run_schedule stop; then
-  write_state 1 "$NOW_EPOCH" "$cooldown_until_epoch" "$max_rpm" "$max_rpm" "stop"
+  write_state 1 "$NOW_EPOCH" "$cooldown_until_epoch" "$max_rpm" "$max_rpm" 0 "stop"
   log "LLM services stopped; cooldown runs until $(format_epoch "$cooldown_until_epoch")"
   exit 0
 fi
 
-write_state 0 0 0 "$max_rpm" "$max_rpm" "stop_failed"
+write_state 0 0 0 "$max_rpm" "$max_rpm" "$high_rpm_started_epoch" "stop_failed"
 log "failed to stop LLM services after high fan RPM $max_rpm"
 exit 1
