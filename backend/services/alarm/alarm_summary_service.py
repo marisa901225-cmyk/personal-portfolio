@@ -151,6 +151,8 @@ async def _generate_alarm_summary_async(
         attempt_no = attempt + 1
         logger.info("Generating alarm summary (Attempt %s/2)...", attempt_no)
         content = prompt_content if attempt_no == 1 else (prompt_content + extra_guard)
+        extra_kwargs = dict(options.extra_kwargs)
+        extra_kwargs.setdefault("reasoning_effort", "none")
         raw = await deps.generate_with_main_llm_async(
             [{"role": "user", "content": content}],
             max_tokens=options.max_tokens,
@@ -158,7 +160,7 @@ async def _generate_alarm_summary_async(
             stop=stop,
             enable_thinking=options.enable_thinking,
             model=model,
-            **options.extra_kwargs,
+            **extra_kwargs,
         )
         deps.dump_llm_draft("alarm_summary_draft", raw)
 

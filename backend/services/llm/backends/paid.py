@@ -134,12 +134,15 @@ class OpenAIPaidBackend(LLMBackend):
         response_format: Any,
         current_tier: Optional[str],
         is_gpt5: bool,
+        reasoning_effort: Optional[str],
         extra_body: Optional[Dict[str, Any]] = None,
     ) -> dict:
         payload: Dict[str, Any] = {"model": model, "messages": messages}
         if not is_gpt5:
             payload["temperature"] = temperature
         payload["max_completion_tokens" if is_gpt5 else "max_tokens"] = max_tokens
+        if is_gpt5 and reasoning_effort:
+            payload["reasoning_effort"] = self._resolve_gpt5_reasoning_effort(reasoning_effort)
         if stop:
             payload["stop"] = stop
         if seed is not None:
@@ -493,6 +496,7 @@ class OpenAIPaidBackend(LLMBackend):
                     response_format=response_format,
                     current_tier=current_tier,
                     is_gpt5=is_gpt5,
+                    reasoning_effort=reasoning_effort,
                     extra_body=extra_body,
                 )
                 response = self._post(url, payload=payload, headers=headers)

@@ -363,6 +363,37 @@ class TestLLMService(unittest.TestCase):
             second_payload = backend._post.call_args_list[1].kwargs["payload"]
             self.assertEqual(second_payload.get("reasoning"), {"effort": "none"})
 
+    def test_paid_backend_chat_includes_gpt5_reasoning_effort_override(self):
+        class _Resp:
+            status_code = 200
+
+            def json(self):
+                return {"choices": [{"message": {"content": "ok"}}]}
+
+        with patch("backend.services.llm.config.settings") as mock_settings:
+            mock_settings.llm_base_url = None
+            mock_settings.llm_api_key = None
+            mock_settings.llm_timeout = 30
+            mock_settings.open_api_key = None
+            mock_settings.ai_report_api_key = "test-key"
+            mock_settings.ai_report_base_url = "https://api.openai.com/v1"
+            mock_settings.ai_report_model = "gpt-5.4-mini"
+            mock_settings.ai_report_fallback_model = "gpt-5.4-mini"
+            mock_settings.ai_report_timeout_sec = 30
+
+            backend = OpenAIPaidBackend(Settings())
+            backend._post = unittest.mock.Mock(return_value=_Resp())
+
+            out = backend.chat(
+                [{"role": "user", "content": "hi"}],
+                model="gpt-5.4-mini",
+                reasoning_effort="none",
+            )
+
+            self.assertEqual(out, "ok")
+            first_payload = backend._post.call_args_list[0].kwargs["payload"]
+            self.assertEqual(first_payload.get("reasoning_effort"), "none")
+
     def test_paid_backend_responses_preserves_multimodal_content(self):
         class _Resp:
             def __init__(self, status_code: int, json_data=None, text: str = ""):

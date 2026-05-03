@@ -201,6 +201,25 @@ class AlarmLlmLogicV2ParityTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result_v1, result_v2)
 
+    async def test_alarm_summary_disables_gpt5_reasoning_by_default(self):
+        stub = _StubLLM(loaded=True)
+        items = [
+            {"app_title": "문피아", "conversation": "", "text": "새 회차가 등록되었습니다"},
+        ]
+        generate_mock = AsyncMock(return_value="- 문피아 새 회차 등록")
+
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(llm_logic_v2.LLMService, "get_instance", return_value=stub))
+            stack.enter_context(patch.object(llm_logic_v2, "load_prompt", return_value="alarm prompt"))
+            stack.enter_context(patch.object(llm_logic_v2, "dump_llm_draft", MagicMock()))
+            stack.enter_context(patch.object(llm_logic_v2, "generate_with_main_llm_async", new=generate_mock))
+            stack.enter_context(patch.object(llm_logic_v2, "sanitize_llm_output", side_effect=lambda src_items, text: text))
+
+            result = await llm_logic_v2.summarize_with_llm(items)
+
+        self.assertEqual(result, "- 문피아 새 회차 등록")
+        self.assertEqual(generate_mock.await_args.kwargs["reasoning_effort"], "none")
+
     async def test_expense_summary_matches_v1_behavior(self):
         stub = _StubLLM(loaded=True)
         expenses = [
