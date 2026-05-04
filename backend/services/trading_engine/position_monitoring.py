@@ -25,7 +25,9 @@ def monitor_positions(bot, *, now: datetime, logger) -> None:
             day_lock_retrace_gap_pct_override: float | None = None
             day_stop_loss_pct_override: float | None = None
             if pos.type == "S" and bot.config.swing_sl_requires_trend_break:
-                swing_trend_broken = bot._is_swing_trend_broken(code=code, quote_price=price, now=now)
+                pnl_pct = (price / pos.entry_price) - 1.0 if pos.entry_price > 0 else 0.0
+                if pnl_pct <= bot.config.swing_stop_loss_pct:
+                    swing_trend_broken = bot._is_swing_trend_broken(code=code, quote_price=price, now=now)
             elif pos.type == "T":
                 day_lock_retrace_gap_pct_override = bot._resolve_day_lock_retrace_gap_pct(code=code)
                 day_stop_loss_pct_override = bot._resolve_day_stop_loss_pct(code=code)

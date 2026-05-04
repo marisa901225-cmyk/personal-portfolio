@@ -511,6 +511,18 @@ def _apply_swing_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_SWING_TAKE_PROFIT_MODE",
         cfg.swing_take_profit_mode,
     )
+    cfg.swing_take_profit_pct = _env_float(
+        "TRADING_ENGINE_SWING_TAKE_PROFIT_PCT",
+        cfg.swing_take_profit_pct,
+    )
+    cfg.swing_trail_start = _env_float(
+        "TRADING_ENGINE_SWING_TRAIL_START",
+        cfg.swing_trail_start,
+    )
+    cfg.swing_trail_gap = _env_float(
+        "TRADING_ENGINE_SWING_TRAIL_GAP",
+        cfg.swing_trail_gap,
+    )
     cfg.swing_source_model_strict_bonus = _env_float(
         "TRADING_ENGINE_SWING_SOURCE_MODEL_STRICT_BONUS",
         cfg.swing_source_model_strict_bonus,

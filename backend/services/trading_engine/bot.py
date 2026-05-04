@@ -157,35 +157,33 @@ class HybridTradingBot(
 
     def has_armed_day_profit_locks(self) -> bool:
         return any(
-            pos.type == "T" and pos.qty > 0 and pos.locked_profit_pct is not None
+            (
+                (pos.type == "T" and pos.locked_profit_pct is not None)
+                or pos.type == "S"
+            )
+            and pos.qty > 0
             for pos in self.state.open_positions.values()
         )
 
     def run_locked_profit_monitor(self, now: datetime | None = None) -> dict[str, object]:
-        if not self._run_lock.acquire(blocking=False):
-            return {"status": "SKIP", "reason": "RUN_ALREADY_IN_PROGRESS"}
         now = now or datetime.now()
         today = now.strftime("%Y%m%d")
-        try:
-            with self._state_lock:
-                self.state = rollover_state_for_date(self.state, today)
+        with self._state_lock:
+            self.state = rollover_state_for_date(self.state, today)
 
-            if not self.has_armed_day_profit_locks():
-                return {"status": "SKIP", "reason": "NO_ARMED_DAY_LOCKS"}
+        if not self.has_armed_day_profit_locks():
+            return {"status": "SKIP", "reason": "NO_ARMED_DAY_LOCKS"}
 
-            self._ensure_journal(today)
-            with self._state_lock:
-                self._refresh_pending_exit_orders()
-                self.monitor_positions(now=now)
-                self.state.last_run_timestamp = now.isoformat(timespec="seconds")
-                save_state(self.config.state_path, self.state)
-            return {
-                "status": "OK",
-                "reason": "ARMED_DAY_LOCKS_MONITORED",
-                "open_positions": len(self.state.open_positions),
-            }
-        finally:
-            self._run_lock.release()
+        self._ensure_journal(today)
+        self.monitor_positions(now=now)
+        with self._state_lock:
+            self.state.last_run_timestamp = now.isoformat(timespec="seconds")
+            save_state(self.config.state_path, self.state)
+        return {
+            "status": "OK",
+            "reason": "EXIT_LOCKS_MONITORED",
+            "open_positions": len(self.state.open_positions),
+        }
 
     def run_once(self, now: datetime | None = None) -> dict[str, object]:
         if not self._run_lock.acquire(blocking=False):

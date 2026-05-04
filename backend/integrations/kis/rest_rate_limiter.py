@@ -171,7 +171,7 @@ def throttle_rest_requests(
                 now = float(clock())
                 timestamps = [
                     ts for ts in _read_timestamps(resolved_state_path)
-                    if now - ts < resolved_window
+                    if 0 <= now - ts < resolved_window
                 ]
                 if len(timestamps) < resolved_limit:
                     timestamps.append(now)
@@ -209,7 +209,7 @@ def throttle_rest_min_gap(
             with _file_lock(resolved_lock_path):
                 now = float(clock())
                 last_timestamp = _read_last_timestamp(resolved_gap_state_path)
-                if last_timestamp is None or now - last_timestamp >= resolved_gap:
+                if last_timestamp is None or last_timestamp > now or now - last_timestamp >= resolved_gap:
                     _write_last_timestamp(resolved_gap_state_path, now)
                     return
 

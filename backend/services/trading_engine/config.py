@@ -47,10 +47,10 @@ class TradeEngineConfig:
     swing_trend_lookback_bars: int = 60
     swing_trend_break_buffer_pct: float = 0.0
     swing_take_profit_pct: float = 0.05
-    swing_trail_start: float = 0.03
+    swing_trail_start: float = 0.05
     swing_trail_gap: float = -0.02
     swing_max_hold_bars: int = 10
-    swing_take_profit_mode: str = "both"  # fixed|trailing|both
+    swing_take_profit_mode: str = "trailing"  # fixed|trailing|both
 
     # Day-trade exits
     day_stop_loss_pct: float = -0.015
