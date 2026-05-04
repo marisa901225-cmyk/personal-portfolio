@@ -467,7 +467,27 @@ class OpenAIPaidBackend(LLMBackend):
         return new_messages
 
     @staticmethod
+    def _normalize_prompt_line(text: Any) -> str:
+        return " ".join(str(text or "").strip().split())
+
+    @classmethod
+    def _existing_system_prompt_lines(cls, messages: List[dict]) -> set[str]:
+        lines: set[str] = set()
+        for message in messages:
+            if message.get("role") != "system":
+                continue
+            content = message.get("content")
+            if not isinstance(content, str):
+                continue
+            for line in content.splitlines():
+                normalized = cls._normalize_prompt_line(line)
+                if normalized:
+                    lines.add(normalized)
+        return lines
+
+    @classmethod
     def _prepend_paid_system_prompt(
+        cls,
         messages: List[dict],
         extra_system_prompt: Optional[str],
         *,
@@ -476,7 +496,16 @@ class OpenAIPaidBackend(LLMBackend):
         prompt = str(extra_system_prompt or "").strip()
         if not is_gpt5 or not prompt:
             return messages
-        return [{"role": "system", "content": prompt}] + list(messages)
+
+        existing_lines = cls._existing_system_prompt_lines(messages)
+        unique_lines = [
+            line
+            for line in prompt.splitlines()
+            if cls._normalize_prompt_line(line) and cls._normalize_prompt_line(line) not in existing_lines
+        ]
+        if not unique_lines:
+            return messages
+        return [{"role": "system", "content": "\n".join(unique_lines).strip()}] + list(messages)
 
     def chat(
         self,

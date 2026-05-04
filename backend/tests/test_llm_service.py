@@ -552,6 +552,54 @@ class TestLLMService(unittest.TestCase):
             self.assertEqual(payload["messages"][0], {"role": "system", "content": "paid-system"})
             self.assertEqual(payload["messages"][1], {"role": "system", "content": "main-system"})
 
+    def test_paid_backend_dedupes_repeated_gpt5_paid_system_prompt_lines(self):
+        class _Resp:
+            def __init__(self, status_code: int, json_data=None, text: str = ""):
+                self.status_code = status_code
+                self._json_data = json_data
+                self.text = text
+
+            def json(self):
+                if isinstance(self._json_data, Exception):
+                    raise self._json_data
+                return self._json_data
+
+        response = _Resp(
+            200,
+            json_data={"choices": [{"message": {"content": "ok"}}]},
+        )
+
+        with patch("backend.services.llm.config.settings") as mock_settings:
+            mock_settings.llm_base_url = None
+            mock_settings.llm_api_key = None
+            mock_settings.llm_timeout = 30
+            mock_settings.open_api_key = None
+            mock_settings.ai_report_api_key = "test-key"
+            mock_settings.ai_report_base_url = "https://api.openai.com/v1"
+            mock_settings.ai_report_model = "gpt-5.4-mini"
+            mock_settings.ai_report_fallback_model = "gpt-5.4-mini"
+            mock_settings.ai_report_timeout_sec = 30
+
+            backend = OpenAIPaidBackend(Settings())
+            backend._post = unittest.mock.Mock(return_value=response)
+
+            out = backend.chat(
+                [
+                    {
+                        "role": "system",
+                        "content": "main-system\nMaximum 120 words.",
+                    },
+                    {"role": "user", "content": "hi"},
+                ],
+                model="gpt-5.4-mini",
+                paid_system_prompt="Maximum 120 words.\nUse concise Korean.",
+            )
+
+            self.assertEqual(out, "ok")
+            payload = backend._post.call_args.kwargs["payload"]
+            self.assertEqual(payload["messages"][0], {"role": "system", "content": "Use concise Korean."})
+            self.assertEqual(payload["messages"][1]["content"], "main-system\nMaximum 120 words.")
+
     def test_remote_backend_caches_model_ids_per_base_url(self):
         settings = SimpleNamespace(
             llm_base_url="http://default-server:8080",
