@@ -1,7 +1,11 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock
 
-from backend.services.alarm.alarm_summary_service import _AlarmSummaryDeps, _generate_alarm_summary_async
+from backend.services.alarm.alarm_summary_service import (
+    ALARM_SUMMARY_DEFAULT_MAX_TOKENS,
+    _AlarmSummaryDeps,
+    _generate_alarm_summary_async,
+)
 
 
 class AlarmSummaryServiceTests(unittest.IsolatedAsyncioTestCase):
@@ -40,8 +44,43 @@ class AlarmSummaryServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result, "- 치지직에서 [민트초코용...님 라이브 시작!]")
         deps.build_stop_tokens.assert_called_once_with(extra=["\n\n\n", "aaaa", "----"])
+        deps.resolve_llm_options.assert_called_once_with(
+            {},
+            default_max_tokens=ALARM_SUMMARY_DEFAULT_MAX_TOKENS,
+            default_temperature=0.05,
+        )
         stop_tokens = deps.generate_with_main_llm_async.await_args.kwargs["stop"]
         self.assertNotIn("...", stop_tokens)
+
+    async def test_default_output_budget_is_roomy_for_paid_chat_completion(self):
+        deps = _AlarmSummaryDeps(
+            build_stop_tokens=MagicMock(return_value=["\n\n\n", "aaaa", "----"]),
+            resolve_llm_options=MagicMock(
+                return_value=MagicMock(
+                    max_tokens=ALARM_SUMMARY_DEFAULT_MAX_TOKENS,
+                    temperature=0.05,
+                    enable_thinking=False,
+                    extra_kwargs={},
+                )
+            ),
+            generate_with_main_llm_async=AsyncMock(return_value="- 문피아에서 새 회차 등록"),
+            dump_llm_draft=MagicMock(),
+            sanitize_llm_output=MagicMock(side_effect=lambda items, text: text),
+            postprocess_llm_text=MagicMock(side_effect=lambda text: text),
+            get_korean_ratio=MagicMock(return_value=1.0),
+        )
+
+        result = await _generate_alarm_summary_async(
+            [{"app_name": "문피아", "app_title": "업데이트", "conversation": "", "text": "새 회차 등록"}],
+            "prompt",
+            deps=deps,
+        )
+
+        self.assertEqual(result, "- 문피아에서 새 회차 등록")
+        self.assertEqual(
+            deps.generate_with_main_llm_async.await_args.kwargs["max_tokens"],
+            ALARM_SUMMARY_DEFAULT_MAX_TOKENS,
+        )
 
 
 if __name__ == "__main__":

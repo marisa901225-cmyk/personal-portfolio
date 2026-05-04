@@ -9,6 +9,8 @@ from .alarm_keywords import COUNT_ONLY_EXCEPTION_KEYWORDS
 
 logger = logging.getLogger(__name__)
 
+ALARM_SUMMARY_DEFAULT_MAX_TOKENS = 1536
+
 _RE_TOKEN = re.compile(r"[가-힣A-Za-z0-9_*]+")
 _RE_BULLET_PREFIX = re.compile(r"^[-•*]\s*")
 _RE_COUNT_ONLY = re.compile(r"\b\d+\s*건\b")
@@ -140,7 +142,11 @@ async def _generate_alarm_summary_async(
     # `...` can legitimately appear in nicknames/titles (e.g. truncated live titles),
     # so treating it as a hard stop can cut summaries mid-sentence.
     stop = deps.build_stop_tokens(extra=["\n\n\n", "aaaa", "----"])
-    options = deps.resolve_llm_options(llm_kwargs, default_max_tokens=512, default_temperature=0.05)
+    options = deps.resolve_llm_options(
+        llm_kwargs,
+        default_max_tokens=ALARM_SUMMARY_DEFAULT_MAX_TOKENS,
+        default_temperature=0.05,
+    )
     extra_guard = (
         "\n\n[추가 규칙]\n"
         "- 'N건'만 나열하지 말고, 각 항목에서 최소 1개의 구체 단서(금액/날짜/상태/키워드/발신자/앱)를 포함해.\n"
