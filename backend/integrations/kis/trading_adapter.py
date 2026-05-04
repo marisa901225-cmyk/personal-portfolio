@@ -24,6 +24,7 @@ import requests
 from backend.integrations.kis.rest_rate_limiter import throttle_rest_min_gap
 from backend.integrations.kis.secondary_market_context import build_secondary_market_context
 
+from .daily_bars_disk_cache import DEFAULT_DAILY_BARS_DISK_CACHE_PATH, DailyBarsDiskCache
 from .trading_account_mixin import KISAccountTradingMixin
 from .trading_market_data_mixin import KISMarketDataMixin
 
@@ -106,6 +107,7 @@ class KISTradingBase:
         self._daily_index_bars_cache: dict[tuple[str, str, int], tuple[float, pd.DataFrame]] = {}
         self._quote_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._holiday_rows_cache: dict[str, tuple[str, list[dict[str, Any]]]] = {}
+        self._daily_bars_disk_cache = DailyBarsDiskCache(DEFAULT_DAILY_BARS_DISK_CACHE_PATH)
         self._holiday_cache_dir = _KIS_HOLIDAY_CACHE_DIR
         self._secondary_market_ctx = build_secondary_market_context(
             min_gap_by_path=_KIS_HTTP_PATH_MIN_GAP_SEC,

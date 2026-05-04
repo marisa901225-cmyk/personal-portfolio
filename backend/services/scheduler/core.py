@@ -350,6 +350,19 @@ async def job_trading_engine_finalize():
             logger.info("trading_engine_finalize summary=%s", summary_text)
 
 
+async def job_trading_engine_daily_bars_cache_cleanup():
+    """
+    장중 후보 산출용 일봉 디스크 캐시를 장마감 후 비운다.
+    """
+    from backend.integrations.kis.daily_bars_disk_cache import (
+        DEFAULT_DAILY_BARS_DISK_CACHE_PATH,
+        clear_daily_bars_disk_cache,
+    )
+
+    removed = await asyncio.to_thread(clear_daily_bars_disk_cache, DEFAULT_DAILY_BARS_DISK_CACHE_PATH)
+    logger.info("trading_engine_daily_bars_cache_cleanup removed=%s", removed)
+
+
 async def job_trading_engine_weekly_archive():
     """
     토요일 주간 아카이브.
@@ -549,6 +562,14 @@ def start_scheduler():
                 job_trading_engine_finalize,
                 CronTrigger(day_of_week="mon-fri", hour=15, minute=31),
                 id="trading_engine_finalize",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            scheduler.add_job(
+                job_trading_engine_daily_bars_cache_cleanup,
+                CronTrigger(day_of_week="mon-fri", hour=15, minute=45),
+                id="trading_engine_daily_bars_cache_cleanup",
                 replace_existing=True,
                 max_instances=1,
             )

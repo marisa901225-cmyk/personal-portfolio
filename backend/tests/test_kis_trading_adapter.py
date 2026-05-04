@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 import requests
 
 from backend.integrations.kis import rest_rate_limiter
+from backend.integrations.kis.daily_bars_disk_cache import DailyBarsDiskCache
 from backend.integrations.kis.trading_adapter import KISTradingAPI
 
 
@@ -547,6 +548,115 @@ class KISTradingAdapterTests(unittest.TestCase):
         self.assertEqual(first["date"].tolist(), ["20260317", "20260318"])
         self.assertEqual(second["date"].tolist(), ["20260317", "20260318"])
         self.assertIsNot(first, second)
+
+    def test_daily_bars_uses_disk_cache_across_adapter_instances(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            cache_path = Path(tmpdir) / "daily_bars_cache.sqlite"
+            first_api = object.__new__(KISTradingAPI)
+            first_api._daily_bars_cache = {}
+            first_api._daily_bars_cache_ttl_sec = 0
+            first_api._daily_bars_disk_cache = DailyBarsDiskCache(cache_path)
+            first_api._market_get = Mock(
+                return_value={
+                    "output2": [
+                        {
+                            "stck_bsop_date": "20260318",
+                            "stck_oprc": "1000",
+                            "stck_hgpr": "1100",
+                            "stck_lwpr": "990",
+                            "stck_clpr": "1080",
+                            "acml_vol": "12345",
+                            "acml_tr_pbmn": "67890",
+                        },
+                        {
+                            "stck_bsop_date": "20260317",
+                            "stck_oprc": "950",
+                            "stck_hgpr": "1000",
+                            "stck_lwpr": "940",
+                            "stck_clpr": "980",
+                            "acml_vol": "11111",
+                            "acml_tr_pbmn": "22222",
+                        },
+                    ]
+                }
+            )
+
+            first = first_api.daily_bars("005930", end="20260318", lookback=2)
+
+            second_api = object.__new__(KISTradingAPI)
+            second_api._daily_bars_cache = {}
+            second_api._daily_bars_cache_ttl_sec = 0
+            second_api._daily_bars_disk_cache = DailyBarsDiskCache(cache_path)
+            second_api._market_get = Mock(return_value={"output2": []})
+            second = second_api.daily_bars("005930", end="20260318", lookback=2)
+
+        self.assertEqual(first["date"].tolist(), ["20260317", "20260318"])
+        self.assertEqual(second["date"].tolist(), ["20260317", "20260318"])
+        first_api._market_get.assert_called_once()
+        second_api._market_get.assert_not_called()
+
+    def test_daily_bars_disk_cache_keeps_only_latest_trade_date_on_store(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            cache = DailyBarsDiskCache(Path(tmpdir) / "daily_bars_cache.sqlite")
+            first_api = object.__new__(KISTradingAPI)
+            first_api._daily_bars_cache = {}
+            first_api._daily_bars_cache_ttl_sec = 0
+            first_api._daily_bars_disk_cache = cache
+            first_api._market_get = Mock(
+                return_value={
+                    "output2": [
+                        {
+                            "stck_bsop_date": "20260318",
+                            "stck_oprc": "1000",
+                            "stck_hgpr": "1100",
+                            "stck_lwpr": "990",
+                            "stck_clpr": "1080",
+                            "acml_vol": "12345",
+                            "acml_tr_pbmn": "67890",
+                        },
+                    ]
+                }
+            )
+            first_api.daily_bars("005930", end="20260318", lookback=1)
+
+            second_api = object.__new__(KISTradingAPI)
+            second_api._daily_bars_cache = {}
+            second_api._daily_bars_cache_ttl_sec = 0
+            second_api._daily_bars_disk_cache = cache
+            second_api._market_get = Mock(
+                return_value={
+                    "output2": [
+                        {
+                            "stck_bsop_date": "20260319",
+                            "stck_oprc": "1100",
+                            "stck_hgpr": "1200",
+                            "stck_lwpr": "1090",
+                            "stck_clpr": "1180",
+                            "acml_vol": "22345",
+                            "acml_tr_pbmn": "77890",
+                        },
+                    ]
+                }
+            )
+            second_api.daily_bars("005930", end="20260319", lookback=1)
+
+            old_cached = cache.load(
+                code="005930",
+                end_date="20260318",
+                lookback=1,
+                adjusted_flag="0",
+            )
+            latest_cached = cache.load(
+                code="005930",
+                end_date="20260319",
+                lookback=1,
+                adjusted_flag="0",
+            )
+
+        self.assertIsNone(old_cached)
+        self.assertIsNotNone(latest_cached)
+        assert latest_cached is not None
+        self.assertEqual(latest_cached["date"].tolist(), ["20260319"])
 
     def test_next_open_trading_day_uses_chk_holiday_opnd_yn_and_cache(self) -> None:
         api = object.__new__(KISTradingAPI)

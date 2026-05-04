@@ -475,6 +475,23 @@ class KISMarketDataMixin:
         if cached is not None:
             return cached
 
+        adjusted_flag = "0"
+        disk_cache = getattr(self, "_daily_bars_disk_cache", None)
+        if disk_cache is not None:
+            cached_disk = disk_cache.load(
+                code=normalized_code,
+                end_date=normalized_end,
+                lookback=int(lookback),
+                adjusted_flag=adjusted_flag,
+            )
+            if cached_disk is not None:
+                return self._cache_store(
+                    "_daily_bars_cache",
+                    cache_key,
+                    cached_disk,
+                    ttl_sec,
+                )
+
         end_dt = datetime.strptime(normalized_end, "%Y%m%d") if len(normalized_end) == 8 else datetime.now()
         start_dt = end_dt - timedelta(days=lookback * 2)
         params = {
@@ -483,7 +500,7 @@ class KISMarketDataMixin:
             "FID_INPUT_DATE_1": start_dt.strftime("%Y%m%d"),
             "FID_INPUT_DATE_2": end_dt.strftime("%Y%m%d"),
             "FID_PERIOD_DIV_CODE": "D",
-            "FID_ORG_ADJ_PRC": "0",
+            "FID_ORG_ADJ_PRC": adjusted_flag,
         }
         data = self._market_get(
             "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
@@ -492,6 +509,14 @@ class KISMarketDataMixin:
         )
         rows = data.get("output2", [])
         if not rows:
+            if disk_cache is not None:
+                disk_cache.store(
+                    code=normalized_code,
+                    end_date=normalized_end,
+                    lookback=int(lookback),
+                    adjusted_flag=adjusted_flag,
+                    frame=pd.DataFrame(),
+                )
             return self._cache_store(
                 "_daily_bars_cache",
                 cache_key,
@@ -517,6 +542,14 @@ class KISMarketDataMixin:
             )
         df = pd.DataFrame(records)
         if df.empty:
+            if disk_cache is not None:
+                disk_cache.store(
+                    code=normalized_code,
+                    end_date=normalized_end,
+                    lookback=int(lookback),
+                    adjusted_flag=adjusted_flag,
+                    frame=df,
+                )
             return self._cache_store(
                 "_daily_bars_cache",
                 cache_key,
@@ -524,6 +557,14 @@ class KISMarketDataMixin:
                 ttl_sec,
             )
         df = df.sort_values("date").tail(lookback).reset_index(drop=True)
+        if disk_cache is not None:
+            disk_cache.store(
+                code=normalized_code,
+                end_date=normalized_end,
+                lookback=int(lookback),
+                adjusted_flag=adjusted_flag,
+                frame=df,
+            )
         return self._cache_store(
             "_daily_bars_cache",
             cache_key,
