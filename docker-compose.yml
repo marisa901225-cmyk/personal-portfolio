@@ -58,6 +58,8 @@ services:
   llama-server-vulkan-huihui:
     image: ghcr.io/ggml-org/llama.cpp:server-vulkan
     container_name: myasset-llm-vulkan-huihui
+    profiles:
+      - vulkan
     restart: unless-stopped
     ports:
       - "8083:8083"
