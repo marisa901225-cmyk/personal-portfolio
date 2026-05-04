@@ -31,6 +31,75 @@ def test_cached_trading_api_reuses_larger_daily_bars_lookback_for_smaller_reques
     assert metrics.counters["daily_bars_cache_hits"] == 1
 
 
+def test_cached_trading_api_reuses_rank_requests_for_same_cycle() -> None:
+    class CountingRankAPI(FakeAPI):
+        def __init__(self) -> None:
+            super().__init__()
+            self.volume_rank_calls: list[tuple[str, int, str]] = []
+            self.hts_top_view_calls: list[tuple[int, str]] = []
+            self.market_cap_calls: list[tuple[int, str]] = []
+
+        def volume_rank(self, kind: str, top_n: int, asof: str) -> list[dict]:
+            self.volume_rank_calls.append((kind, top_n, asof))
+            return [
+                {"code": f"{kind}-{idx}", "rank": idx}
+                for idx in range(1, top_n + 1)
+            ]
+
+        def hts_top_view_rank(self, top_n: int, asof: str) -> list[dict]:
+            self.hts_top_view_calls.append((top_n, asof))
+            return [
+                {"code": f"view-{idx}", "rank": idx}
+                for idx in range(1, top_n + 1)
+            ]
+
+        def market_cap_rank(self, top_k: int, asof: str) -> list[dict]:
+            self.market_cap_calls.append((top_k, asof))
+            return [
+                {"code": f"mcap-{idx}", "rank": idx}
+                for idx in range(1, top_k + 1)
+            ]
+
+    asof = "20260430"
+    api = CountingRankAPI()
+    metrics = TradingRunMetrics()
+    cached = CachedTradingAPI(api, metrics=metrics)
+
+    first_volume = cached.volume_rank("volume", top_n=100, asof=asof)
+    second_volume = cached.volume_rank("volume", top_n=50, asof=asof)
+    first_value = cached.volume_rank("value", top_n=80, asof=asof)
+    second_value = cached.volume_rank("value", top_n=80, asof=asof)
+    first_view = cached.hts_top_view_rank(top_n=20, asof=asof)
+    second_view = cached.hts_top_view_rank(top_n=10, asof=asof)
+    first_mcap = cached.market_cap_rank(top_k=500, asof=asof)
+    second_mcap = cached.market_cap_rank(top_k=200, asof=asof)
+
+    assert len(first_volume) == 100
+    assert len(second_volume) == 50
+    assert len(first_value) == 80
+    assert len(second_value) == 80
+    assert len(first_view) == 20
+    assert len(second_view) == 10
+    assert len(first_mcap) == 500
+    assert len(second_mcap) == 200
+    assert api.volume_rank_calls == [
+        ("volume", 100, asof),
+        ("value", 80, asof),
+    ]
+    assert api.hts_top_view_calls == [(20, asof)]
+    assert api.market_cap_calls == [(500, asof)]
+    assert metrics.counters["volume_rank_requests"] == 4
+    assert metrics.counters["volume_rank_api_calls"] == 2
+    assert metrics.counters["volume_rank_cache_hits"] == 2
+    assert metrics.counters["hts_top_view_rank_requests"] == 2
+    assert metrics.counters["hts_top_view_rank_api_calls"] == 1
+    assert metrics.counters["hts_top_view_rank_cache_hits"] == 1
+    assert metrics.counters["market_cap_rank_requests"] == 2
+    assert metrics.counters["market_cap_rank_api_calls"] == 1
+    assert metrics.counters["market_cap_rank_cache_hits"] == 1
+    assert cached.snapshot_counts()["volume_rank_cache_entries"] == 2
+
+
 def test_global_market_signal_is_reused_from_same_day_cache() -> None:
     class CountingGlobalSignalAPI(FakeAPI):
         def __init__(self) -> None:
