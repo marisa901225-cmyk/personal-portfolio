@@ -33,7 +33,7 @@ is_weekend() {
 }
 
 get_available_services() {
-  run_compose config --services
+  run_compose ps --services --all
 }
 
 get_target_services() {

@@ -55,6 +55,7 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
         sensor_pattern: str = "",
         start_max_temp_c: str = "88",
         start_retry_sec: int = 300,
+        startup_grace_sec: int = 600,
         temp_sensor_pattern: str = "",
     ) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
@@ -74,6 +75,7 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
                 "LLM_FAN_GUARD_STOP_DELAY_SEC": str(stop_delay_sec),
                 "LLM_FAN_GUARD_START_MAX_TEMP_C": str(start_max_temp_c),
                 "LLM_FAN_GUARD_START_RETRY_SEC": str(start_retry_sec),
+                "LLM_FAN_GUARD_STARTUP_GRACE_SEC": str(startup_grace_sec),
                 "LLM_FAN_GUARD_TEMP_SENSOR_PATTERN": temp_sensor_pattern,
             }
         )
@@ -251,7 +253,48 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
         state_text = self.state_file.read_text(encoding="utf-8")
         self.assertIn('"cooldown_active": 0', state_text)
         self.assertIn('"cooldown_until_epoch": 0', state_text)
+        self.assertIn('"last_start_epoch": 5000', state_text)
         self.assertIn('"last_action": "start"', state_text)
+
+    def test_startup_grace_defers_stop_after_restart(self) -> None:
+        self.state_file.write_text(
+            textwrap.dedent(
+                """
+                {
+                  "cooldown_active": 0,
+                  "cooldown_started_epoch": 0,
+                  "cooldown_until_epoch": 0,
+                  "last_trigger_rpm": 2350,
+                  "last_seen_rpm": 0,
+                  "high_rpm_started_epoch": 0,
+                  "last_start_epoch": 1000,
+                  "last_action": "start",
+                  "updated_at_epoch": 1000
+                }
+                """
+            ).strip()
+            + "\n",
+            encoding="utf-8",
+        )
+
+        result = self._run_guard(
+            sensors_output="""
+                xe-pci-0300
+                Adapter: PCI adapter
+                fan1:        2589 RPM
+            """,
+            now_epoch=1_300,
+            startup_grace_sec=600,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self._read_actions(), [])
+        state_text = self.state_file.read_text(encoding="utf-8")
+        self.assertIn('"cooldown_active": 0', state_text)
+        self.assertIn('"last_seen_rpm": 2589', state_text)
+        self.assertIn('"high_rpm_started_epoch": 0', state_text)
+        self.assertIn('"last_start_epoch": 1000', state_text)
+        self.assertIn('"last_action": "startup_grace"', state_text)
 
     def test_defers_restart_when_temperature_is_still_high(self) -> None:
         self.state_file.write_text(

@@ -17,6 +17,7 @@ COOLDOWN_SEC="${LLM_FAN_GUARD_COOLDOWN_SEC:-3600}"
 SENSOR_PATTERN="${LLM_FAN_GUARD_SENSOR_PATTERN:-}"
 START_MAX_TEMP_C="${LLM_FAN_GUARD_START_MAX_TEMP_C:-88}"
 START_RETRY_SEC="${LLM_FAN_GUARD_START_RETRY_SEC:-300}"
+STARTUP_GRACE_SEC="${LLM_FAN_GUARD_STARTUP_GRACE_SEC:-600}"
 TEMP_SENSOR_PATTERN="${LLM_FAN_GUARD_TEMP_SENSOR_PATTERN:-$SENSOR_PATTERN}"
 NOW_EPOCH="${LLM_FAN_GUARD_NOW_EPOCH:-$(date +%s)}"
 
@@ -58,6 +59,7 @@ write_state() {
   local last_seen_rpm="$5"
   local high_rpm_started_epoch="$6"
   local last_action="$7"
+  local persisted_last_start_epoch="${8:-${current_last_start_epoch:-0}}"
   local tmp_file
 
   tmp_file="$(mktemp "${STATE_FILE}.XXXXXX")"
@@ -68,6 +70,7 @@ write_state() {
   printf '  "last_trigger_rpm": %s,\n' "$last_trigger_rpm" >> "$tmp_file"
   printf '  "last_seen_rpm": %s,\n' "$last_seen_rpm" >> "$tmp_file"
   printf '  "high_rpm_started_epoch": %s,\n' "$high_rpm_started_epoch" >> "$tmp_file"
+  printf '  "last_start_epoch": %s,\n' "$persisted_last_start_epoch" >> "$tmp_file"
   printf '  "last_action": "%s",\n' "$last_action" >> "$tmp_file"
   printf '  "updated_at_epoch": %s\n' "$NOW_EPOCH" >> "$tmp_file"
   printf '}\n' >> "$tmp_file"
@@ -179,6 +182,7 @@ cooldown_until_epoch="$(read_state_number cooldown_until_epoch 0)"
 last_trigger_rpm="$(read_state_number last_trigger_rpm 0)"
 last_seen_rpm="$(read_state_number last_seen_rpm 0)"
 high_rpm_started_epoch="$(read_state_number high_rpm_started_epoch 0)"
+current_last_start_epoch="$(read_state_number last_start_epoch 0)"
 
 if [[ "$cooldown_active" == "1" ]]; then
   if (( NOW_EPOCH < cooldown_until_epoch )); then
@@ -205,7 +209,7 @@ if [[ "$cooldown_active" == "1" ]]; then
 
   log "cooldown expired at $(format_epoch "$cooldown_until_epoch"); restarting LLM services"
   if run_schedule start; then
-    write_state 0 0 0 "$last_trigger_rpm" 0 0 "start"
+    write_state 0 0 0 "$last_trigger_rpm" 0 0 "start" "$NOW_EPOCH"
     log "LLM services restarted after cooldown"
     exit 0
   fi
@@ -236,6 +240,15 @@ if (( max_rpm < THRESHOLD_RPM )); then
   exit 0
 fi
 
+if (( STARTUP_GRACE_SEC > 0 && current_last_start_epoch > 0 )); then
+  startup_elapsed_sec="$((NOW_EPOCH - current_last_start_epoch))"
+  if (( startup_elapsed_sec >= 0 && startup_elapsed_sec < STARTUP_GRACE_SEC )); then
+    write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" 0 "startup_grace" "$current_last_start_epoch"
+    log "fan RPM $max_rpm exceeded threshold $THRESHOLD_RPM during startup grace ${startup_elapsed_sec}s/${STARTUP_GRACE_SEC}s; deferring stop check"
+    exit 0
+  fi
+fi
+
 if (( high_rpm_started_epoch == 0 )); then
   high_rpm_started_epoch="$NOW_EPOCH"
 fi
@@ -251,7 +264,7 @@ cooldown_until_epoch="$((NOW_EPOCH + COOLDOWN_SEC))"
 log "fan RPM $max_rpm stayed above threshold $THRESHOLD_RPM for ${high_rpm_elapsed_sec}s; stopping LLM services for ${COOLDOWN_SEC}s"
 
 if run_schedule stop; then
-  write_state 1 "$NOW_EPOCH" "$cooldown_until_epoch" "$max_rpm" "$max_rpm" 0 "stop"
+  write_state 1 "$NOW_EPOCH" "$cooldown_until_epoch" "$max_rpm" "$max_rpm" 0 "stop" 0
   log "LLM services stopped; cooldown runs until $(format_epoch "$cooldown_until_epoch")"
   exit 0
 fi
