@@ -274,6 +274,23 @@ class OpenAIPaidBackend(LLMBackend):
                     chunks.append(str(part["text"]))
         return "".join(chunks).strip()
 
+    @staticmethod
+    def _responses_output_types(data: Any) -> List[str]:
+        if not isinstance(data, dict):
+            return []
+
+        types: List[str] = []
+        for item in (data.get("output") or []):
+            if not isinstance(item, dict):
+                continue
+            item_type = item.get("type")
+            if item_type:
+                types.append(str(item_type))
+            for part in (item.get("content") or []):
+                if isinstance(part, dict) and part.get("type"):
+                    types.append(str(part["type"]))
+        return types
+
     def _try_responses_api(
         self,
         *,
@@ -357,7 +374,31 @@ class OpenAIPaidBackend(LLMBackend):
                 self._last_error = None
                 return output
 
-            self._last_error = "OpenAI Responses API returned no output text"
+            incomplete_details = data.get("incomplete_details") if isinstance(data, dict) else None
+            incomplete_reason = ""
+            if isinstance(incomplete_details, dict):
+                incomplete_reason = str(incomplete_details.get("reason") or "")
+            if (
+                incomplete_reason == "max_output_tokens"
+                and attempt < max_attempts - 1
+                and int(payload.get("max_output_tokens") or 0) < 20000
+            ):
+                previous_limit = int(payload.get("max_output_tokens") or 0)
+                payload["max_output_tokens"] = min(max(previous_limit * 2, 2048), 20000)
+                logger.warning(
+                    "OpenAI Responses API exhausted max_output_tokens=%s without text. Retrying with %s.",
+                    previous_limit,
+                    payload["max_output_tokens"],
+                )
+                continue
+
+            self._last_error = (
+                "OpenAI Responses API returned no output text "
+                f"status={data.get('status') if isinstance(data, dict) else None} "
+                f"incomplete_details={incomplete_details} "
+                f"output_types={self._responses_output_types(data)} "
+                f"usage={data.get('usage') if isinstance(data, dict) else None}"
+            )
             logger.error(self._last_error)
             return ""
 

@@ -81,7 +81,7 @@ class TradeEngineConfig:
     day_chart_review_chart_wildcard_slots: int = 1
     day_chart_review_paid_min_candidates: int = 3
     day_chart_review_model: str = "gpt-5.5"
-    day_chart_review_reasoning_effort: str = "high"
+    day_chart_review_reasoning_effort: str = "low"
     day_afternoon_entry_start_window_index: int = 2
     day_afternoon_loss_limit_loss_count: int = 2
     defer_swing_scan_in_day_entry_window: bool = False
@@ -220,7 +220,7 @@ class TradeEngineConfig:
     swing_chart_review_top_n: int = 5
     swing_chart_review_paid_min_candidates: int = 3
     swing_chart_review_model: str = "gpt-5.5"
-    swing_chart_review_reasoning_effort: str = "high"
+    swing_chart_review_reasoning_effort: str = "low"
     quote_score_limit: int = 30
     allow_etf_swing_fallback: bool = True
     industry_idx_master_path: str = "backend/data/trading_engine_masters/idxcode.mst.zip"

@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-REVIEW_MAX_TOKENS = 700
+REVIEW_MAX_TOKENS = 4096
 CHART_REVIEW_RESPONSE_FORMAT = {
     "type": "json_schema",
     "json_schema": {

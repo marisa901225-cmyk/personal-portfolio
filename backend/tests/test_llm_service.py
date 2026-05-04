@@ -311,6 +311,59 @@ class TestLLMService(unittest.TestCase):
             second_payload = backend._post.call_args_list[1].kwargs["payload"]
             self.assertEqual(second_payload.get("max_output_tokens"), 16)
 
+    def test_paid_backend_retries_responses_when_reasoning_exhausts_output_tokens(self):
+        class _Resp:
+            def __init__(self, status_code: int, json_data=None, text: str = ""):
+                self.status_code = status_code
+                self._json_data = json_data
+                self.text = text
+
+            def json(self):
+                if isinstance(self._json_data, Exception):
+                    raise self._json_data
+                return self._json_data
+
+        chat_ok_but_empty = _Resp(
+            200,
+            json_data={"choices": [{"message": {"content": ""}}]},
+        )
+        responses_incomplete = _Resp(
+            200,
+            json_data={
+                "status": "incomplete",
+                "incomplete_details": {"reason": "max_output_tokens"},
+                "output": [{"type": "reasoning"}],
+                "usage": {"output_tokens": 700, "output_tokens_details": {"reasoning_tokens": 700}},
+            },
+        )
+        responses_ok = _Resp(200, json_data={"output_text": "retry-ok"})
+
+        with patch("backend.services.llm.config.settings") as mock_settings:
+            mock_settings.llm_base_url = None
+            mock_settings.llm_api_key = None
+            mock_settings.llm_timeout = 30
+            mock_settings.open_api_key = None
+            mock_settings.ai_report_api_key = "test-key"
+            mock_settings.ai_report_base_url = "https://api.openai.com/v1"
+            mock_settings.ai_report_model = "gpt-5.4-mini"
+            mock_settings.ai_report_fallback_model = "gpt-5.4-mini"
+            mock_settings.ai_report_timeout_sec = 30
+
+            backend = OpenAIPaidBackend(Settings())
+            backend._post = unittest.mock.Mock(side_effect=[chat_ok_but_empty, responses_incomplete, responses_ok])
+
+            out = backend.chat(
+                [{"role": "user", "content": "hi"}],
+                model="gpt-5.4-mini",
+                max_tokens=700,
+            )
+
+            self.assertEqual(out, "retry-ok")
+            second_payload = backend._post.call_args_list[1].kwargs["payload"]
+            third_payload = backend._post.call_args_list[2].kwargs["payload"]
+            self.assertEqual(second_payload.get("max_output_tokens"), 2048)
+            self.assertEqual(third_payload.get("max_output_tokens"), 2048)
+
     def test_paid_backend_responses_respects_reasoning_effort_override(self):
         class _Resp:
             def __init__(self, status_code: int, json_data=None, text: str = ""):
