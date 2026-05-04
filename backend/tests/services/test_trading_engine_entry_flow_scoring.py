@@ -128,6 +128,81 @@ def test_pick_swing_prefers_sector_etf_on_theme_day() -> None:
 
     assert picked == "ETF001"
 
+def test_pick_swing_prefers_sol_ai_semiconductor_top2_plus_etf_on_theme_day() -> None:
+    cfg = TradeEngineConfig(use_news_sentiment=True)
+    candidates = Candidates(
+        asof="20260216",
+        popular=pd.DataFrame(),
+        model=pd.DataFrame(
+            [
+                {
+                    "code": "005930",
+                    "name": "삼성전자",
+                    "avg_value_20d": 1_800_000_000_000,
+                    "ma20": 100.0,
+                    "ma60": 95.0,
+                    "close": 110.0,
+                    "change_pct": 4.0,
+                    "is_etf": False,
+                    "trend_tier": "strict",
+                },
+                {
+                    "code": "000660",
+                    "name": "SK하이닉스",
+                    "avg_value_20d": 1_200_000_000_000,
+                    "ma20": 95.0,
+                    "ma60": 90.0,
+                    "close": 103.0,
+                    "change_pct": 3.2,
+                    "is_etf": False,
+                    "trend_tier": "strict",
+                },
+            ]
+        ),
+        etf=pd.DataFrame(
+            [
+                {
+                    "code": "ETF001",
+                    "name": "KODEX 반도체",
+                    "avg_value_20d": 900_000_000_000,
+                    "ma20": 98.0,
+                    "ma60": 93.0,
+                    "close": 108.0,
+                    "change_pct": 3.8,
+                    "is_etf": True,
+                },
+                {
+                    "code": "0167A0",
+                    "name": "SOL AI반도체TOP2플러스",
+                    "avg_value_20d": 500_000_000_000,
+                    "ma20": 99.0,
+                    "ma60": 94.0,
+                    "close": 109.0,
+                    "change_pct": 2.8,
+                    "is_etf": True,
+                },
+            ]
+        ),
+        merged=pd.DataFrame(),
+        quote_codes=["005930", "000660", "ETF001", "0167A0"],
+    )
+    quotes = {
+        "005930": {"price": 110.0, "change_pct": 4.0},
+        "000660": {"price": 103.0, "change_pct": 3.2},
+        "ETF001": {"price": 108.0, "change_pct": 3.8},
+        "0167A0": {"price": 109.0, "change_pct": 2.8},
+    }
+    news_signal = NewsSentimentSignal(
+        market_score=0.3,
+        sector_scores={"semiconductor": 0.75},
+        sector_keywords={"semiconductor": ("반도체", "삼성전자", "sk하이닉스")},
+        article_count=50,
+    )
+
+    picked = pick_swing(candidates, quotes, cfg, news_signal=news_signal)
+
+    assert picked == "0167A0"
+
 def test_pick_swing_keeps_stock_when_theme_breadth_is_not_met() -> None:
     cfg = TradeEngineConfig(use_news_sentiment=True)
     candidates = Candidates(

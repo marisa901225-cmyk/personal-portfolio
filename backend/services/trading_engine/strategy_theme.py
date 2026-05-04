@@ -9,8 +9,11 @@ from .news_sentiment import NewsSentimentSignal, _load_sector_keywords
 from .types import QuoteMap
 from .utils import is_broad_market_etf, match_name_to_sectors
 
+_PREFERRED_THEME_ETF_CODES: dict[str, tuple[str, ...]] = {
+    "semiconductor": ("0167A0",),
+}
 _PREFERRED_THEME_ETF_NAME_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "semiconductor": ("kodex 반도체",),
+    "semiconductor": ("sol ai반도체top2플러스", "ai반도체top2플러스", "kodex 반도체"),
 }
 
 
@@ -199,8 +202,9 @@ def _pick_theme_day_swing_etf(
 
         theme_bonus = (sector_score * 20.0) + min(10.0, max(0, breadth - 1) * 4.0)
         themed_etfs["theme_score"] = themed_etfs["score"] + theme_bonus
-        themed_etfs["_preferred_name_rank"] = themed_etfs["name"].fillna("").map(
-            lambda name: _theme_etf_name_preference_rank(str(name), sector)
+        themed_etfs["_preferred_rank"] = themed_etfs.apply(
+            lambda row: _theme_etf_preference_rank(row, sector),
+            axis=1,
         )
         themed_etfs = themed_etfs[
             themed_etfs["theme_score"] >= float(config.swing_sector_etf_min_score)
@@ -213,7 +217,7 @@ def _pick_theme_day_swing_etf(
             continue
 
         themed_etfs = themed_etfs.sort_values(
-            by=["_preferred_name_rank", "theme_score", "score", "_change_pct_num", "avg_value_20d"],
+            by=["_preferred_rank", "theme_score", "score", "_change_pct_num", "avg_value_20d"],
             ascending=[True, False, False, False, False],
         )
         return str(themed_etfs.iloc[0]["code"])
@@ -226,6 +230,19 @@ def _match_name_to_sectors(
     sector_keywords: dict[str, tuple[str, ...]],
 ) -> set[str]:
     return match_name_to_sectors(name, sector_keywords)
+
+
+def _theme_etf_preference_rank(row: pd.Series, sector: str) -> int:
+    code = str(row.get("code") or "").strip().upper()
+    preferred_codes = tuple(str(item).strip().upper() for item in _PREFERRED_THEME_ETF_CODES.get(str(sector), ()))
+    for idx, preferred_code in enumerate(preferred_codes):
+        if code == preferred_code:
+            return idx
+
+    name_offset = len(preferred_codes)
+    name = str(row.get("name") or "")
+    name_rank = _theme_etf_name_preference_rank(name, sector)
+    return name_offset + name_rank
 
 
 def _theme_etf_name_preference_rank(name: str, sector: str) -> int:
