@@ -497,15 +497,16 @@ class OpenAIPaidBackend(LLMBackend):
         if not is_gpt5 or not prompt:
             return messages
 
-        existing_lines = cls._existing_system_prompt_lines(messages)
+        non_system_messages = [message for message in messages if message.get("role") != "system"]
+        existing_lines = cls._existing_system_prompt_lines(non_system_messages)
         unique_lines = [
             line
             for line in prompt.splitlines()
             if cls._normalize_prompt_line(line) and cls._normalize_prompt_line(line) not in existing_lines
         ]
         if not unique_lines:
-            return messages
-        return [{"role": "system", "content": "\n".join(unique_lines).strip()}] + list(messages)
+            return non_system_messages
+        return [{"role": "system", "content": "\n".join(unique_lines).strip()}] + non_system_messages
 
     def chat(
         self,

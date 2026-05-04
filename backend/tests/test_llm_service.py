@@ -550,7 +550,8 @@ class TestLLMService(unittest.TestCase):
             self.assertEqual(out, "ok")
             payload = backend._post.call_args.kwargs["payload"]
             self.assertEqual(payload["messages"][0], {"role": "system", "content": "paid-system"})
-            self.assertEqual(payload["messages"][1], {"role": "system", "content": "main-system"})
+            self.assertEqual(payload["messages"][1], {"role": "user", "content": "hi"})
+            self.assertEqual(len(payload["messages"]), 2)
 
     def test_paid_backend_dedupes_repeated_gpt5_paid_system_prompt_lines(self):
         class _Resp:
@@ -597,8 +598,12 @@ class TestLLMService(unittest.TestCase):
 
             self.assertEqual(out, "ok")
             payload = backend._post.call_args.kwargs["payload"]
-            self.assertEqual(payload["messages"][0], {"role": "system", "content": "Use concise Korean."})
-            self.assertEqual(payload["messages"][1]["content"], "main-system\nMaximum 120 words.")
+            self.assertEqual(
+                payload["messages"][0],
+                {"role": "system", "content": "Maximum 120 words.\nUse concise Korean."},
+            )
+            self.assertEqual(payload["messages"][1], {"role": "user", "content": "hi"})
+            self.assertEqual(len(payload["messages"]), 2)
 
     def test_remote_backend_caches_model_ids_per_base_url(self):
         settings = SimpleNamespace(
