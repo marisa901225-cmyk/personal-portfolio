@@ -204,6 +204,7 @@ async def process_pending_alarms(db: Session, model_override: Optional[str] = No
                         conversation=alarm.conversation, classification="placeholder",
                         discard_reason="Tasker placeholder", rule_version=1
                     ))
+                    alarm.status = "processed"
                     # db.commit() 제거: 마지막에 일괄 커밋
                     processing_alarms.remove(alarm)
                     filtered_count += 1
@@ -219,6 +220,7 @@ async def process_pending_alarms(db: Session, model_override: Optional[str] = No
                         conversation=alarm.conversation, classification="ignored",
                         discard_reason="OTP/Security filter", rule_version=1
                     ))
+                    alarm.status = "processed"
                     # db.commit() 제거
                     processing_alarms.remove(alarm)
                     filtered_count += 1
@@ -271,6 +273,7 @@ async def process_pending_alarms(db: Session, model_override: Optional[str] = No
                         conversation=alarm.conversation, classification=classification,
                         discard_reason=discard_reason, rule_version=1
                     ))
+                    alarm.status = "processed"
                     # db.commit() 제거
                     processing_alarms.remove(alarm)
                     filtered_count += 1

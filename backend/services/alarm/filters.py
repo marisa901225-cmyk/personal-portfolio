@@ -275,6 +275,8 @@ def is_review_spam(text: str) -> bool:
         r"포인트.*선물",
         r"추억.*알아보세요",
         r"오늘의.*포인트",
+        r"상당\s*코인\s*\d+\s*개",
+        r"코인\s*\d+\s*개.*기다리고",
     ]
 
     for pattern in (review_patterns + game_event_patterns):
@@ -416,6 +418,7 @@ def is_whitelisted(text: str) -> bool:
         "추억을 알아보세요", "오늘의 포인트",
         "이벤트", "당첨자", "당첨 안내", "응모",
         "럭키박스", "득템", "사전예약", "쿠폰",
+        "기다리고 있어요", "상당 코인",
     ]
     if any(p in t for p in promo_keywords):
         return False

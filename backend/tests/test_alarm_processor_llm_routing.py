@@ -92,6 +92,45 @@ class TestAlarmProcessorLlmRouting(unittest.IsolatedAsyncioTestCase):
         )
         mock_summary.assert_not_awaited()
 
+    async def test_filtered_promo_alarm_is_closed_without_summary(self):
+        alarm = SimpleNamespace(
+            id=1,
+            raw_text="₩ 303 상당 코인 20개가 기다리고 있어요!",
+            masked_text=None,
+            sender="AliExpress",
+            app_name="AliExpress",
+            package="com.alibaba.aliexpresshd",
+            app_title="₩ 303 상당 코인 20개가 기다리고 있어요!",
+            conversation=None,
+            status="pending",
+            classification=None,
+        )
+        db = MagicMock()
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [alarm]
+
+        with (
+            patch.object(processor, "check_upcoming_matches", new=AsyncMock()),
+            patch.object(processor, "_get_nb_pipeline", return_value=None),
+            patch("backend.services.users.get_or_create_single_user", return_value=MagicMock(id=1)),
+            patch.object(processor, "should_ignore", return_value=False),
+            patch.object(processor, "is_whitelisted", return_value=False),
+            patch.object(processor, "is_review_spam", return_value=True),
+            patch.object(processor, "summarize_with_llm", new=AsyncMock()) as mock_summary,
+            patch.object(
+                processor,
+                "generate_random_message_payload",
+                new=AsyncMock(return_value={"title": "랜덤 제목", "body": "랜덤 본문"}),
+            ) as mock_random,
+            patch.object(processor, "send_telegram_message", new=AsyncMock()) as mock_send,
+        ):
+            await processor.process_pending_alarms(db)
+
+        self.assertEqual(alarm.status, "processed")
+        self.assertEqual(alarm.classification, "review_spam")
+        mock_summary.assert_not_awaited()
+        mock_random.assert_awaited_once()
+        mock_send.assert_awaited_once()
+
     async def test_paid_prefix_notice_is_prepended_to_first_summary_message(self):
         alarm = SimpleNamespace(
             id=1,
