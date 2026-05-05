@@ -13,7 +13,8 @@ SENSORS_BIN="${LLM_FAN_GUARD_SENSORS_BIN:-sensors}"
 ENABLED="${LLM_FAN_GUARD_ENABLED:-1}"
 THRESHOLD_RPM="${LLM_FAN_GUARD_THRESHOLD_RPM:-1600}"
 STOP_DELAY_SEC="${LLM_FAN_GUARD_STOP_DELAY_SEC:-120}"
-COOLDOWN_SEC="${LLM_FAN_GUARD_COOLDOWN_SEC:-3600}"
+COOLDOWN_SEC="${LLM_FAN_GUARD_COOLDOWN_SEC:-0}"
+RESTART_DELAY_SEC="${LLM_FAN_GUARD_RESTART_DELAY_SEC:-10}"
 SENSOR_PATTERN="${LLM_FAN_GUARD_SENSOR_PATTERN:-}"
 START_MAX_TEMP_C="${LLM_FAN_GUARD_START_MAX_TEMP_C:-88}"
 START_RETRY_SEC="${LLM_FAN_GUARD_START_RETRY_SEC:-300}"
@@ -207,10 +208,10 @@ if [[ "$cooldown_active" == "1" ]]; then
     fi
   fi
 
-  log "cooldown expired at $(format_epoch "$cooldown_until_epoch"); restarting LLM services"
+  log "restart delay elapsed at $(format_epoch "$cooldown_until_epoch"); restarting LLM services"
   if run_schedule start; then
     write_state 0 0 0 "$last_trigger_rpm" 0 0 "start" "$NOW_EPOCH"
-    log "LLM services restarted after cooldown"
+    log "LLM services restarted after fan reset delay"
     exit 0
   fi
 
@@ -261,12 +262,51 @@ if (( high_rpm_elapsed_sec < STOP_DELAY_SEC )); then
 fi
 
 cooldown_until_epoch="$((NOW_EPOCH + COOLDOWN_SEC))"
-log "fan RPM $max_rpm stayed above threshold $THRESHOLD_RPM for ${high_rpm_elapsed_sec}s; stopping LLM services for ${COOLDOWN_SEC}s"
+log "fan RPM $max_rpm stayed above threshold $THRESHOLD_RPM for ${high_rpm_elapsed_sec}s; stopping LLM services"
 
 if run_schedule stop; then
-  write_state 1 "$NOW_EPOCH" "$cooldown_until_epoch" "$max_rpm" "$max_rpm" 0 "stop" 0
-  log "LLM services stopped; cooldown runs until $(format_epoch "$cooldown_until_epoch")"
-  exit 0
+  if (( COOLDOWN_SEC > 0 )); then
+    write_state 1 "$NOW_EPOCH" "$cooldown_until_epoch" "$max_rpm" "$max_rpm" 0 "stop" 0
+    log "LLM services stopped; restart delayed until $(format_epoch "$cooldown_until_epoch")"
+    exit 0
+  fi
+
+  if (( RESTART_DELAY_SEC > 0 )); then
+    log "LLM services stopped; waiting ${RESTART_DELAY_SEC}s before temperature check and restart"
+    sleep "$RESTART_DELAY_SEC"
+  else
+    log "LLM services stopped; checking temperature before immediate restart"
+  fi
+
+  if temp_threshold_enabled "$START_MAX_TEMP_C"; then
+    if sensors_output="$("$SENSORS_BIN" 2>/dev/null)"; then
+      restart_temp_c="$(printf '%s\n' "$sensors_output" | max_temp_c_from_output)"
+      if [[ -n "$restart_temp_c" ]] && temp_is_at_or_above_threshold "$restart_temp_c" "$START_MAX_TEMP_C"; then
+        next_retry_epoch="$(($(date +%s) + START_RETRY_SEC))"
+        write_state 1 "$NOW_EPOCH" "$next_retry_epoch" "$max_rpm" "$max_rpm" 0 "restart_deferred_hot" 0
+        log "restart deferred after stop: sensor temp ${restart_temp_c}C reached start limit ${START_MAX_TEMP_C}C; retry after $(format_epoch "$next_retry_epoch")"
+        exit 0
+      fi
+
+      if [[ -z "$restart_temp_c" ]]; then
+        log "post-stop temperature gate skipped; no temperature lines matched${TEMP_SENSOR_PATTERN:+ for pattern '$TEMP_SENSOR_PATTERN'}"
+      fi
+    else
+      log "post-stop temperature gate skipped; failed to read sensors output from $SENSORS_BIN"
+    fi
+  fi
+
+  log "temperature is acceptable after stop; restarting LLM services"
+  if run_schedule start; then
+    write_state 0 0 0 "$max_rpm" 0 0 "restart_after_stop" "$(date +%s)"
+    log "LLM services restarted after fan reset"
+    exit 0
+  fi
+
+  next_retry_epoch="$(($(date +%s) + START_RETRY_SEC))"
+  write_state 1 "$NOW_EPOCH" "$next_retry_epoch" "$max_rpm" "$max_rpm" 0 "restart_failed" 0
+  log "failed to restart LLM services after fan reset; retry after $(format_epoch "$next_retry_epoch")"
+  exit 1
 fi
 
 write_state 0 0 0 "$max_rpm" "$max_rpm" "$high_rpm_started_epoch" "stop_failed"
