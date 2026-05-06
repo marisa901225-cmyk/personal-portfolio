@@ -40,6 +40,12 @@ class Settings:
         self.ai_report_model = settings.ai_report_model
         self.ai_report_fallback_model = settings.ai_report_fallback_model
         self.ai_report_timeout_sec = settings.ai_report_timeout_sec
+        self.google_token = settings.google_token
+        self.translation_batch_provider = settings.translation_batch_provider
+        self.translation_batch_model = settings.translation_batch_model
+        self.translation_batch_temperature = settings.translation_batch_temperature
+        self.translation_batch_max_tokens = settings.translation_batch_max_tokens
+        self.gemini_batch_base_url = settings.gemini_batch_base_url
 
         self.backend_dir_abs = BACKEND_DIR_ABS
         self.data_dir_abs = DATA_DIR_ABS

@@ -63,6 +63,14 @@ class Settings(BaseSettings):
     ai_report_temperature: float = Field(default=0.3, validation_alias="AI_REPORT_TEMPERATURE")
     ai_report_max_tokens: int = Field(default=8000, validation_alias="AI_REPORT_MAX_TOKENS")
     ai_report_timeout_sec: float = Field(default=900.0, validation_alias="AI_REPORT_TIMEOUT_SEC")
+    translation_batch_provider: str = Field(default="openai", validation_alias="TRANSLATION_BATCH_PROVIDER")
+    translation_batch_model: Optional[str] = Field(default=None, validation_alias="TRANSLATION_BATCH_MODEL")
+    translation_batch_temperature: float = Field(default=0.2, validation_alias="TRANSLATION_BATCH_TEMPERATURE")
+    translation_batch_max_tokens: int = Field(default=4096, validation_alias="TRANSLATION_BATCH_MAX_TOKENS")
+    gemini_batch_base_url: str = Field(
+        default="https://generativelanguage.googleapis.com/v1beta",
+        validation_alias="GEMINI_BATCH_BASE_URL",
+    )
     morning_openrouter_base_url: str = Field(
         default="https://openrouter.ai/api/v1",
         validation_alias="MORNING_OPENROUTER_BASE_URL",

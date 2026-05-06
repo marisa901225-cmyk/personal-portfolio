@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
+from .llm.batch import LLMBatchRequest
+
 
 @dataclass(frozen=True)
 class GlossaryEntry:
@@ -172,3 +174,56 @@ def build_translation_messages(
         {"role": "system", "content": "\n".join(system_lines)},
         {"role": "user", "content": "\n\n".join(user_parts)},
     ]
+
+
+def build_translation_batch_requests(
+    chunks: list[str],
+    *,
+    glossary: list[GlossaryEntry] | None = None,
+    max_tokens: int = 4096,
+    temperature: float = 0.2,
+) -> list[LLMBatchRequest]:
+    requests: list[LLMBatchRequest] = []
+    previous_source_chunks: list[str] = []
+    for index, chunk in enumerate(chunks):
+        glossary_entries = select_glossary_entries(chunk, glossary or [])
+        messages = build_translation_messages(
+            chunk,
+            glossary_entries=glossary_entries,
+            previous_source_chunks=previous_source_chunks,
+        )
+        requests.append(
+            LLMBatchRequest(
+                key=f"chunk-{index:05d}",
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+        )
+        previous_source_chunks.append(chunk)
+    return requests
+
+
+def submit_translation_batch(
+    chunks: list[str],
+    *,
+    glossary: list[GlossaryEntry] | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    display_name: str = "translation-batch",
+):
+    from .llm.service import LLMService
+
+    llm = LLMService.get_instance()
+    requests = build_translation_batch_requests(
+        chunks,
+        glossary=glossary,
+        max_tokens=int(getattr(llm.settings, "translation_batch_max_tokens", 4096)),
+        temperature=float(getattr(llm.settings, "translation_batch_temperature", 0.2)),
+    )
+    return llm.submit_batch(
+        requests,
+        provider=provider,
+        model=model,
+        display_name=display_name,
+    )

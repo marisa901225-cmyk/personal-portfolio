@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from .config import Settings
 from .backends.remote import RemoteLlamaBackend
 from .backends.paid import OpenAIPaidBackend
+from .batch import GeminiBatchClient, LLMBatchJob, LLMBatchRequest, OpenAIBatchClient
 
 logger = logging.getLogger(__name__)
 KST = ZoneInfo("Asia/Seoul")
@@ -201,6 +202,29 @@ class LLMService:
         self._last_error = getattr(self.paid_backend, "_last_error", None) or "Paid LLM failed"
         self._last_route = "paid_failed"
         return ""
+
+    def submit_batch(
+        self,
+        requests: list[LLMBatchRequest],
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        display_name: str = "translation-batch",
+    ) -> LLMBatchJob:
+        selected_provider = (provider or self.settings.translation_batch_provider or "openai").strip().lower()
+        if selected_provider == "openai":
+            return OpenAIBatchClient(self.settings).submit_responses_batch(
+                requests,
+                model=model,
+                display_name=display_name,
+            )
+        if selected_provider == "gemini":
+            return GeminiBatchClient(self.settings).submit_generate_content_batch(
+                requests,
+                model=model,
+                display_name=display_name,
+            )
+        raise ValueError(f"Unsupported batch provider: {selected_provider}")
 
     def switch_model(self, model_path: str) -> bool:
         """원격 모델 스위칭 지원"""

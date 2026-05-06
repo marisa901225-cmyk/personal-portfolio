@@ -40,11 +40,13 @@ class TestAlarmProcessorNoRandomWithExpense(unittest.IsolatedAsyncioTestCase):
              patch.object(processor, "is_whitelisted", return_value=True), \
              patch.object(processor, "parse_card_approval", return_value=fake_card_info), \
              patch.object(processor, "summarize_with_llm", new=AsyncMock(return_value="랜덤메시지")), \
+             patch.object(processor, "generate_random_message_payload", new=AsyncMock(return_value=None)), \
              patch.object(processor, "send_telegram_message", new=AsyncMock()) as mock_send:
 
             await processor.process_pending_alarms(db)
 
             processor.summarize_with_llm.assert_not_awaited()
+            processor.generate_random_message_payload.assert_awaited_once()
             mock_send.assert_not_awaited()
 
 
