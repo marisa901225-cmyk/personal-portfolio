@@ -36,7 +36,7 @@ class TestSchedulerRoleSplit(unittest.TestCase):
         self.assertIn("collect_game_news", registered_ids)
         self.assertIn("morning_briefing", registered_ids)
         self.assertNotIn("trading_engine_cycle_preopen", registered_ids)
-        self.assertNotIn("trading_engine_cycle_entry_window_open_1", registered_ids)
+        self.assertNotIn("trading_engine_cycle_intraday_morning", registered_ids)
         self.assertNotIn("trading_engine_finalize", registered_ids)
         fake_scheduler.start.assert_called_once()
 
@@ -59,11 +59,10 @@ class TestSchedulerRoleSplit(unittest.TestCase):
         self.assertNotIn("collect_game_news", registered_ids)
         self.assertNotIn("morning_briefing", registered_ids)
         self.assertIn("trading_engine_cycle_preopen", registered_ids)
-        self.assertIn("trading_engine_cycle_entry_window_open_1", registered_ids)
-        self.assertIn("trading_engine_cycle_entry_window_open_2", registered_ids)
         self.assertIn("trading_engine_cycle_intraday_morning", registered_ids)
         self.assertIn("trading_engine_cycle_intraday_midday", registered_ids)
         self.assertIn("trading_engine_cycle_intraday_afternoon", registered_ids)
+        self.assertIn("trading_engine_cycle_intraday_close", registered_ids)
         self.assertIn("trading_engine_finalize", registered_ids)
         fake_scheduler.start.assert_called_once()
 

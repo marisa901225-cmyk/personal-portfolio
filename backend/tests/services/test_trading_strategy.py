@@ -218,7 +218,7 @@ class TradingStrategyTests(unittest.TestCase):
                 {"code": "STK01", "name": "Stock", "is_etf": False, "avg_value_5d": "10000000000", "change_pct": "1.8", "mock_score": 95.0},
             ]
         )
-        mock_score.side_effect = lambda row, quotes, config: float(row["mock_score"])
+        mock_score.side_effect = lambda row, *args, **kwargs: float(row["mock_score"])
 
         cfg = TradeEngineConfig(
             include_etf=True,
@@ -237,7 +237,7 @@ class TradingStrategyTests(unittest.TestCase):
                 {"code": "STK01", "name": "Stock", "is_etf": False, "avg_value_5d": "10000000000", "change_pct": "1.8", "mock_score": 94.0},
             ]
         )
-        mock_score.side_effect = lambda row, quotes, config: float(row["mock_score"])
+        mock_score.side_effect = lambda row, *args, **kwargs: float(row["mock_score"])
 
         cfg = TradeEngineConfig(
             include_etf=True,
@@ -257,7 +257,7 @@ class TradingStrategyTests(unittest.TestCase):
                 {"code": "ETF01", "name": "ETF", "is_etf": True, "avg_value_5d": "70000000000", "change_pct": "4.0", "mock_score": 100.0},
             ]
         )
-        mock_score.side_effect = lambda row, quotes, config: float(row["mock_score"])
+        mock_score.side_effect = lambda row, *args, **kwargs: float(row["mock_score"])
 
         cfg = TradeEngineConfig(include_etf=True, day_etf_min_avg_value_5d=50_000_000_000)
         ranked = rank_daytrade_codes(self._candidates_with_popular(pool), quotes={}, config=cfg)
@@ -272,7 +272,7 @@ class TradingStrategyTests(unittest.TestCase):
                 {"code": "AFFORD1", "name": "Affordable", "is_etf": False, "avg_value_5d": "80000000000", "change_pct": "2.5", "mock_score": 90.0},
             ]
         )
-        mock_score.side_effect = lambda row, quotes, config: float(row["mock_score"])
+        mock_score.side_effect = lambda row, *args, **kwargs: float(row["mock_score"])
 
         cfg = TradeEngineConfig(
             initial_capital=1_000_000,
@@ -320,7 +320,7 @@ class TradingStrategyTests(unittest.TestCase):
                 },
             ]
         )
-        mock_score.side_effect = lambda row, quotes, config: float(row["mock_score"])
+        mock_score.side_effect = lambda row, *args, **kwargs: float(row["mock_score"])
 
         cfg = TradeEngineConfig(
             include_etf=True,
@@ -381,7 +381,7 @@ class TradingStrategyTests(unittest.TestCase):
             "RISK01": {"management_issue_code": "N", "market_warning_code": "03"},
             "OK001": {"management_issue_code": "N", "market_warning_code": "00"},
         }
-        mock_score.side_effect = lambda row, quotes, config: float(row["mock_score"])
+        mock_score.side_effect = lambda row, *args, **kwargs: float(row["mock_score"])
 
         cfg = TradeEngineConfig(
             include_etf=False,
@@ -537,7 +537,7 @@ class TradingStrategyTests(unittest.TestCase):
                 {"code": "STK_LOW", "name": "Stock low", "is_etf": False, "avg_value_5d": "20000000000", "change_pct": "1.1", "mock_score": 70.0},
             ]
         )
-        mock_score.side_effect = lambda row, quotes, config: float(row["mock_score"])
+        mock_score.side_effect = lambda row, *args, **kwargs: float(row["mock_score"])
 
         cfg = TradeEngineConfig(
             include_etf=True,
@@ -559,7 +559,7 @@ class TradingStrategyTests(unittest.TestCase):
                 {"code": "BIO1", "name": "바이오 대장주", "is_etf": False, "avg_value_5d": "75000000000", "change_pct": "4.4", "mock_score": 104.0},
             ]
         )
-        mock_score.side_effect = lambda row, quotes, config, news_signal=None: float(row["mock_score"])
+        mock_score.side_effect = lambda row, *args, **kwargs: float(row["mock_score"])
 
         cfg = TradeEngineConfig(
             include_etf=False,
@@ -610,7 +610,7 @@ class TradingStrategyTests(unittest.TestCase):
                 {"code": "ETF_OK", "name": "ETF ok", "is_etf": True, "avg_value_5d": "60000000000", "change_pct": "2.0", "mock_score": 90.0},
             ]
         )
-        mock_score.side_effect = lambda row, quotes, config: float(row["mock_score"])
+        mock_score.side_effect = lambda row, *args, **kwargs: float(row["mock_score"])
 
         cfg = TradeEngineConfig(
             include_etf=True,
@@ -628,7 +628,7 @@ class TradingStrategyTests(unittest.TestCase):
                 {"code": "SAFE01", "name": "Safe", "is_etf": False, "avg_value_5d": "10000000000", "change_pct": "1.2", "mock_score": 80.0},
             ]
         )
-        mock_score.side_effect = lambda row, quotes, config: float(row["mock_score"])
+        mock_score.side_effect = lambda row, *args, **kwargs: float(row["mock_score"])
 
         cfg = TradeEngineConfig(
             include_etf=False,
@@ -646,7 +646,7 @@ class TradingStrategyTests(unittest.TestCase):
                 {"code": "SAFE02", "name": "Safer", "is_etf": False, "avg_value_5d": "70000000000", "change_pct": "2.4", "mock_score": 100.0},
             ]
         )
-        mock_score.side_effect = lambda row, quotes, config: float(row["mock_score"])
+        mock_score.side_effect = lambda row, *args, **kwargs: float(row["mock_score"])
 
         cfg = TradeEngineConfig(
             include_etf=False,
@@ -680,7 +680,7 @@ class TradingStrategyTests(unittest.TestCase):
                 },
             ]
         )
-        mock_score.side_effect = lambda row, quotes, config: float(row["mock_score"])
+        mock_score.side_effect = lambda row, *args, **kwargs: float(row["mock_score"])
 
         cfg = TradeEngineConfig(
             include_etf=False,
@@ -784,7 +784,7 @@ class TradingStrategyTests(unittest.TestCase):
                 },
             ]
         )
-        mock_score.side_effect = lambda row, quotes, config, news_signal=None: 100.0 if row["code"] == "379800" else 90.0
+        mock_score.side_effect = lambda row, *args, **kwargs: 100.0 if row["code"] == "379800" else 90.0
 
         cfg = TradeEngineConfig(
             allow_etf_swing_fallback=True,

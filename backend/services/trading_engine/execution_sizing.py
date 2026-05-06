@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from .execution_support import BuySizingSnapshot, SellSizingSnapshot
-from .interfaces import BuyOrderInfoAPI, SellOrderInfoAPI, TradingAPI
+from .interfaces import TradingAPI
 from .utils import parse_numeric
 
 logger = logging.getLogger(__name__)
@@ -22,12 +22,13 @@ def resolve_buy_sizing(
         cash=max(0.0, fallback_cash),
         price_now=max(0.0, fallback_price),
     )
-    if not isinstance(api, BuyOrderInfoAPI):
+    buy_order_capacity = getattr(api, "buy_order_capacity", None)
+    if not callable(buy_order_capacity):
         return snapshot
 
     query_price = int(price or 0) or int(fallback_price)
     try:
-        info = api.buy_order_capacity(
+        info = buy_order_capacity(
             code=code,
             order_type=order_type,
             price=query_price,
@@ -67,11 +68,12 @@ def resolve_sell_sizing(
     code: str,
 ) -> SellSizingSnapshot:
     snapshot = SellSizingSnapshot()
-    if not isinstance(api, SellOrderInfoAPI):
+    sell_order_capacity = getattr(api, "sell_order_capacity", None)
+    if not callable(sell_order_capacity):
         return snapshot
 
     try:
-        info = api.sell_order_capacity(code)
+        info = sell_order_capacity(code)
     except Exception as exc:
         logger.warning("sell_order_capacity lookup failed code=%s error=%s", code, exc)
         return snapshot

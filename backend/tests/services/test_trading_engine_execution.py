@@ -474,6 +474,9 @@ def test_bot_skips_daytrade_reentry_after_same_day_stoploss_even_before_threshol
         runlog_path=str(tmp_path / "run.log"),
         use_news_sentiment=False,
         use_intraday_circuit_breaker=False,
+        use_global_market_leadership=False,
+        day_use_intraday_confirmation=False,
+        day_chart_review_enabled=False,
     )
     bot = HybridTradingBot(api, config=cfg)
     bot.state.trade_date = asof
@@ -499,11 +502,21 @@ def test_bot_skips_daytrade_reentry_after_same_day_stoploss_even_before_threshol
         quote_codes=["011930", "005930"],
     )
 
+    empty_swing_candidates = Candidates(
+        asof=asof,
+        popular=pd.DataFrame(),
+        model=pd.DataFrame(),
+        etf=pd.DataFrame(),
+        merged=pd.DataFrame(),
+        quote_codes=[],
+    )
+
     with patch("backend.services.trading_engine.bot.is_trading_day", return_value=True):
         with patch("backend.services.trading_engine.bot.get_regime", return_value=("RISK_ON", None)):
-            with patch("backend.services.trading_engine.bot.build_candidates", return_value=candidates):
-                with patch("backend.services.trading_engine.bot.build_news_sentiment_signal", return_value=None):
-                    out = bot.run_once(now=datetime(2026, 4, 8, 9, 10))
+            with patch("backend.services.trading_engine.bot.build_day_candidates", return_value=candidates):
+                with patch("backend.services.trading_engine.bot.build_swing_candidates", return_value=empty_swing_candidates):
+                    with patch("backend.services.trading_engine.bot.build_news_sentiment_signal", return_value=None):
+                        out = bot.run_once(now=datetime(2026, 4, 8, 9, 10))
 
     assert out["status"] == "OK"
     assert api.order_calls == [
@@ -551,6 +564,9 @@ def test_bot_skips_day_stoploss_excluded_symbol_on_next_daytrade_entry(tmp_path)
         runlog_path=str(tmp_path / "run.log"),
         use_news_sentiment=False,
         use_intraday_circuit_breaker=False,
+        use_global_market_leadership=False,
+        day_use_intraday_confirmation=False,
+        day_chart_review_enabled=False,
     )
     bot = HybridTradingBot(api, config=cfg)
     bot.state.trade_date = asof
@@ -580,11 +596,21 @@ def test_bot_skips_day_stoploss_excluded_symbol_on_next_daytrade_entry(tmp_path)
         quote_codes=["011930", "005930"],
     )
 
+    empty_swing_candidates = Candidates(
+        asof=asof,
+        popular=pd.DataFrame(),
+        model=pd.DataFrame(),
+        etf=pd.DataFrame(),
+        merged=pd.DataFrame(),
+        quote_codes=[],
+    )
+
     with patch("backend.services.trading_engine.bot.is_trading_day", return_value=True):
         with patch("backend.services.trading_engine.bot.get_regime", return_value=("RISK_ON", None)):
-            with patch("backend.services.trading_engine.bot.build_candidates", return_value=candidates):
-                with patch("backend.services.trading_engine.bot.build_news_sentiment_signal", return_value=None):
-                    out = bot.run_once(now=datetime(2026, 4, 8, 9, 10))
+            with patch("backend.services.trading_engine.bot.build_day_candidates", return_value=candidates):
+                with patch("backend.services.trading_engine.bot.build_swing_candidates", return_value=empty_swing_candidates):
+                    with patch("backend.services.trading_engine.bot.build_news_sentiment_signal", return_value=None):
+                        out = bot.run_once(now=datetime(2026, 4, 8, 9, 10))
 
     assert out["status"] == "OK"
     assert api.order_calls == [
@@ -605,6 +631,9 @@ def test_bot_skips_blacklisted_symbol_on_same_day_reentry_candidate(tmp_path) ->
         runlog_path=str(tmp_path / "run.log"),
         use_news_sentiment=False,
         use_intraday_circuit_breaker=False,
+        use_global_market_leadership=False,
+        day_use_intraday_confirmation=False,
+        day_chart_review_enabled=False,
     )
     bot = HybridTradingBot(api, config=cfg)
     bot.state.trade_date = asof
@@ -629,11 +658,21 @@ def test_bot_skips_blacklisted_symbol_on_same_day_reentry_candidate(tmp_path) ->
         quote_codes=["027360", "005930"],
     )
 
+    empty_swing_candidates = Candidates(
+        asof=asof,
+        popular=pd.DataFrame(),
+        model=pd.DataFrame(),
+        etf=pd.DataFrame(),
+        merged=pd.DataFrame(),
+        quote_codes=[],
+    )
+
     with patch("backend.services.trading_engine.bot.is_trading_day", return_value=True):
         with patch("backend.services.trading_engine.bot.get_regime", return_value=("RISK_ON", None)):
-            with patch("backend.services.trading_engine.bot.build_candidates", return_value=candidates):
-                with patch("backend.services.trading_engine.bot.build_news_sentiment_signal", return_value=None):
-                    out = bot.run_once(now=datetime(2026, 4, 8, 9, 10))
+            with patch("backend.services.trading_engine.bot.build_day_candidates", return_value=candidates):
+                with patch("backend.services.trading_engine.bot.build_swing_candidates", return_value=empty_swing_candidates):
+                    with patch("backend.services.trading_engine.bot.build_news_sentiment_signal", return_value=None):
+                        out = bot.run_once(now=datetime(2026, 4, 8, 9, 10))
 
     assert out["status"] == "OK"
     assert api.order_calls == [

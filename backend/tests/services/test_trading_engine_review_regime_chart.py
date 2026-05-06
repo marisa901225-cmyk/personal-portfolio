@@ -372,6 +372,8 @@ def test_bot_holds_profitable_broker_position_when_same_symbol_is_picked(tmp_pat
         runlog_path=str(tmp_path / "run.log"),
         use_news_sentiment=False,
         use_intraday_circuit_breaker=False,
+        use_global_market_leadership=False,
+        swing_chart_review_enabled=False,
     )
     bot = HybridTradingBot(api, config=cfg)
     bot.state.trade_date = asof
@@ -403,11 +405,21 @@ def test_bot_holds_profitable_broker_position_when_same_symbol_is_picked(tmp_pat
         quote_codes=["005930"],
     )
 
+    empty_day_candidates = Candidates(
+        asof=asof,
+        popular=pd.DataFrame(),
+        model=pd.DataFrame(),
+        etf=pd.DataFrame(),
+        merged=pd.DataFrame(),
+        quote_codes=[],
+    )
+
     with patch("backend.services.trading_engine.bot.is_trading_day", return_value=True):
         with patch("backend.services.trading_engine.bot.get_regime", return_value=("RISK_ON", None)):
-            with patch("backend.services.trading_engine.bot.build_candidates", return_value=candidates):
-                with patch("backend.services.trading_engine.bot.build_news_sentiment_signal", return_value=None):
-                    out = bot.run_once(now=datetime(2026, 4, 8, 9, 10))
+            with patch("backend.services.trading_engine.bot.build_day_candidates", return_value=empty_day_candidates):
+                with patch("backend.services.trading_engine.bot.build_swing_candidates", return_value=candidates):
+                    with patch("backend.services.trading_engine.bot.build_news_sentiment_signal", return_value=None):
+                        out = bot.run_once(now=datetime(2026, 4, 8, 9, 10))
 
     assert out["status"] == "OK"
     assert api.order_calls == []

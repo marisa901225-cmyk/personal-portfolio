@@ -37,9 +37,11 @@ class TestKisConfigDir(unittest.TestCase):
         except ModuleNotFoundError:
             self.skipTest("pydantic not installed in this environment")
         with patch.dict(os.environ, {}, clear=True):
+            import backend.integrations.kis.config_paths as config_paths
             import backend.integrations.kis.open_trading.kis_auth_state as state
             from backend.integrations.kis.config_paths import DEFAULT_KIS_CONFIG_DIR
 
-            importlib.reload(state)
-            state.reload_paths()
+            with patch.object(config_paths.settings, "kis_config_dir", None):
+                importlib.reload(state)
+                state.reload_paths()
             self.assertEqual(state.config_root, str(DEFAULT_KIS_CONFIG_DIR))

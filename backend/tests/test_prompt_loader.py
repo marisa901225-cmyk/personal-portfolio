@@ -9,11 +9,15 @@ from backend.services import prompt_loader
 class PromptLoaderTests(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
+        self._original_prompts_dir = prompt_loader.PROMPTS_DIR
         prompt_loader.PROMPTS_DIR = self._tmp.name
         prompt_loader._prompt_cache.clear()
         prompt_loader._prompt_mtime.clear()
 
     def tearDown(self) -> None:
+        prompt_loader.PROMPTS_DIR = self._original_prompts_dir
+        prompt_loader._prompt_cache.clear()
+        prompt_loader._prompt_mtime.clear()
         self._tmp.cleanup()
 
     def _write(self, name: str, content: str) -> str:

@@ -10,6 +10,7 @@ os.environ["API_TOKEN"] = "test-token"
 
 from backend.main import app  # noqa: E402
 from backend.core import auth as auth_module  # noqa: E402
+from backend.core.auth import create_access_token  # noqa: E402
 from backend.core.db import Base, get_db  # noqa: E402
 from backend.core.models import SpamRule  # noqa: E402
 
@@ -36,7 +37,10 @@ class SpamRulesTests(unittest.TestCase):
 
         app.dependency_overrides[get_db] = _override_get_db
         self.client = TestClient(app)
-        self.headers = {"X-API-Token": "test-token"}
+        self.headers = {
+            "X-API-Token": "test-token",
+            "Authorization": f"Bearer {create_access_token({'sub': 'test-user'})}",
+        }
         db = self.SessionLocal()
         try:
             db.query(SpamRule).delete()

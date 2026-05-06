@@ -67,38 +67,37 @@ class TestLLMService(unittest.TestCase):
                     remote_chat.assert_called()
 
     def test_generate_chat_falls_back_to_paid_on_remote_failure(self):
-        with patch("backend.services.llm.config.settings") as mock_settings:
-            mock_settings.llm_base_url = "http://localhost:8080"
-            mock_settings.ai_report_api_key = "test-key"
-            mock_settings.ai_report_fallback_model = "gpt-5.4-mini"
+        LLMService._instance = None
+        llm = LLMService.get_instance()
+        llm.settings.llm_base_url = "http://localhost:8080"
+        llm.settings.ai_report_api_key = "test-key"
+        llm.settings.ai_report_fallback_model = "gpt-5.4-mini"
 
-            def _remote_fail(*args, **kwargs):
-                return ""
-
-            with patch.object(RemoteLlamaBackend, "chat", new=_remote_fail):
-                with patch.object(OpenAIPaidBackend, "chat", return_value="paid-ok") as paid_chat:
-                    llm = LLMService.get_instance()
-                    response_format = {
-                        "type": "json_schema",
-                        "json_schema": {"name": "t2", "strict": True, "schema": {"type": "object"}},
-                    }
-                    out = llm.generate_chat(
-                        [{"role": "user", "content": "hi"}],
-                        stop=["STOP"],
-                        seed=9,
-                        model="openai/gpt-5.1-chat",
-                        api_key="openrouter-key",
-                        base_url="https://openrouter.ai/api/v1",
-                        service_tier="flex",
-                        response_format=response_format,
-                    )
-                    self.assertEqual(out, "paid-ok")
-                    self.assertIsNone(llm.get_last_error())
-                    _, called_kwargs = paid_chat.call_args
-                    self.assertEqual(called_kwargs.get("model"), "openai/gpt-5.1-chat")
-                    self.assertEqual(called_kwargs.get("api_key"), "openrouter-key")
-                    self.assertEqual(called_kwargs.get("base_url"), "https://openrouter.ai/api/v1")
-                    self.assertNotIn("top_k", called_kwargs)
+        with (
+            patch.object(llm.backend, "chat", return_value=""),
+            patch.object(llm.paid_backend, "chat", return_value="paid-ok") as paid_chat,
+        ):
+            response_format = {
+                "type": "json_schema",
+                "json_schema": {"name": "t2", "strict": True, "schema": {"type": "object"}},
+            }
+            out = llm.generate_chat(
+                [{"role": "user", "content": "hi"}],
+                stop=["STOP"],
+                seed=9,
+                model="openai/gpt-5.1-chat",
+                api_key="openrouter-key",
+                base_url="https://openrouter.ai/api/v1",
+                service_tier="flex",
+                response_format=response_format,
+            )
+            self.assertEqual(out, "paid-ok")
+            self.assertIsNone(llm.get_last_error())
+            _, called_kwargs = paid_chat.call_args
+            self.assertEqual(called_kwargs.get("model"), "openai/gpt-5.1-chat")
+            self.assertEqual(called_kwargs.get("api_key"), "openrouter-key")
+            self.assertEqual(called_kwargs.get("base_url"), "https://openrouter.ai/api/v1")
+            self.assertNotIn("top_k", called_kwargs)
 
     def test_generate_chat_skips_paid_when_fallback_disabled(self):
         with patch("backend.services.llm.config.settings") as mock_settings:

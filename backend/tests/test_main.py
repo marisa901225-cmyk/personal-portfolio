@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 os.environ["API_TOKEN"] = "test-token"
 
 from backend.main import api_health, app, health, root  # noqa: E402
+from backend.core.auth import create_access_token  # noqa: E402
 from backend.core.db_migrations import ensure_schema # noqa: E402
 
 
@@ -16,7 +17,10 @@ class MainHealthTests(unittest.TestCase):
     def setUp(self) -> None:
         ensure_schema()
         os.environ["API_TOKEN"] = "test-token"
-        self.headers = {"X-API-Token": os.environ["API_TOKEN"]}
+        self.headers = {
+            "X-API-Token": os.environ["API_TOKEN"],
+            "Authorization": f"Bearer {create_access_token({'sub': 'test-user'})}",
+        }
 
     def test_health_returns_ok(self) -> None:
         payload = asyncio.run(health())
