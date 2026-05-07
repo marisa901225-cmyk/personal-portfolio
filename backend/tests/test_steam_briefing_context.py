@@ -8,11 +8,11 @@ from zoneinfo import ZoneInfo
 
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
-from backend.services.news.steam import (
+from backend.services.news.steam import load_monthly_steam_ranking_summary
+from backend.services.news.steam_player_trends import (
     _calculate_steam_trend_score,
     _load_steam_watchlist,
     _parse_steam_stats_candidates,
-    load_monthly_steam_ranking_summary,
     load_steam_player_trending_summary,
 )
 from backend.services.news.rss import _infer_rss_metadata, load_recent_inven_game_digest
