@@ -100,7 +100,7 @@ def review_day_candidates_with_llm(
         header_text=(
             f"거래일: {trade_date}\n"
             f"후보 수: {len(assets)}\n"
-            "각 후보에 대해 ENTER/PASS/UNSURE를 주고, selected_code는 가장 나은 1개만 선택해줘."
+            "각 후보에 대해 ENTER/PASS/UNSURE를 줘. 단타 슬롯은 최대 2개까지 가능하므로 살 만한 후보는 2개까지 ENTER로 남기고, selected_code는 그중 1순위 1개만 선택해줘."
         ),
         system_prompt_name="trading_day_chart_review_system",
         paid_min_candidates=max(2, int(getattr(config, "day_chart_review_paid_min_candidates", 2))),
