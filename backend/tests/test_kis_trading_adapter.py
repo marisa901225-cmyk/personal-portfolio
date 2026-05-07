@@ -663,7 +663,7 @@ class KISTradingAdapterTests(unittest.TestCase):
         api._holiday_rows_cache = {}
 
         with TemporaryDirectory() as tmpdir:
-            api._holiday_cache_dir = Path(tmpdir)
+            api._daily_bars_disk_cache = DailyBarsDiskCache(Path(tmpdir) / "daily_bars_cache.sqlite")
             api._market_get = Mock(
                 return_value={
                     "output": [
@@ -690,11 +690,12 @@ class KISTradingAdapterTests(unittest.TestCase):
             },
         )
 
-    def test_domestic_holiday_rows_reuses_same_day_disk_cache(self) -> None:
+    def test_domestic_holiday_rows_reuses_daily_bars_db_cache_after_restart(self) -> None:
         with TemporaryDirectory() as tmpdir:
+            cache_path = Path(tmpdir) / "daily_bars_cache.sqlite"
             first_api = object.__new__(KISTradingAPI)
             first_api._holiday_rows_cache = {}
-            first_api._holiday_cache_dir = Path(tmpdir)
+            first_api._daily_bars_disk_cache = DailyBarsDiskCache(cache_path)
             first_api._market_get = Mock(
                 return_value={
                     "output": [
@@ -707,7 +708,7 @@ class KISTradingAdapterTests(unittest.TestCase):
 
             second_api = object.__new__(KISTradingAPI)
             second_api._holiday_rows_cache = {}
-            second_api._holiday_cache_dir = Path(tmpdir)
+            second_api._daily_bars_disk_cache = DailyBarsDiskCache(cache_path)
             second_api._market_get = Mock(return_value={"output": []})
             second_rows = second_api.domestic_holiday_rows("20260923")
 

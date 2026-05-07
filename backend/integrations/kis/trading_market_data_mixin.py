@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-import json
 import logging
 from typing import Any
 
@@ -15,7 +14,7 @@ class KISMarketDataMixin:
     def next_open_trading_day(self, date: str, max_lookahead_days: int = 14) -> str | None:
         """
         국내휴장일조회(TCA0903R) 결과에서 기준일 이후 첫 개장일(opnd_yn=Y)을 찾는다.
-        KIS 권고에 맞춰 기준일별 조회 결과는 당일 파일 캐시로 재사용한다.
+        KIS 권고에 맞춰 기준일별 조회 결과는 당일 일봉 DB 캐시로 재사용한다.
         """
         normalized_date = self._normalize_yyyymmdd(date)
         if len(normalized_date) != 8:
@@ -75,46 +74,26 @@ class KISMarketDataMixin:
         return [dict(row) for row in rows]
 
     def _load_holiday_rows_cache(self, bass_dt: str, today_key: str) -> list[dict[str, Any]] | None:
-        path = self._holiday_cache_path(bass_dt)
-        if path is None or not path.exists():
+        cache = getattr(self, "_daily_bars_disk_cache", None)
+        if cache is None:
             return None
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            rows = cache.load_holiday_rows(bass_dt=bass_dt, fetched_on=today_key)
+        except Exception:
+            logger.warning("failed to load KIS holiday cache bass_dt=%s", bass_dt, exc_info=True)
             return None
-        if str(payload.get("fetched_on") or "") != today_key:
-            return None
-        rows = payload.get("rows")
-        if not isinstance(rows, list):
+        if rows is None:
             return None
         return [dict(row) for row in rows if isinstance(row, dict)]
 
     def _store_holiday_rows_cache(self, bass_dt: str, today_key: str, rows: list[dict[str, Any]]) -> None:
-        path = self._holiday_cache_path(bass_dt)
-        if path is None:
+        cache = getattr(self, "_daily_bars_disk_cache", None)
+        if cache is None:
             return
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(
-                json.dumps(
-                    {
-                        "bass_dt": bass_dt,
-                        "fetched_on": today_key,
-                        "rows": rows,
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
-            )
-        except OSError:
-            logger.warning("failed to store KIS holiday cache bass_dt=%s path=%s", bass_dt, path, exc_info=True)
-
-    def _holiday_cache_path(self, bass_dt: str):
-        cache_dir = getattr(self, "_holiday_cache_dir", None)
-        if cache_dir is None:
-            return None
-        return cache_dir / f"{bass_dt}.json"
+            cache.store_holiday_rows(bass_dt=bass_dt, fetched_on=today_key, rows=rows)
+        except Exception:
+            logger.warning("failed to store KIS holiday cache bass_dt=%s", bass_dt, exc_info=True)
 
     @staticmethod
     def _normalize_holiday_rows(raw_rows: Any) -> list[dict[str, Any]]:

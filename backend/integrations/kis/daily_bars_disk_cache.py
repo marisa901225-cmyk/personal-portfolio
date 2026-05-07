@@ -123,6 +123,68 @@ class DailyBarsDiskCache:
             logger.warning("daily bars disk cache purge failed path=%s", self.path, exc_info=True)
             return 0
 
+    def load_holiday_rows(self, *, bass_dt: str, fetched_on: str) -> list[dict[str, Any]] | None:
+        self._ensure_schema()
+        normalized_bass_dt = str(bass_dt or "").strip()[:8]
+        normalized_fetched_on = str(fetched_on or "").strip()[:8]
+        if len(normalized_bass_dt) != 8 or len(normalized_fetched_on) != 8:
+            return None
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    """
+                    SELECT rows_json
+                    FROM holiday_rows_cache
+                    WHERE bass_dt = ?
+                      AND fetched_on = ?
+                    """,
+                    (normalized_bass_dt, normalized_fetched_on),
+                ).fetchone()
+        except sqlite3.Error:
+            logger.warning("holiday rows disk cache load failed path=%s bass_dt=%s", self.path, bass_dt, exc_info=True)
+            return None
+
+        if not row:
+            return None
+        try:
+            rows = json.loads(str(row[0] or "[]"))
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(rows, list):
+            return None
+        return [dict(item) for item in rows if isinstance(item, dict)]
+
+    def store_holiday_rows(self, *, bass_dt: str, fetched_on: str, rows: list[dict[str, Any]]) -> None:
+        self._ensure_schema()
+        normalized_bass_dt = str(bass_dt or "").strip()[:8]
+        normalized_fetched_on = str(fetched_on or "").strip()[:8]
+        if len(normalized_bass_dt) != 8 or len(normalized_fetched_on) != 8:
+            return
+        normalized_rows = [dict(item) for item in rows if isinstance(item, dict)]
+        try:
+            with self._connect() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO holiday_rows_cache (
+                        bass_dt, fetched_on, stored_at, rows_json
+                    )
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(bass_dt, fetched_on)
+                    DO UPDATE SET
+                        stored_at = excluded.stored_at,
+                        rows_json = excluded.rows_json
+                    """,
+                    (
+                        normalized_bass_dt,
+                        normalized_fetched_on,
+                        datetime.now(_KST).isoformat(timespec="seconds"),
+                        json.dumps(normalized_rows, ensure_ascii=False, separators=(",", ":")),
+                    ),
+                )
+                conn.commit()
+        except sqlite3.Error:
+            logger.warning("holiday rows disk cache store failed path=%s bass_dt=%s", self.path, bass_dt, exc_info=True)
+
     def clear(self) -> int:
         self._ensure_schema()
         try:
@@ -161,6 +223,17 @@ class DailyBarsDiskCache:
                     """
                     CREATE INDEX IF NOT EXISTS idx_daily_bars_cache_trade_date
                     ON daily_bars_cache(trade_date)
+                    """
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS holiday_rows_cache (
+                        bass_dt TEXT NOT NULL,
+                        fetched_on TEXT NOT NULL,
+                        stored_at TEXT NOT NULL,
+                        rows_json TEXT NOT NULL,
+                        PRIMARY KEY (bass_dt, fetched_on)
+                    )
                     """
                 )
                 conn.commit()
