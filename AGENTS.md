@@ -86,6 +86,7 @@
 
 ## Verification
 - Run the lightest meaningful verification before declaring work complete.
+- For backend Python tests, prefer the repository virtualenv: `venv/bin/python -m pytest ...`. Do not fall back to host `python`/`python3` unless the virtualenv is missing or broken, and mention that fallback.
 - Use `npm run test:frontend` for frontend test changes when applicable.
 - Use `npm run test:backend` for backend test changes when applicable.
 - If a full test command is too expensive or blocked, run a narrower check and state the remaining risk.
