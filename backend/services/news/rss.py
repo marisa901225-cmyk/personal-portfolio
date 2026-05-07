@@ -55,7 +55,7 @@ def load_recent_inven_game_digest(
     until_str = base.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
 
     sql = """
-        SELECT source_name, title, published_at
+        SELECT source_name, title, published_at, url
         FROM game_news
         WHERE source_type = 'news'
           AND source_name IN ('Inven Game Intro', 'Inven Game Review', 'Inven Ranking Analysis')
@@ -81,11 +81,13 @@ def load_recent_inven_game_digest(
         "Inven Ranking Analysis": "순위분석",
     }
     items: list[str] = []
-    for source_name, title, published_at in rows:
+    for source_name, title, published_at, url in rows:
         label = label_map.get(str(source_name or "").strip(), "게임기사")
         time_label = str(published_at or "").strip()[:16].replace("T", " ")
         prefix = f"{time_label} " if time_label else ""
-        items.append(f"{prefix}[{label}] {title}")
+        url_text = str(url or "").strip()
+        suffix = f" ({url_text})" if url_text else ""
+        items.append(f"{prefix}[{label}] {title}{suffix}")
 
     return "최근 Inven 게임 기사: " + " | ".join(items)
 

@@ -41,6 +41,7 @@ class SteamBriefingContextTests(unittest.TestCase):
                 source_name TEXT,
                 source_type TEXT,
                 title TEXT,
+                url TEXT,
                 full_content TEXT,
                 published_at TEXT
             );
@@ -191,13 +192,13 @@ class SteamBriefingContextTests(unittest.TestCase):
         conn = sqlite3.connect(db_path)
         conn.executemany(
             """
-            INSERT INTO game_news (source_name, source_type, title, full_content, published_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO game_news (source_name, source_type, title, full_content, url, published_at)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             [
-                ("Inven Game Intro", "news", "기대작 소개", "", "2026-03-17 12:00:00"),
-                ("Inven Game Review", "news", "액션 RPG 리뷰", "", "2026-03-16 12:00:00"),
-                ("Inven Ranking Analysis", "news", "MMO 순위 분석", "", "2026-03-15 12:00:00"),
+                ("Inven Game Intro", "news", "기대작 소개", "", "https://example.com/intro", "2026-03-17 12:00:00"),
+                ("Inven Game Review", "news", "액션 RPG 리뷰", "", "https://example.com/review", "2026-03-16 12:00:00"),
+                ("Inven Ranking Analysis", "news", "MMO 순위 분석", "", "https://example.com/ranking", "2026-03-15 12:00:00"),
             ],
         )
         conn.commit()
@@ -212,6 +213,9 @@ class SteamBriefingContextTests(unittest.TestCase):
         self.assertIn("[소개] 기대작 소개", digest)
         self.assertIn("[리뷰] 액션 RPG 리뷰", digest)
         self.assertIn("[순위분석] MMO 순위 분석", digest)
+        self.assertIn("https://example.com/intro", digest)
+        self.assertIn("https://example.com/review", digest)
+        self.assertIn("https://example.com/ranking", digest)
 
     def test_weather_snapshot_prefix_is_added_when_weather_details_are_missing(self):
         original = "특히 파생상품 시장 쪽을 보면 더 확실해. 오늘은 변동성이 커 보이더라."
