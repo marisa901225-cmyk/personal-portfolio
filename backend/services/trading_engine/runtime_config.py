@@ -71,6 +71,10 @@ def _apply_general_overrides(cfg: TradeEngineConfig) -> None:
     )
     cfg.swing_cash_ratio = _env_float("TRADING_ENGINE_SWING_CASH_RATIO", cfg.swing_cash_ratio)
     cfg.day_cash_ratio = _env_float("TRADING_ENGINE_DAY_CASH_RATIO", cfg.day_cash_ratio)
+    cfg.day_entry_budget_cap_krw = _env_int(
+        "TRADING_ENGINE_DAY_ENTRY_BUDGET_CAP_KRW",
+        cfg.day_entry_budget_cap_krw,
+    )
     cfg.day_reuse_unused_swing_cash_enabled = _env_bool(
         "TRADING_ENGINE_DAY_REUSE_UNUSED_SWING_CASH_ENABLED",
         cfg.day_reuse_unused_swing_cash_enabled,

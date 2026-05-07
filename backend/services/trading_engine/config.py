@@ -12,8 +12,8 @@ class TradeEngineConfig:
 
     # Position limits
     max_swing_positions: int = 1
-    max_day_positions: int = 1
-    max_total_positions: int = 2
+    max_day_positions: int = 2
+    max_total_positions: int = 3
 
     # Entry limits
     max_swing_entries_per_week: int = 10
@@ -29,6 +29,7 @@ class TradeEngineConfig:
     # Sizing
     swing_cash_ratio: float = 0.80
     day_cash_ratio: float = 0.20
+    day_entry_budget_cap_krw: int = 300_000
     use_realized_profit_buffer: bool = True
     day_reuse_unused_swing_cash_enabled: bool = True
     day_reuse_unused_swing_cash_min_krw: int = 100_000

@@ -24,10 +24,19 @@ def strategy_budget_cash_cap(bot, *, cash_ratio: float, position_type: str | Non
     if normalized_position_type == "T":
         base_cap += unused_swing_budget_for_day(bot)
     if not bot.config.use_realized_profit_buffer:
-        return base_cap
+        return _cap_day_entry_budget(bot, base_cap, normalized_position_type)
 
     profit_buffer = principal_buffer_from_account(bot, logger=logging.getLogger(__name__))
-    return max(0.0, base_cap + profit_buffer)
+    return _cap_day_entry_budget(bot, max(0.0, base_cap + profit_buffer), normalized_position_type)
+
+
+def _cap_day_entry_budget(bot, budget_cap: float, position_type: str) -> float:
+    if position_type != "T":
+        return budget_cap
+    per_entry_cap = max(0.0, float(getattr(bot.config, "day_entry_budget_cap_krw", 0) or 0))
+    if per_entry_cap <= 0:
+        return budget_cap
+    return max(0.0, min(float(budget_cap), per_entry_cap))
 
 
 def unused_swing_budget_for_day(bot) -> float:
