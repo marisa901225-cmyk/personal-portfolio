@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
 from backend.services.news.steam import load_monthly_steam_ranking_summary
-from backend.services.news.rss import load_recent_inven_game_digest
+from backend.services.news.rss import _infer_rss_metadata, load_recent_inven_game_digest
 from backend.services.news.weather_message import (
     _build_weather_snapshot_prefix,
     _ensure_weather_snapshot_prefix,
@@ -216,6 +216,24 @@ class SteamBriefingContextTests(unittest.TestCase):
         self.assertNotIn("https://example.com/intro", digest)
         self.assertNotIn("https://example.com/review", digest)
         self.assertIn("https://example.com/ranking", digest)
+
+    def test_inven_ranking_analysis_detection_prefers_rank_before_analysis(self):
+        self.assertEqual(
+            _infer_rss_metadata("Inven", "MMO 순위 분석"),
+            ("Gaming", "Ranking"),
+        )
+        self.assertEqual(
+            _infer_rss_metadata("Inven", "MMO 순위분석"),
+            ("Gaming", "Ranking"),
+        )
+        self.assertEqual(
+            _infer_rss_metadata("Inven", "MMO 랭킹 분석"),
+            ("Gaming", "Ranking"),
+        )
+        self.assertEqual(
+            _infer_rss_metadata("Inven", "업데이트 방향 분석"),
+            ("General", None),
+        )
 
     def test_weather_snapshot_prefix_is_added_when_weather_details_are_missing(self):
         original = "특히 파생상품 시장 쪽을 보면 더 확실해. 오늘은 변동성이 커 보이더라."

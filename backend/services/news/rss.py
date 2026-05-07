@@ -20,6 +20,20 @@ from ..duckdb_refine_config import get_db_path
 logger = logging.getLogger(__name__)
 
 
+def _is_ranking_analysis_article(source_name: str, title: str) -> bool:
+    source = str(source_name or "").lower()
+    title_text = str(title or "").lower()
+    compact = re.sub(r"\s+", "", f"{source} {title_text}")
+
+    if "rankinganalysis" in compact:
+        return True
+    if "순위분석" in compact or "랭킹분석" in compact:
+        return True
+    return ("순위" in compact or "ranking" in compact or "랭킹" in compact) and (
+        "분석" in compact or "analysis" in compact
+    )
+
+
 def _infer_rss_metadata(source_name: str, title: str) -> tuple[str, str | None]:
     source = str(source_name or "").lower()
     normalized_title = str(title or "").lower()
@@ -28,7 +42,7 @@ def _infer_rss_metadata(source_name: str, title: str) -> tuple[str, str | None]:
         return "LoL", "Esports"
     if "review" in source or "리뷰" in source:
         return "Gaming", "Review"
-    if "ranking" in source or "순위" in source or "분석" in source:
+    if _is_ranking_analysis_article(source_name, title):
         return "Gaming", "Ranking"
     if "intro" in source or "소개" in source:
         return "Gaming", "Preview"
@@ -85,7 +99,7 @@ def load_recent_inven_game_digest(
         label = label_map.get(str(source_name or "").strip(), "게임기사")
         time_label = str(published_at or "").strip()[:16].replace("T", " ")
         prefix = f"{time_label} " if time_label else ""
-        url_text = str(url or "").strip() if str(source_name or "").strip() == "Inven Ranking Analysis" else ""
+        url_text = str(url or "").strip() if _is_ranking_analysis_article(source_name, title) else ""
         suffix = f" ({url_text})" if url_text else ""
         items.append(f"{prefix}[{label}] {title}{suffix}")
 
