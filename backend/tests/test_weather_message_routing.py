@@ -128,3 +128,22 @@ class WeatherMessageRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[오늘의 날씨 정보 - 서울]", message)
         self.assertEqual(fake_llm.paid_calls, [])
         self.assertEqual(fake_llm.chat_calls, [])
+
+    async def test_weather_message_linkifies_inven_news_urls_for_telegram_html(self):
+        text = (
+            "오늘 서울은 17도고 낮 최고기온은 22도야. 하늘은 구름이 많고 강수확률도 낮은 편이야. "
+            "순위분석은 여기야 (https://www.inven.co.kr/webzine/news/?news=316108&foo=bar)"
+        )
+        fake_llm = _FakeLLM(paid_responses=[text], is_paid_configured=True, is_remote_configured=True)
+
+        message, _ = await self._render(fake_llm)
+
+        self.assertIn(
+            '<a href="https://www.inven.co.kr/webzine/news/?news=316108&amp;foo=bar">',
+            message,
+        )
+        self.assertIn(
+            "https://www.inven.co.kr/webzine/news/?news=316108&amp;foo=bar</a>",
+            message,
+        )
+        self.assertNotIn("news=316108&foo=bar)", message)

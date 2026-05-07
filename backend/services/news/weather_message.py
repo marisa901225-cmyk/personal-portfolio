@@ -3,6 +3,7 @@ import logging
 import os
 import asyncio
 import re
+import html
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -15,6 +16,7 @@ from ...services.prompt_loader import load_prompt
 logger = logging.getLogger(__name__)
 _WEATHER_MESSAGE_MAX_CHARS = 3500
 _MORNING_MIN_TEXT_LEN = 20
+_INVEN_NEWS_URL_RE = re.compile(r"https?://(?:www\.)?inven\.co\.kr/webzine/news/\?[^\s\)<>\"']+")
 KST = ZoneInfo("Asia/Seoul")
 DEFAULT_PERSONA_NAME = "애니 (Annie)"
 PERSONA_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "../../data/persona_config.json")
@@ -244,6 +246,19 @@ def _ensure_weather_snapshot_prefix(
     return f"{prefix}\n\n{normalized}"
 
 
+def _linkify_inven_news_urls_for_telegram(text: str) -> str:
+    """Telegram HTML parse_mode에서 Inven 기사 URL이 깨지지 않도록 링크 태그로 감싼다."""
+    if not text:
+        return text
+
+    def _replace(match: re.Match[str]) -> str:
+        url = match.group(0)
+        safe_url = html.escape(url, quote=True)
+        return f'<a href="{safe_url}">{safe_url}</a>'
+
+    return _INVEN_NEWS_URL_RE.sub(_replace, text)
+
+
 def format_ultra_short_data(snapshot: Dict[str, str]) -> str:
     """초단기예보 스냅샷을 프롬프트용 단일 문자열로 변환한다."""
     if not snapshot:
@@ -461,6 +476,7 @@ async def generate_weather_message_with_llm(
             pop=pop,
             max_temp=max_temp,
         )
+        normalized = _linkify_inven_news_urls_for_telegram(normalized)
         return _trim_for_telegram(normalized)
 
     def _format_futures_options_data(data: Optional[Dict]) -> str:
