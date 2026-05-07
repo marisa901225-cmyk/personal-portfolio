@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
 from unittest.mock import patch
 
 from backend.services.trading_engine.config import TradeEngineConfig
-from backend.services.trading_engine.runtime_config import load_trade_engine_config_from_env
+from backend.services.trading_engine.runtime_config import (
+    _load_permanent_blacklist_codes,
+    load_trade_engine_config_from_env,
+)
 
 
 def test_runtime_config_applies_core_risk_overrides() -> None:
@@ -41,15 +45,20 @@ def test_runtime_config_keeps_default_entry_windows_on_invalid_override() -> Non
     assert cfg.entry_windows == default_windows
 
 
-def test_runtime_config_applies_permanent_excluded_entry_codes_override() -> None:
-    with patch.dict(
-        "os.environ",
-        {"TRADING_ENGINE_PERMANENT_EXCLUDED_ENTRY_CODES": "034020,010170"},
-        clear=False,
-    ):
-        cfg = load_trade_engine_config_from_env()
+def test_runtime_config_loads_default_permanent_excluded_entry_codes_from_json() -> None:
+    cfg = load_trade_engine_config_from_env()
 
-    assert cfg.permanent_excluded_entry_codes == ("034020", "010170")
+    assert cfg.permanent_excluded_entry_codes == ("034020",)
+
+
+def test_runtime_config_deduplicates_permanent_excluded_entry_codes_from_json(tmp_path) -> None:
+    blacklist_path = tmp_path / "permanent_blacklist.json"
+    blacklist_path.write_text(
+        json.dumps({"codes": ["034020", "010170", "034020"]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    assert _load_permanent_blacklist_codes(str(blacklist_path)) == ("034020", "010170")
 
 
 def test_runtime_config_applies_frequently_tuned_scoring_and_global_signal_overrides() -> None:

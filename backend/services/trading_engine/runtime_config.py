@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+from pathlib import Path
 
 from .config import TradeEngineConfig
 from .utils import parse_hhmm
@@ -125,10 +127,6 @@ def _apply_general_overrides(cfg: TradeEngineConfig) -> None:
     cfg.entry_windows = _env_entry_windows("TRADING_ENGINE_ENTRY_WINDOWS", cfg.entry_windows)
     cfg.market_proxy_code = _env_text("TRADING_ENGINE_MARKET_PROXY_CODE", cfg.market_proxy_code)
     cfg.kosdaq_proxy_code = _env_text("TRADING_ENGINE_KOSDAQ_PROXY_CODE", cfg.kosdaq_proxy_code)
-    cfg.permanent_excluded_entry_codes = _env_csv_tuple(
-        "TRADING_ENGINE_PERMANENT_EXCLUDED_ENTRY_CODES",
-        cfg.permanent_excluded_entry_codes,
-    )
     cfg.use_kosdaq_confirmation = _env_bool(
         "TRADING_ENGINE_USE_KOSDAQ_CONFIRMATION",
         cfg.use_kosdaq_confirmation,
@@ -784,6 +782,28 @@ def _apply_master_path_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_NEWS_SECTOR_QUERIES_PATH",
         cfg.news_sector_queries_path,
     )
+    cfg.permanent_excluded_entry_codes = _load_permanent_blacklist_codes(cfg.permanent_blacklist_path)
+
+
+def _load_permanent_blacklist_codes(path: str) -> tuple[str, ...]:
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return ()
+
+    raw_codes = payload.get("codes") if isinstance(payload, dict) else payload
+    if not isinstance(raw_codes, list):
+        return ()
+
+    codes: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_codes:
+        code = str(raw or "").strip()
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        codes.append(code)
+    return tuple(codes)
 
 
 def _env_text(name: str, default: str) -> str:

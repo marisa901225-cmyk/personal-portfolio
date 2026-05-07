@@ -81,6 +81,7 @@ class TradingStrategyTests(unittest.TestCase):
             quote_score_limit=10,
             market_proxy_code="069500",
             kosdaq_proxy_code="229200",
+            permanent_excluded_entry_codes=("034020",),
         )
 
         result = build_candidates(api=object(), asof="20260227", config=cfg)

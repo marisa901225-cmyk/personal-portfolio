@@ -8,7 +8,7 @@ class TradeEngineConfig:
     # Capital / universe
     initial_capital: int = 1_000_000
     include_etf: bool = True
-    permanent_excluded_entry_codes: tuple[str, ...] = ("034020",)
+    permanent_excluded_entry_codes: tuple[str, ...] = ()
 
     # Position limits
     max_swing_positions: int = 1
@@ -227,6 +227,7 @@ class TradeEngineConfig:
     industry_idx_master_path: str = "backend/data/trading_engine_masters/idxcode.mst.zip"
     industry_kospi_master_path: str = "backend/data/trading_engine_masters/kospi_code.mst.zip"
     industry_kosdaq_master_path: str = "backend/data/trading_engine_masters/kosdaq_code.mst.zip"
+    permanent_blacklist_path: str = "backend/data/trading_engine_permanent_blacklist.json"
 
     # Regime / calendar
     market_proxy_code: str = "069500"
