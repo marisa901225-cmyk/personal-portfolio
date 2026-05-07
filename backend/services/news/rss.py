@@ -85,7 +85,7 @@ def load_recent_inven_game_digest(
         label = label_map.get(str(source_name or "").strip(), "게임기사")
         time_label = str(published_at or "").strip()[:16].replace("T", " ")
         prefix = f"{time_label} " if time_label else ""
-        url_text = str(url or "").strip()
+        url_text = str(url or "").strip() if str(source_name or "").strip() == "Inven Ranking Analysis" else ""
         suffix = f" ({url_text})" if url_text else ""
         items.append(f"{prefix}[{label}] {title}{suffix}")
 

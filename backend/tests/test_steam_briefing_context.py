@@ -213,8 +213,8 @@ class SteamBriefingContextTests(unittest.TestCase):
         self.assertIn("[소개] 기대작 소개", digest)
         self.assertIn("[리뷰] 액션 RPG 리뷰", digest)
         self.assertIn("[순위분석] MMO 순위 분석", digest)
-        self.assertIn("https://example.com/intro", digest)
-        self.assertIn("https://example.com/review", digest)
+        self.assertNotIn("https://example.com/intro", digest)
+        self.assertNotIn("https://example.com/review", digest)
         self.assertIn("https://example.com/ranking", digest)
 
     def test_weather_snapshot_prefix_is_added_when_weather_details_are_missing(self):
