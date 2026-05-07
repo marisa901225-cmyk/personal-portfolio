@@ -334,9 +334,23 @@ class BotEntryFlowMixin:
             self._pass(reason, regime)
             return
 
-        result = None
-        code = ""
+        fills: list[tuple[str, FillResult]] = []
+        entry_block_reason: str | None = None
         for ranked_code in resolved_ranked_codes:
+            if fills:
+                ok, reason = can_enter(
+                    "T",
+                    self.state,
+                    regime=regime,
+                    candidates_count=len(resolved_ranked_codes),
+                    now=now,
+                    config=self.config,
+                    is_trading_day_value=True,
+                )
+                if not ok:
+                    entry_block_reason = reason
+                    break
+
             quote = quotes.get(ranked_code) if isinstance(quotes, dict) else None
             order_type, price = _resolve_day_entry_order(
                 quote=quote,
@@ -362,9 +376,8 @@ class BotEntryFlowMixin:
                 ),
             )
             if attempt:
-                result = attempt
-                code = ranked_code
-                break
+                fills.append((ranked_code, attempt))
+                continue
             if ranked_code in self.state.pending_entry_orders:
                 return
             synced_result, pending_order = self._recover_failed_buy_attempt(
@@ -374,12 +387,11 @@ class BotEntryFlowMixin:
                 regime=regime,
             )
             if synced_result is not None:
-                result = synced_result
-                code = ranked_code
-                break
+                fills.append((ranked_code, synced_result))
+                continue
             if pending_order is not None:
                 return
-        if not result:
+        if not fills:
             self._pass("DAY_ENTRY_FAILED", regime)
             if review_applied:
                 self._notify_chart_review_skip(
@@ -392,37 +404,44 @@ class BotEntryFlowMixin:
         if window_index is not None:
             self.state.day_entry_windows_used_today.add(window_index)
 
-        self._journal(
-            "ENTRY_FILL",
-            asof_date=self.state.trade_date,
-            code=code,
-            side="BUY",
-            qty=result.qty,
-            avg_price=result.avg_price,
-            strategy_type="T",
-            regime=regime,
-            **self._entry_sizing_fields(result),
-        )
-        if result.reason == "BROKER_SYNC":
-            self._notify_text(
-                format_entry_message(
-                    strategy="T",
-                    code=code,
-                    qty=result.qty,
-                    avg_price=result.avg_price,
-                    regime=regime,
-                    sync=True,
-                )
+        for code, result in fills:
+            self._journal(
+                "ENTRY_FILL",
+                asof_date=self.state.trade_date,
+                code=code,
+                side="BUY",
+                qty=result.qty,
+                avg_price=result.avg_price,
+                strategy_type="T",
+                regime=regime,
+                **self._entry_sizing_fields(result),
             )
-        else:
-            self._notify_text(
-                format_entry_message(
-                    strategy="T",
-                    code=code,
-                    qty=result.qty,
-                    avg_price=result.avg_price,
-                    regime=regime,
+            if result.reason == "BROKER_SYNC":
+                self._notify_text(
+                    format_entry_message(
+                        strategy="T",
+                        code=code,
+                        qty=result.qty,
+                        avg_price=result.avg_price,
+                        regime=regime,
+                        sync=True,
+                    )
                 )
+            else:
+                self._notify_text(
+                    format_entry_message(
+                        strategy="T",
+                        code=code,
+                        qty=result.qty,
+                        avg_price=result.avg_price,
+                        regime=regime,
+                    )
+                )
+        if entry_block_reason is not None:
+            logger.info(
+                "day entry batch stopped after %d fill(s): %s",
+                len(fills),
+                entry_block_reason,
             )
 
     def _apply_day_intraday_confirmation(

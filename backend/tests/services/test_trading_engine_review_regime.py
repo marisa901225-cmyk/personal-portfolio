@@ -334,10 +334,12 @@ def test_day_entry_accepts_tight_base_intraday_candidate(tmp_path) -> None:
             news_signal=None,
         )
 
-    assert bot.state.day_entries_today == 1
+    assert bot.state.day_entries_today == 2
     assert "BASE01" in bot.state.open_positions
+    assert "NEXT01" in bot.state.open_positions
     assert api.order_calls == [
-        {"side": "BUY", "code": "BASE01", "qty": 20, "order_type": "limit", "price": 10_010}
+        {"side": "BUY", "code": "BASE01", "qty": 20, "order_type": "limit", "price": 10_010},
+        {"side": "BUY", "code": "NEXT01", "qty": 20, "order_type": "limit", "price": 10_010},
     ]
 
 def test_day_entry_uses_chart_review_selected_candidate(tmp_path) -> None:
@@ -393,10 +395,12 @@ def test_day_entry_uses_chart_review_selected_candidate(tmp_path) -> None:
             news_signal=None,
         )
 
-    assert bot.state.day_entries_today == 1
+    assert bot.state.day_entries_today == 2
     assert "KEEP01" in bot.state.open_positions
+    assert "NEXT01" in bot.state.open_positions
     assert api.order_calls == [
-        {"side": "BUY", "code": "KEEP01", "qty": 20, "order_type": "limit", "price": 10_010}
+        {"side": "BUY", "code": "KEEP01", "qty": 20, "order_type": "limit", "price": 10_010},
+        {"side": "BUY", "code": "NEXT01", "qty": 20, "order_type": "limit", "price": 10_010},
     ]
 
 def test_day_entry_skips_chart_review_when_entry_window_closed(tmp_path) -> None:
@@ -518,5 +522,3 @@ def test_day_entry_checks_pending_order_before_reporting_failure(tmp_path) -> No
     assert api.order_calls == [
         {"side": "BUY", "code": "222080", "qty": 20, "order_type": "limit", "price": 10_010}
     ]
-
-
