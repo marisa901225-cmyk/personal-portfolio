@@ -81,6 +81,22 @@ def enter_position(
         return None
 
     normalized_order_type = str(order_type or "").strip().lower()
+    if normalized_order_type == "limit":
+        refreshed_quote = _refresh_quote_for_order(api, code=code)
+        refreshed_price = parse_numeric(refreshed_quote.get("price"))
+        if refreshed_price is not None and refreshed_price > 0:
+            if refreshed_price != price_now:
+                logger.info(
+                    "enter_position: refreshed quote before order code=%s price=%s->%s order_type=%s",
+                    code,
+                    price_now,
+                    refreshed_price,
+                    order_type,
+                )
+            price_now = refreshed_price
+            if price is not None and int(price) > 0:
+                price = next_buy_retry_price(int(refreshed_price))
+
     if normalized_order_type == "limit" and (price is None or int(price) <= 0):
         fallback_limit_price = normalize_buy_limit_price(int(price_now))
         logger.warning(
@@ -536,6 +552,16 @@ def increment_bars_held(state: TradeState) -> None:
     for pos in state.open_positions.values():
         if pos.type == "S":
             pos.bars_held += 1
+
+
+def _refresh_quote_for_order(api: TradingAPI, *, code: str) -> OrderPayload:
+    refresh_quote = getattr(api, "refresh_quote", None)
+    if callable(refresh_quote):
+        try:
+            return dict(refresh_quote(code) or {})
+        except Exception as exc:
+            logger.warning("refresh_quote failed before order code=%s error=%s", code, exc)
+    return dict(api.quote(code) or {})
 
 
 def is_insufficient_cash_rejection(message: str) -> bool:

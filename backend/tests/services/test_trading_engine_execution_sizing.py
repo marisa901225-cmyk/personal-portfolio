@@ -583,6 +583,53 @@ def test_enter_position_normalizes_invalid_limit_price_to_valid_tick() -> None:
         {"side": "BUY", "code": "027360", "qty": 17, "order_type": "limit", "price": 14_350},
     ]
 
+def test_enter_position_recalculates_limit_price_from_fresh_quote_before_order() -> None:
+    class FreshQuoteAPI(FakeAPI):
+        def __init__(self) -> None:
+            super().__init__()
+            self._fresh_quotes: dict[str, dict] = {}
+
+        def refresh_quote(self, code: str) -> dict:
+            return dict(self._fresh_quotes.get(code, self.quote(code)))
+
+        def place_order(self, side: str, code: str, qty: int, order_type: str, price: int | None) -> dict:
+            self.order_calls.append(
+                {"side": side, "code": code, "qty": qty, "order_type": order_type, "price": price}
+            )
+            return {
+                "success": True,
+                "order_id": f"{side}-{code}-1",
+                "filled_qty": qty,
+                "avg_price": price,
+            }
+
+    api = FreshQuoteAPI()
+    api._cash_available = 500_000
+    api._quotes["010170"] = {"price": 19_820, "change_pct": 8.5}
+    api._fresh_quotes["010170"] = {"price": 20_750, "change_pct": 12.0}
+    state = new_state("20260507")
+
+    from backend.services.trading_engine.execution import enter_position
+
+    result = enter_position(
+        api,
+        state,
+        position_type="T",
+        code="010170",
+        cash_ratio=0.2,
+        budget_cash_cap=330_000,
+        asof_date="20260507",
+        now=datetime(2026, 5, 7, 9, 7),
+        order_type="limit",
+        price=19_830,
+    )
+
+    assert result is not None
+    assert result.avg_price == 20_800
+    assert api.order_calls == [
+        {"side": "BUY", "code": "010170", "qty": 15, "order_type": "limit", "price": 20_800},
+    ]
+
 def test_enter_position_fills_missing_limit_price_from_quote() -> None:
     class MissingLimitPriceAPI(FakeAPI):
         def place_order(self, side: str, code: str, qty: int, order_type: str, price: int | None) -> dict:

@@ -31,6 +31,35 @@ def test_cached_trading_api_reuses_larger_daily_bars_lookback_for_smaller_reques
     assert metrics.counters["daily_bars_cache_hits"] == 1
 
 
+def test_cached_trading_api_refresh_quote_bypasses_cached_quote() -> None:
+    class CountingQuoteAPI(FakeAPI):
+        def __init__(self) -> None:
+            super().__init__()
+            self.quote_calls = 0
+
+        def quote(self, code: str) -> dict:
+            self.quote_calls += 1
+            return dict(self._quotes.get(code, {"price": 0, "change_pct": 0.0}))
+
+    api = CountingQuoteAPI()
+    api._quotes["010170"] = {"price": 19_820, "change_pct": 8.5}
+    metrics = TradingRunMetrics()
+    cached = CachedTradingAPI(api, metrics=metrics)
+
+    first = cached.quote("010170")
+    api._quotes["010170"] = {"price": 20_750, "change_pct": 12.0}
+    second = cached.refresh_quote("010170")
+    third = cached.quote("010170")
+
+    assert first["price"] == 19_820
+    assert second["price"] == 20_750
+    assert third["price"] == 20_750
+    assert api.quote_calls == 2
+    assert metrics.counters["quote_requests"] == 3
+    assert metrics.counters["quote_api_calls"] == 2
+    assert metrics.counters["quote_cache_hits"] == 1
+
+
 def test_cached_trading_api_reuses_rank_requests_for_same_cycle() -> None:
     class CountingRankAPI(FakeAPI):
         def __init__(self) -> None:

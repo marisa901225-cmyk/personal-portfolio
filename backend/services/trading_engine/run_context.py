@@ -115,6 +115,15 @@ class CachedTradingAPI:
         self._quote_cache[normalized] = dict(payload)
         return payload
 
+    def refresh_quote(self, code: str) -> dict[str, Any]:
+        normalized = str(code)
+        self._incr("quote_requests")
+        self._incr("quote_api_calls")
+        quote = self._delegate.quote(code)
+        payload = dict(quote or {})
+        self._quote_cache[normalized] = dict(payload)
+        return payload
+
     def volume_rank(self, kind: str, top_n: int, asof: str) -> list[dict[str, Any]]:
         cache_key = (str(kind), str(asof))
         requested_top_n = max(0, int(top_n))
