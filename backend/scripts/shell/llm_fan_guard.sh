@@ -13,6 +13,8 @@ SENSORS_BIN="${LLM_FAN_GUARD_SENSORS_BIN:-sensors}"
 ENABLED="${LLM_FAN_GUARD_ENABLED:-1}"
 THRESHOLD_RPM="${LLM_FAN_GUARD_THRESHOLD_RPM:-1600}"
 STOP_DELAY_SEC="${LLM_FAN_GUARD_STOP_DELAY_SEC:-120}"
+CRITICAL_THRESHOLD_RPM="${LLM_FAN_GUARD_CRITICAL_THRESHOLD_RPM:-2000}"
+CRITICAL_STOP_DELAY_SEC="${LLM_FAN_GUARD_CRITICAL_STOP_DELAY_SEC:-0}"
 COOLDOWN_SEC="${LLM_FAN_GUARD_COOLDOWN_SEC:-0}"
 RESTART_DELAY_SEC="${LLM_FAN_GUARD_RESTART_DELAY_SEC:-10}"
 SENSOR_PATTERN="${LLM_FAN_GUARD_SENSOR_PATTERN:-}"
@@ -241,7 +243,18 @@ if (( max_rpm < THRESHOLD_RPM )); then
   exit 0
 fi
 
-if (( STARTUP_GRACE_SEC > 0 && current_last_start_epoch > 0 )); then
+active_threshold_rpm="$THRESHOLD_RPM"
+active_stop_delay_sec="$STOP_DELAY_SEC"
+threshold_label="threshold"
+critical_threshold_active=0
+if (( CRITICAL_THRESHOLD_RPM > 0 && max_rpm >= CRITICAL_THRESHOLD_RPM )); then
+  active_threshold_rpm="$CRITICAL_THRESHOLD_RPM"
+  active_stop_delay_sec="$CRITICAL_STOP_DELAY_SEC"
+  threshold_label="critical threshold"
+  critical_threshold_active=1
+fi
+
+if (( critical_threshold_active == 0 && STARTUP_GRACE_SEC > 0 && current_last_start_epoch > 0 )); then
   startup_elapsed_sec="$((NOW_EPOCH - current_last_start_epoch))"
   if (( startup_elapsed_sec >= 0 && startup_elapsed_sec < STARTUP_GRACE_SEC )); then
     write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" 0 "startup_grace" "$current_last_start_epoch"
@@ -255,14 +268,14 @@ if (( high_rpm_started_epoch == 0 )); then
 fi
 
 high_rpm_elapsed_sec="$((NOW_EPOCH - high_rpm_started_epoch))"
-if (( high_rpm_elapsed_sec < STOP_DELAY_SEC )); then
+if (( high_rpm_elapsed_sec < active_stop_delay_sec )); then
   write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" "$high_rpm_started_epoch" "observe_high_rpm"
-  log "fan RPM $max_rpm exceeded threshold $THRESHOLD_RPM for ${high_rpm_elapsed_sec}s; waiting for ${STOP_DELAY_SEC}s before stop check"
+  log "fan RPM $max_rpm exceeded $threshold_label $active_threshold_rpm for ${high_rpm_elapsed_sec}s; waiting for ${active_stop_delay_sec}s before stop check"
   exit 0
 fi
 
 cooldown_until_epoch="$((NOW_EPOCH + COOLDOWN_SEC))"
-log "fan RPM $max_rpm stayed above threshold $THRESHOLD_RPM for ${high_rpm_elapsed_sec}s; stopping LLM services"
+log "fan RPM $max_rpm stayed above $threshold_label $active_threshold_rpm for ${high_rpm_elapsed_sec}s; stopping LLM services"
 
 if run_schedule stop; then
   if (( COOLDOWN_SEC > 0 )); then
