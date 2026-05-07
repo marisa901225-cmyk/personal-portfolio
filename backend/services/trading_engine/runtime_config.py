@@ -125,6 +125,10 @@ def _apply_general_overrides(cfg: TradeEngineConfig) -> None:
     cfg.entry_windows = _env_entry_windows("TRADING_ENGINE_ENTRY_WINDOWS", cfg.entry_windows)
     cfg.market_proxy_code = _env_text("TRADING_ENGINE_MARKET_PROXY_CODE", cfg.market_proxy_code)
     cfg.kosdaq_proxy_code = _env_text("TRADING_ENGINE_KOSDAQ_PROXY_CODE", cfg.kosdaq_proxy_code)
+    cfg.permanent_excluded_entry_codes = _env_csv_tuple(
+        "TRADING_ENGINE_PERMANENT_EXCLUDED_ENTRY_CODES",
+        cfg.permanent_excluded_entry_codes,
+    )
     cfg.use_kosdaq_confirmation = _env_bool(
         "TRADING_ENGINE_USE_KOSDAQ_CONFIRMATION",
         cfg.use_kosdaq_confirmation,

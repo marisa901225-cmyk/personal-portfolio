@@ -41,6 +41,17 @@ def test_runtime_config_keeps_default_entry_windows_on_invalid_override() -> Non
     assert cfg.entry_windows == default_windows
 
 
+def test_runtime_config_applies_permanent_excluded_entry_codes_override() -> None:
+    with patch.dict(
+        "os.environ",
+        {"TRADING_ENGINE_PERMANENT_EXCLUDED_ENTRY_CODES": "034020,010170"},
+        clear=False,
+    ):
+        cfg = load_trade_engine_config_from_env()
+
+    assert cfg.permanent_excluded_entry_codes == ("034020", "010170")
+
+
 def test_runtime_config_applies_frequently_tuned_scoring_and_global_signal_overrides() -> None:
     with patch.dict(
         "os.environ",

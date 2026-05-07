@@ -543,6 +543,8 @@ def _resolve_management_issue_code(row: pd.Series, quotes: QuoteMap) -> object:
 
 def _proxy_codes(config: TradeEngineConfig) -> set[str]:
     codes = {str(config.market_proxy_code).strip(), str(config.kosdaq_proxy_code).strip()}
+    for code in getattr(config, "permanent_excluded_entry_codes", ()):
+        codes.add(str(code).strip())
     return {c for c in codes if c}
 
 

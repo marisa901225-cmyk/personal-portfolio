@@ -8,6 +8,7 @@ class TradeEngineConfig:
     # Capital / universe
     initial_capital: int = 1_000_000
     include_etf: bool = True
+    permanent_excluded_entry_codes: tuple[str, ...] = ("034020",)
 
     # Position limits
     max_swing_positions: int = 1

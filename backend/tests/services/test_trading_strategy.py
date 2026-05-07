@@ -57,12 +57,14 @@ class TradingStrategyTests(unittest.TestCase):
         mock_popular.return_value = pd.DataFrame(
             [
                 {"code": "069500", "name": "KOSPI200", "avg_value_5d": 1, "close": 1, "change_pct": 1, "is_etf": True},
+                {"code": "034020", "name": "두산에너지빌리티", "avg_value_5d": 3, "close": 1, "change_pct": 1, "is_etf": False},
                 {"code": "111111", "name": "Alpha", "avg_value_5d": 2, "close": 1, "change_pct": 1, "is_etf": False},
             ]
         )
         mock_model.return_value = pd.DataFrame(
             [
                 {"code": "229200", "name": "KOSDAQ150", "avg_value_20d": 10, "ma20": 1, "ma60": 1, "close": 1, "change_pct": 1, "is_etf": True},
+                {"code": "034020", "name": "두산에너지빌리티", "avg_value_20d": 30, "ma20": 1, "ma60": 1, "close": 1, "change_pct": 1, "is_etf": False},
                 {"code": "222222", "name": "Beta", "avg_value_20d": 20, "ma20": 1, "ma60": 1, "close": 1, "change_pct": 1, "is_etf": False},
             ]
         )
@@ -70,6 +72,7 @@ class TradingStrategyTests(unittest.TestCase):
             [
                 {"code": "333333", "name": "ETF A", "avg_value_20d": 30, "ma20": 1, "ma60": 1, "close": 1, "change_pct": 1, "is_etf": True},
                 {"code": "069500", "name": "KOSPI200", "avg_value_20d": 40, "ma20": 1, "ma60": 1, "close": 1, "change_pct": 1, "is_etf": True},
+                {"code": "034020", "name": "두산에너지빌리티 ETF?", "avg_value_20d": 50, "ma20": 1, "ma60": 1, "close": 1, "change_pct": 1, "is_etf": True},
             ]
         )
 
@@ -83,12 +86,17 @@ class TradingStrategyTests(unittest.TestCase):
         result = build_candidates(api=object(), asof="20260227", config=cfg)
 
         self.assertNotIn("069500", set(result.popular["code"]))
+        self.assertNotIn("034020", set(result.popular["code"]))
         self.assertNotIn("229200", set(result.model["code"]))
+        self.assertNotIn("034020", set(result.model["code"]))
         self.assertNotIn("069500", set(result.etf["code"]))
+        self.assertNotIn("034020", set(result.etf["code"]))
         self.assertNotIn("069500", set(result.merged["code"]))
         self.assertNotIn("229200", set(result.merged["code"]))
+        self.assertNotIn("034020", set(result.merged["code"]))
         self.assertNotIn("069500", set(result.quote_codes))
         self.assertNotIn("229200", set(result.quote_codes))
+        self.assertNotIn("034020", set(result.quote_codes))
 
     def test_merge_candidates_prioritizes_theme_injected_rows(self) -> None:
         popular = pd.DataFrame(
