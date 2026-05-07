@@ -130,6 +130,29 @@ class GameNews(Base):
     )
 
 
+class SteamPlayerSnapshot(Base):
+    """Steam AppID별 현재 접속자 시계열 스냅샷"""
+
+    __tablename__ = "steam_player_snapshots"
+    __table_args__ = (
+        Index("idx_steam_player_snapshots_app_time", "appid", "captured_at"),
+        Index("idx_steam_player_snapshots_bucket_time", "source_bucket", "captured_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    appid: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    source_bucket: Mapped[str] = mapped_column(String(30), nullable=False)
+    current_players: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    store_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    thumbnail_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    captured_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, nullable=False
+    )
+
+
 class SpamNews(Base):
     """광고성/스팸으로 분류된 뉴스 데이터 (필터링 로직 고도화용)"""
     __tablename__ = "spam_news"

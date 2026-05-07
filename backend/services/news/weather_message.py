@@ -364,7 +364,7 @@ async def fetch_briefing_context() -> Tuple[Optional[Any], Optional[Any], Option
         )
         from ...integrations.air_korea.air_korea_client import air_korea_client
         from .esports_results import fetch_lec_results_summary
-        from .steam import load_monthly_steam_ranking_summary
+        from .steam import load_monthly_steam_ranking_summary, load_steam_player_trending_summary
         from .rss import load_recent_inven_game_digest
 
         logger.info("Fetching economic, market outlook, dust, culture, and derivatives data for morning briefing...")
@@ -373,7 +373,8 @@ async def fetch_briefing_context() -> Tuple[Optional[Any], Optional[Any], Option
         market_news_task = asyncio.to_thread(EconomyService.load_market_outlook_news_context)
         dust_task = air_korea_client.get_latest_active_alarm(district_name="서울")
         lec_task = fetch_lec_results_summary(limit=10, lookback_hours=48, max_chars=0)
-        steam_task = asyncio.to_thread(load_monthly_steam_ranking_summary)
+        steam_rank_task = asyncio.to_thread(load_monthly_steam_ranking_summary)
+        steam_trend_task = asyncio.to_thread(load_steam_player_trending_summary)
         inven_task = asyncio.to_thread(load_recent_inven_game_digest)
         options_task = asyncio.to_thread(get_latest_option_snapshot_summary)
         now_kst = datetime.now(KST)
@@ -387,7 +388,8 @@ async def fetch_briefing_context() -> Tuple[Optional[Any], Optional[Any], Option
             market_news_result,
             dust_result,
             lec_result,
-            steam_result,
+            steam_rank_result,
+            steam_trend_result,
             inven_result,
             options_result,
             weekly_derivatives_result,
@@ -396,7 +398,8 @@ async def fetch_briefing_context() -> Tuple[Optional[Any], Optional[Any], Option
             market_news_task,
             dust_task,
             lec_task,
-            steam_task,
+            steam_rank_task,
+            steam_trend_task,
             inven_task,
             options_task,
             weekly_derivatives_task,
@@ -409,9 +412,17 @@ async def fetch_briefing_context() -> Tuple[Optional[Any], Optional[Any], Option
             market_outlook_news = market_news_result
         if not isinstance(dust_result, Exception):
             dust_alarm = dust_result
+        steam_fragments = [
+            result.strip()
+            for result in (
+                None if isinstance(steam_trend_result, Exception) else steam_trend_result,
+                None if isinstance(steam_rank_result, Exception) else steam_rank_result,
+            )
+            if isinstance(result, str) and result.strip()
+        ]
         culture_context = _select_culture_context(
             None if isinstance(lec_result, Exception) else lec_result,
-            None if isinstance(steam_result, Exception) else steam_result,
+            "\n".join(steam_fragments),
             None if isinstance(inven_result, Exception) else inven_result,
         )
         if not isinstance(options_result, Exception):

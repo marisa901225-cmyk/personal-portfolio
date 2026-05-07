@@ -8,7 +8,11 @@ from zoneinfo import ZoneInfo
 
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
-from backend.services.news.steam import load_monthly_steam_ranking_summary
+from backend.services.news.steam import (
+    _calculate_steam_trend_score,
+    load_monthly_steam_ranking_summary,
+    load_steam_player_trending_summary,
+)
 from backend.services.news.rss import _infer_rss_metadata, load_recent_inven_game_digest
 from backend.services.news.weather_message import (
     _build_weather_snapshot_prefix,
@@ -50,6 +54,79 @@ class SteamBriefingContextTests(unittest.TestCase):
         conn.commit()
         conn.close()
         return tmp.name
+
+    def _create_steam_player_snapshots_table(self, db_path: str) -> None:
+        conn = sqlite3.connect(db_path)
+        conn.executescript(
+            """
+            CREATE TABLE steam_player_snapshots (
+                id INTEGER PRIMARY KEY,
+                appid INTEGER,
+                name TEXT,
+                source_bucket TEXT,
+                current_players INTEGER,
+                store_url TEXT,
+                thumbnail_url TEXT,
+                captured_at TEXT
+            );
+            """
+        )
+        conn.commit()
+        conn.close()
+
+    def test_steam_trend_score_needs_lift_over_7d_average(self):
+        stable_score = _calculate_steam_trend_score(
+            current_players=100_000,
+            avg_7d=100_000,
+            first_24h_players=98_000,
+        )
+        rising_score = _calculate_steam_trend_score(
+            current_players=12_000,
+            avg_7d=4_000,
+            first_24h_players=3_000,
+        )
+
+        self.assertEqual(stable_score, 0.0)
+        self.assertGreater(rising_score, stable_score)
+
+    def test_load_steam_player_trending_summary_splits_store_and_ranking(self):
+        db_path = self._make_db()
+        self._create_steam_player_snapshots_table(db_path)
+        conn = sqlite3.connect(db_path)
+        conn.executemany(
+            """
+            INSERT INTO steam_player_snapshots
+                (appid, name, source_bucket, current_players, store_url, thumbnail_url, captured_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (730, "Counter-Strike 2", "ranking", 1_000_000, "https://store.steampowered.com/app/730", "", "2026-03-17 06:00:00"),
+                (730, "Counter-Strike 2", "ranking", 1_010_000, "https://store.steampowered.com/app/730", "", "2026-03-18 06:00:00"),
+                (999001, "Fresh Co-op Hit", "new_release", 2_000, "https://store.steampowered.com/app/999001", "", "2026-03-17 06:00:00"),
+                (999001, "Fresh Co-op Hit", "new_release", 12_000, "https://store.steampowered.com/app/999001", "", "2026-03-18 06:00:00"),
+                (999002, "Store Seller", "top_seller", 5_000, "https://store.steampowered.com/app/999002", "", "2026-03-17 06:00:00"),
+                (999002, "Store Seller", "top_seller", 9_000, "https://store.steampowered.com/app/999002", "", "2026-03-18 06:00:00"),
+                (1085660, "Destiny 2", "ranking", 40_000, "https://store.steampowered.com/app/1085660", "", "2026-03-17 06:00:00"),
+                (1085660, "Destiny 2", "ranking", 90_000, "https://store.steampowered.com/app/1085660", "", "2026-03-18 06:00:00"),
+            ],
+        )
+        conn.commit()
+        conn.close()
+
+        summary = load_steam_player_trending_summary(
+            db_path=db_path,
+            now=datetime(2026, 3, 18, 7, 0, tzinfo=ZoneInfo("Asia/Seoul")),
+            store_limit=3,
+            ranking_limit=3,
+        )
+
+        self.assertIn("Steam 실시간 접속자 트렌드", summary)
+        self.assertIn("신작/스토어 화제작:", summary)
+        self.assertIn("Fresh Co-op Hit", summary)
+        self.assertIn("Store Seller", summary)
+        self.assertIn("SteamSpy 순위권 급등:", summary)
+        self.assertIn("Destiny 2", summary)
+        self.assertIn("Counter-Strike 2", summary)
 
     def test_load_monthly_steam_ranking_summary_aggregates_recent_rows(self):
         db_path = self._make_db()

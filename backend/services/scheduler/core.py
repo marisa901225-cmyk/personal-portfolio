@@ -87,6 +87,7 @@ async def job_collect_news():
                     sync_retry(NewsCollector.collect_rss)(db, url, source_name)
 
                 await async_retry(NewsCollector.collect_steamspy_rankings)(db)
+                await async_retry(NewsCollector.collect_steam_new_trends)(db)
                 await async_retry(NewsCollector.collect_all_naver_news)(db)
                 await async_retry(NewsCollector.collect_all_google_news)(db)
 
@@ -95,6 +96,24 @@ async def job_collect_news():
                 raise e
             finally:
                 logger.info("News collection job finished.")
+
+
+async def job_collect_steam_player_snapshots():
+    """
+    Steam 현재 접속자 시계열 수집.
+
+    신작/스토어 화제작과 SteamSpy 순위권을 별도 bucket으로 저장해 고정 인기작 쏠림을 줄인다.
+    """
+    with SessionLocal() as db:
+        async with monitor_job_async("collect_steam_player_snapshots", db):
+            logger.info("Starting Steam player snapshot collection job...")
+            try:
+                await async_retry(NewsCollector.collect_steam_player_snapshots)(db)
+            except Exception as e:
+                logger.error(f"Steam player snapshot collection job failed: {e}", exc_info=True)
+                raise e
+            finally:
+                logger.info("Steam player snapshot collection job finished.")
 
 
 async def job_collect_premarket_news():
@@ -412,6 +431,14 @@ def start_scheduler():
                 job_collect_news,
                 CronTrigger(minute="7,37"),
                 id="collect_game_news",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            scheduler.add_job(
+                job_collect_steam_player_snapshots,
+                CronTrigger(minute="*/10"),
+                id="collect_steam_player_snapshots",
                 replace_existing=True,
                 max_instances=1,
             )

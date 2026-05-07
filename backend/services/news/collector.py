@@ -3,7 +3,7 @@ from .core import calculate_simhash, calculate_importance_score, RSS_FEEDS, NAVE
 from .rss import collect_rss
 from .google import collect_google_news as collect_google_news_v2, collect_all_google_macro_news
 from .naver import collect_naver_news, collect_all_naver_news
-from .steam import collect_steamspy_rankings, collect_steam_new_trends
+from .steam import collect_steamspy_rankings, collect_steam_new_trends, collect_steam_player_snapshots
 from .refiner import refine_schedules_with_duckdb, refine_news_with_duckdb, refine_economy_news_with_duckdb, refine_game_trends_with_duckdb
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,10 @@ class NewsCollector:
     @staticmethod
     async def collect_steam_new_trends(db):
         return await collect_steam_new_trends(db)
+
+    @staticmethod
+    async def collect_steam_player_snapshots(db):
+        return await collect_steam_player_snapshots(db)
 
 
     @staticmethod

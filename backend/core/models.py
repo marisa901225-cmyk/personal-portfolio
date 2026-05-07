@@ -25,6 +25,7 @@ from .models_misc import (
     SchedulerState,
     EconRateState,
     KrOptionBoardSnapshot,
+    SteamPlayerSnapshot,
     TradingEngineArchive,
     SyncSchedulerLogArchive,
     EsportsMatch,
