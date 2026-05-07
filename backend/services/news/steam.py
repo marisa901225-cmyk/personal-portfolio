@@ -1,6 +1,7 @@
 import logging
 import httpx
 import asyncio
+import json
 import math
 import re
 import sqlite3
@@ -16,11 +17,19 @@ from ..duckdb_refine_config import get_db_path
 logger = logging.getLogger(__name__)
 _KST = ZoneInfo("Asia/Seoul")
 _STEAM_FEATURED_CATEGORIES_URL = "https://store.steampowered.com/api/featuredcategories/"
+_STEAM_STATS_URL = "https://store.steampowered.com/stats/stats/"
 _STEAM_CURRENT_PLAYERS_URL = "https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/"
 _STEAM_RANKING_TITLE_RE = re.compile(r"^\[Steam Ranking\]\s*(?P<name>.+)$")
 _STEAM_RANK_RE = re.compile(r"(?im)^Rank:\s*(?P<rank>\d+)\s*$")
 _STEAM_OWNERS_RE = re.compile(r"(?im)^Owners:\s*(?P<owners>.+)\s*$")
-_STORE_BUCKETS = {"new_release", "top_seller"}
+_STEAM_STATS_ROW_RE = re.compile(
+    r"(?P<current>[\d,]+).*?(?P<peak>[\d,]+).*?"
+    r"store\.steampowered\.com/app/(?P<appid>\d+)[^>]*>\s*(?P<name>[^<]+)\s*</a>",
+    re.IGNORECASE | re.DOTALL,
+)
+_STORE_BUCKETS = {"new_release", "top_seller", "sale", "watchlist"}
+_RANKING_BUCKETS = {"official_top", "ranking"}
+_STEAM_WATCHLIST_PATH = Path(__file__).resolve().parents[2] / "data" / "steam_trend_watchlist.json"
 
 
 def _extract_game_name(title: str) -> str:
@@ -120,6 +129,64 @@ def _safe_int(value: object, default: int = 0) -> int:
 
 def _steam_store_url(appid: int) -> str:
     return f"https://store.steampowered.com/app/{appid}"
+
+
+def _extract_appid_from_url(value: object) -> int:
+    match = re.search(r"/app/(\d+)", str(value or ""))
+    if not match:
+        return 0
+    return _safe_int(match.group(1))
+
+
+def _load_steam_watchlist(path: str | Path | None = None) -> list[dict[str, object]]:
+    watchlist_path = Path(path) if path else _STEAM_WATCHLIST_PATH
+    if not watchlist_path.exists():
+        return []
+
+    try:
+        payload = json.loads(watchlist_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning("Steam watchlist load failed path=%s error=%s", watchlist_path, exc)
+        return []
+
+    raw_items = payload.get("apps") if isinstance(payload, dict) else payload
+    if not isinstance(raw_items, list):
+        return []
+
+    items: list[dict[str, object]] = []
+    for raw in raw_items:
+        if isinstance(raw, int):
+            items.append({"appid": raw, "name": ""})
+        elif isinstance(raw, str):
+            appid = _safe_int(raw)
+            if appid:
+                items.append({"appid": appid, "name": ""})
+        elif isinstance(raw, dict):
+            appid = _safe_int(raw.get("appid") or raw.get("id"))
+            if appid:
+                items.append(
+                    {
+                        "appid": appid,
+                        "name": str(raw.get("name") or "").strip(),
+                        "thumbnail_url": str(raw.get("thumbnail_url") or raw.get("thumbnail") or "").strip(),
+                    }
+                )
+    return items
+
+
+def _parse_steam_stats_candidates(html_text: str, *, limit: int = 100) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    for match in _STEAM_STATS_ROW_RE.finditer(str(html_text or "")):
+        candidates.append(
+            {
+                "appid": _safe_int(match.group("appid")),
+                "name": str(match.group("name") or "").strip(),
+                "current_players": _safe_int(match.group("current")),
+            }
+        )
+        if len(candidates) >= max(1, int(limit)):
+            break
+    return candidates
 
 
 def _calculate_steam_trend_score(
@@ -262,7 +329,7 @@ def load_steam_player_trending_summary(
         bucket = str(item.get("source_bucket") or "")
         if bucket in _STORE_BUCKETS:
             sections["store"].append(meta)
-        elif bucket == "ranking":
+        elif bucket in _RANKING_BUCKETS:
             sections["ranking"].append(meta)
 
     def _sort_key(meta: dict[str, object]) -> tuple[float, int, str]:
@@ -291,7 +358,7 @@ def load_steam_player_trending_summary(
         )
     if ranking_items:
         fragments.append(
-            "SteamSpy 순위권 급등: "
+            "Steam 공식/SteamSpy 순위권 급등: "
             + "; ".join(_format_trending_entry(meta) for meta in ranking_items)
         )
     if not fragments:
@@ -623,13 +690,16 @@ async def collect_steam_new_trends(db: Session):
 async def collect_steam_player_snapshots(
     db: Session,
     *,
-    ranking_limit: int = 40,
-    store_limit: int = 20,
+    official_limit: int = 100,
+    ranking_limit: int = 100,
+    store_limit: int = 40,
+    watchlist_path: str | Path | None = None,
 ) -> int:
     """
-    SteamSpy 순위권과 Steam Store 신작/탑셀러 후보의 현재 접속자 수를 저장한다.
+    Steam 공식 통계, SteamSpy, Store 신작/할인/탑셀러, 관심 AppID의 현재 접속자 수를 저장한다.
 
     같은 AppID가 신작과 순위권 양쪽에 걸리면 양쪽 bucket으로 저장해서 브리핑에서 분리 계산한다.
+    공식 통계 페이지에서 이미 현재 플레이어 수가 있는 항목은 그 값을 바로 저장해 API 호출을 줄인다.
     """
     logger.info("Collecting Steam current player snapshots...")
     captured_at = datetime.now(timezone.utc)
@@ -641,11 +711,14 @@ async def collect_steam_player_snapshots(
         name: object,
         bucket: str,
         thumbnail_url: object = "",
+        current_players: object | None = None,
     ) -> None:
         aid = _safe_int(appid)
         clean_name = str(name or "").strip()
-        if aid <= 0 or not clean_name:
+        if aid <= 0:
             return
+        if not clean_name:
+            clean_name = f"Steam App {aid}"
         item = candidates.setdefault(
             aid,
             {
@@ -654,15 +727,36 @@ async def collect_steam_player_snapshots(
                 "store_url": _steam_store_url(aid),
                 "thumbnail_url": str(thumbnail_url or "").strip(),
                 "buckets": set(),
+                "current_players_by_bucket": {},
             },
         )
-        item["name"] = clean_name or item["name"]
+        if clean_name and not str(clean_name).lower().startswith("steam app "):
+            item["name"] = clean_name
         if thumbnail_url and not item.get("thumbnail_url"):
             item["thumbnail_url"] = str(thumbnail_url).strip()
         item["buckets"].add(bucket)
+        current = _safe_int(current_players, default=-1)
+        if current >= 0:
+            item["current_players_by_bucket"][bucket] = current
 
     try:
         async with httpx.AsyncClient() as client:
+            try:
+                stats_response = await client.get(_STEAM_STATS_URL, timeout=20.0)
+                stats_response.raise_for_status()
+                for item in _parse_steam_stats_candidates(
+                    stats_response.text,
+                    limit=max(1, int(official_limit)),
+                ):
+                    _add_candidate(
+                        item.get("appid"),
+                        name=item.get("name"),
+                        bucket="official_top",
+                        current_players=item.get("current_players"),
+                    )
+            except Exception as exc:
+                logger.warning("Steam official stats candidates failed: %s", exc)
+
             try:
                 ranking_response = await client.get(
                     STEAMSPY_URL,
@@ -704,8 +798,30 @@ async def collect_steam_player_snapshots(
                         thumbnail_url=item.get("header_image") or item.get("small_capsule_image"),
                     )
                     top_seller_count += 1
+
+                specials = store_data.get("specials", {}).get("items", [])
+                sale_count = 0
+                for item in specials:
+                    if sale_count >= max(1, int(store_limit)):
+                        break
+                    aid = item.get("id") or item.get("appid") or _extract_appid_from_url(item.get("url"))
+                    _add_candidate(
+                        aid,
+                        name=item.get("name"),
+                        bucket="sale",
+                        thumbnail_url=item.get("header_image") or item.get("small_capsule_image"),
+                    )
+                    sale_count += 1
             except Exception as exc:
                 logger.warning("Steam Store trend candidates failed: %s", exc)
+
+            for item in _load_steam_watchlist(watchlist_path):
+                _add_candidate(
+                    item.get("appid"),
+                    name=item.get("name"),
+                    bucket="watchlist",
+                    thumbnail_url=item.get("thumbnail_url"),
+                )
 
             if not candidates:
                 logger.warning("No Steam player snapshot candidates found.")
@@ -713,21 +829,30 @@ async def collect_steam_player_snapshots(
 
             count = 0
             for aid, meta in candidates.items():
-                try:
-                    players_response = await client.get(
-                        _STEAM_CURRENT_PLAYERS_URL,
-                        params={"appid": aid},
-                        timeout=10.0,
-                    )
-                    if players_response.status_code != 200:
+                buckets = sorted(meta.get("buckets") or [])
+                players_by_bucket = dict(meta.get("current_players_by_bucket") or {})
+                missing_buckets = [bucket for bucket in buckets if bucket not in players_by_bucket]
+                shared_current_players: int | None = None
+                if missing_buckets:
+                    try:
+                        players_response = await client.get(
+                            _STEAM_CURRENT_PLAYERS_URL,
+                            params={"appid": aid},
+                            timeout=10.0,
+                        )
+                        if players_response.status_code != 200:
+                            continue
+                        payload = players_response.json().get("response", {})
+                        shared_current_players = _safe_int(payload.get("player_count"))
+                    except Exception as exc:
+                        logger.debug("Steam current players failed appid=%s error=%s", aid, exc)
                         continue
-                    payload = players_response.json().get("response", {})
-                    current_players = _safe_int(payload.get("player_count"))
-                except Exception as exc:
-                    logger.debug("Steam current players failed appid=%s error=%s", aid, exc)
-                    continue
 
-                for bucket in sorted(meta.get("buckets") or []):
+                for bucket in buckets:
+                    current_players = _safe_int(
+                        players_by_bucket.get(bucket),
+                        default=shared_current_players if shared_current_players is not None else 0,
+                    )
                     db.add(
                         SteamPlayerSnapshot(
                             appid=aid,

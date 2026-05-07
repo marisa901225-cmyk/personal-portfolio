@@ -10,6 +10,8 @@ os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
 from backend.services.news.steam import (
     _calculate_steam_trend_score,
+    _load_steam_watchlist,
+    _parse_steam_stats_candidates,
     load_monthly_steam_ranking_summary,
     load_steam_player_trending_summary,
 )
@@ -89,6 +91,47 @@ class SteamBriefingContextTests(unittest.TestCase):
         self.assertEqual(stable_score, 0.0)
         self.assertGreater(rising_score, stable_score)
 
+    def test_parse_steam_stats_candidates_from_official_stats_html(self):
+        html = """
+        <tr>
+            <td>604,203</td><td>1,408,857</td>
+            <td><a href="https://store.steampowered.com/app/730/CounterStrike_2/">Counter-Strike 2</a></td>
+        </tr>
+        <tr>
+            <td>103,696</td><td>189,320</td>
+            <td><a href="https://store.steampowered.com/app/646570/Slay_the_Spire_2/">Slay the Spire 2</a></td>
+        </tr>
+        """
+
+        candidates = _parse_steam_stats_candidates(html, limit=1)
+
+        self.assertEqual(
+            candidates,
+            [{"appid": 730, "name": "Counter-Strike 2", "current_players": 604203}],
+        )
+
+    def test_load_steam_watchlist_accepts_manageable_json_candidates(self):
+        tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+        tmp.close()
+        self.addCleanup(lambda: os.path.exists(tmp.name) and os.remove(tmp.name))
+        with open(tmp.name, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "apps": [
+                        730,
+                        "1085660",
+                        {"appid": 999001, "name": "Fresh Co-op Hit", "thumbnail_url": "https://cdn.example/thumb.jpg"},
+                    ]
+                },
+                f,
+            )
+
+        watchlist = _load_steam_watchlist(tmp.name)
+
+        self.assertEqual(watchlist[0]["appid"], 730)
+        self.assertEqual(watchlist[1]["appid"], 1085660)
+        self.assertEqual(watchlist[2]["name"], "Fresh Co-op Hit")
+
     def test_load_steam_player_trending_summary_splits_store_and_ranking(self):
         db_path = self._make_db()
         self._create_steam_player_snapshots_table(db_path)
@@ -106,8 +149,10 @@ class SteamBriefingContextTests(unittest.TestCase):
                 (999001, "Fresh Co-op Hit", "new_release", 12_000, "https://store.steampowered.com/app/999001", "", "2026-03-18 06:00:00"),
                 (999002, "Store Seller", "top_seller", 5_000, "https://store.steampowered.com/app/999002", "", "2026-03-17 06:00:00"),
                 (999002, "Store Seller", "top_seller", 9_000, "https://store.steampowered.com/app/999002", "", "2026-03-18 06:00:00"),
-                (1085660, "Destiny 2", "ranking", 40_000, "https://store.steampowered.com/app/1085660", "", "2026-03-17 06:00:00"),
-                (1085660, "Destiny 2", "ranking", 90_000, "https://store.steampowered.com/app/1085660", "", "2026-03-18 06:00:00"),
+                (1085660, "Destiny 2", "official_top", 40_000, "https://store.steampowered.com/app/1085660", "", "2026-03-17 06:00:00"),
+                (1085660, "Destiny 2", "official_top", 90_000, "https://store.steampowered.com/app/1085660", "", "2026-03-18 06:00:00"),
+                (999003, "Discount Sleeper", "sale", 1_000, "https://store.steampowered.com/app/999003", "", "2026-03-17 06:00:00"),
+                (999003, "Discount Sleeper", "sale", 7_000, "https://store.steampowered.com/app/999003", "", "2026-03-18 06:00:00"),
             ],
         )
         conn.commit()
@@ -124,7 +169,8 @@ class SteamBriefingContextTests(unittest.TestCase):
         self.assertIn("신작/스토어 화제작:", summary)
         self.assertIn("Fresh Co-op Hit", summary)
         self.assertIn("Store Seller", summary)
-        self.assertIn("SteamSpy 순위권 급등:", summary)
+        self.assertIn("Discount Sleeper", summary)
+        self.assertIn("Steam 공식/SteamSpy 순위권 급등:", summary)
         self.assertIn("Destiny 2", summary)
         self.assertIn("Counter-Strike 2", summary)
 
