@@ -50,7 +50,7 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
         sensors_output: str,
         now_epoch: int,
         threshold_rpm: int = 1600,
-        stop_delay_sec: int = 120,
+        stop_delay_sec: int = 30,
         cooldown_sec: int = 3600,
         sensor_pattern: str = "",
         start_max_temp_c: str = "88",
@@ -166,7 +166,7 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
                   "cooldown_until_epoch": 0,
                   "last_trigger_rpm": 0,
                   "last_seen_rpm": 1750,
-                  "high_rpm_started_epoch": 900,
+                  "high_rpm_started_epoch": 980,
                   "last_action": "observe_high_rpm",
                   "updated_at_epoch": 900
                 }
@@ -190,7 +190,7 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
         state_text = self.state_file.read_text(encoding="utf-8")
         self.assertIn('"cooldown_active": 0', state_text)
         self.assertIn('"last_seen_rpm": 1750', state_text)
-        self.assertIn('"high_rpm_started_epoch": 900', state_text)
+        self.assertIn('"high_rpm_started_epoch": 980', state_text)
         self.assertIn('"last_action": "observe_high_rpm"', state_text)
 
     def test_does_not_retrigger_while_cooldown_is_active(self) -> None:
