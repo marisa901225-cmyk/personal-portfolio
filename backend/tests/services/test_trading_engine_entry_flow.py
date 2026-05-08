@@ -38,6 +38,64 @@ def test_passes_day_intraday_confirmation_allows_momentum_pullback_with_quote_fa
     assert meta["reason"] == "MOMENTUM_PULLBACK_OK"
     assert meta["day_change_pct"] == 19.97
 
+def test_passes_day_intraday_confirmation_allows_high_volume_momentum_pullback_defaults() -> None:
+    from backend.services.trading_engine.intraday import passes_day_intraday_confirmation
+
+    asof = "20260508"
+    api = FakeAPI()
+    api._quotes["090710"] = {
+        "price": 6_650,
+        "open": 6_090,
+        "high": 6_850,
+        "low": 6_090,
+        "change_pct": 9.0,
+    }
+    api.intraday_bars = lambda code, asof, lookback=120: _make_intraday_bars(  # type: ignore[attr-defined]
+        asof,
+        [6_780, 6_620, 6_650],
+        last_change_pct=0.0,
+    )
+
+    ok, meta = passes_day_intraday_confirmation(
+        api,
+        trade_date=asof,
+        code="090710",
+        config=TradeEngineConfig(),
+    )
+
+    assert ok is True
+    assert meta["reason"] == "MOMENTUM_PULLBACK_OK"
+    assert meta["day_change_pct"] == 9.0
+
+def test_passes_day_intraday_confirmation_allows_strong_last_bar_dip_defaults() -> None:
+    from backend.services.trading_engine.intraday import passes_day_intraday_confirmation
+
+    asof = "20260508"
+    api = FakeAPI()
+    api._quotes["397030"] = {
+        "price": 13_700,
+        "open": 11_670,
+        "high": 13_780,
+        "low": 11_670,
+        "change_pct": 17.38,
+    }
+    api.intraday_bars = lambda code, asof, lookback=120: _make_intraday_bars(  # type: ignore[attr-defined]
+        asof,
+        [13_620, 13_740, 13_700],
+        last_change_pct=0.0,
+    )
+
+    ok, meta = passes_day_intraday_confirmation(
+        api,
+        trade_date=asof,
+        code="397030",
+        config=TradeEngineConfig(),
+    )
+
+    assert ok is True
+    assert meta["reason"] == "MOMENTUM_PULLBACK_OK"
+    assert meta["day_change_pct"] == 17.38
+
 def test_bot_risk_on_exits_existing_risk_off_parking(tmp_path) -> None:
     class SpyNotifier:
         def __init__(self) -> None:
@@ -305,4 +363,3 @@ def test_swing_no_candidate_notified_once_per_window(tmp_path) -> None:
     assert len(swing_skip_msgs) == 1
     assert "스윙 후보" in swing_skip_msgs[0]
     assert "09:55-10:10" in swing_skip_msgs[0]
-
