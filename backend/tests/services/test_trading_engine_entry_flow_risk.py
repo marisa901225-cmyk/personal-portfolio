@@ -381,7 +381,11 @@ def test_day_afternoon_entry_blocks_after_two_stoploss_sized_losses() -> None:
 
 
 def test_day_entry_limit_expands_when_intraday_win_rate_is_healthy() -> None:
-    cfg = TradeEngineConfig()
+    cfg = TradeEngineConfig(
+        max_day_entries_per_day=4,
+        day_conditional_extra_entries_enabled=True,
+        day_conditional_extra_entries=2,
+    )
     state = new_state("20260216")
     state.day_entries_today = 4
     state.day_wins_today = 2
@@ -415,7 +419,11 @@ def test_day_entry_limit_expands_when_intraday_win_rate_is_healthy() -> None:
 
 
 def test_day_entry_limit_stays_capped_when_intraday_win_rate_is_weak() -> None:
-    cfg = TradeEngineConfig()
+    cfg = TradeEngineConfig(
+        max_day_entries_per_day=4,
+        day_conditional_extra_entries_enabled=True,
+        day_conditional_extra_entries=2,
+    )
     state = new_state("20260216")
     state.day_entries_today = 4
     state.day_wins_today = 1
