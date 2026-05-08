@@ -68,6 +68,9 @@ def record_profit_to_google_calendar(
     trade_date: str,
     realized_pnl: float,
     pnl_rate: float | None = None,
+    account_summary: str | None = None,
+    eval_pct: float | None = None,
+    trade_activity_summary: str | None = None,
     logger: logging.Logger = logger,
 ) -> str | None:
     """Calendar에는 날짜별 실현손익만 간단히 남긴다."""
@@ -87,6 +90,9 @@ def record_profit_to_google_calendar(
             trade_date=trade_date,
             realized_pnl=realized_pnl,
             pnl_rate=pnl_rate,
+            account_summary=account_summary,
+            eval_pct=eval_pct,
+            trade_activity_summary=trade_activity_summary,
         )
         event_id = _upsert_event_by_private_property(
             service=service,
@@ -229,13 +235,30 @@ def _build_profit_event(
     trade_date: str,
     realized_pnl: float,
     pnl_rate: float | None = None,
+    account_summary: str | None = None,
+    eval_pct: float | None = None,
+    trade_activity_summary: str | None = None,
 ) -> dict[str, object]:
     start_date = datetime.strptime(trade_date, "%Y%m%d").date()
     end_date = start_date + timedelta(days=1)
     rate_text = f" ({pnl_rate:+.2f}%)" if pnl_rate is not None else ""
+    has_journal_detail = bool(account_summary or trade_activity_summary or eval_pct is not None)
+    description = _format_profit_line(realized_pnl=realized_pnl, pnl_rate=pnl_rate)
+    summary = f"[자동매매] {realized_pnl:,.0f}원{rate_text}"
+    if has_journal_detail:
+        description = "\n".join(
+            _build_finalize_calendar_lines(
+                trade_date=trade_date,
+                realized_pnl=realized_pnl,
+                eval_pct=eval_pct,
+                account_summary=account_summary,
+                trade_activity_summary=trade_activity_summary,
+            )
+        )
+        summary = f"[마감] {trade_date}"
     return {
-        "summary": f"[자동매매] {realized_pnl:,.0f}원{rate_text}",
-        "description": _format_profit_line(realized_pnl=realized_pnl, pnl_rate=pnl_rate),
+        "summary": summary,
+        "description": description,
         "start": {"date": start_date.isoformat()},
         "end": {"date": end_date.isoformat()},
         "extendedProperties": {

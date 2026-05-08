@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from backend.services.trading_engine.bot_runtime_support import (
+    finalize_calendar_account_context,
+    finalize_trade_activity_summary,
+)
 from backend.services.trading_engine.google_calendar import record_profit_to_google_calendar
+from backend.services.trading_engine.journal import TradeJournal
 from backend.services.trading_engine.runtime import get_or_create_bot
 
 logger = logging.getLogger(__name__)
@@ -40,11 +46,27 @@ def main() -> None:
         print(_format_preview_line(trade_date=trade_date, realized_pnl=realized_pnl, pnl_rate=rate))
         if args.dry_run:
             continue
+        journal = _load_journal_if_exists(bot=bot, trade_date=trade_date)
+        trade_activity_summary = (
+            finalize_trade_activity_summary(journal=journal, config=bot.config, logger=logger) if journal else None
+        )
+        calendar_account_context = finalize_calendar_account_context(bot, logger=logger) if trade_date == bot.state.trade_date else None
+        account_summary = (
+            str(calendar_account_context.get("account_line") or "") if calendar_account_context else None
+        )
+        eval_pct = (
+            float(calendar_account_context["eval_pct"])
+            if calendar_account_context and calendar_account_context.get("eval_pct") is not None
+            else None
+        )
         event_id = record_profit_to_google_calendar(
             config=bot.config,
             trade_date=trade_date,
             realized_pnl=realized_pnl,
             pnl_rate=rate,
+            account_summary=account_summary,
+            eval_pct=eval_pct,
+            trade_activity_summary=trade_activity_summary,
             logger=logger,
         )
         if event_id:
@@ -63,6 +85,13 @@ def _today_kst() -> str:
 def _format_preview_line(*, trade_date: str, realized_pnl: float, pnl_rate: float | None) -> str:
     rate_text = f" ({pnl_rate:+.2f}%)" if pnl_rate is not None else ""
     return f"{trade_date}: 실현손익 {realized_pnl:,.0f}원{rate_text}"
+
+
+def _load_journal_if_exists(*, bot, trade_date: str) -> TradeJournal | None:
+    journal = TradeJournal(output_dir=bot.config.output_dir, asof_date=trade_date)
+    if not os.path.exists(journal.jsonl_path):
+        return None
+    return journal
 
 
 if __name__ == "__main__":

@@ -546,6 +546,27 @@ def test_profit_google_calendar_event_payload_is_concise_all_day_record() -> Non
     assert event["extendedProperties"]["private"]["trading_profit_date"] == "20260508"
 
 
+def test_profit_google_calendar_event_payload_uses_closeout_format_when_journal_exists() -> None:
+    event = _build_profit_event(
+        config=TradeEngineConfig(),
+        trade_date="20260508",
+        realized_pnl=57112.0,
+        pnl_rate=2.20540307,
+        account_summary="총평가 1,423,000원 / 현금 300,000원 / 보유 4종목",
+        eval_pct=-0.8,
+        trade_activity_summary="매수: 한화오션 외 2건 / 청산: SK하이닉스 - 손절",
+    )
+
+    assert event["summary"] == "[마감] 20260508"
+    assert event["description"] == (
+        "[마감] 20260508\n"
+        "손익: 실현 +57,112원 / 평가 -0.80%\n"
+        "계좌: 총평가 1,423,000원 / 현금 300,000원 / 보유 4종목\n"
+        "매수: 한화오션 외 2건\n"
+        "청산: SK하이닉스 - 손절"
+    )
+
+
 def test_archive_trading_engine_weekly_keeps_large_files_on_disk(tmp_path) -> None:
     db_path = tmp_path / "archive.db"
     engine = create_engine(
