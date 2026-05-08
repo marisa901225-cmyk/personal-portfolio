@@ -203,16 +203,22 @@ def _normalize_yyyymmdd(text: str) -> str:
         raw = raw.replace("-", "")
     return raw[:8]
 def _resolve_day_change_pct(api: TradingAPI, code: str, bars: pd.DataFrame) -> float | None:
+    bar_day_change_pct: float | None = None
     if "change_pct" in bars.columns:
         cp = pd.to_numeric(bars["change_pct"], errors="coerce").dropna()
         if not cp.empty:
-            return float(cp.iloc[-1])
+            bar_day_change_pct = float(cp.iloc[-1])
 
+    quote_day_change_pct: float | None = None
     quote_fn = getattr(api, "quote", None)
     if callable(quote_fn):
         try:
             q = quote_fn(code)
-            return parse_numeric(q.get("change_pct"))
+            quote_day_change_pct = parse_numeric(q.get("change_pct"))
         except Exception:
-            return None
-    return None
+            quote_day_change_pct = None
+
+    values = [v for v in (bar_day_change_pct, quote_day_change_pct) if v is not None]
+    if not values:
+        return None
+    return min(values)

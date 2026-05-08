@@ -82,6 +82,36 @@ def test_detect_intraday_cb_day_change_drop() -> None:
     assert triggered is True
     assert meta.get("reason") == "DAY_CHANGE_DROP"
 
+def test_detect_intraday_cb_uses_quote_day_change_when_intraday_change_is_stale() -> None:
+    class IntradayAPI(FakeAPI):
+        def __init__(self) -> None:
+            super().__init__()
+            self._intraday: dict[tuple[str, str], pd.DataFrame] = {}
+
+        def intraday_bars(self, code: str, asof: str, lookback: int = 120) -> pd.DataFrame:
+            del lookback
+            return self._intraday.get((code, asof), pd.DataFrame())
+
+    api = IntradayAPI()
+    asof = "20260304"
+    code = "069500"
+    api._intraday[(code, asof)] = _make_intraday_bars(asof, [100.0, 99.9, 99.8], last_change_pct=0.0)
+    api._quotes[code] = {"price": 93000, "change_pct": -7.0}
+
+    triggered, meta = detect_intraday_circuit_breaker(
+        api,
+        asof=asof,
+        code=code,
+        one_bar_drop_pct=-10.0,
+        window_minutes=5,
+        window_drop_pct=-10.0,
+        day_change_pct=-5.5,
+    )
+
+    assert triggered is True
+    assert meta.get("reason") == "DAY_CHANGE_DROP"
+    assert meta.get("day_change_pct") == -7.0
+
 def test_detect_intraday_cb_last_bar_drop() -> None:
     class IntradayAPI(FakeAPI):
         def __init__(self) -> None:
@@ -183,6 +213,7 @@ def test_bot_intraday_cb_forces_risk_off(tmp_path) -> None:
         runlog_path=str(tmp_path / "run.log"),
         use_news_sentiment=False,
         use_intraday_circuit_breaker=True,
+        intraday_cb_1bar_drop_pct=-1.0,
     )
     bot = HybridTradingBot(api, config=cfg)
     out = bot.run_once(now=datetime(2026, 3, 4, 10, 5))
