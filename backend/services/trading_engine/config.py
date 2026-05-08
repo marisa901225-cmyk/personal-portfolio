@@ -246,6 +246,13 @@ class TradeEngineConfig:
     output_dir: str = "backend/storage/trading_engine/output"
     runlog_path: str = "backend/storage/trading_engine/runlog_current.log"
     price_sync_status_path: str = "backend/storage/trading_engine/sync_prices_status.json"
+    google_calendar_enabled: bool = True
+    google_calendar_id: str = "primary"
+    google_calendar_credentials_path: str = "backend/storage/trading_engine/credentials.json"
+    google_calendar_token_path: str = "backend/storage/trading_engine/token.json"
+    google_calendar_timezone: str = "Asia/Seoul"
+    google_calendar_finalize_hour: int = 15
+    google_calendar_finalize_minute: int = 40
     archive_inline_max_bytes: int = 1_000_000
 
     # Notifications

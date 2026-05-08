@@ -53,6 +53,10 @@ backend/storage/economy_snapshot/
 backend/storage/weather_cache/
 backend/storage/kis_config/
 backend/storage/trading_engine/
+backend/storage/trading_engine/credentials.json
+backend/storage/trading_engine/token.json
+backend/storage/trading_engine/*credentials*.json
+backend/storage/trading_engine/*token*.json
 backend/storage/market_sentiment/
 backend/storage/charts/
 backend/storage/llm_compare_local/

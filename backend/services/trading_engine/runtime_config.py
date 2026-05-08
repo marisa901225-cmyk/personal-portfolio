@@ -23,6 +23,15 @@ def _apply_path_overrides(cfg: TradeEngineConfig) -> None:
     cfg.state_path = _env_text("TRADING_ENGINE_STATE_PATH", cfg.state_path)
     cfg.output_dir = _env_text("TRADING_ENGINE_OUTPUT_DIR", cfg.output_dir)
     cfg.runlog_path = _env_text("TRADING_ENGINE_RUNLOG_PATH", cfg.runlog_path)
+    cfg.price_sync_status_path = _env_text("TRADING_ENGINE_PRICE_SYNC_STATUS_PATH", cfg.price_sync_status_path)
+    cfg.google_calendar_credentials_path = _env_text(
+        "TRADING_ENGINE_GOOGLE_CALENDAR_CREDENTIALS_PATH",
+        cfg.google_calendar_credentials_path,
+    )
+    cfg.google_calendar_token_path = _env_text(
+        "TRADING_ENGINE_GOOGLE_CALENDAR_TOKEN_PATH",
+        cfg.google_calendar_token_path,
+    )
 
 
 def _apply_general_overrides(cfg: TradeEngineConfig) -> None:
@@ -138,6 +147,26 @@ def _apply_general_overrides(cfg: TradeEngineConfig) -> None:
     cfg.notify_on_core_pass_only = _env_bool(
         "TRADING_ENGINE_NOTIFY_ON_CORE_PASS_ONLY",
         cfg.notify_on_core_pass_only,
+    )
+    cfg.google_calendar_enabled = _env_bool(
+        "TRADING_ENGINE_GOOGLE_CALENDAR_ENABLED",
+        cfg.google_calendar_enabled,
+    )
+    cfg.google_calendar_id = _env_text(
+        "TRADING_ENGINE_GOOGLE_CALENDAR_ID",
+        cfg.google_calendar_id,
+    )
+    cfg.google_calendar_timezone = _env_text(
+        "TRADING_ENGINE_GOOGLE_CALENDAR_TIMEZONE",
+        cfg.google_calendar_timezone,
+    )
+    cfg.google_calendar_finalize_hour = _env_int(
+        "TRADING_ENGINE_GOOGLE_CALENDAR_FINALIZE_HOUR",
+        cfg.google_calendar_finalize_hour,
+    )
+    cfg.google_calendar_finalize_minute = _env_int(
+        "TRADING_ENGINE_GOOGLE_CALENDAR_FINALIZE_MINUTE",
+        cfg.google_calendar_finalize_minute,
     )
 
 

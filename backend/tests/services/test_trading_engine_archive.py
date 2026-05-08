@@ -12,6 +12,7 @@ from backend.services.trading_engine.archive import archive_trading_engine_weekl
 from backend.services.trading_engine.bot import HybridTradingBot
 from backend.services.trading_engine.day_chart_review import DayChartReviewResult
 from backend.services.trading_engine.entry_support import apply_day_chart_review, apply_swing_chart_review
+from backend.services.trading_engine.google_calendar import _build_finalize_event
 from backend.services.trading_engine.bot_runtime_support import (
     finalize_account_summary,
     finalize_price_sync_summary,
@@ -477,6 +478,21 @@ def test_price_sync_completion_is_summarized_for_finalize(tmp_path) -> None:
     )
 
     assert summary == "7종목 완료 (2026-05-08 15:33:02 기준)"
+
+
+def test_finalize_google_calendar_event_payload_uses_trade_date_and_summary() -> None:
+    event = _build_finalize_event(
+        config=TradeEngineConfig(),
+        trade_date="20260508",
+        summary_text="[마감] 20260508\n실현손익은 57,112원 (+5.71%)이었습니다.",
+        realized_pnl=57112.0,
+        realized_pct=5.7112,
+    )
+
+    assert event["summary"] == "[매매마감] 20260508 57,112원 (+5.71%)"
+    assert event["description"] == "[마감] 20260508\n실현손익은 57,112원 (+5.71%)이었습니다."
+    assert event["start"]["dateTime"].startswith("2026-05-08T15:40:00")
+    assert event["extendedProperties"]["private"]["trading_finalize_date"] == "20260508"
 
 
 def test_archive_trading_engine_weekly_keeps_large_files_on_disk(tmp_path) -> None:

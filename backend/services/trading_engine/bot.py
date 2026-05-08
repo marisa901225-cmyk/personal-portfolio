@@ -31,6 +31,7 @@ from .config import TradeEngineConfig
 from .day_chart_review import review_day_candidates_with_llm, review_swing_candidates_with_llm
 from .execution import handle_open_orders
 from .global_market_signal import get_or_build_global_market_signal
+from .google_calendar import record_finalize_briefing_to_google_calendar
 from .interfaces import TradingAPI
 from .journal import TradeJournal
 from .news_sentiment import build_news_sentiment_signal
@@ -145,6 +146,14 @@ class HybridTradingBot(
             logger=logger,
         ) or fallback_summary_text
         self._notify_text(summary_text)
+        record_finalize_briefing_to_google_calendar(
+            config=self.config,
+            trade_date=today,
+            summary_text=summary_text,
+            realized_pnl=realized_pnl,
+            realized_pct=realized_pct,
+            logger=logger,
+        )
         self.notifier.flush(timeout_sec=2.0)
         return summary_text
 
