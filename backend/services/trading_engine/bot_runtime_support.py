@@ -218,6 +218,67 @@ def summarize_finalize_pass_reasons(pass_reasons: dict[str, int]) -> str:
 
 
 def finalize_account_summary(bot, *, logger: logging.Logger) -> str | None:
+    snapshot = finalize_account_snapshot(bot, logger=logger)
+    if snapshot is None:
+        return None
+
+    cash = snapshot.get("cash")
+    position_count = int(snapshot.get("position_count") or 0)
+    holding_labels = list(snapshot.get("holding_labels") or [])
+    eval_pnl_total = float(snapshot.get("eval_pnl_total") or 0.0)
+    eval_value_total = float(snapshot.get("eval_value_total") or 0.0)
+    cost_basis_total = float(snapshot.get("cost_basis_total") or 0.0)
+
+    parts: list[str] = []
+    if cash is not None:
+        parts.append(f"예수금 {float(cash):,.0f}원")
+    if holding_labels:
+        extra_count = position_count - len(holding_labels)
+        suffix = f" 외 {extra_count}종목" if extra_count > 0 else ""
+        parts.append(f"보유 {position_count}종목: {', '.join(holding_labels)}{suffix}")
+    else:
+        parts.append(f"보유 {position_count}종목")
+    if position_count > 0:
+        if eval_value_total > 0:
+            parts.append(f"평가금액 {eval_value_total:,.0f}원")
+        if eval_pnl_total:
+            eval_pnl_pct = (eval_pnl_total / cost_basis_total * 100.0) if cost_basis_total > 0 else 0.0
+            parts.append(f"평가손익 {eval_pnl_total:,.0f}원 ({eval_pnl_pct:+.2f}%)")
+    return ", ".join(parts)
+
+
+def finalize_calendar_account_summary(bot, *, logger: logging.Logger) -> str | None:
+    context = finalize_calendar_account_context(bot, logger=logger)
+    if context is None:
+        return None
+    return str(context.get("account_line") or "") or None
+
+
+def finalize_calendar_account_context(bot, *, logger: logging.Logger) -> dict[str, object] | None:
+    snapshot = finalize_account_snapshot(bot, logger=logger)
+    if snapshot is None:
+        return None
+
+    cash = snapshot.get("cash")
+    position_count = int(snapshot.get("position_count") or 0)
+    cost_basis_total = float(snapshot.get("cost_basis_total") or 0.0)
+    eval_pnl_total = float(snapshot.get("eval_pnl_total") or 0.0)
+    eval_value_total = float(snapshot.get("eval_value_total") or 0.0)
+    total_value = (float(cash) if cash is not None else 0.0) + eval_value_total
+    if total_value <= 0:
+        return None
+    eval_pct = (eval_pnl_total / cost_basis_total * 100.0) if cost_basis_total > 0 else None
+    parts = [f"총평가 {total_value:,.0f}원"]
+    if cash is not None:
+        parts.append(f"현금 {float(cash):,.0f}원")
+    parts.append(f"보유 {position_count}종목")
+    return {
+        "account_line": " / ".join(parts),
+        "eval_pct": eval_pct,
+    }
+
+
+def finalize_account_snapshot(bot, *, logger: logging.Logger) -> dict[str, object] | None:
     cash_available = getattr(bot.api, "cash_available", None)
     if callable(cash_available):
         try:
@@ -268,22 +329,14 @@ def finalize_account_summary(bot, *, logger: logging.Logger) -> str | None:
     if cash is None and position_count == 0:
         return None
 
-    parts: list[str] = []
-    if cash is not None:
-        parts.append(f"주문가능현금 {float(cash):,.0f}원")
-    if holding_labels:
-        extra_count = position_count - len(holding_labels)
-        suffix = f" 외 {extra_count}종목" if extra_count > 0 else ""
-        parts.append(f"보유 {position_count}종목: {', '.join(holding_labels)}{suffix}")
-    else:
-        parts.append(f"보유 {position_count}종목")
-    if position_count > 0:
-        if eval_value_total > 0:
-            parts.append(f"평가금액 {eval_value_total:,.0f}원")
-        if eval_pnl_total:
-            eval_pnl_pct = (eval_pnl_total / cost_basis_total * 100.0) if cost_basis_total > 0 else 0.0
-            parts.append(f"평가손익 {eval_pnl_total:,.0f}원 ({eval_pnl_pct:+.2f}%)")
-    return ", ".join(parts)
+    return {
+        "cash": cash,
+        "position_count": position_count,
+        "holding_labels": holding_labels,
+        "eval_pnl_total": eval_pnl_total,
+        "eval_value_total": eval_value_total,
+        "cost_basis_total": cost_basis_total,
+    }
 
 
 def finalize_trade_activity_summary(

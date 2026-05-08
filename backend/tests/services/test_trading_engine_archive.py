@@ -12,9 +12,11 @@ from backend.services.trading_engine.archive import archive_trading_engine_weekl
 from backend.services.trading_engine.bot import HybridTradingBot
 from backend.services.trading_engine.day_chart_review import DayChartReviewResult
 from backend.services.trading_engine.entry_support import apply_day_chart_review, apply_swing_chart_review
-from backend.services.trading_engine.google_calendar import _build_finalize_event
+from backend.services.trading_engine.google_calendar import _build_finalize_event, _build_profit_event
 from backend.services.trading_engine.bot_runtime_support import (
     finalize_account_summary,
+    finalize_calendar_account_context,
+    finalize_calendar_account_summary,
     finalize_price_sync_summary,
     finalize_state_sync_summary,
     finalize_trade_activity_summary,
@@ -332,8 +334,33 @@ def test_finalize_account_summary_includes_cash_positions_and_eval_pnl() -> None
 
     assert (
         summary
-        == "주문가능현금 123,456원, 보유 2종목: SKC, 대한광통신, 평가금액 41,000원, 평가손익 1,000원 (+2.50%)"
+        == "예수금 123,456원, 보유 2종목: SKC, 대한광통신, 평가금액 41,000원, 평가손익 1,000원 (+2.50%)"
     )
+
+
+def test_finalize_calendar_account_summary_uses_total_account_value() -> None:
+    class _API:
+        def cash_available(self) -> int:
+            return 123456
+
+        def positions(self) -> list[dict[str, object]]:
+            return [
+                {"name": "SKC", "qty": 2, "avg_price": 10000, "current_price": 11000, "pnl": 2000},
+                {"name": "대한광통신", "qty": 1, "avg_price": 20000, "current_price": 19000, "pnl": -1000},
+            ]
+
+    class _Bot:
+        api = _API()
+
+    summary = finalize_calendar_account_summary(_Bot(), logger=__import__("logging").getLogger(__name__))
+
+    assert summary == "총평가 164,456원 / 현금 123,456원 / 보유 2종목"
+
+    context = finalize_calendar_account_context(_Bot(), logger=__import__("logging").getLogger(__name__))
+    assert context == {
+        "account_line": "총평가 164,456원 / 현금 123,456원 / 보유 2종목",
+        "eval_pct": 2.5,
+    }
 
 
 def test_finalize_trade_activity_summary_names_entries_and_exits(tmp_path, monkeypatch) -> None:
@@ -487,12 +514,36 @@ def test_finalize_google_calendar_event_payload_uses_trade_date_and_summary() ->
         summary_text="[마감] 20260508\n실현손익은 57,112원 (+5.71%)이었습니다.",
         realized_pnl=57112.0,
         realized_pct=5.7112,
+        account_summary="총평가 1,423,000원 / 현금 300,000원 / 보유 4종목",
+        eval_pct=-0.8,
+        trade_activity_summary="매수: 한화오션 외 2건 / 청산: SK하이닉스 - 손절",
     )
 
     assert event["summary"] == "[매매마감] 20260508 57,112원 (+5.71%)"
-    assert event["description"] == "[마감] 20260508\n실현손익은 57,112원 (+5.71%)이었습니다."
+    assert event["description"] == (
+        "[마감] 20260508\n"
+        "손익: 실현 +57,112원 / 평가 -0.80%\n"
+        "계좌: 총평가 1,423,000원 / 현금 300,000원 / 보유 4종목\n"
+        "매수: 한화오션 외 2건\n"
+        "청산: SK하이닉스 - 손절"
+    )
     assert event["start"]["dateTime"].startswith("2026-05-08T15:40:00")
     assert event["extendedProperties"]["private"]["trading_finalize_date"] == "20260508"
+
+
+def test_profit_google_calendar_event_payload_is_concise_all_day_record() -> None:
+    event = _build_profit_event(
+        config=TradeEngineConfig(),
+        trade_date="20260508",
+        realized_pnl=57112.0,
+        pnl_rate=2.20540307,
+    )
+
+    assert event["summary"] == "[자동매매] 57,112원 (+2.21%)"
+    assert event["description"] == "실현손익: 57,112원 (+2.21%)"
+    assert event["start"] == {"date": "2026-05-08"}
+    assert event["end"] == {"date": "2026-05-09"}
+    assert event["extendedProperties"]["private"]["trading_profit_date"] == "20260508"
 
 
 def test_archive_trading_engine_weekly_keeps_large_files_on_disk(tmp_path) -> None:

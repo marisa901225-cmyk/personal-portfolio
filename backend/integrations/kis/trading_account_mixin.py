@@ -324,6 +324,62 @@ class KISAccountTradingMixin:
             )
         return result
 
+    def period_profit(
+        self,
+        *,
+        start_date: str,
+        end_date: str,
+        code: str = "",
+    ) -> list[dict[str, Any]]:
+        """
+        기간별손익일별합산조회.
+        GET /uapi/domestic-stock/v1/trading/inquire-period-profit
+        """
+        cano, acnt_prdt_cd = self._account()
+        params = {
+            "CANO": cano,
+            "ACNT_PRDT_CD": acnt_prdt_cd,
+            "INQR_DVSN": "00",
+            "SORT_DVSN": "00",
+            "PDNO": str(code or "").strip(),
+            "INQR_STRT_DT": self._normalize_yyyymmdd(start_date),
+            "INQR_END_DT": self._normalize_yyyymmdd(end_date),
+            "CBLC_DVSN": "00",
+            "CTX_AREA_FK100": "",
+            "CTX_AREA_NK100": "",
+        }
+        data = self._get(
+            "/uapi/domestic-stock/v1/trading/inquire-period-profit",
+            "TTTC8708R",
+            params,
+        )
+        output = data.get("output1") or []
+        if isinstance(output, dict):
+            output = [output]
+
+        result: list[dict[str, Any]] = []
+        for r in output:
+            if not isinstance(r, dict):
+                continue
+            trade_date = str(r.get("trad_dt") or r.get("TRAD_DT") or "").strip()
+            if not trade_date:
+                continue
+            result.append(
+                {
+                    "trade_date": trade_date,
+                    "realized_pnl": self._to_int(r.get("rlzt_pfls")),
+                    "pnl_rate": self._to_float(r.get("pfls_rt")),
+                    "buy_amount": self._to_int(r.get("buy_amt")),
+                    "sell_amount": self._to_int(r.get("sll_amt")),
+                    "buy_qty": self._to_int(r.get("buy_qty1")),
+                    "sell_qty": self._to_int(r.get("sll_qty1")),
+                    "fee": self._to_int(r.get("fee")),
+                    "tax": self._to_int(r.get("tl_tax")),
+                    "raw": r,
+                }
+            )
+        return result
+
     def cancel_order(self, order_id: str) -> dict[str, Any]:
         """
         주식 주문 취소 [v1_국내주식-003].

@@ -16,6 +16,7 @@ from .bot_runtime_support import (
     empty_candidates,
     entry_sizing_fields,
     finalize_account_summary,
+    finalize_calendar_account_context,
     finalize_price_sync_summary,
     finalize_realized_pnl,
     finalize_state_sync_summary,
@@ -116,6 +117,21 @@ class HybridTradingBot(
         if self.config.initial_capital > 0:
             realized_pct = realized_pnl / self.config.initial_capital * 100.0
         journal_summary = self.journal.summary()
+        account_summary = finalize_account_summary(self, logger=logger)
+        calendar_account_context = finalize_calendar_account_context(self, logger=logger)
+        calendar_account_summary = (
+            str(calendar_account_context.get("account_line") or "") if calendar_account_context else None
+        )
+        calendar_eval_pct = (
+            float(calendar_account_context["eval_pct"])
+            if calendar_account_context and calendar_account_context.get("eval_pct") is not None
+            else None
+        )
+        trade_activity_summary = finalize_trade_activity_summary(
+            journal=self.journal,
+            config=self.config,
+            logger=logger,
+        )
         fallback_summary_text = (
             f"[마감] {today}\n"
             f"{journal_summary}\n"
@@ -128,12 +144,8 @@ class HybridTradingBot(
             realized_pct=realized_pct,
             open_positions=len(self.state.open_positions),
             pass_reasons=self.state.pass_reasons_today,
-            account_summary=finalize_account_summary(self, logger=logger),
-            trade_activity_summary=finalize_trade_activity_summary(
-                journal=self.journal,
-                config=self.config,
-                logger=logger,
-            ),
+            account_summary=account_summary,
+            trade_activity_summary=trade_activity_summary,
             state_sync_summary=finalize_state_sync_summary(
                 journal=self.journal,
                 logger=logger,
@@ -152,6 +164,9 @@ class HybridTradingBot(
             summary_text=summary_text,
             realized_pnl=realized_pnl,
             realized_pct=realized_pct,
+            account_summary=calendar_account_summary,
+            eval_pct=calendar_eval_pct,
+            trade_activity_summary=trade_activity_summary,
             logger=logger,
         )
         self.notifier.flush(timeout_sec=2.0)
