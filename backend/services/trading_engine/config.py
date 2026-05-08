@@ -245,6 +245,7 @@ class TradeEngineConfig:
     state_path: str = "backend/storage/trading_engine/state.json"
     output_dir: str = "backend/storage/trading_engine/output"
     runlog_path: str = "backend/storage/trading_engine/runlog_current.log"
+    price_sync_status_path: str = "backend/storage/trading_engine/sync_prices_status.json"
     archive_inline_max_bytes: int = 1_000_000
 
     # Notifications

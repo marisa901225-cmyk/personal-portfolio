@@ -11,10 +11,15 @@ from .bot_entry_flow import BotEntryFlowMixin
 from .bot_notifications import BotNotificationsMixin
 from .bot_position_management import BotPositionManagementMixin
 from .bot_runtime_support import (
+    build_finalize_message_with_local_llm,
     combine_quote_codes,
     empty_candidates,
     entry_sizing_fields,
+    finalize_account_summary,
+    finalize_price_sync_summary,
     finalize_realized_pnl,
+    finalize_state_sync_summary,
+    finalize_trade_activity_summary,
     log_run_metrics,
     merge_candidate_frames,
     principal_buffer_from_account,
@@ -109,11 +114,36 @@ class HybridTradingBot(
         realized_pct = 0.0
         if self.config.initial_capital > 0:
             realized_pct = realized_pnl / self.config.initial_capital * 100.0
-        summary_text = (
+        journal_summary = self.journal.summary()
+        fallback_summary_text = (
             f"[마감] {today}\n"
-            f"{self.journal.summary()}\n"
+            f"{journal_summary}\n"
             f"실현손익: {realized_pnl:,.0f}원 ({realized_pct:+.2f}%)"
         )
+        summary_text = build_finalize_message_with_local_llm(
+            trade_date=today,
+            journal_summary=journal_summary,
+            realized_pnl=realized_pnl,
+            realized_pct=realized_pct,
+            open_positions=len(self.state.open_positions),
+            pass_reasons=self.state.pass_reasons_today,
+            account_summary=finalize_account_summary(self, logger=logger),
+            trade_activity_summary=finalize_trade_activity_summary(
+                journal=self.journal,
+                config=self.config,
+                logger=logger,
+            ),
+            state_sync_summary=finalize_state_sync_summary(
+                journal=self.journal,
+                logger=logger,
+            ),
+            price_sync_summary=finalize_price_sync_summary(
+                trade_date=today,
+                status_path=self.config.price_sync_status_path,
+                logger=logger,
+            ),
+            logger=logger,
+        ) or fallback_summary_text
         self._notify_text(summary_text)
         self.notifier.flush(timeout_sec=2.0)
         return summary_text

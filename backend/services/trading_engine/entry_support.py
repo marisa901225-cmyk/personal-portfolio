@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from .intraday import passes_day_intraday_confirmation
-from .notification_text import format_candidate_review_message
 from .utils import parse_numeric
 
 
@@ -92,19 +91,6 @@ def apply_day_chart_review(
         selected_code=review.selected_code,
         summary=review.summary,
     )
-    summary = review.summary or "차트 구조 기준으로 shortlist 재검토 완료"
-    selected = review.selected_code or (review.approved_codes[0] if review.approved_codes else "NONE")
-    bot._notify_text(
-        format_candidate_review_message(
-            strategy="DAY",
-            shortlisted_codes=review.shortlisted_codes,
-            selected_code=selected,
-            approved_codes=review.approved_codes,
-            summary=summary,
-        )
-    )
-    for path in review.chart_paths:
-        bot._notify_file(path, caption="[단타][LLM][차트]")
     return review.approved_codes, True
 
 
@@ -141,17 +127,4 @@ def apply_swing_chart_review(
         selected_code=review.selected_code,
         summary=review.summary,
     )
-    summary = review.summary or "차트 구조 기준으로 swing shortlist 재검토 완료"
-    selected = review.selected_code or (review.approved_codes[0] if review.approved_codes else "NONE")
-    bot._notify_text(
-        format_candidate_review_message(
-            strategy="SWING",
-            shortlisted_codes=review.shortlisted_codes,
-            selected_code=selected,
-            approved_codes=review.approved_codes,
-            summary=summary,
-        )
-    )
-    for path in review.chart_paths:
-        bot._notify_file(path, caption="[스윙][LLM][차트]")
     return review.approved_codes, True

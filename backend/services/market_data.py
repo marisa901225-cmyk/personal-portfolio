@@ -1,5 +1,7 @@
 
+import json
 import logging
+import os
 from datetime import datetime
 from typing import Optional, Dict, Any
 from sqlalchemy import func
@@ -10,6 +12,8 @@ from backend.integrations.kis.kis_client import fetch_kis_prices_krw, fetch_usdk
 from backend.services.portfolio import PortfolioService
 
 logger = logging.getLogger(__name__)
+
+PRICE_SYNC_STATUS_PATH = "backend/storage/trading_engine/sync_prices_status.json"
 
 
 async def send_kis_alert(message: str, level: str = "WARNING") -> None:
@@ -222,12 +226,33 @@ class MarketDataService:
         """
         시세 동기화 완료 알림 전송
         """
-        from backend.integrations.telegram import send_telegram_message
-        
         try:
-            msg = await MarketDataService.generate_creative_msg(ticker_count, mock=mock)
-            # 봇 타입을 'main'으로 명시하여 DB 백업 봇으로 발송
-            await send_telegram_message(msg, bot_type="main")
-            logger.info("Price sync notification sent.")
+            MarketDataService.record_sync_completion(ticker_count=ticker_count, mock=mock)
+            logger.info("Price sync completion recorded.")
         except Exception as e:
-            logger.error(f"Failed to send sync notification: {e}")
+            logger.error(f"Failed to record sync notification: {e}")
+
+    @staticmethod
+    def record_sync_completion(
+        *,
+        ticker_count: int,
+        mock: bool = False,
+        status_path: str = PRICE_SYNC_STATUS_PATH,
+        now: datetime | None = None,
+    ) -> dict[str, object]:
+        from pytz import timezone
+
+        KST = timezone("Asia/Seoul")
+        sync_time = now or datetime.now(KST)
+        payload: dict[str, object] = {
+            "trade_date": sync_time.strftime("%Y%m%d"),
+            "synced_at": sync_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "ticker_count": int(ticker_count),
+            "mock": bool(mock),
+        }
+        os.makedirs(os.path.dirname(status_path), exist_ok=True)
+        tmp_path = f"{status_path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False)
+        os.replace(tmp_path, status_path)
+        return payload

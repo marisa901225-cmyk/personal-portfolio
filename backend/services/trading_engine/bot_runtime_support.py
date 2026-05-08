@@ -1,14 +1,26 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 import logging
 
 import pandas as pd
 
 from .config import TradeEngineConfig
+from ..llm.service import LLMService
+from ..prompt_loader import load_prompt
+from .journal import TradeJournal
+from .notification_text import reason_label
 from .run_context import CachedTradingAPI, TradingRunMetrics
+from .stock_master import load_stock_master_map
 from .strategy import Candidates
 from .utils import parse_numeric
+
+_DEFAULT_FINALIZE_SYSTEM_PROMPT = (
+    "너는 자동매매 마감 문자를 읽기 쉽게 정리하는 비서다. "
+    "입력에 있는 숫자와 사실만 사용하고, 한국어로 4~7줄 마감 브리핑을 작성하라. "
+    "매수와 청산은 줄을 나누고, 첫 줄은 반드시 '[마감] YYYYMMDD' 형식으로 시작하라."
+)
 
 
 def entry_sizing_fields(result: object) -> dict[str, object]:
@@ -98,6 +110,324 @@ def finalize_realized_pnl(bot, *, logger: logging.Logger) -> float:
     if broker_realized_pnl is not None:
         bot.state.realized_pnl_today = broker_realized_pnl
     return float(bot.state.realized_pnl_today)
+
+
+def build_finalize_message_with_local_llm(
+    *,
+    trade_date: str,
+    journal_summary: str,
+    realized_pnl: float,
+    realized_pct: float,
+    open_positions: int,
+    pass_reasons: dict[str, int],
+    logger: logging.Logger,
+    account_summary: str | None = None,
+    trade_activity_summary: str | None = None,
+    state_sync_summary: str | None = None,
+    price_sync_summary: str | None = None,
+) -> str | None:
+    llm = LLMService.get_instance()
+    if not llm.settings.is_remote_configured():
+        return None
+
+    raw_context = (
+        f"거래일: {trade_date}\n"
+        f"이벤트 요약: {journal_summary or '이벤트 없음'}\n"
+        f"실현손익: {realized_pnl:,.0f}원 ({realized_pct:+.2f}%)\n"
+        f"오늘 매매 요약: {trade_activity_summary or '체결/청산 특이사항 없음'}\n"
+        f"상태동기화: {state_sync_summary or '0건'}\n"
+        f"시세동기화: {price_sync_summary or '확인 없음'}\n"
+        f"마감 시 열린 포지션 수: {open_positions}\n"
+        f"계좌 상황: {account_summary or '확인 불가'}\n"
+        f"패스 특이사항: {summarize_finalize_pass_reasons(pass_reasons)}\n"
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": load_prompt("trading_finalize_summary_system") or _DEFAULT_FINALIZE_SYSTEM_PROMPT,
+        },
+        {
+            "role": "user",
+            "content": raw_context,
+        },
+    ]
+    try:
+        text = llm.generate_chat(
+            messages,
+            max_tokens=900,
+            temperature=0.2,
+            model="gpt-5.4-mini",
+            allow_paid_fallback=True,
+        )
+    except Exception:
+        logger.warning("trading finalize local LLM summary failed", exc_info=True)
+        return None
+
+    text = _clean_finalize_llm_message(text)
+    if not text:
+        return None
+    if not text.startswith("[마감]"):
+        text = f"[마감] {trade_date}\n{text}"
+    realized_amount_text = f"{realized_pnl:,.0f}원"
+    if realized_amount_text not in text:
+        text = f"{text}\n실현손익: {realized_pnl:,.0f}원 ({realized_pct:+.2f}%)"
+    return text
+
+
+def _clean_finalize_llm_message(text: str) -> str:
+    lines: list[str] = []
+    in_reason = False
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.lower().startswith("<reason"):
+            in_reason = True
+            continue
+        if line.lower().startswith("</reason"):
+            in_reason = False
+            continue
+        if in_reason:
+            continue
+        if line.startswith("```"):
+            continue
+        lines.append(line)
+    cleaned = "\n".join(lines).strip()
+    return cleaned.replace("%)로", "%)으로")
+
+
+def summarize_finalize_pass_reasons(pass_reasons: dict[str, int]) -> str:
+    noteworthy_labels = {
+        "DAILY_MAX_LOSS": "일일 손실 한도 도달",
+        "DAY_AFTERNOON_LOSS_LIMIT": "오후 단타 손실 제한",
+        "DAY_ENTRY_FAILED": "단타 진입 실패",
+        "FETCH_FAILED": "장중 데이터 조회 실패",
+        "MAX_CONSECUTIVE_LOSSES": "연속 손실 제한",
+        "STATE_LOAD_CORRUPT": "상태 파일 손상 감지",
+        "STATE_RECOVERY_REQUIRED": "상태 복구 점검 필요",
+        "SWING_ENTRY_FAILED": "스윙 진입 실패",
+    }
+    phrases = [
+        noteworthy_labels[str(reason)]
+        for reason, count in sorted(pass_reasons.items(), key=lambda item: str(item[0]))
+        if int(count) > 0 and str(reason) in noteworthy_labels
+    ]
+    if not phrases:
+        return "특이사항 없음"
+    return ", ".join(dict.fromkeys(phrases))
+
+
+def finalize_account_summary(bot, *, logger: logging.Logger) -> str | None:
+    cash_available = getattr(bot.api, "cash_available", None)
+    if callable(cash_available):
+        try:
+            cash = parse_numeric(cash_available())
+        except Exception:
+            logger.warning("finalize account cash snapshot failed", exc_info=True)
+            cash = None
+    else:
+        cash = None
+
+    positions_fn = getattr(bot.api, "positions", None)
+    if callable(positions_fn):
+        try:
+            positions = positions_fn() or []
+        except Exception:
+            logger.warning("finalize account positions snapshot failed", exc_info=True)
+            positions = []
+    else:
+        positions = []
+
+    position_count = 0
+    eval_pnl_total = 0.0
+    eval_value_total = 0.0
+    cost_basis_total = 0.0
+    holding_labels: list[str] = []
+    for item in positions:
+        if not isinstance(item, dict):
+            continue
+        qty = parse_numeric(item.get("qty") or item.get("hldg_qty"))
+        if qty is None or qty <= 0:
+            continue
+        position_count += 1
+        code = str(item.get("code") or item.get("pdno") or "").strip()
+        name = str(item.get("name") or item.get("prdt_name") or "").strip()
+        if len(holding_labels) < 3:
+            if name or code:
+                holding_labels.append(name or code)
+        avg_price = parse_numeric(item.get("avg_price") or item.get("pchs_avg_pric"))
+        current_price = parse_numeric(item.get("current_price") or item.get("prpr"))
+        pnl = parse_numeric(item.get("pnl") or item.get("evlu_pfls_amt"))
+        if pnl is not None:
+            eval_pnl_total += float(pnl)
+        if avg_price is not None and avg_price > 0:
+            cost_basis_total += float(avg_price) * float(qty)
+        if current_price is not None and current_price > 0:
+            eval_value_total += float(current_price) * float(qty)
+
+    if cash is None and position_count == 0:
+        return None
+
+    parts: list[str] = []
+    if cash is not None:
+        parts.append(f"주문가능현금 {float(cash):,.0f}원")
+    if holding_labels:
+        extra_count = position_count - len(holding_labels)
+        suffix = f" 외 {extra_count}종목" if extra_count > 0 else ""
+        parts.append(f"보유 {position_count}종목: {', '.join(holding_labels)}{suffix}")
+    else:
+        parts.append(f"보유 {position_count}종목")
+    if position_count > 0:
+        if eval_value_total > 0:
+            parts.append(f"평가금액 {eval_value_total:,.0f}원")
+        if eval_pnl_total:
+            eval_pnl_pct = (eval_pnl_total / cost_basis_total * 100.0) if cost_basis_total > 0 else 0.0
+            parts.append(f"평가손익 {eval_pnl_total:,.0f}원 ({eval_pnl_pct:+.2f}%)")
+    return ", ".join(parts)
+
+
+def finalize_trade_activity_summary(
+    *,
+    journal: TradeJournal,
+    config: TradeEngineConfig,
+    logger: logging.Logger,
+) -> str | None:
+    rows = _load_journal_rows(journal.jsonl_path, logger=logger)
+    if not rows:
+        return None
+
+    name_map = _load_finalize_name_map(config=config, logger=logger)
+    entries_by_code: dict[str, str] = {}
+    exit_by_code: dict[str, str] = {}
+
+    for row in rows:
+        event = str(row.get("event") or "").strip().upper()
+        code = str(row.get("code") or "").strip()
+        if not code:
+            continue
+        name = _resolve_finalize_stock_name(code, name_map)
+        if event in {"ENTRY_FILL", "STATE_RECONCILE_ADD"}:
+            qty = int(parse_numeric(row.get("qty")) or 0)
+            avg_price = parse_numeric(row.get("avg_price"))
+            strategy_type = str(row.get("strategy_type") or "").strip().upper()
+            strategy_label = "스윙" if strategy_type == "S" else "단타" if strategy_type == "T" else "파킹" if strategy_type == "P" else ""
+            price_text = f" {float(avg_price):,.0f}원" if avg_price is not None else ""
+            qty_text = f" {qty}주" if qty > 0 else ""
+            prefix = f"{strategy_label} " if strategy_label else ""
+            entries_by_code[code] = f"{prefix}{name}{qty_text}{price_text}".strip()
+            continue
+
+        exit_text = _format_finalize_exit_row(row=row, name=name)
+        if exit_text:
+            exit_by_code[code] = exit_text
+
+    parts: list[str] = []
+    if entries_by_code:
+        parts.append(f"매수: {_join_limited(list(entries_by_code.values()))}")
+    if exit_by_code:
+        parts.append(f"청산: {_join_limited(list(exit_by_code.values()))}")
+    return " / ".join(parts) if parts else None
+
+
+def finalize_state_sync_summary(
+    *,
+    journal: TradeJournal,
+    logger: logging.Logger,
+) -> str | None:
+    rows = _load_journal_rows(journal.jsonl_path, logger=logger)
+    if not rows:
+        return None
+    sync_count = sum(1 for row in rows if str(row.get("event") or "").strip().upper().startswith("STATE_RECONCILE_"))
+    if sync_count <= 0:
+        return None
+    return f"{sync_count}건"
+
+
+def finalize_price_sync_summary(
+    *,
+    trade_date: str,
+    status_path: str,
+    logger: logging.Logger,
+) -> str | None:
+    try:
+        with open(status_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError):
+        logger.warning("finalize price sync status read failed path=%s", status_path, exc_info=True)
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if str(payload.get("trade_date") or "") != str(trade_date):
+        return None
+    ticker_count = int(parse_numeric(payload.get("ticker_count")) or 0)
+    if ticker_count <= 0:
+        return None
+    synced_at = str(payload.get("synced_at") or "").strip()
+    if synced_at:
+        return f"{ticker_count}종목 완료 ({synced_at} 기준)"
+    return f"{ticker_count}종목 완료"
+
+
+def _load_journal_rows(path: str, *, logger: logging.Logger) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(row, dict):
+                    rows.append(row)
+    except OSError:
+        logger.warning("finalize trade journal read failed path=%s", path, exc_info=True)
+    return rows
+
+
+def _load_finalize_name_map(*, config: TradeEngineConfig, logger: logging.Logger) -> dict[str, str]:
+    try:
+        master_map = load_stock_master_map(
+            kospi_master_path=config.industry_kospi_master_path,
+            kosdaq_master_path=config.industry_kosdaq_master_path,
+        )
+    except Exception:
+        logger.warning("finalize stock master load failed", exc_info=True)
+        return {}
+    return {code: info.name for code, info in master_map.items() if getattr(info, "name", "")}
+
+
+def _resolve_finalize_stock_name(code: str, name_map: dict[str, str]) -> str:
+    return str(name_map.get(code) or code).strip() or code
+
+
+def _format_finalize_exit_row(*, row: dict[str, object], name: str) -> str | None:
+    event = str(row.get("event") or "").strip().upper()
+    if event not in {"EXIT_FILL", "STATE_RECONCILE_DROP"}:
+        return None
+    reason = str(row.get("reason") or row.get("exit_reason") or "").strip().upper()
+    if event == "STATE_RECONCILE_DROP":
+        reason = str(row.get("exit_reason") or "").strip().upper()
+        if not reason:
+            return None
+    qty = int(parse_numeric(row.get("exit_fill_qty") or row.get("qty")) or 0)
+    pnl_pct = parse_numeric(row.get("exit_fill_pnl_pct") or row.get("pnl_pct"))
+    price = parse_numeric(row.get("exit_fill_avg_price") or row.get("avg_price"))
+    qty_text = f" {qty}주" if qty > 0 else ""
+    price_text = f" {float(price):,.0f}원" if price is not None else ""
+    pnl_text = f" {float(pnl_pct):+.2f}%" if pnl_pct is not None else ""
+    reason_text = reason_label(reason) if reason else "청산"
+    return f"{name}{qty_text} {reason_text}{price_text}{pnl_text}".strip()
+
+
+def _join_limited(items: list[str], *, limit: int = 6) -> str:
+    visible = [item for item in items if item][:limit]
+    suffix = f" 외 {len(items) - limit}건" if len(items) > limit else ""
+    return ", ".join(visible) + suffix
 
 
 def fetch_account_realized_pnl(bot, *, logger: logging.Logger) -> float | None:

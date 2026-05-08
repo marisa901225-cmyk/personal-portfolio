@@ -41,7 +41,7 @@ class BotPositionManagementMixin:
                 self.state,
                 trade_date=self.state.trade_date,
                 journal=self._journal,
-                notify_text=self._notify_text,
+                notify_text=lambda _msg: None,
                 config=self.config,
                 now=now,
                 logger=logger,
