@@ -116,7 +116,71 @@ def test_reconcile_state_drop_links_pending_exit_order_without_estimated_pnl() -
     assert "estimated_pnl_pct" not in journal_rows[0][1]
     assert notifications == [
         "[상태동기화][정리] 034020 로컬수량=1 브로커수량=0 기준=브로커계좌조회 "
-        "마지막가=127000 주문사유=수익보전 이탈 주문번호=0020845000"
+        "마지막가=127000 로컬평단=124800 마지막가기준손익=+1.76% "
+        "주문사유=수익보전 이탈 주문번호=0020845000"
+    ]
+
+def test_reconcile_state_drop_links_pending_exit_fill_from_daily_ccld() -> None:
+    from backend.services.trading_engine.position_helpers import reconcile_state_with_broker_positions
+
+    class FillLookupAPI(FakeAPI):
+        def daily_order_fills(self, **kwargs) -> list[dict]:
+            assert kwargs["start_date"] == "20260508"
+            assert kwargs["end_date"] == "20260508"
+            assert kwargs["code"] == "319400"
+            assert kwargs["order_id"] == "0008965100"
+            assert kwargs["side"] == "01"
+            return [
+                {
+                    "order_id": "0008965100",
+                    "code": "319400",
+                    "filled_qty": 8,
+                    "avg_price": 35_400.0,
+                }
+            ]
+
+    api = FillLookupAPI()
+    api._positions = []
+    api._quotes["319400"] = {"price": 35_400, "change_pct": -1.1}
+    state = new_state("20260508")
+    state.open_positions["319400"] = PositionState(
+        type="T",
+        entry_time="2026-05-08T09:08:00",
+        entry_price=35_800.0,
+        qty=8,
+        highest_price=36_300.0,
+        entry_date="20260508",
+        locked_profit_pct=0.005,
+    )
+    state.pending_exit_orders["319400"] = {
+        "strategy_type": "T",
+        "reason": "LOCK",
+        "order_id": "0008965100",
+        "qty": 8,
+        "order_time": "091500",
+    }
+    journal_rows: list[tuple[str, dict]] = []
+    notifications: list[str] = []
+
+    reconcile_state_with_broker_positions(
+        api,
+        state,
+        trade_date="20260508",
+        journal=lambda event, **fields: journal_rows.append((event, fields)),
+        notify_text=notifications.append,
+        now=datetime(2026, 5, 8, 9, 16, 0),
+    )
+
+    assert "319400" not in state.open_positions
+    assert journal_rows[0][0] == "STATE_RECONCILE_DROP"
+    assert journal_rows[0][1]["exit_fill_qty"] == 8
+    assert journal_rows[0][1]["exit_fill_avg_price"] == 35_400.0
+    assert round(journal_rows[0][1]["exit_fill_pnl_pct"], 4) == -1.1173
+    assert notifications == [
+        "[상태동기화][정리] 319400 로컬수량=8 브로커수량=0 기준=브로커계좌조회 "
+        "마지막가=35400 로컬평단=35800 마지막가기준손익=-1.12% "
+        "체결수량=8 체결가=35400 체결손익=-1.12% "
+        "주문사유=수익보전 이탈(마지막가 기준 평단 하회) 주문번호=0008965100"
     ]
 
 def test_reconcile_state_adds_broker_only_position_using_day_journal_hint(tmp_path) -> None:

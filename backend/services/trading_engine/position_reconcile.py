@@ -72,6 +72,17 @@ def reconcile_state_with_broker_positions(
         if isinstance(pending_exit, dict):
             drop_meta["exit_reason"] = str(pending_exit.get("reason") or "").strip() or None
             drop_meta["exit_order_id"] = str(pending_exit.get("order_id") or "").strip() or None
+            drop_meta.update(
+                collect_exit_fill_meta(
+                    api,
+                    code=code,
+                    trade_date=trade_date,
+                    order_id=drop_meta["exit_order_id"],
+                )
+            )
+            fill_avg_price = parse_numeric(drop_meta.get("exit_fill_avg_price"))
+            if fill_avg_price is not None and pos.entry_price > 0:
+                drop_meta["exit_fill_pnl_pct"] = (float(fill_avg_price) / float(pos.entry_price) - 1.0) * 100.0
         if logger is not None:
             logger.warning(
                 "state reconcile dropped stale position code=%s type=%s qty=%s broker_qty=0 last_price=%s",
@@ -90,6 +101,9 @@ def reconcile_state_with_broker_positions(
             last_quote_price=drop_meta["last_quote_price"],
             exit_reason=drop_meta.get("exit_reason"),
             exit_order_id=drop_meta.get("exit_order_id"),
+            exit_fill_qty=drop_meta.get("exit_fill_qty"),
+            exit_fill_avg_price=drop_meta.get("exit_fill_avg_price"),
+            exit_fill_pnl_pct=drop_meta.get("exit_fill_pnl_pct"),
         )
         notify_text(format_drop_notification(code=code, position=pos, drop_meta=drop_meta, config=config))
 
@@ -230,6 +244,58 @@ def collect_drop_meta(
     }
 
 
+def collect_exit_fill_meta(
+    api: TradingAPI,
+    *,
+    code: str,
+    trade_date: str,
+    order_id: object,
+) -> dict[str, float | int | None]:
+    normalized_order_id = str(order_id or "").strip()
+    if not normalized_order_id:
+        return {}
+
+    fill_lookup = getattr(api, "daily_order_fills", None)
+    if not callable(fill_lookup):
+        return {}
+
+    try:
+        rows = fill_lookup(
+            start_date=trade_date,
+            end_date=trade_date,
+            code=code,
+            order_id=normalized_order_id,
+            side="01",
+        ) or []
+    except Exception:
+        return {}
+
+    total_qty = 0
+    total_value = 0.0
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        row_order_id = str(row.get("order_id") or row.get("odno") or "").strip()
+        if row_order_id and row_order_id != normalized_order_id:
+            continue
+        row_code = str(row.get("code") or row.get("pdno") or "").strip()
+        if row_code and row_code != code:
+            continue
+        qty = int(parse_numeric(row.get("filled_qty") or row.get("qty")) or 0)
+        price = parse_numeric(row.get("avg_price") or row.get("price"))
+        if qty <= 0 or price is None or price <= 0:
+            continue
+        total_qty += qty
+        total_value += float(price) * qty
+
+    if total_qty <= 0:
+        return {}
+    return {
+        "exit_fill_qty": total_qty,
+        "exit_fill_avg_price": total_value / total_qty,
+    }
+
+
 def format_drop_notification(
     *,
     code: str,
@@ -241,13 +307,22 @@ def format_drop_notification(
     last_quote_price = drop_meta.get("last_quote_price")
     exit_reason = str(drop_meta.get("exit_reason") or "").strip()
     exit_order_id = str(drop_meta.get("exit_order_id") or "").strip()
+    exit_fill_qty = parse_numeric(drop_meta.get("exit_fill_qty"))
+    exit_fill_avg_price = parse_numeric(drop_meta.get("exit_fill_avg_price"))
+    exit_fill_pnl_pct = None
+    if exit_fill_avg_price is not None and position.entry_price > 0:
+        exit_fill_pnl_pct = (float(exit_fill_avg_price) / float(position.entry_price) - 1.0) * 100.0
 
     return format_state_sync_drop_message(
         code=code,
         local_qty=position.qty,
         last_price=float(last_quote_price) if last_quote_price is not None else None,
+        local_avg_price=float(position.entry_price) if position.entry_price > 0 else None,
         exit_reason=exit_reason or None,
         exit_order_id=exit_order_id or None,
+        exit_fill_qty=int(exit_fill_qty) if exit_fill_qty is not None else None,
+        exit_fill_avg_price=float(exit_fill_avg_price) if exit_fill_avg_price is not None else None,
+        exit_fill_pnl_pct=float(exit_fill_pnl_pct) if exit_fill_pnl_pct is not None else None,
     )
 
 

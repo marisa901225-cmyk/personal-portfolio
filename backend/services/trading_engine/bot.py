@@ -171,10 +171,13 @@ class HybridTradingBot(
         with self._state_lock:
             self.state = rollover_state_for_date(self.state, today)
 
+        self._ensure_journal(today)
+        self._reconcile_state_with_broker_positions(now=now)
+        self._refresh_pending_exit_orders()
+
         if not self.has_armed_day_profit_locks():
             return {"status": "SKIP", "reason": "NO_ARMED_DAY_LOCKS"}
 
-        self._ensure_journal(today)
         self.monitor_positions(now=now)
         with self._state_lock:
             self.state.last_run_timestamp = now.isoformat(timespec="seconds")

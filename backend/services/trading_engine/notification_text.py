@@ -211,14 +211,32 @@ def format_state_sync_drop_message(
     code: str,
     local_qty: int,
     last_price: float | None,
+    local_avg_price: float | None = None,
     exit_reason: str | None = None,
     exit_order_id: str | None = None,
+    exit_fill_qty: int | None = None,
+    exit_fill_avg_price: float | None = None,
+    exit_fill_pnl_pct: float | None = None,
 ) -> str:
     parts = [f"[상태동기화][정리] {code} 로컬수량={local_qty} 브로커수량=0 기준=브로커계좌조회"]
     if last_price is not None:
         parts.append(f"마지막가={float(last_price):.0f}")
+    last_price_pnl_pct: float | None = None
+    if exit_reason and local_avg_price is not None and local_avg_price > 0:
+        parts.append(f"로컬평단={float(local_avg_price):.0f}")
+        if last_price is not None:
+            last_price_pnl_pct = (float(last_price) / float(local_avg_price) - 1.0) * 100.0
+            parts.append(f"마지막가기준손익={last_price_pnl_pct:+.2f}%")
+    if exit_fill_qty is not None and exit_fill_avg_price is not None:
+        parts.append(f"체결수량={int(exit_fill_qty)}")
+        parts.append(f"체결가={float(exit_fill_avg_price):.0f}")
+        if exit_fill_pnl_pct is not None:
+            parts.append(f"체결손익={float(exit_fill_pnl_pct):+.2f}%")
     if exit_reason:
-        parts.append(f"주문사유={reason_label(exit_reason)}")
+        reason_text = reason_label(exit_reason)
+        if str(exit_reason).strip().upper() == "LOCK" and last_price_pnl_pct is not None and last_price_pnl_pct <= 0:
+            reason_text = f"{reason_text}(마지막가 기준 평단 하회)"
+        parts.append(f"주문사유={reason_text}")
     if exit_order_id:
         parts.append(f"주문번호={exit_order_id}")
     return " ".join(parts)

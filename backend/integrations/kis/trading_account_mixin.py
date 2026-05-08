@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -254,6 +255,71 @@ class KISAccountTradingMixin:
                     "filled_qty": int(r.get("tot_ccld_qty", 0)),
                     "remaining_qty": int(r.get("psbl_qty", 0)),
                     "order_time": r.get("ord_tmd", ""),
+                }
+            )
+        return result
+
+    def daily_order_fills(
+        self,
+        *,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        code: str = "",
+        order_id: str = "",
+        side: str = "00",
+    ) -> list[dict[str, Any]]:
+        """
+        주식일별주문체결조회 [v1_국내주식-005].
+        GET /uapi/domestic-stock/v1/trading/inquire-daily-ccld
+        """
+        cano, acnt_prdt_cd = self._account()
+        today = datetime.now().strftime("%Y%m%d")
+        normalized_start = self._normalize_yyyymmdd(start_date or today)
+        normalized_end = self._normalize_yyyymmdd(end_date or normalized_start)
+        params = {
+            "CANO": cano,
+            "ACNT_PRDT_CD": acnt_prdt_cd,
+            "INQR_STRT_DT": normalized_start,
+            "INQR_END_DT": normalized_end,
+            "SLL_BUY_DVSN_CD": str(side or "00").strip() or "00",
+            "INQR_DVSN": "00",
+            "PDNO": str(code or "").strip(),
+            "ODNO": str(order_id or "").strip(),
+            "CCLD_DVSN": "01",
+            "INQR_DVSN_3": "00",
+            "INQR_DVSN_1": "",
+            "CTX_AREA_FK100": "",
+            "CTX_AREA_NK100": "",
+            "EXCG_ID_DVSN_CD": "KRX",
+        }
+        data = self._get(
+            "/uapi/domestic-stock/v1/trading/inquire-daily-ccld",
+            "TTTC8001R",
+            params,
+        )
+        output = data.get("output1") or data.get("output") or []
+        if isinstance(output, dict):
+            output = [output]
+
+        result: list[dict[str, Any]] = []
+        for r in output:
+            if not isinstance(r, dict):
+                continue
+            fill_qty = self._to_int(r.get("tot_ccld_qty") or r.get("ccld_qty"))
+            fill_avg_price = self._to_float(r.get("avg_prvs") or r.get("ccld_unpr") or r.get("ord_unpr"))
+            result.append(
+                {
+                    "order_id": str(r.get("odno") or r.get("ODNO") or "").strip(),
+                    "code": str(r.get("pdno") or r.get("PDNO") or "").strip(),
+                    "name": str(r.get("prdt_name") or r.get("prdt_name") or "").strip(),
+                    "side": "buy" if str(r.get("sll_buy_dvsn_cd") or "").strip() == "02" else "sell",
+                    "qty": self._to_int(r.get("ord_qty")),
+                    "filled_qty": fill_qty,
+                    "avg_price": fill_avg_price,
+                    "order_price": self._to_float(r.get("ord_unpr")),
+                    "order_time": str(r.get("ord_tmd") or "").strip(),
+                    "fill_time": str(r.get("ccld_tmd") or r.get("ord_tmd") or "").strip(),
+                    "raw": r,
                 }
             )
         return result
