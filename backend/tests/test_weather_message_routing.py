@@ -147,3 +147,13 @@ class WeatherMessageRoutingTests(unittest.IsolatedAsyncioTestCase):
             message,
         )
         self.assertNotIn("news=316108&foo=bar)", message)
+
+    async def test_weather_message_is_not_truncated_before_telegram_send(self):
+        long_text = "오늘 서울은 17도고 낮 최고기온은 22도야. " + ("긴 브리핑 문장입니다. " * 320)
+        fake_llm = _FakeLLM(paid_responses=[long_text], is_paid_configured=True, is_remote_configured=True)
+
+        message, _ = await self._render(fake_llm)
+
+        self.assertIn("긴 브리핑 문장입니다", message)
+        self.assertGreater(len(message), 3500)
+        self.assertNotIn("이하 생략", message)

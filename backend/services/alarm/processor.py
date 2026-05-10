@@ -49,12 +49,21 @@ def _env_optional(key: str) -> Optional[str]:
     return value or None
 
 
-def _sanitize_shared_llm_kwargs(llm_kwargs: dict) -> dict:
-    return {
+def _sanitize_shared_llm_kwargs(llm_kwargs: dict, *, route: str) -> dict:
+    shared_kwargs = {
         key: value
         for key, value in llm_kwargs.items()
         if not key.startswith("summary_") and not key.startswith("random_")
     }
+
+    if route == "random":
+        # Morning briefing passes OpenRouter credentials for notification summaries.
+        # Random topics should use the normal local-first LLMService route and only
+        # fall back through the service's configured default path if local really fails.
+        for key in ("api_key", "base_url", "base_url_override"):
+            shared_kwargs.pop(key, None)
+
+    return shared_kwargs
 
 
 def _resolve_alarm_llm_route(
@@ -65,7 +74,7 @@ def _resolve_alarm_llm_route(
     if route not in _ROUTE_ENV_KEYS:
         raise ValueError(f"Unknown alarm LLM route: {route}")
 
-    shared_kwargs = _sanitize_shared_llm_kwargs(llm_kwargs)
+    shared_kwargs = _sanitize_shared_llm_kwargs(llm_kwargs, route=route)
     route_prefix = f"{route}_"
     route_base_url = llm_kwargs.get(f"{route_prefix}base_url_override") or _env_optional(
         _ROUTE_ENV_KEYS[route]["base_url"]
@@ -77,9 +86,14 @@ def _resolve_alarm_llm_route(
     if route_base_url:
         shared_kwargs["base_url_override"] = route_base_url
 
-    # endpoint를 명시적으로 갈라 태울 때는 공용 model_override를 그대로 넘기지 않고,
-    # route별 model이 없으면 해당 endpoint의 /v1/models 자동 탐색을 사용한다.
-    resolved_model = route_model if route_model else (None if route_base_url else model_override)
+    # Random topics must not inherit summary-only OpenRouter model overrides.
+    # With no random-specific model, let the local endpoint expose its model via /v1/models.
+    if route == "random":
+        resolved_model = route_model
+    else:
+        # endpoint를 명시적으로 갈라 태울 때는 공용 model_override를 그대로 넘기지 않고,
+        # route별 model이 없으면 해당 endpoint의 /v1/models 자동 탐색을 사용한다.
+        resolved_model = route_model if route_model else (None if route_base_url else model_override)
     return resolved_model, shared_kwargs
 
 

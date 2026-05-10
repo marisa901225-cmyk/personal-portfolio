@@ -14,7 +14,6 @@ from ...services.llm_service import LLMService
 from ...services.prompt_loader import load_prompt
 
 logger = logging.getLogger(__name__)
-_WEATHER_MESSAGE_MAX_CHARS = 3500
 _MORNING_MIN_TEXT_LEN = 20
 _INVEN_NEWS_URL_RE = re.compile(r"https?://(?:www\.)?inven\.co\.kr/webzine/news/\?[^\s\)<>\"']+")
 KST = ZoneInfo("Asia/Seoul")
@@ -459,20 +458,6 @@ async def generate_weather_message_with_llm(
     weekly_derivatives_briefing: Optional[str] = None,
 ) -> str:
     """날씨 정보를 LLM으로 자연어 메시지로 변환한다."""
-    def _trim_for_telegram(text: str, max_chars: int = _WEATHER_MESSAGE_MAX_CHARS) -> str:
-        if len(text) <= max_chars:
-            return text
-        truncated = text[:max_chars]
-        cut_idx = max(
-            truncated.rfind("\n"),
-            truncated.rfind(". "),
-            truncated.rfind("! "),
-            truncated.rfind("? "),
-        )
-        if cut_idx >= 200:
-            truncated = truncated[:cut_idx]
-        return truncated.rstrip() + "\n\n... (이하 생략)"
-
     def _is_valid_message(text: str) -> bool:
         return len((text or "").strip()) >= _MORNING_MIN_TEXT_LEN
 
@@ -488,7 +473,7 @@ async def generate_weather_message_with_llm(
             max_temp=max_temp,
         )
         normalized = _linkify_inven_news_urls_for_telegram(normalized)
-        return _trim_for_telegram(normalized)
+        return normalized
 
     def _format_futures_options_data(data: Optional[Dict]) -> str:
         if not data:

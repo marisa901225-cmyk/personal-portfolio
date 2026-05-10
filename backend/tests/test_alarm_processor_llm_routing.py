@@ -92,6 +92,43 @@ class TestAlarmProcessorLlmRouting(unittest.IsolatedAsyncioTestCase):
         )
         mock_summary.assert_not_awaited()
 
+    async def test_random_route_does_not_inherit_summary_openrouter_kwargs(self):
+        db = MagicMock()
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "ALARM_RANDOM_LLM_BASE_URL": "",
+                    "ALARM_RANDOM_MODEL_OVERRIDE": "",
+                },
+                clear=False,
+            ),
+            patch.object(processor, "check_upcoming_matches", new=AsyncMock()),
+            patch.object(processor, "_get_nb_pipeline", return_value=None),
+            patch("backend.services.users.get_or_create_single_user", return_value=MagicMock(id=1)),
+            patch.object(
+                processor,
+                "generate_random_message_payload",
+                new=AsyncMock(return_value={"title": "랜덤 제목", "body": "랜덤 본문"}),
+            ) as mock_random,
+            patch.object(processor, "summarize_with_llm", new=AsyncMock()) as mock_summary,
+            patch.object(processor, "send_telegram_message", new=AsyncMock()),
+        ):
+            await processor.process_pending_alarms(
+                db,
+                model_override="openai/gpt-5.1-chat",
+                api_key="openrouter-key",
+                base_url="https://openrouter.ai/api/v1",
+            )
+
+        self.assertIsNone(mock_random.await_args.kwargs["model"])
+        self.assertNotIn("api_key", mock_random.await_args.kwargs)
+        self.assertNotIn("base_url", mock_random.await_args.kwargs)
+        self.assertNotIn("base_url_override", mock_random.await_args.kwargs)
+        mock_summary.assert_not_awaited()
+
     async def test_filtered_promo_alarm_is_closed_without_summary(self):
         alarm = SimpleNamespace(
             id=1,
