@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import calendar
 import json
 import logging
 import os
@@ -62,10 +63,12 @@ def _quarter_key(now: datetime) -> str:
 
 
 def _is_quarter_window(now: datetime) -> bool:
-    if now.month not in {1, 4, 7, 10}:
+    if now.month not in {3, 6, 9, 12}:
         return False
-    max_day = _env_int("PENSION_REBALANCE_QUARTER_WINDOW_DAYS", 7)
-    return 1 <= now.day <= max_day
+    window_days = max(1, _env_int("PENSION_REBALANCE_QUARTER_WINDOW_DAYS", 7))
+    last_day = calendar.monthrange(now.year, now.month)[1]
+    first_window_day = max(1, last_day - window_days + 1)
+    return first_window_day <= now.day <= last_day
 
 
 def _read_state(path: Path) -> dict:
