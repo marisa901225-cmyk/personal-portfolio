@@ -16,6 +16,8 @@ import json
 import logging
 import os
 import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -76,6 +78,17 @@ _KIS_VALUE_RANK_PRICE_BUCKETS: tuple[tuple[str, str], ...] = (
     ("200000", "500000"),
     ("500000", "9999999"),
 )
+_AUTH_EXPIRY_BUFFER_SEC = 60
+
+
+@dataclass(slots=True, frozen=True)
+class KISDirectCredentials:
+    app_key: str
+    app_secret: str
+    account: str
+    product: str = "01"
+    base_url: str = "https://openapi.koreainvestment.com:9443"
+    user_agent: str = "MyAsset"
 
 
 class KISTradingBase:
@@ -87,31 +100,55 @@ class KISTradingBase:
     _daily_index_bars_cache_ttl_sec = _KIS_DAILY_INDEX_BARS_CACHE_TTL_SEC
     _quote_cache_ttl_sec = _KIS_QUOTE_CACHE_TTL_SEC
 
-    def __init__(self) -> None:
+    def __init__(self, credentials: KISDirectCredentials | None = None) -> None:
         from . import kis_client as core
 
-        core._ensure_kis_modules_loaded()
-        core._ensure_auth()
-
-        self._core = core
-        self._ka = core.ka
-        import kis_auth_rest  # type: ignore
-
+        self._direct_credentials = credentials
+        self._direct_access_token: str | None = None
+        self._direct_token_expires_at: datetime | None = None
         self._session = requests.Session()
-        self._rest_throttle = kis_auth_rest._throttle_rest
         self._daily_bars_cache: dict[tuple[str, str, int], tuple[float, pd.DataFrame]] = {}
         self._daily_index_bars_cache: dict[tuple[str, str, int], tuple[float, pd.DataFrame]] = {}
         self._quote_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._holiday_rows_cache: dict[str, tuple[str, list[dict[str, Any]]]] = {}
         self._daily_bars_disk_cache = DailyBarsDiskCache(DEFAULT_DAILY_BARS_DISK_CACHE_PATH)
-        self._secondary_market_ctx = build_secondary_market_context(
-            min_gap_by_path=_KIS_HTTP_PATH_MIN_GAP_SEC,
-        )
+        self._secondary_market_ctx = None
+        self._core = core
+        self._ka = None
+        self._rest_throttle = None
+
+        if credentials is None:
+            core._ensure_kis_modules_loaded()
+            core._ensure_auth()
+            self._ka = core.ka
+            import kis_auth_rest  # type: ignore
+
+            self._rest_throttle = kis_auth_rest._throttle_rest
+            self._secondary_market_ctx = build_secondary_market_context(
+                min_gap_by_path=_KIS_HTTP_PATH_MIN_GAP_SEC,
+            )
         if self._secondary_market_ctx is not None:
             logger.info("[KIS TradingAPI] 보조 조회 전용 appkey 활성화")
         logger.info("[KIS TradingAPI] 어댑터 초기화 완료")
 
     def _headers(self, tr_id: str, tr_cont: str = "") -> dict[str, str]:
+        if self._direct_credentials is not None:
+            token = self._ensure_direct_auth()
+            h = {
+                "content-type": "application/json",
+                "authorization": f"Bearer {token}",
+                "appkey": self._direct_credentials.app_key,
+                "appsecret": self._direct_credentials.app_secret,
+                "tr_id": tr_id,
+                "custtype": "P",
+                "User-Agent": self._direct_credentials.user_agent,
+            }
+            if tr_cont:
+                h["tr_cont"] = tr_cont
+            return h
+
+        if self._ka is None:
+            raise RuntimeError("KIS adapter is not initialized")
         h = self._ka._getBaseHeader()
         h["tr_id"] = tr_id
         h["custtype"] = "P"
@@ -120,11 +157,59 @@ class KISTradingBase:
         return h
 
     def _base_url(self) -> str:
+        if self._direct_credentials is not None:
+            return self._direct_credentials.base_url
+        if self._ka is None:
+            raise RuntimeError("KIS adapter is not initialized")
         return self._ka.getTREnv().my_url
 
     def _account(self) -> tuple[str, str]:
+        if self._direct_credentials is not None:
+            acct = self._direct_credentials.account
+            return acct[:8], acct[8:10] if len(acct) >= 10 else (self._direct_credentials.product or "01")
+        if self._ka is None:
+            raise RuntimeError("KIS adapter is not initialized")
         acct = self._ka.getTREnv().my_acct
         return acct[:8], acct[8:10] if len(acct) >= 10 else "01"
+
+    def _direct_token_is_valid(self) -> bool:
+        if not self._direct_access_token:
+            return False
+        if self._direct_token_expires_at is None:
+            return True
+        return datetime.now() + timedelta(seconds=_AUTH_EXPIRY_BUFFER_SEC) < self._direct_token_expires_at
+
+    def _ensure_direct_auth(self, *, force: bool = False) -> str:
+        credentials = self._direct_credentials
+        if credentials is None:
+            raise RuntimeError("direct KIS credentials are not configured")
+        if not force and self._direct_token_is_valid():
+            return str(self._direct_access_token)
+
+        payload = {
+            "grant_type": "client_credentials",
+            "appkey": credentials.app_key,
+            "appsecret": credentials.app_secret,
+        }
+        self._throttle_rest()
+        response = self._session.post(
+            f"{credentials.base_url}/oauth2/tokenP",
+            headers={"content-type": "application/json"},
+            data=json.dumps(payload),
+            timeout=(_KIS_HTTP_CONNECT_TIMEOUT_SEC, _KIS_HTTP_READ_TIMEOUT_SEC),
+        )
+        data = response.json()
+        token = str(data.get("access_token") or "").strip()
+        if response.status_code >= 400 or not token:
+            raise RuntimeError(f"KIS direct auth failed: {response.status_code} {data.get('msg_cd')} {data.get('msg1')}")
+        self._direct_access_token = token
+        expires_raw = str(data.get("access_token_token_expired") or "").strip()
+        if expires_raw:
+            try:
+                self._direct_token_expires_at = datetime.strptime(expires_raw, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                self._direct_token_expires_at = None
+        return token
 
     def _throttle_rest(self) -> None:
         throttle = getattr(self, "_rest_throttle", None)
@@ -193,12 +278,26 @@ class KISTradingBase:
         return self._copy_cached_value(copied)
 
     def _is_expired_token_response(self, response: requests.Response, data: dict | None = None) -> bool:
+        if self._direct_credentials is not None:
+            payload = data if isinstance(data, dict) else {}
+            msg_cd = str(payload.get("msg_cd") or "").strip()
+            msg1 = str(payload.get("msg1") or "").strip().lower()
+            text = str(getattr(response, "text", "") or "").lower()
+            return (
+                msg_cd == "EGW00123"
+                or "token expired" in msg1
+                or "기간이 만료된 token" in msg1
+                or (response.status_code == 401 and "token" in text)
+            )
         checker = getattr(getattr(self, "_ka", None), "is_expired_token_response", None)
         if callable(checker):
             return bool(checker(response, data=data))
         return False
 
     def _force_reauth_current_env(self) -> None:
+        if self._direct_credentials is not None:
+            self._ensure_direct_auth(force=True)
+            return
         refresher = getattr(getattr(self, "_ka", None), "force_reauth_current_env", None)
         if callable(refresher):
             refresher()
@@ -263,7 +362,8 @@ class KISTradingBase:
         url = f"{self._base_url()}{path}"
         force_refreshed = False
         for attempt in range(1, _KIS_HTTP_GET_MAX_ATTEMPTS + 1):
-            self._core._ensure_auth()
+            if self._direct_credentials is None:
+                self._core._ensure_auth()
             headers = self._headers(tr_id, tr_cont)
             self._throttle_rest()
             self._throttle_path_min_gap(path)
@@ -327,9 +427,15 @@ class KISTradingBase:
         force_refreshed = False
 
         while True:
-            self._core._ensure_auth()
+            if self._direct_credentials is None:
+                self._core._ensure_auth()
             headers = self._headers(tr_id)
-            self._ka.set_order_hash_key(headers, body)
+            if self._direct_credentials is None:
+                if self._ka is None:
+                    raise RuntimeError("KIS adapter is not initialized")
+                self._ka.set_order_hash_key(headers, body)
+            else:
+                self._set_direct_order_hash_key(headers, body)
             self._throttle_rest()
             try:
                 res = self._session.post(
@@ -367,12 +473,35 @@ class KISTradingBase:
                 logger.error("[KIS API] POST 실패: tr_id=%s msg=%s", tr_id, data.get("msg1"))
             return data
 
+    def _set_direct_order_hash_key(self, headers: dict[str, str], body: dict) -> None:
+        response = self._session.post(
+            f"{self._base_url()}/uapi/hashkey",
+            headers=headers,
+            data=json.dumps(body),
+            timeout=(_KIS_HTTP_CONNECT_TIMEOUT_SEC, _KIS_HTTP_READ_TIMEOUT_SEC),
+        )
+        data = response.json()
+        if self._is_expired_token_response(response, data=data):
+            self._force_reauth_current_env()
+            headers.update(self._headers(str(headers.get("tr_id") or "")))
+            response = self._session.post(
+                f"{self._base_url()}/uapi/hashkey",
+                headers=headers,
+                data=json.dumps(body),
+                timeout=(_KIS_HTTP_CONNECT_TIMEOUT_SEC, _KIS_HTTP_READ_TIMEOUT_SEC),
+            )
+            data = response.json()
+        response.raise_for_status()
+        hash_value = data.get("HASH")
+        if hash_value:
+            headers["hashkey"] = str(hash_value)
+
 
 class KISTradingAPI(KISMarketDataMixin, KISAccountTradingMixin, KISTradingBase):
     """KIS OpenAPI 기반 TradingAPI 프로토콜 구현체."""
 
 
-def create_trading_api() -> KISTradingAPI:
+def create_trading_api(credentials: KISDirectCredentials | None = None) -> KISTradingAPI:
     """
     Trading engine이 호출하는 팩토리 함수.
 
@@ -380,4 +509,4 @@ def create_trading_api() -> KISTradingAPI:
         TRADING_ENGINE_API_FACTORY=backend.integrations.kis.trading_adapter:create_trading_api
     """
     logger.info("[KIS TradingAPI] 팩토리 함수 호출 → KISTradingAPI 생성")
-    return KISTradingAPI()
+    return KISTradingAPI(credentials=credentials)

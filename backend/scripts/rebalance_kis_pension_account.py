@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 from pathlib import Path
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any
 
-import requests
-
+from backend.integrations.kis.trading_adapter import KISDirectCredentials, create_trading_api
 from backend.services.pension_rebalancing import (
     calculate_equity_trend_metrics,
     PensionAsset,
@@ -31,7 +29,6 @@ from backend.services.trading_engine.execution_support import (
 
 
 DEFAULT_RUNTIME_ENV = Path("/app/runtime/myasset.secrets.env")
-DEFAULT_TOKEN_CACHE = Path("/app/runtime/kis_pension_token.json")
 DEFAULT_PROD_URL = "https://openapi.koreainvestment.com:9443"
 DEFAULT_US_SHORT_BOND_CODE = "0048J0"
 
@@ -93,263 +90,74 @@ def _aggressive_limit_price(*, side: str, price: int) -> int:
 
 class PensionKISClient:
     def __init__(self, env: dict[str, str]) -> None:
-        self.app_key = str(env.get("KIS_MY_APP2") or "").strip()
-        self.app_secret = str(env.get("KIS_MY_SEC2") or "").strip()
-        self.account = str(env.get("KIS_MY_ACCT_STOCK2") or "").strip()
-        self.product = str(env.get("KIS_MY_PROD2") or "").strip()
-        self.base_url = str(env.get("KIS_PROD") or DEFAULT_PROD_URL).strip()
-        self.session = requests.Session()
-        self.token = ""
+        app_key = str(env.get("KIS_MY_APP2") or "").strip()
+        app_secret = str(env.get("KIS_MY_SEC2") or "").strip()
+        account = str(env.get("KIS_MY_ACCT_STOCK2") or "").strip()
+        product = str(env.get("KIS_MY_PROD2") or "").strip() or "01"
+        base_url = str(env.get("KIS_PROD") or DEFAULT_PROD_URL).strip()
 
         missing = [
             name
             for name, value in (
-                ("KIS_MY_APP2", self.app_key),
-                ("KIS_MY_SEC2", self.app_secret),
-                ("KIS_MY_ACCT_STOCK2", self.account),
+                ("KIS_MY_APP2", app_key),
+                ("KIS_MY_SEC2", app_secret),
+                ("KIS_MY_ACCT_STOCK2", account),
             )
             if not value
         ]
         if missing:
             raise RuntimeError(f"missing pension KIS env: {','.join(missing)}")
-
-    def _read_cached_token(self) -> str:
-        try:
-            data = json.loads(DEFAULT_TOKEN_CACHE.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return ""
-
-        token = str(data.get("access_token") or "").strip()
-        expires_raw = str(data.get("expires_at") or "").strip()
-        if not token or not expires_raw:
-            return ""
-        try:
-            expires_at = datetime.strptime(expires_raw, "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            return ""
-        if datetime.now() + timedelta(minutes=30) >= expires_at:
-            return ""
-        return token
-
-    def _write_cached_token(self, token: str, expires_at: str) -> None:
-        if not token or not expires_at:
-            return
-        try:
-            DEFAULT_TOKEN_CACHE.parent.mkdir(parents=True, exist_ok=True)
-            DEFAULT_TOKEN_CACHE.write_text(
-                json.dumps({"access_token": token, "expires_at": expires_at}),
-                encoding="utf-8",
+        self.api = create_trading_api(
+            KISDirectCredentials(
+                app_key=app_key,
+                app_secret=app_secret,
+                account=account,
+                product=product,
+                base_url=base_url,
             )
-            DEFAULT_TOKEN_CACHE.chmod(0o600)
-        except OSError:
-            pass
-
-    @property
-    def cano(self) -> str:
-        return self.account[:8]
-
-    @property
-    def acnt_prdt_cd(self) -> str:
-        return self.account[8:10] if len(self.account) >= 10 else (self.product or "01")
-
-    def auth(self) -> None:
-        cached_token = self._read_cached_token()
-        if cached_token:
-            self.token = cached_token
-            return
-
-        response = self.session.post(
-            f"{self.base_url}/oauth2/tokenP",
-            headers={"content-type": "application/json"},
-            data=json.dumps(
-                {
-                    "grant_type": "client_credentials",
-                    "appkey": self.app_key,
-                    "appsecret": self.app_secret,
-                }
-            ),
-            timeout=(3.05, 10.0),
         )
-        data = response.json()
-        token = str(data.get("access_token") or "").strip()
-        if response.status_code >= 400 or not token:
-            raise RuntimeError(f"KIS auth failed: {response.status_code} {data.get('msg_cd')} {data.get('msg1')}")
-        self.token = token
-        self._write_cached_token(token, str(data.get("access_token_token_expired") or "").strip())
-
-    def _headers(self, tr_id: str) -> dict[str, str]:
-        if not self.token:
-            self.auth()
-        return {
-            "content-type": "application/json",
-            "authorization": f"Bearer {self.token}",
-            "appkey": self.app_key,
-            "appsecret": self.app_secret,
-            "tr_id": tr_id,
-            "custtype": "P",
-        }
 
     def balance(self) -> tuple[list[PensionHolding], int]:
-        params = {
-            "CANO": self.cano,
-            "ACNT_PRDT_CD": self.acnt_prdt_cd,
-            "AFHR_FLPR_YN": "N",
-            "OFL_YN": "",
-            "INQR_DVSN": "01",
-            "UNPR_DVSN": "01",
-            "FUND_STTL_ICLD_YN": "N",
-            "FNCG_AMT_AUTO_RDPT_YN": "N",
-            "PRCS_DVSN": "00",
-            "CTX_AREA_FK100": "",
-            "CTX_AREA_NK100": "",
-        }
-        response = self.session.get(
-            f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-balance",
-            headers=self._headers("TTTC8434R"),
-            params=params,
-            timeout=(3.05, 10.0),
-        )
-        data = response.json()
-        if data.get("rt_cd") != "0":
-            raise RuntimeError(f"KIS balance failed: {response.status_code} {data.get('msg_cd')} {data.get('msg1')}")
-
         holdings: list[PensionHolding] = []
-        for row in data.get("output1") or []:
-            qty = _to_int(row.get("hldg_qty"))
+        for row in self.api.positions():
+            qty = _to_int(row.get("qty"))
             if qty <= 0:
                 continue
-            price = _to_int(row.get("prpr"))
-            value = _to_int(row.get("evlu_amt")) or qty * price
+            price = _to_int(row.get("current_price"))
+            value = qty * price
             holdings.append(
                 PensionHolding(
-                    code=str(row.get("pdno") or "").strip(),
-                    name=str(row.get("prdt_name") or "").strip(),
+                    code=str(row.get("code") or "").strip(),
+                    name=str(row.get("name") or "").strip(),
                     qty=qty,
                     price=price,
                     value=value,
                 )
             )
-
-        output2 = data.get("output2") or []
-        summary = output2[0] if isinstance(output2, list) and output2 else output2
-        summary = summary if isinstance(summary, dict) else {}
-        return holdings, _to_int(summary.get("prvs_rcdl_excc_amt"))
+        return holdings, self.api.cash_available()
 
     def quote(self, code: str) -> dict[str, Any]:
-        params = {
-            "FID_COND_MRKT_DIV_CODE": "J",
-            "FID_INPUT_ISCD": code,
-        }
-        response = self.session.get(
-            f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-price",
-            headers=self._headers("FHKST01010100"),
-            params=params,
-            timeout=(3.05, 10.0),
-        )
-        data = response.json()
-        if data.get("rt_cd") != "0":
-            raise RuntimeError(f"KIS quote failed code={code}: {data.get('msg_cd')} {data.get('msg1')}")
-        row = data.get("output") or {}
-        return {
-            "price": _to_int(row.get("stck_prpr")),
-            "change_pct": _to_float(row.get("prdy_ctrt")),
-        }
+        return self.api.quote(code)
 
     def buy_order_capacity(self, code: str, *, price: int = 0, order_type: str = "00") -> dict[str, int]:
-        params = {
-            "CANO": self.cano,
-            "ACNT_PRDT_CD": self.acnt_prdt_cd,
-            "PDNO": code,
-            "ORD_UNPR": str(max(0, int(price))),
-            "ORD_DVSN": order_type,
-            "CMA_EVLU_AMT_ICLD_YN": "N",
-            "OVRS_ICLD_YN": "N",
-        }
-        response = self.session.get(
-            f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-psbl-order",
-            headers=self._headers("TTTC8908R"),
-            params=params,
-            timeout=(3.05, 10.0),
-        )
-        data = response.json()
-        if data.get("rt_cd") != "0":
-            raise RuntimeError(f"KIS buy capacity failed code={code}: {data.get('msg_cd')} {data.get('msg1')}")
-        output = data.get("output") or {}
-        row = output[0] if isinstance(output, list) and output else output
-        row = row if isinstance(row, dict) else {}
-        return {
-            "ord_psbl_cash": _to_int(row.get("ord_psbl_cash")),
-            "nrcvb_buy_amt": _to_int(row.get("nrcvb_buy_amt")),
-            "nrcvb_buy_qty": _to_int(row.get("nrcvb_buy_qty")),
-            "max_buy_amt": _to_int(row.get("max_buy_amt")),
-            "max_buy_qty": _to_int(row.get("max_buy_qty")),
-        }
-
-    def chart_prices(
-        self,
-        code: str,
-        *,
-        start_date: str,
-        end_date: str,
-        period_div_code: str,
-    ) -> list[tuple[str, int]]:
-        params = {
-            "FID_COND_MRKT_DIV_CODE": "J",
-            "FID_INPUT_ISCD": code,
-            "FID_INPUT_DATE_1": start_date,
-            "FID_INPUT_DATE_2": end_date,
-            "FID_PERIOD_DIV_CODE": period_div_code,
-            "FID_ORG_ADJ_PRC": "0",
-        }
-        response = self.session.get(
-            f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
-            headers=self._headers("FHKST03010100"),
-            params=params,
-            timeout=(3.05, 10.0),
-        )
-        data = response.json()
-        if data.get("rt_cd") != "0":
-            raise RuntimeError(f"KIS chart prices failed code={code}: {data.get('msg_cd')} {data.get('msg1')}")
-        rows = data.get("output2") or []
-        prices: list[tuple[str, int]] = []
-        for row in rows:
-            trade_date = str(row.get("stck_bsop_date") or "").strip()
-            close = _to_int(row.get("stck_clpr"))
-            if trade_date and close > 0:
-                prices.append((trade_date, close))
-        return sorted(prices)
+        return self.api.buy_order_capacity(code=code, price=price, order_type=order_type)
 
     def daily_prices(self, code: str, *, start_date: str, end_date: str) -> list[tuple[str, int]]:
-        return self.chart_prices(code, start_date=start_date, end_date=end_date, period_div_code="D")
+        return self.api.chart_prices(code, start_date=start_date, end_date=end_date, period_div_code="D")
 
     def monthly_prices(self, code: str, *, start_date: str, end_date: str) -> list[tuple[str, int]]:
-        return self.chart_prices(code, start_date=start_date, end_date=end_date, period_div_code="M")
+        return self.api.chart_prices(code, start_date=start_date, end_date=end_date, period_div_code="M")
 
     def place_order(self, *, side: str, code: str, qty: int, price: int) -> dict[str, Any]:
-        body = {
-            "CANO": self.cano,
-            "ACNT_PRDT_CD": self.acnt_prdt_cd,
-            "PDNO": code,
-            "ORD_DVSN": "00",
-            "ORD_QTY": str(qty),
-            "ORD_UNPR": str(max(0, int(price))),
-        }
-        tr_id = "TTTC0012U" if side == "BUY" else "TTTC0011U"
-        response = self.session.post(
-            f"{self.base_url}/uapi/domestic-stock/v1/trading/order-cash",
-            headers=self._headers(tr_id),
-            data=json.dumps(body),
-            timeout=(3.05, 10.0),
-        )
-        data = response.json()
+        result = self.api.place_order(side=side, code=code, qty=qty, order_type="limit", price=price)
         return {
-            "success": data.get("rt_cd") == "0",
+            "success": bool(result.get("success")),
             "code": code,
             "side": side,
             "qty": qty,
             "price": price,
-            "order_id": (data.get("output") or {}).get("ODNO", ""),
-            "msg": data.get("msg1", ""),
+            "order_id": result.get("order_id", ""),
+            "msg": result.get("msg", ""),
         }
 
 

@@ -551,6 +551,38 @@ class KISMarketDataMixin:
             ttl_sec,
         )
 
+    def chart_prices(
+        self,
+        code: str,
+        *,
+        start_date: str,
+        end_date: str,
+        period_div_code: str = "D",
+    ) -> list[tuple[str, int]]:
+        """
+        국내주식 기간별 종가 조회. period_div_code는 D/W/M/Y를 그대로 KIS에 전달한다.
+        """
+        params = {
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": str(code or "").strip(),
+            "FID_INPUT_DATE_1": self._normalize_yyyymmdd(start_date),
+            "FID_INPUT_DATE_2": self._normalize_yyyymmdd(end_date),
+            "FID_PERIOD_DIV_CODE": str(period_div_code or "D").strip().upper(),
+            "FID_ORG_ADJ_PRC": "0",
+        }
+        data = self._market_get(
+            "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
+            "FHKST03010100",
+            params,
+        )
+        prices: list[tuple[str, int]] = []
+        for row in data.get("output2", []) or []:
+            trade_date = str(row.get("stck_bsop_date") or "").strip()
+            close = self._to_int(row.get("stck_clpr"))
+            if trade_date and close > 0:
+                prices.append((trade_date, close))
+        return sorted(prices)
+
     def daily_index_bars(
         self,
         index_code: str,
