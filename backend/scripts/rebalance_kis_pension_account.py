@@ -4,7 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import requests
@@ -12,8 +12,12 @@ import requests
 from backend.services.pension_rebalancing import (
     PensionAsset,
     PensionHolding,
+    QuarterlyMarketSignal,
     build_pension_rebalance_plan,
     normalize_regime,
+    pct_return,
+    quarter_start,
+    resolve_quarterly_market_signal,
 )
 
 
@@ -213,6 +217,33 @@ class PensionKISClient:
             "change_pct": _to_float(row.get("prdy_ctrt")),
         }
 
+    def daily_prices(self, code: str, *, start_date: str, end_date: str) -> list[tuple[str, int]]:
+        params = {
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": code,
+            "FID_INPUT_DATE_1": start_date,
+            "FID_INPUT_DATE_2": end_date,
+            "FID_PERIOD_DIV_CODE": "D",
+            "FID_ORG_ADJ_PRC": "0",
+        }
+        response = self.session.get(
+            f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice",
+            headers=self._headers("FHKST03010100"),
+            params=params,
+            timeout=(3.05, 10.0),
+        )
+        data = response.json()
+        if data.get("rt_cd") != "0":
+            raise RuntimeError(f"KIS daily prices failed code={code}: {data.get('msg_cd')} {data.get('msg1')}")
+        rows = data.get("output2") or []
+        prices: list[tuple[str, int]] = []
+        for row in rows:
+            trade_date = str(row.get("stck_bsop_date") or "").strip()
+            close = _to_int(row.get("stck_clpr"))
+            if trade_date and close > 0:
+                prices.append((trade_date, close))
+        return sorted(prices)
+
     def place_order(self, *, side: str, code: str, qty: int) -> dict[str, Any]:
         body = {
             "CANO": self.cano,
@@ -240,31 +271,77 @@ class PensionKISClient:
         }
 
 
-def _assets_from_env(env: dict[str, str]) -> list[PensionAsset]:
+def _assets_from_env(env: dict[str, str], *, selected_momentum_code: str | None = None) -> list[PensionAsset]:
     sp500 = str(env.get("PENSION_REBALANCE_SP500_CODE") or "360200").strip()
-    us_growth = str(
-        env.get("PENSION_REBALANCE_US_GROWTH_CODE")
+    momentum = str(
+        selected_momentum_code
+        or env.get("PENSION_REBALANCE_MOMENTUM_CODE")
+        or env.get("PENSION_REBALANCE_US_GROWTH_CODE")
         or env.get("PENSION_REBALANCE_NASDAQ_CODE")
         or "426030"
     ).strip()
     bond = str(env.get("PENSION_REBALANCE_US_BOND_CODE") or "").strip()
     assets = [
         PensionAsset(sp500, "sp500", "S&P500"),
-        PensionAsset(us_growth, "us_growth", "US Growth ETF"),
+        PensionAsset(momentum, "momentum", "Momentum ETF"),
     ]
     if bond:
         assets.append(PensionAsset(bond, "bond", "US Bond"))
     return assets
 
 
-def _resolve_regime(client: PensionKISClient, env: dict[str, str], requested: str, sp500_code: str) -> str:
+def _quarterly_return(client: PensionKISClient, code: str, *, today: date) -> float:
+    start = quarter_start(today).strftime("%Y%m%d")
+    end = today.strftime("%Y%m%d")
+    prices = client.daily_prices(code, start_date=start, end_date=end)
+    if len(prices) < 2:
+        quote = client.quote(code)
+        return float(quote.get("change_pct") or 0.0)
+    return pct_return(float(prices[0][1]), float(prices[-1][1]))
+
+
+def _resolve_quarterly_signal(
+    client: PensionKISClient,
+    env: dict[str, str],
+    requested: str,
+) -> QuarterlyMarketSignal:
+    sp500_code = str(env.get("PENSION_REBALANCE_SP500_CODE") or "360200").strip()
+    kospi_code = str(env.get("PENSION_REBALANCE_KOSPI_CODE") or "237350").strip()
+    nasdaq_code = str(
+        env.get("PENSION_REBALANCE_NASDAQ_CODE")
+        or env.get("PENSION_REBALANCE_MOMENTUM_CODE")
+        or env.get("PENSION_REBALANCE_US_GROWTH_CODE")
+        or "426030"
+    ).strip()
+    today = date.today()
+    reference_return = _quarterly_return(client, sp500_code, today=today)
+    kospi_return = _quarterly_return(client, kospi_code, today=today)
+    nasdaq_return = _quarterly_return(client, nasdaq_code, today=today)
+    signal = resolve_quarterly_market_signal(
+        reference_return_pct=reference_return,
+        kospi_return_pct=kospi_return,
+        nasdaq_return_pct=nasdaq_return,
+        kospi_code=kospi_code,
+        nasdaq_code=nasdaq_code,
+    )
     if requested != "auto":
-        return normalize_regime(requested)
+        return QuarterlyMarketSignal(
+            regime=normalize_regime(requested),
+            reference_return_pct=signal.reference_return_pct,
+            kospi_return_pct=signal.kospi_return_pct,
+            nasdaq_return_pct=signal.nasdaq_return_pct,
+            selected_momentum_code=signal.selected_momentum_code,
+        )
     configured = str(env.get("PENSION_REBALANCE_REGIME") or "").strip()
     if configured:
-        return normalize_regime(configured)
-    quote = client.quote(sp500_code)
-    return "rising" if float(quote.get("change_pct") or 0.0) > 0 else "falling"
+        return QuarterlyMarketSignal(
+            regime=normalize_regime(configured),
+            reference_return_pct=signal.reference_return_pct,
+            kospi_return_pct=signal.kospi_return_pct,
+            nasdaq_return_pct=signal.nasdaq_return_pct,
+            selected_momentum_code=signal.selected_momentum_code,
+        )
+    return signal
 
 
 def main() -> int:
@@ -276,8 +353,9 @@ def main() -> int:
     args = parser.parse_args()
 
     env = {**_load_env_file(DEFAULT_RUNTIME_ENV), **os.environ}
-    assets = _assets_from_env(env)
     client = PensionKISClient(env)
+    signal = _resolve_quarterly_signal(client, env, args.regime)
+    assets = _assets_from_env(env, selected_momentum_code=signal.selected_momentum_code)
     holdings, cash = client.balance()
 
     prices = {holding.code: holding.price for holding in holdings if holding.price > 0}
@@ -285,20 +363,22 @@ def main() -> int:
         if asset.code not in prices:
             prices[asset.code] = int(client.quote(asset.code).get("price") or 0)
 
-    sp500_code = next(asset.code for asset in assets if asset.bucket == "sp500")
-    regime = _resolve_regime(client, env, args.regime, sp500_code)
     plan = build_pension_rebalance_plan(
         holdings=holdings,
         cash=cash,
         assets=assets,
         prices=prices,
-        regime=regime,
+        regime=signal.regime,
         min_order_amount=args.min_order_amount,
         allow_sells=not args.no_sells,
     )
 
     print("mode", "EXECUTE" if args.execute else "DRY_RUN")
     print("regime", plan.regime)
+    print("quarterly_reference_return_pct", round(signal.reference_return_pct, 2))
+    print("quarterly_kospi_return_pct", round(signal.kospi_return_pct, 2))
+    print("quarterly_nasdaq_return_pct", round(signal.nasdaq_return_pct, 2))
+    print("selected_momentum_code", signal.selected_momentum_code)
     print("total_value", plan.total_value)
     print("cash", plan.cash)
     print("target_weights", plan.target_weights)

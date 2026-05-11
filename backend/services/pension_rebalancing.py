@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from math import floor
 from typing import Iterable, Literal
 
 
 Regime = Literal["rising", "falling", "neutral"]
-Bucket = Literal["sp500", "us_growth", "bond", "other"]
+Bucket = Literal["sp500", "momentum", "bond", "other"]
 Side = Literal["BUY", "SELL"]
 
 
@@ -48,10 +49,19 @@ class PensionRebalancePlan:
     estimated_cash_after_orders: int
 
 
+@dataclass(frozen=True)
+class QuarterlyMarketSignal:
+    regime: Regime
+    reference_return_pct: float
+    kospi_return_pct: float
+    nasdaq_return_pct: float
+    selected_momentum_code: str
+
+
 DEFAULT_TARGETS: dict[Regime, dict[Bucket, float]] = {
-    "rising": {"sp500": 0.40, "us_growth": 0.60, "bond": 0.0, "other": 0.0},
-    "falling": {"sp500": 0.50, "us_growth": 0.20, "bond": 0.30, "other": 0.0},
-    "neutral": {"sp500": 0.60, "us_growth": 0.30, "bond": 0.10, "other": 0.0},
+    "rising": {"sp500": 0.40, "momentum": 0.60, "bond": 0.0, "other": 0.0},
+    "falling": {"sp500": 0.50, "momentum": 0.20, "bond": 0.30, "other": 0.0},
+    "neutral": {"sp500": 0.60, "momentum": 0.30, "bond": 0.10, "other": 0.0},
 }
 
 
@@ -79,12 +89,42 @@ def normalize_regime(value: str) -> Regime:
     return normalized  # type: ignore[return-value]
 
 
+def quarter_start(value: date) -> date:
+    month = ((value.month - 1) // 3) * 3 + 1
+    return date(value.year, month, 1)
+
+
+def pct_return(start_price: float, end_price: float) -> float:
+    if start_price <= 0:
+        return 0.0
+    return (end_price - start_price) / start_price * 100.0
+
+
+def resolve_quarterly_market_signal(
+    *,
+    reference_return_pct: float,
+    kospi_return_pct: float,
+    nasdaq_return_pct: float,
+    kospi_code: str,
+    nasdaq_code: str,
+) -> QuarterlyMarketSignal:
+    regime: Regime = "rising" if reference_return_pct > 0 else "falling"
+    selected_momentum_code = kospi_code if kospi_return_pct > nasdaq_return_pct else nasdaq_code
+    return QuarterlyMarketSignal(
+        regime=regime,
+        reference_return_pct=reference_return_pct,
+        kospi_return_pct=kospi_return_pct,
+        nasdaq_return_pct=nasdaq_return_pct,
+        selected_momentum_code=selected_momentum_code,
+    )
+
+
 def bucket_values(
     holdings: Iterable[PensionHolding],
     assets: Iterable[PensionAsset],
 ) -> dict[Bucket, int]:
     bucket_by_code = {asset.code: asset.bucket for asset in assets}
-    values: dict[Bucket, int] = {"sp500": 0, "us_growth": 0, "bond": 0, "other": 0}
+    values: dict[Bucket, int] = {"sp500": 0, "momentum": 0, "bond": 0, "other": 0}
     for holding in holdings:
         values[bucket_by_code.get(holding.code, "other")] += max(0, int(holding.value))
     return values
