@@ -90,6 +90,22 @@ def _single_regime(
     return "NEUTRAL", None
 
 
+def _live_change_pct(api: TradingAPI, code: str) -> float | None:
+    quote_fn = getattr(api, "quote", None)
+    if not callable(quote_fn):
+        return None
+    try:
+        q = quote_fn(code)
+    except Exception:
+        return None
+    return parse_numeric(q.get("change_pct"))
+
+
+def _is_strong_live_risk_on(api: TradingAPI, code: str, *, threshold_pct: float = 3.0) -> bool:
+    live_change_pct = _live_change_pct(api, code)
+    return live_change_pct is not None and live_change_pct >= threshold_pct
+
+
 def detect_intraday_circuit_breaker(
     api: TradingAPI,
     *,
@@ -170,22 +186,31 @@ def get_regime(
     """
     Returns (regime_string, detected_panic_date)
     """
-    # 0. ✅ 쿨다운 체크
+    # 1. Primary 로직: KIS에서 다시 받은 현재 일봉/시세를 먼저 신뢰한다.
+    primary_regime, primary_panic_date = _single_regime(api, asof, primary_code, vol_threshold)
+
+    # 로컬 state의 last_panic_date 또는 최근 일봉 패닉은 오염될 수 있다.
+    # KIS 실시간 proxy가 강한 상승장이라면 과거/로컬 위험회피 신호를 무시한다.
+    if _is_strong_live_risk_on(api, primary_code):
+        return "RISK_ON", None
+
+    # 2. 로컬 쿨다운은 KIS 실시간 상승장 검증 뒤에만 적용한다.
     if _is_in_cooldown(asof, last_panic_date, days=3):
         return "RISK_OFF", None
 
-    # 1. Primary 로직
-    primary_regime, primary_panic_date = _single_regime(api, asof, primary_code, vol_threshold)
-    
     if not use_confirmation:
         return primary_regime, primary_panic_date
 
-    # 2. Confirmation 로직
+    # 3. Confirmation 로직
     confirm_regime, confirm_panic_date = _single_regime(api, asof, confirmation_code, vol_threshold)
     detected_panic_date = max(
         [d for d in (primary_panic_date, confirm_panic_date) if d is not None],
         default=None,
     )
+
+    if _is_strong_live_risk_on(api, confirmation_code):
+        if primary_regime != "RISK_OFF":
+            return "RISK_ON", None
     
     if primary_regime == "RISK_OFF" or confirm_regime == "RISK_OFF":
         return "RISK_OFF", detected_panic_date

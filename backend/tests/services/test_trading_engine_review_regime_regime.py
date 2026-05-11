@@ -170,6 +170,30 @@ def test_get_regime_uses_relaxed_default_vol_threshold_for_war_volatility() -> N
     assert strict_regime == "RISK_OFF"
     assert strict_panic_date is None
 
+def test_get_regime_ignores_stale_local_panic_when_kis_quote_is_strong_positive() -> None:
+    asof = "20260511"
+    api = FakeAPI()
+    closes = [float(100 + idx) for idx in range(80)]
+    api._bars[("069500", asof)] = _make_bars_from_closes(asof, closes)
+    api._quotes["069500"] = {"price": 180.0, "change_pct": 4.21}
+
+    regime, panic_date = get_regime(api, asof, last_panic_date="20260508")
+
+    assert regime == "RISK_ON"
+    assert panic_date is None
+
+def test_get_regime_keeps_local_panic_cooldown_without_kis_positive_confirmation() -> None:
+    asof = "20260511"
+    api = FakeAPI()
+    closes = [float(100 + idx) for idx in range(80)]
+    api._bars[("069500", asof)] = _make_bars_from_closes(asof, closes)
+    api._quotes["069500"] = {"price": 170.0, "change_pct": 0.2}
+
+    regime, panic_date = get_regime(api, asof, last_panic_date="20260508")
+
+    assert regime == "RISK_OFF"
+    assert panic_date is None
+
 def test_bot_keeps_original_panic_date_inside_recent_window(tmp_path) -> None:
     asof = "20260312"
     api = FakeAPI()
