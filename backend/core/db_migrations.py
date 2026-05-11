@@ -71,6 +71,7 @@ def _migrate_settings_table(conn: Connection) -> None:
         ("kis_vops_url", "VARCHAR(255)"), ("kis_agent", "VARCHAR(128)"),
         ("kis_token_encrypted", "TEXT"), ("kis_token_expires_at", "DATETIME"),
         ("kis_token_encrypted1", "TEXT"), ("kis_token_expires_at1", "DATETIME"),
+        ("kis_token_encrypted2", "TEXT"), ("kis_token_expires_at2", "DATETIME"),
     ]
     
     for col_name, col_type in kis_configs:

@@ -24,6 +24,7 @@ import pandas as pd
 import requests
 from backend.integrations.kis.rest_rate_limiter import throttle_rest_min_gap
 from backend.integrations.kis.secondary_market_context import build_secondary_market_context
+from backend.integrations.kis.token_store import read_kis_token_record, save_kis_token
 
 from .daily_bars_disk_cache import DEFAULT_DAILY_BARS_DISK_CACHE_PATH, DailyBarsDiskCache
 from .trading_account_mixin import KISAccountTradingMixin
@@ -89,6 +90,7 @@ class KISDirectCredentials:
     product: str = "01"
     base_url: str = "https://openapi.koreainvestment.com:9443"
     user_agent: str = "MyAsset"
+    token_slot: int | None = None
 
 
 class KISTradingBase:
@@ -186,6 +188,19 @@ class KISTradingBase:
         if not force and self._direct_token_is_valid():
             return str(self._direct_access_token)
 
+        if not force and credentials.token_slot is not None:
+            cached_token, cached_expires_at = read_kis_token_record(slot=credentials.token_slot)
+            if cached_token:
+                self._direct_access_token = cached_token
+                self._direct_token_expires_at = cached_expires_at
+                if self._direct_token_is_valid():
+                    logger.info(
+                        "[KIS TradingAPI] direct token reused from DB slot=%s expires_at=%s",
+                        credentials.token_slot,
+                        cached_expires_at,
+                    )
+                    return cached_token
+
         payload = {
             "grant_type": "client_credentials",
             "appkey": credentials.app_key,
@@ -209,6 +224,8 @@ class KISTradingBase:
                 self._direct_token_expires_at = datetime.strptime(expires_raw, "%Y-%m-%d %H:%M:%S")
             except ValueError:
                 self._direct_token_expires_at = None
+        if credentials.token_slot is not None:
+            save_kis_token(token, self._direct_token_expires_at, slot=credentials.token_slot)
         return token
 
     def _throttle_rest(self) -> None:

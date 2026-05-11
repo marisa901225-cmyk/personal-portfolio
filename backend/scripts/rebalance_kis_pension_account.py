@@ -114,6 +114,7 @@ class PensionKISClient:
                 account=account,
                 product=product,
                 base_url=base_url,
+                token_slot=2,
             )
         )
 

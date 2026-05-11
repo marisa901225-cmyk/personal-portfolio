@@ -21,6 +21,8 @@ _TOKEN_TAG_SIZE = 16
 
 
 def _slot_columns(slot: int) -> tuple[str, str]:
+    if int(slot) == 2:
+        return "kis_token_encrypted2", "kis_token_expires_at2"
     if int(slot) == 1:
         return "kis_token_encrypted1", "kis_token_expires_at1"
     return "kis_token_encrypted", "kis_token_expires_at"
