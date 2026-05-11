@@ -7,8 +7,9 @@ import logging
 import os
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -16,6 +17,7 @@ from dotenv import load_dotenv
 from pytz import timezone
 
 from backend.core.env_paths import get_project_env_files
+from backend.integrations.kis.trading_adapter import KISDirectCredentials, create_trading_api
 from backend.core.logging_config import setup_global_logging
 
 
@@ -69,6 +71,89 @@ def _is_quarter_window(now: datetime) -> bool:
     last_day = calendar.monthrange(now.year, now.month)[1]
     first_window_day = max(1, last_day - window_days + 1)
     return first_window_day <= now.day <= last_day
+
+
+def _holiday_row_date(row: dict[str, Any]) -> str:
+    for key in ("bass_dt", "bss_dt", "stck_bsop_date", "bsop_date", "date"):
+        normalized = "".join(ch for ch in str(row.get(key) or "") if ch.isdigit())[:8]
+        if len(normalized) == 8:
+            return normalized
+    return ""
+
+
+def _open_day_from_holiday_rows(date_key: str, rows: list[dict[str, Any]]) -> bool | None:
+    for row in rows:
+        if _holiday_row_date(row) != date_key:
+            continue
+        return str(row.get("opnd_yn") or "").strip().upper() == "Y"
+    return None
+
+
+def _build_pension_kis_api():
+    app_key = str(os.getenv("KIS_MY_APP2") or "").strip()
+    app_secret = str(os.getenv("KIS_MY_SEC2") or "").strip()
+    account = str(os.getenv("KIS_MY_ACCT_STOCK2") or "").strip()
+    product = str(os.getenv("KIS_MY_PROD2") or "").strip() or "01"
+    base_url = str(os.getenv("KIS_PROD") or "https://openapi.koreainvestment.com:9443").strip()
+    missing = [
+        name
+        for name, value in (
+            ("KIS_MY_APP2", app_key),
+            ("KIS_MY_SEC2", app_secret),
+            ("KIS_MY_ACCT_STOCK2", account),
+        )
+        if not value
+    ]
+    if missing:
+        raise RuntimeError(f"missing pension KIS env for trading-day lookup: {','.join(missing)}")
+    return create_trading_api(
+        KISDirectCredentials(
+            app_key=app_key,
+            app_secret=app_secret,
+            account=account,
+            product=product,
+            base_url=base_url,
+            token_slot=2,
+        )
+    )
+
+
+def _query_kis_trading_day(date_key: str) -> bool:
+    api = _build_pension_kis_api()
+    rows = api.domestic_holiday_rows(date_key)
+    open_day = _open_day_from_holiday_rows(date_key, rows)
+    if open_day is not None:
+        return open_day
+
+    previous_day = (datetime.strptime(date_key, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
+    next_open = api.next_open_trading_day(previous_day, max_lookahead_days=3)
+    return str(next_open or "").strip() == date_key
+
+
+def _fallback_trading_day(date_key: str) -> bool:
+    try:
+        parsed = datetime.strptime(date_key, "%Y%m%d").date()
+    except ValueError:
+        return False
+    if parsed.weekday() >= 5:
+        return False
+    try:
+        import holidays
+
+        return parsed not in holidays.country_holidays("KR", years=[parsed.year])
+    except Exception:
+        return True
+
+
+def _is_scheduled_trading_day(now: datetime) -> bool:
+    date_key = now.strftime("%Y%m%d")
+    if now.weekday() >= 5:
+        return False
+    try:
+        return _query_kis_trading_day(date_key)
+    except Exception:
+        logger.warning("KIS trading-day lookup failed date=%s; using fallback calendar", date_key, exc_info=True)
+        return _fallback_trading_day(date_key)
 
 
 def _read_state(path: Path) -> dict:
@@ -151,6 +236,10 @@ def _run_rebalance(*, reason: str, force: bool = False) -> int:
 
     if reason == "schedule" and not _is_quarter_window(now):
         logger.info("skip pension rebalance: outside quarter window now=%s", now.isoformat())
+        return 0
+
+    if reason == "schedule" and not _is_scheduled_trading_day(now):
+        logger.info("skip pension rebalance: non-trading day now=%s", now.isoformat())
         return 0
 
     command = _build_command(execute=execute)
