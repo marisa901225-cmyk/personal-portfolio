@@ -273,18 +273,27 @@ class PensionKISClient:
 
 def _assets_from_env(env: dict[str, str], *, selected_momentum_code: str | None = None) -> list[PensionAsset]:
     sp500 = str(env.get("PENSION_REBALANCE_SP500_CODE") or "360200").strip()
-    momentum = str(
-        selected_momentum_code
+    kospi = str(env.get("PENSION_REBALANCE_KOSPI_CODE") or "237350").strip()
+    nasdaq = str(
+        env.get("PENSION_REBALANCE_NASDAQ_CODE")
         or env.get("PENSION_REBALANCE_MOMENTUM_CODE")
         or env.get("PENSION_REBALANCE_US_GROWTH_CODE")
-        or env.get("PENSION_REBALANCE_NASDAQ_CODE")
         or "426030"
     ).strip()
     bond = str(env.get("PENSION_REBALANCE_US_BOND_CODE") or "").strip()
+    momentum_codes = [
+        str(selected_momentum_code or "").strip(),
+        kospi,
+        nasdaq,
+    ]
     assets = [
         PensionAsset(sp500, "sp500", "S&P500"),
-        PensionAsset(momentum, "momentum", "Momentum ETF"),
     ]
+    seen = {sp500}
+    for code in momentum_codes:
+        if code and code not in seen:
+            assets.append(PensionAsset(code, "momentum", "Momentum ETF"))
+            seen.add(code)
     if bond:
         assets.append(PensionAsset(bond, "bond", "US Bond"))
     return assets

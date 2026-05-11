@@ -15,6 +15,7 @@ from backend.services.pension_rebalancing import (
 
 ASSETS = [
     PensionAsset("360200", "sp500", "ACE 미국S&P500"),
+    PensionAsset("237350", "momentum", "KODEX 코스피100"),
     PensionAsset("426030", "momentum", "TIME 미국나스닥100액티브"),
     PensionAsset("BOND01", "bond", "미국채권"),
 ]
@@ -30,7 +31,7 @@ def test_rising_market_targets_sp500_at_40_and_momentum_etf_at_60() -> None:
         holdings=holdings,
         cash=0,
         assets=ASSETS,
-        prices={"360200": 10_000, "426030": 10_000, "0117V0": 10_000, "BOND01": 10_000},
+        prices={"360200": 10_000, "237350": 10_000, "426030": 10_000, "BOND01": 10_000},
         regime="rising",
         min_order_amount=10_000,
     )
@@ -51,7 +52,7 @@ def test_falling_market_reduces_momentum_etf_and_adds_us_bond() -> None:
         holdings=holdings,
         cash=0,
         assets=ASSETS,
-        prices={"360200": 10_000, "426030": 10_000, "0117V0": 10_000, "BOND01": 10_000},
+        prices={"360200": 10_000, "237350": 10_000, "426030": 10_000, "BOND01": 10_000},
         regime="falling",
         min_order_amount=10_000,
     )
@@ -112,3 +113,22 @@ def test_quarterly_signal_selects_nasdaq_when_it_leads() -> None:
 def test_quarter_start_and_pct_return() -> None:
     assert quarter_start(date(2026, 5, 11)) == date(2026, 4, 1)
     assert round(pct_return(100, 112.5), 2) == 12.5
+
+
+def test_unselected_nasdaq_is_kept_inside_momentum_bucket() -> None:
+    holdings = [
+        PensionHolding("237350", "KODEX 코스피100", 40, 10_000, 400_000),
+        PensionHolding("426030", "TIME 미국나스닥100액티브", 40, 10_000, 400_000),
+        PensionHolding("360200", "ACE 미국S&P500", 20, 10_000, 200_000),
+    ]
+
+    plan = build_pension_rebalance_plan(
+        holdings=holdings,
+        cash=0,
+        assets=ASSETS,
+        prices={"237350": 10_000, "426030": 10_000, "360200": 10_000, "BOND01": 10_000},
+        regime="rising",
+        min_order_amount=10_000,
+    )
+
+    assert not any(order.side == "SELL" and order.code == "426030" for order in plan.orders)
