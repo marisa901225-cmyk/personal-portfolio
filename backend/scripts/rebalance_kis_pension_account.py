@@ -9,6 +9,7 @@ from typing import Any
 
 from backend.integrations.kis.trading_adapter import KISDirectCredentials, create_trading_api
 from backend.services.pension_rebalancing import (
+    DEFAULT_MOMENTUM_OUTPERFORMANCE_THRESHOLD_PCT,
     calculate_equity_trend_metrics,
     PensionAsset,
     PensionHolding,
@@ -186,18 +187,20 @@ def _assets_from_env(env: dict[str, str], *, selected_momentum_code: str | None 
         or TradeEngineConfig().risk_off_parking_code
         or ""
     ).strip()
-    momentum_codes = [
-        str(selected_momentum_code or "").strip(),
-        kospi,
-        nasdaq,
-    ]
+    selected_momentum_code = None if selected_momentum_code is None else str(selected_momentum_code).strip()
+    if selected_momentum_code is None:
+        momentum_codes = [(kospi, True), (nasdaq, True)]
+    elif selected_momentum_code:
+        momentum_codes = [(selected_momentum_code, True), (kospi, False), (nasdaq, False)]
+    else:
+        momentum_codes = [(kospi, False), (nasdaq, False)]
     assets = [
         PensionAsset(sp500, "sp500", "S&P500"),
     ]
     seen = {sp500}
-    for code in momentum_codes:
+    for code, buyable in momentum_codes:
         if code and code not in seen:
-            assets.append(PensionAsset(code, "momentum", "Momentum ETF"))
+            assets.append(PensionAsset(code, "momentum", "Momentum ETF", buyable=buyable))
             seen.add(code)
     if bond:
         assets.append(PensionAsset(bond, "bond", "US Short Bond"))
@@ -253,6 +256,13 @@ def _resolve_quarterly_signal(
         nasdaq_return_pct=nasdaq_return,
         kospi_code=kospi_code,
         nasdaq_code=nasdaq_code,
+        momentum_outperformance_threshold_pct=max(
+            0.0,
+            _env_float(
+                "PENSION_REBALANCE_MOMENTUM_OUTPERFORMANCE_PCT",
+                DEFAULT_MOMENTUM_OUTPERFORMANCE_THRESHOLD_PCT,
+            ),
+        ),
         trend_metrics=trend_metrics,
     )
     if requested != "auto":

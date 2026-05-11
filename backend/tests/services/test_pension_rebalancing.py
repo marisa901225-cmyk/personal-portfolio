@@ -13,6 +13,7 @@ from backend.services.pension_rebalancing import (
     pct_return,
     quarter_start,
     resolve_quarterly_market_signal,
+    select_momentum_candidate,
 )
 
 
@@ -305,13 +306,67 @@ def test_quarterly_signal_selects_nasdaq_when_it_leads() -> None:
     signal = resolve_quarterly_market_signal(
         reference_return_pct=-0.4,
         kospi_return_pct=1.0,
-        nasdaq_return_pct=2.0,
+        nasdaq_return_pct=2.3,
         kospi_code="237350",
         nasdaq_code="426030",
     )
 
     assert signal.regime == "falling"
     assert signal.selected_momentum_code == "426030"
+
+
+def test_momentum_candidate_requires_positive_return_and_sp500_outperformance() -> None:
+    assert (
+        select_momentum_candidate(
+            reference_return_pct=4.0,
+            kospi_return_pct=5.0,
+            nasdaq_return_pct=6.4,
+            kospi_code="237350",
+            nasdaq_code="426030",
+        )
+        == ""
+    )
+    assert (
+        select_momentum_candidate(
+            reference_return_pct=4.0,
+            kospi_return_pct=5.0,
+            nasdaq_return_pct=6.5,
+            kospi_code="237350",
+            nasdaq_code="426030",
+        )
+        == "426030"
+    )
+    assert (
+        select_momentum_candidate(
+            reference_return_pct=-4.0,
+            kospi_return_pct=-0.5,
+            nasdaq_return_pct=-0.2,
+            kospi_code="237350",
+            nasdaq_code="426030",
+        )
+        == ""
+    )
+
+
+def test_no_momentum_candidate_keeps_holdings_classified_but_blocks_new_momentum_buy() -> None:
+    plan = build_pension_rebalance_plan(
+        holdings=[PensionHolding("426030", "TIME 미국나스닥100액티브", 10, 10_000, 100_000)],
+        cash=500_000,
+        assets=[
+            PensionAsset("360200", "sp500", "ACE 미국S&P500"),
+            PensionAsset("237350", "momentum", "KODEX 코스피100", buyable=False),
+            PensionAsset("426030", "momentum", "TIME 미국나스닥100액티브", buyable=False),
+            PensionAsset("BOND01", "bond", "미국채권"),
+        ],
+        prices={"360200": 10_000, "237350": 10_000, "426030": 10_000, "BOND01": 10_000},
+        regime="rising",
+        min_order_amount=10_000,
+        allow_sells=False,
+    )
+
+    assert plan.current_values["momentum"] == 100_000
+    assert not any(order.side == "BUY" and order.bucket == "momentum" for order in plan.orders)
+    assert any(order.side == "BUY" and order.bucket == "sp500" for order in plan.orders)
 
 
 def test_equity_trend_metrics_use_10_month_average_drawdown_and_3m_return() -> None:

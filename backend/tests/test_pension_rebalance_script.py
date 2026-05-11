@@ -21,6 +21,37 @@ def test_assets_from_env_deduplicates_bond_and_parking_code() -> None:
     assert [asset.bucket for asset in assets if asset.code == "0048J0"] == ["bond"]
 
 
+def test_assets_from_env_marks_momentum_unbuyable_without_candidate() -> None:
+    assets = _assets_from_env(
+        {
+            "PENSION_REBALANCE_SP500_CODE": "360200",
+            "PENSION_REBALANCE_KOSPI_CODE": "237350",
+            "PENSION_REBALANCE_NASDAQ_CODE": "426030",
+        },
+        selected_momentum_code="",
+    )
+
+    momentum_assets = [asset for asset in assets if asset.bucket == "momentum"]
+    assert {asset.code for asset in momentum_assets} == {"237350", "426030"}
+    assert not any(asset.buyable for asset in momentum_assets)
+
+
+def test_assets_from_env_marks_selected_momentum_buyable_first() -> None:
+    assets = _assets_from_env(
+        {
+            "PENSION_REBALANCE_SP500_CODE": "360200",
+            "PENSION_REBALANCE_KOSPI_CODE": "237350",
+            "PENSION_REBALANCE_NASDAQ_CODE": "426030",
+        },
+        selected_momentum_code="426030",
+    )
+
+    momentum_assets = [asset for asset in assets if asset.bucket == "momentum"]
+    assert momentum_assets[0].code == "426030"
+    assert momentum_assets[0].buyable
+    assert not next(asset for asset in momentum_assets if asset.code == "237350").buyable
+
+
 def test_quarterly_return_uses_quote_when_only_one_daily_price() -> None:
     class Client:
         def daily_prices(self, code: str, *, start_date: str, end_date: str) -> list[tuple[str, int]]:

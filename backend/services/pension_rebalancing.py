@@ -16,6 +16,7 @@ class PensionAsset:
     code: str
     bucket: Bucket
     name: str = ""
+    buyable: bool = True
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,7 @@ DEFAULT_TARGETS: dict[Regime, dict[Bucket, float]] = {
     "falling": {"sp500": 0.50, "momentum": 0.20, "bond": 0.30, "other": 0.0},
     "crash": {"sp500": 0.40, "momentum": 0.10, "bond": 0.50, "other": 0.0},
 }
+DEFAULT_MOMENTUM_OUTPERFORMANCE_THRESHOLD_PCT = 2.5
 
 
 def normalize_regime(value: str) -> Regime:
@@ -115,6 +117,29 @@ def pct_return(start_price: float, end_price: float) -> float:
     if start_price <= 0:
         return 0.0
     return (end_price - start_price) / start_price * 100.0
+
+
+def select_momentum_candidate(
+    *,
+    reference_return_pct: float,
+    kospi_return_pct: float,
+    nasdaq_return_pct: float,
+    kospi_code: str,
+    nasdaq_code: str,
+    min_outperformance_pct: float = DEFAULT_MOMENTUM_OUTPERFORMANCE_THRESHOLD_PCT,
+) -> str:
+    if kospi_return_pct > nasdaq_return_pct:
+        candidate_code = kospi_code
+        candidate_return = kospi_return_pct
+    else:
+        candidate_code = nasdaq_code
+        candidate_return = nasdaq_return_pct
+
+    if candidate_return <= 0.0:
+        return ""
+    if candidate_return - reference_return_pct < min_outperformance_pct:
+        return ""
+    return candidate_code
 
 
 def _last_price_by_month(prices: Iterable[tuple[str, int]]) -> list[tuple[str, int]]:
@@ -168,6 +193,7 @@ def resolve_quarterly_market_signal(
     nasdaq_return_pct: float,
     kospi_code: str,
     nasdaq_code: str,
+    momentum_outperformance_threshold_pct: float = DEFAULT_MOMENTUM_OUTPERFORMANCE_THRESHOLD_PCT,
     trend_metrics: EquityTrendMetrics | None = None,
 ) -> QuarterlyMarketSignal:
     if trend_metrics and trend_metrics.current_price > 0 and trend_metrics.moving_average_10m > 0:
@@ -185,7 +211,14 @@ def resolve_quarterly_market_signal(
             regime = "neutral"
     else:
         regime = "rising" if reference_return_pct > 0 else "falling"
-    selected_momentum_code = kospi_code if kospi_return_pct > nasdaq_return_pct else nasdaq_code
+    selected_momentum_code = select_momentum_candidate(
+        reference_return_pct=reference_return_pct,
+        kospi_return_pct=kospi_return_pct,
+        nasdaq_return_pct=nasdaq_return_pct,
+        kospi_code=kospi_code,
+        nasdaq_code=nasdaq_code,
+        min_outperformance_pct=momentum_outperformance_threshold_pct,
+    )
     return QuarterlyMarketSignal(
         regime=regime,
         reference_return_pct=reference_return_pct,
@@ -268,7 +301,8 @@ def build_pension_rebalance_plan(
     bucket_by_code = {asset.code: asset.bucket for asset in assets}
     code_by_bucket: dict[Bucket, str] = {}
     for asset in assets:
-        code_by_bucket.setdefault(asset.bucket, asset.code)
+        if asset.buyable:
+            code_by_bucket.setdefault(asset.bucket, asset.code)
 
     orders: list[PensionOrderPlan] = []
     estimated_cash = max(0, int(cash))
@@ -451,7 +485,8 @@ def build_pension_cash_sweep_plan(
 
     code_by_bucket: dict[Bucket, str] = {}
     for asset in assets:
-        code_by_bucket.setdefault(asset.bucket, asset.code)
+        if asset.buyable:
+            code_by_bucket.setdefault(asset.bucket, asset.code)
 
     sp500_code = code_by_bucket.get("sp500")
     parking_code = str(parking_code or code_by_bucket.get("parking") or "").strip()
