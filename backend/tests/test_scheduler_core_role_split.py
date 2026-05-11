@@ -64,6 +64,12 @@ class TestSchedulerRoleSplit(unittest.TestCase):
         self.assertIn("trading_engine_cycle_intraday_afternoon", registered_ids)
         self.assertIn("trading_engine_cycle_intraday_close", registered_ids)
         self.assertIn("trading_engine_finalize", registered_ids)
+        finalize_call = next(
+            call for call in fake_scheduler.add_job.call_args_list if call.kwargs["id"] == "trading_engine_finalize"
+        )
+        finalize_trigger = finalize_call.args[1]
+        self.assertEqual(str(finalize_trigger.fields[5]), "15")
+        self.assertEqual(str(finalize_trigger.fields[6]), "34")
         fake_scheduler.start.assert_called_once()
 
 

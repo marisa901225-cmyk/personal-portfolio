@@ -587,7 +587,7 @@ def start_scheduler():
 
             scheduler.add_job(
                 job_trading_engine_finalize,
-                CronTrigger(day_of_week="mon-fri", hour=15, minute=31),
+                CronTrigger(day_of_week="mon-fri", hour=15, minute=34),
                 id="trading_engine_finalize",
                 replace_existing=True,
                 max_instances=1,
