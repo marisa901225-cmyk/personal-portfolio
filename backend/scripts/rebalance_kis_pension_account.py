@@ -193,6 +193,7 @@ def _assets_from_env(env: dict[str, str], *, selected_momentum_code: str | None 
             seen.add(code)
     if bond:
         assets.append(PensionAsset(bond, "bond", "US Short Bond"))
+        seen.add(bond)
     if parking and parking not in seen:
         assets.append(PensionAsset(parking, "parking", "Parking ETF"))
     return assets
@@ -202,10 +203,13 @@ def _quarterly_return(client: PensionKISClient, code: str, *, today: date) -> fl
     start = quarter_start(today).strftime("%Y%m%d")
     end = today.strftime("%Y%m%d")
     prices = client.daily_prices(code, start_date=start, end_date=end)
-    if len(prices) < 2:
+    if len(prices) >= 2:
+        return pct_return(float(prices[0][1]), float(prices[-1][1]))
+    if len(prices) == 1:
         quote = client.quote(code)
-        return float(quote.get("change_pct") or 0.0)
-    return pct_return(float(prices[0][1]), float(prices[-1][1]))
+        current_price = int(quote.get("price") or prices[-1][1])
+        return pct_return(float(prices[0][1]), float(current_price))
+    return 0.0
 
 
 def _trend_start(today: date) -> str:
@@ -331,7 +335,7 @@ def _execute_orders(client: PensionKISClient, orders: list[PensionOrderPlan]) ->
 def main() -> int:
     parser = argparse.ArgumentParser(description="Plan or execute KIS pension-account rebalancing.")
     parser.add_argument("--regime", default="auto", help="auto, rising, falling, neutral")
-    parser.add_argument("--execute", action="store_true", help="place market orders; default is dry-run")
+    parser.add_argument("--execute", action="store_true", help="place limit orders; default is dry-run")
     parser.add_argument("--no-sells", action="store_true", help="only plan buys with available cash")
     parser.add_argument("--min-order-amount", type=int, default=50_000)
     parser.add_argument("--cash-sweep", action="store_true", help="daily cash/parking sweep without quarterly rebalance")
