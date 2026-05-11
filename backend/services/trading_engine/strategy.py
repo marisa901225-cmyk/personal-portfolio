@@ -225,6 +225,16 @@ def rank_swing_codes(
     global_signal: GlobalMarketSignal | None = None,
 ) -> list[str]:
     primary = candidates.model.copy()
+    if not primary.empty:
+        primary["source_model"] = True
+        primary = _attach_popular_liquidity_signals(primary, candidates.popular)
+    primary = _append_day_theme_leaders_to_swing_primary(
+        primary=primary,
+        popular=candidates.popular,
+        quotes=quotes,
+        config=config,
+        news_signal=news_signal,
+    )
     use_etf_fallback = primary.empty and config.allow_etf_swing_fallback
     if primary.empty and not use_etf_fallback:
         return []
@@ -234,13 +244,9 @@ def rank_swing_codes(
         if primary.empty:
             return []
         primary["source_model"] = False
-    else:
-        primary["source_model"] = True
 
     if primary.empty:
         return []
-
-    primary = _attach_popular_liquidity_signals(primary, candidates.popular)
 
     if "is_etf" in primary.columns and primary["is_etf"].fillna(False).any():
         primary = primary[~primary.apply(lambda r: is_broad_market_etf(r.to_dict()), axis=1)]
@@ -305,6 +311,102 @@ def rank_swing_codes(
         seen.add(code_str)
         deduped_codes.append(code_str)
     return deduped_codes
+
+
+def _append_day_theme_leaders_to_swing_primary(
+    *,
+    primary: pd.DataFrame,
+    popular: pd.DataFrame,
+    quotes: QuoteMap,
+    config: TradeEngineConfig,
+    news_signal: NewsSentimentSignal | None,
+) -> pd.DataFrame:
+    if (
+        not bool(getattr(config, "swing_include_day_theme_leaders", True))
+        or popular is None
+        or popular.empty
+        or "code" not in popular.columns
+    ):
+        return primary
+
+    existing_codes = set(primary["code"].astype(str)) if "code" in primary.columns else set()
+    pool = popular.copy()
+    pool = pool[~pool["code"].astype(str).isin(existing_codes)]
+    if pool.empty:
+        return primary
+
+    pool["_change_pct_num"] = pool.apply(lambda row: _resolve_change_pct(row, quotes), axis=1)
+    pool["_avg_value_5d_num"] = pool["avg_value_5d"].map(parse_numeric) if "avg_value_5d" in pool.columns else None
+    pool = pool[
+        pool["_change_pct_num"].fillna(-999.0) >= float(getattr(config, "swing_day_theme_leader_min_change_pct", 2.0))
+    ]
+    pool = pool[
+        pool["_avg_value_5d_num"].fillna(0.0)
+        >= float(getattr(config, "swing_day_theme_leader_min_avg_value_5d", 30_000_000_000))
+    ]
+    if pool.empty:
+        return primary
+
+    pool["_theme_leader"] = pool.apply(
+        lambda row: _is_day_theme_leader(row, news_signal=news_signal, config=config),
+        axis=1,
+    )
+    pool = pool[pool["_theme_leader"]]
+    if pool.empty:
+        return primary
+
+    pool = pool.sort_values(
+        by=["_change_pct_num", "_avg_value_5d_num", "code"],
+        ascending=[False, False, True],
+    ).head(max(1, int(getattr(config, "swing_day_theme_leader_max_candidates", 5))))
+
+    leaders = pool.copy()
+    leaders["source_model"] = True
+    leaders["trend_tier"] = leaders.get("trend_tier", "relaxed")
+    leaders["swing_day_theme_leader"] = True
+    if "avg_value_20d" not in leaders.columns:
+        leaders["avg_value_20d"] = leaders["_avg_value_5d_num"]
+    else:
+        leaders["avg_value_20d"] = leaders["avg_value_20d"].fillna(leaders["_avg_value_5d_num"])
+    return pd.concat([primary, leaders], ignore_index=True, sort=False)
+
+
+def _is_day_theme_leader(
+    row: pd.Series,
+    *,
+    news_signal: NewsSentimentSignal | None,
+    config: TradeEngineConfig,
+) -> bool:
+    for flag_col in ("theme_injected", "sector_bucket_selected"):
+        if flag_col in row and _truthy(row.get(flag_col)):
+            return True
+
+    if str(row.get("theme_sector") or "").strip():
+        return True
+    if str(row.get("industry_bucket_name") or "").strip():
+        return True
+
+    if news_signal is None or not news_signal.sector_keywords:
+        return False
+
+    matched = _match_name_to_sectors(str(row.get("name") or ""), news_signal.sector_keywords)
+    if not matched:
+        return False
+    min_sector_score = float(getattr(config, "day_theme_candidate_min_sector_score", 0.35))
+    return any(float(news_signal.sector_scores.get(sector, 0.0)) >= min_sector_score for sector in matched)
+
+
+def _truthy(value: object) -> bool:
+    if value is None:
+        return False
+    try:
+        if pd.isna(value):
+            return False
+    except TypeError:
+        pass
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+    return bool(value)
 
 
 def pick_daytrade(

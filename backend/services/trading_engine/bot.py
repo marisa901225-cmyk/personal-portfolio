@@ -456,7 +456,7 @@ class HybridTradingBot(
                     self._try_enter_swing(
                         now=now,
                         regime=regime,
-                        candidates=swing_candidates,
+                        candidates=candidates,
                         quotes=quotes,
                         news_signal=news_signal,
                         global_signal=global_signal,

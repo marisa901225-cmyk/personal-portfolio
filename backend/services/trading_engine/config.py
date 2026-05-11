@@ -215,6 +215,11 @@ class TradeEngineConfig:
     swing_sector_etf_min_breadth: int = 2
     swing_sector_etf_min_score: float = 30.0
     swing_sector_etf_min_change_pct: float = 0.0
+    swing_include_day_theme_leaders: bool = True
+    swing_day_theme_leader_max_candidates: int = 5
+    swing_day_theme_leader_min_change_pct: float = 2.0
+    swing_day_theme_leader_min_avg_value_5d: int = 30_000_000_000
+    swing_day_theme_leader_bonus: float = 36.0
     swing_global_sector_positive_bonus_max: float = 8.0
     swing_global_sector_negative_penalty_max: float = 10.0
     swing_global_market_negative_penalty_max: float = 2.5

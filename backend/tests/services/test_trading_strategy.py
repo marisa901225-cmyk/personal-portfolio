@@ -16,6 +16,7 @@ from backend.services.trading_engine.strategy import (
     pick_daytrade,
     pick_swing,
     rank_daytrade_codes,
+    rank_swing_codes,
 )
 
 
@@ -933,6 +934,84 @@ class TradingStrategyTests(unittest.TestCase):
 
         picked = pick_swing(candidates, quotes={}, config=TradeEngineConfig())
         self.assertEqual(picked, "LIQ001")
+
+    def test_rank_swing_includes_strong_day_theme_leaders(self) -> None:
+        model_pool = pd.DataFrame(
+            [
+                {
+                    "code": "APR001",
+                    "name": "에이피알",
+                    "avg_value_20d": 900_000_000_000,
+                    "ma20": 100,
+                    "ma60": 95,
+                    "close": 104,
+                    "change_pct": 1.2,
+                    "is_etf": False,
+                    "trend_tier": "strict",
+                }
+            ]
+        )
+        popular_pool = pd.DataFrame(
+            [
+                {
+                    "code": "SEMI01",
+                    "name": "KODEX 반도체",
+                    "avg_value_5d": 180_000_000_000,
+                    "close": 106,
+                    "change_pct": 6.5,
+                    "is_etf": True,
+                    "sector_bucket_selected": True,
+                    "theme_sector": "semiconductor",
+                }
+            ]
+        )
+        cfg = TradeEngineConfig(
+            swing_include_day_theme_leaders=True,
+            swing_day_theme_leader_min_change_pct=2.0,
+            swing_day_theme_leader_min_avg_value_5d=30_000_000_000,
+            swing_day_theme_leader_bonus=36.0,
+        )
+        candidates = self._candidates_with_swing(model=model_pool, etf=pd.DataFrame(), popular=popular_pool)
+
+        ranked = rank_swing_codes(candidates, quotes={}, config=cfg)
+
+        self.assertEqual(ranked[0], "SEMI01")
+        self.assertIn("APR001", ranked)
+
+    def test_rank_swing_ignores_plain_day_popular_rows(self) -> None:
+        model_pool = pd.DataFrame(
+            [
+                {
+                    "code": "APR001",
+                    "name": "에이피알",
+                    "avg_value_20d": 900_000_000_000,
+                    "ma20": 100,
+                    "ma60": 95,
+                    "close": 104,
+                    "change_pct": 1.2,
+                    "is_etf": False,
+                    "trend_tier": "strict",
+                }
+            ]
+        )
+        popular_pool = pd.DataFrame(
+            [
+                {
+                    "code": "PLAIN1",
+                    "name": "무테마",
+                    "avg_value_5d": 180_000_000_000,
+                    "close": 106,
+                    "change_pct": 6.5,
+                    "is_etf": False,
+                }
+            ]
+        )
+        candidates = self._candidates_with_swing(model=model_pool, etf=pd.DataFrame(), popular=popular_pool)
+
+        ranked = rank_swing_codes(candidates, quotes={}, config=TradeEngineConfig())
+
+        self.assertEqual(ranked[0], "APR001")
+        self.assertNotIn("PLAIN1", ranked)
 
     def test_score_day_row_applies_sector_news_bonus(self) -> None:
         row = pd.Series(

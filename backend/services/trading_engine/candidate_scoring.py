@@ -34,6 +34,8 @@ def _score_swing_row(
             if trend_tier == "strict"
             else float(getattr(config, "swing_source_model_relaxed_bonus", 22.0))
         )
+    if _as_bool(row.get("swing_day_theme_leader", False)):
+        score += float(getattr(config, "swing_day_theme_leader_bonus", 36.0))
 
     if ma20 and close > ma20:
         score += float(getattr(config, "swing_ma20_bonus", 10.0))
