@@ -12,12 +12,18 @@ import requests
 from backend.services.pension_rebalancing import (
     PensionAsset,
     PensionHolding,
+    PensionOrderPlan,
     QuarterlyMarketSignal,
     build_pension_rebalance_plan,
     normalize_regime,
     pct_return,
     quarter_start,
     resolve_quarterly_market_signal,
+)
+from backend.services.trading_engine.execution_support import (
+    krx_tick_size,
+    next_buy_retry_price,
+    normalize_buy_limit_price,
 )
 
 
@@ -51,6 +57,24 @@ def _to_float(value: Any) -> float:
         return float(str(value or "0").replace(",", "").strip() or "0")
     except (TypeError, ValueError):
         return 0.0
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = str(os.getenv(name, "") or "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _aggressive_limit_price(*, side: str, price: int) -> int:
+    if side == "BUY":
+        return next_buy_retry_price(int(price))
+    normalized = normalize_buy_limit_price(int(price))
+    tick_size = krx_tick_size(float(normalized))
+    return max(tick_size, normalized - tick_size)
 
 
 class PensionKISClient:
@@ -217,6 +241,36 @@ class PensionKISClient:
             "change_pct": _to_float(row.get("prdy_ctrt")),
         }
 
+    def buy_order_capacity(self, code: str, *, price: int = 0, order_type: str = "00") -> dict[str, int]:
+        params = {
+            "CANO": self.cano,
+            "ACNT_PRDT_CD": self.acnt_prdt_cd,
+            "PDNO": code,
+            "ORD_UNPR": str(max(0, int(price))),
+            "ORD_DVSN": order_type,
+            "CMA_EVLU_AMT_ICLD_YN": "N",
+            "OVRS_ICLD_YN": "N",
+        }
+        response = self.session.get(
+            f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-psbl-order",
+            headers=self._headers("TTTC8908R"),
+            params=params,
+            timeout=(3.05, 10.0),
+        )
+        data = response.json()
+        if data.get("rt_cd") != "0":
+            raise RuntimeError(f"KIS buy capacity failed code={code}: {data.get('msg_cd')} {data.get('msg1')}")
+        output = data.get("output") or {}
+        row = output[0] if isinstance(output, list) and output else output
+        row = row if isinstance(row, dict) else {}
+        return {
+            "ord_psbl_cash": _to_int(row.get("ord_psbl_cash")),
+            "nrcvb_buy_amt": _to_int(row.get("nrcvb_buy_amt")),
+            "nrcvb_buy_qty": _to_int(row.get("nrcvb_buy_qty")),
+            "max_buy_amt": _to_int(row.get("max_buy_amt")),
+            "max_buy_qty": _to_int(row.get("max_buy_qty")),
+        }
+
     def daily_prices(self, code: str, *, start_date: str, end_date: str) -> list[tuple[str, int]]:
         params = {
             "FID_COND_MRKT_DIV_CODE": "J",
@@ -244,14 +298,14 @@ class PensionKISClient:
                 prices.append((trade_date, close))
         return sorted(prices)
 
-    def place_order(self, *, side: str, code: str, qty: int) -> dict[str, Any]:
+    def place_order(self, *, side: str, code: str, qty: int, price: int) -> dict[str, Any]:
         body = {
             "CANO": self.cano,
             "ACNT_PRDT_CD": self.acnt_prdt_cd,
             "PDNO": code,
-            "ORD_DVSN": "01",
+            "ORD_DVSN": "00",
             "ORD_QTY": str(qty),
-            "ORD_UNPR": "0",
+            "ORD_UNPR": str(max(0, int(price))),
         }
         tr_id = "TTTC0012U" if side == "BUY" else "TTTC0011U"
         response = self.session.post(
@@ -266,6 +320,7 @@ class PensionKISClient:
             "code": code,
             "side": side,
             "qty": qty,
+            "price": price,
             "order_id": (data.get("output") or {}).get("ODNO", ""),
             "msg": data.get("msg1", ""),
         }
@@ -372,15 +427,67 @@ def main() -> int:
         if asset.code not in prices:
             prices[asset.code] = int(client.quote(asset.code).get("price") or 0)
 
+    orderable_cash = cash
+    if args.execute:
+        capacity_values = []
+        for asset in assets:
+            if asset.bucket in {"sp500", "momentum"}:
+                limit_price = _aggressive_limit_price(side="BUY", price=prices.get(asset.code, 0))
+                capacity = client.buy_order_capacity(asset.code, price=limit_price, order_type="00")
+                capacity_values.append(
+                    max(
+                        capacity.get("ord_psbl_cash", 0),
+                        capacity.get("nrcvb_buy_amt", 0),
+                        capacity.get("max_buy_amt", 0),
+                    )
+                )
+        positive_capacity_values = [value for value in capacity_values if value > 0]
+        if positive_capacity_values:
+            orderable_cash = min(cash, max(positive_capacity_values))
+        cash_buffer_pct = max(0.0, min(0.5, _env_float("PENSION_REBALANCE_ORDER_CASH_BUFFER_PCT", 0.10)))
+        orderable_cash = int(orderable_cash * (1.0 - cash_buffer_pct))
+
     plan = build_pension_rebalance_plan(
         holdings=holdings,
-        cash=cash,
+        cash=orderable_cash,
         assets=assets,
         prices=prices,
         regime=signal.regime,
         min_order_amount=args.min_order_amount,
         allow_sells=not args.no_sells,
     )
+
+    if args.execute:
+        remaining_orderable_cash = orderable_cash
+        adjusted_orders: list[PensionOrderPlan] = []
+        for order in plan.orders:
+            if order.side != "BUY":
+                adjusted_orders.append(order)
+                continue
+            limit_price = _aggressive_limit_price(side="BUY", price=order.price)
+            capacity = client.buy_order_capacity(order.code, price=limit_price, order_type="00")
+            capacity_qty = max(capacity.get("nrcvb_buy_qty", 0), capacity.get("max_buy_qty", 0))
+            cash_qty = remaining_orderable_cash // max(1, limit_price)
+            qty_candidates = [order.qty, int(cash_qty)]
+            if capacity_qty > 0:
+                qty_candidates.append(capacity_qty)
+            adjusted_qty = min(qty_candidates)
+            if adjusted_qty <= 0:
+                continue
+            adjusted_amount = adjusted_qty * limit_price
+            adjusted_orders.append(
+                PensionOrderPlan(
+                    side=order.side,
+                    code=order.code,
+                    bucket=order.bucket,
+                    qty=adjusted_qty,
+                    price=limit_price,
+                    amount=adjusted_amount,
+                    reason=order.reason,
+                )
+            )
+            remaining_orderable_cash = max(0, remaining_orderable_cash - adjusted_amount)
+        plan.orders[:] = adjusted_orders
 
     print("mode", "EXECUTE" if args.execute else "DRY_RUN")
     print("regime", plan.regime)
@@ -390,6 +497,9 @@ def main() -> int:
     print("selected_momentum_code", signal.selected_momentum_code)
     print("total_value", plan.total_value)
     print("cash", plan.cash)
+    if args.execute:
+        print("balance_cash_d2", cash)
+        print("orderable_cash_used", orderable_cash)
     print("target_weights", plan.target_weights)
     print("current_values", plan.current_values)
     print("estimated_cash_after_orders", plan.estimated_cash_after_orders)
@@ -404,7 +514,8 @@ def main() -> int:
         return 0
 
     for order in plan.orders:
-        result = client.place_order(side=order.side, code=order.code, qty=order.qty)
+        order_price = _aggressive_limit_price(side=order.side, price=order.price) if order.side == "SELL" else order.price
+        result = client.place_order(side=order.side, code=order.code, qty=order.qty, price=order_price)
         print("order_result", result)
         if not result.get("success"):
             return 1

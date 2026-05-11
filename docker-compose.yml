@@ -121,6 +121,7 @@ services:
       - LLM_CACHE_TYPE_K=q4_0
       - LLM_CACHE_TYPE_V=q4_0
       - LLM_MMPROJ_PATH=/data/gemma-4-E4B.mmproj-Q8_0.gguf
+      - LLM_EXTRA_ARGS=--no-warmup
       - ONEAPI_DEVICE_SELECTOR=level_zero:0
       - GGML_SYCL_FORCE_MMQ=1
       - ZES_ENABLE_SYSMAN=1
@@ -310,6 +311,39 @@ services:
     cpus: "1.0"
     mem_limit: "512m"
     pids_limit: 300
+
+  pension-rebalancer:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: myasset-pension-rebalancer
+    restart: unless-stopped
+    volumes:
+      - ./backend:/app/backend
+      - ./backend/storage:/app/backend/storage
+      - ./backend/data:/app/backend/data
+      - ./backend/logs:/app/backend/logs
+      - ${MYASSET_SECRETS_ENV_FILE:-/home/dlckdgn/ai-models/myasset.secrets.env}:/app/runtime/myasset.secrets.env
+      - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
+    command: python -m backend.scripts.run_pension_rebalance_scheduler
+    environment:
+      - PYTHONPATH=/app
+      - TZ=Asia/Seoul
+      - MYASSET_SECRETS_ENV_FILE=/app/runtime/myasset.secrets.env
+      - PENSION_REBALANCE_EXECUTE=${PENSION_REBALANCE_EXECUTE:-1}
+      - PENSION_REBALANCE_RUN_ON_START=${PENSION_REBALANCE_RUN_ON_START:-1}
+      - PENSION_REBALANCE_FORCE_START=${PENSION_REBALANCE_FORCE_START:-0}
+      - PENSION_REBALANCE_HOUR=${PENSION_REBALANCE_HOUR:-10}
+      - PENSION_REBALANCE_MINUTE=${PENSION_REBALANCE_MINUTE:-5}
+      - PENSION_REBALANCE_QUARTER_WINDOW_DAYS=${PENSION_REBALANCE_QUARTER_WINDOW_DAYS:-7}
+      - PENSION_REBALANCE_STATE_PATH=${PENSION_REBALANCE_STATE_PATH:-/app/backend/storage/pension_rebalance/state.json}
+      - PENSION_REBALANCE_MIN_ORDER_AMOUNT=${PENSION_REBALANCE_MIN_ORDER_AMOUNT:-50000}
+    env_file: *backend_env_files
+    networks:
+      - appnet
+    cpus: "0.5"
+    mem_limit: "384m"
+    pids_limit: 200
 
   esports-monitor:
     build:
