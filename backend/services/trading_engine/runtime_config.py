@@ -439,6 +439,10 @@ def _apply_daytrade_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_DAY_LOCK_VOLATILITY_GAP_MULTIPLIER",
         cfg.day_lock_volatility_gap_multiplier,
     )
+    cfg.day_lock_requires_intraday_trend_break = _env_bool(
+        "TRADING_ENGINE_DAY_LOCK_REQUIRES_INTRADAY_TREND_BREAK",
+        cfg.day_lock_requires_intraday_trend_break,
+    )
     cfg.day_stop_loss_volatility_multiplier = _env_float(
         "TRADING_ENGINE_DAY_STOP_LOSS_VOLATILITY_MULTIPLIER",
         cfg.day_stop_loss_volatility_multiplier,

@@ -64,6 +64,7 @@ class TradeEngineConfig:
     day_lock_profit_floor_pct: float = 0.005
     day_lock_retrace_gap_pct: float = 0.006
     day_lock_volatility_gap_multiplier: float = 0.60
+    day_lock_requires_intraday_trend_break: bool = True
     day_stoploss_exclude_after_losses: int = 3
     day_stop_llm_review_enabled: bool = True
     day_stop_llm_review_use_paid: bool = True

@@ -85,6 +85,7 @@ def should_exit_position(
     config: TradeEngineConfig,
     swing_trend_broken: bool | None = None,
     day_lock_retrace_gap_pct_override: float | None = None,
+    day_lock_intraday_trend_broken: bool | None = None,
     day_stop_loss_pct_override: float | None = None,
 ) -> tuple[bool, str, float]:
     if position.entry_price <= 0:
@@ -101,6 +102,10 @@ def should_exit_position(
 
     locked_profit_pct = float(position.locked_profit_pct) if position.locked_profit_pct is not None else None
     if position.type == "T" and locked_profit_pct is not None and pnl_pct < locked_profit_pct:
+        if bool(getattr(config, "day_lock_requires_intraday_trend_break", False)) and not bool(
+            day_lock_intraday_trend_broken
+        ):
+            return False, "", pnl_pct
         return True, "LOCK", pnl_pct
 
     if position.type == "P":

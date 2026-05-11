@@ -27,11 +27,12 @@ def test_swing_position_does_not_exit_on_day_lock_retrace(tmp_path) -> None:
     assert reason == ""
     assert round(pnl_pct, 4) == 0.036
 
-def test_day_position_arms_profit_lock_and_exits_on_retrace() -> None:
+def test_day_position_arms_profit_lock_and_waits_for_intraday_trend_break() -> None:
     cfg = TradeEngineConfig(
         day_lock_profit_trigger_pct=0.009,
         day_lock_profit_floor_pct=0.002,
         day_lock_retrace_gap_pct=0.006,
+        day_lock_requires_intraday_trend_break=True,
     )
     position = PositionState(
         type="T",
@@ -59,6 +60,19 @@ def test_day_position_arms_profit_lock_and_exits_on_retrace() -> None:
         quote_price=100_800.0,
         now=datetime(2026, 2, 16, 9, 24),
         config=cfg,
+        day_lock_intraday_trend_broken=False,
+    )
+
+    assert exit_now is False
+    assert reason == ""
+    assert round(pnl_pct, 4) == 0.008
+
+    exit_now, reason, pnl_pct = should_exit_position(
+        position,
+        quote_price=100_800.0,
+        now=datetime(2026, 2, 16, 9, 25),
+        config=cfg,
+        day_lock_intraday_trend_broken=True,
     )
 
     assert exit_now is True

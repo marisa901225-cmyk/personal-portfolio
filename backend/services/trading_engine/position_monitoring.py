@@ -23,6 +23,7 @@ def monitor_positions(bot, *, now: datetime, logger) -> None:
 
             swing_trend_broken: bool | None = None
             day_lock_retrace_gap_pct_override: float | None = None
+            day_lock_intraday_trend_broken: bool | None = None
             day_stop_loss_pct_override: float | None = None
             if pos.type == "S" and bot.config.swing_sl_requires_trend_break:
                 pnl_pct = (price / pos.entry_price) - 1.0 if pos.entry_price > 0 else 0.0
@@ -31,6 +32,13 @@ def monitor_positions(bot, *, now: datetime, logger) -> None:
             elif pos.type == "T":
                 day_lock_retrace_gap_pct_override = bot._resolve_day_lock_retrace_gap_pct(code=code)
                 day_stop_loss_pct_override = bot._resolve_day_stop_loss_pct(code=code)
+                if (
+                    bool(getattr(bot.config, "day_lock_requires_intraday_trend_break", True))
+                    and pos.locked_profit_pct is not None
+                    and pos.entry_price > 0
+                    and (price / pos.entry_price - 1.0) < float(pos.locked_profit_pct)
+                ):
+                    day_lock_intraday_trend_broken = _is_day_lock_intraday_trend_broken(bot, code=code, logger=logger)
 
             exit_now, reason, pnl_pct = should_exit_position(
                 pos,
@@ -39,6 +47,7 @@ def monitor_positions(bot, *, now: datetime, logger) -> None:
                 config=bot.config,
                 swing_trend_broken=swing_trend_broken,
                 day_lock_retrace_gap_pct_override=day_lock_retrace_gap_pct_override,
+                day_lock_intraday_trend_broken=day_lock_intraday_trend_broken,
                 day_stop_loss_pct_override=day_stop_loss_pct_override,
             )
             if not exit_now:
@@ -97,6 +106,14 @@ def monitor_positions(bot, *, now: datetime, logger) -> None:
                     pnl_pct=pnl_pct * 100,
                 )
             )
+
+
+def _is_day_lock_intraday_trend_broken(bot, *, code: str, logger) -> bool:
+    ok, meta = bot._passes_day_intraday_confirmation(code=code)
+    if ok:
+        return False
+    reason = str(meta.get("reason") or "").strip().upper()
+    return reason in {"WEAK_INTRADAY_WINDOW", "WEAK_INTRADAY_LAST_BAR", "INTRADAY_RETRACE"}
 
 
 def record_pending_exit_order(bot, order: dict, *, strategy_type: str) -> None:
