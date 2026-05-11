@@ -101,9 +101,9 @@ def _live_change_pct(api: TradingAPI, code: str) -> float | None:
     return parse_numeric(q.get("change_pct"))
 
 
-def _is_strong_live_risk_on(api: TradingAPI, code: str, *, threshold_pct: float = 3.0) -> bool:
+def _is_live_risk_on(api: TradingAPI, code: str, *, threshold_pct: float = 0.0) -> bool:
     live_change_pct = _live_change_pct(api, code)
-    return live_change_pct is not None and live_change_pct >= threshold_pct
+    return live_change_pct is not None and live_change_pct > threshold_pct
 
 
 def detect_intraday_circuit_breaker(
@@ -190,8 +190,8 @@ def get_regime(
     primary_regime, primary_panic_date = _single_regime(api, asof, primary_code, vol_threshold)
 
     # 로컬 state의 last_panic_date 또는 최근 일봉 패닉은 오염될 수 있다.
-    # KIS 실시간 proxy가 강한 상승장이라면 과거/로컬 위험회피 신호를 무시한다.
-    if _is_strong_live_risk_on(api, primary_code):
+    # KIS 실시간 proxy가 상승이면 과거/로컬 위험회피 신호를 무시한다.
+    if _is_live_risk_on(api, primary_code):
         return "RISK_ON", None
 
     # 2. 로컬 쿨다운은 KIS 실시간 상승장 검증 뒤에만 적용한다.
@@ -208,7 +208,7 @@ def get_regime(
         default=None,
     )
 
-    if _is_strong_live_risk_on(api, confirmation_code):
+    if _is_live_risk_on(api, confirmation_code):
         if primary_regime != "RISK_OFF":
             return "RISK_ON", None
     
