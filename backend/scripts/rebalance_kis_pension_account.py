@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 from pathlib import Path
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from backend.integrations.kis.trading_adapter import KISDirectCredentials, create_trading_api
@@ -160,6 +161,13 @@ class PensionKISClient:
             "order_id": result.get("order_id", ""),
             "msg": result.get("msg", ""),
         }
+
+    def open_orders(self) -> list[dict[str, Any]]:
+        return self.api.open_orders()
+
+    def daily_order_fills(self, *, code: str = "", order_id: str = "", side: str = "00") -> list[dict[str, Any]]:
+        today = datetime.now().strftime("%Y%m%d")
+        return self.api.daily_order_fills(start_date=today, end_date=today, code=code, order_id=order_id, side=side)
 
 
 def _assets_from_env(env: dict[str, str], *, selected_momentum_code: str | None = None) -> list[PensionAsset]:
@@ -332,6 +340,86 @@ def _execute_orders(client: PensionKISClient, orders: list[PensionOrderPlan]) ->
     return 0
 
 
+def _has_open_order(client: PensionKISClient, *, code: str, order_id: str) -> bool:
+    for order in client.open_orders() or []:
+        order_code = str(order.get("code") or "").strip()
+        current_order_id = str(order.get("order_id") or "").strip()
+        remaining_qty = _to_int(order.get("remaining_qty"))
+        if remaining_qty <= 0:
+            continue
+        if order_id and current_order_id == order_id:
+            return True
+        if code and order_code == code and str(order.get("side") or "").lower() == "sell":
+            return True
+    return False
+
+
+def _sell_order_filled(client: PensionKISClient, *, code: str, order_id: str, qty: int) -> bool:
+    fills = client.daily_order_fills(code=code, order_id=order_id, side="01")
+    filled_qty = sum(_to_int(fill.get("filled_qty")) for fill in fills)
+    return filled_qty >= qty
+
+
+def _wait_for_sell_fills(client: PensionKISClient, sell_results: list[dict[str, Any]]) -> bool:
+    timeout_sec = max(0, _env_int("PENSION_REBALANCE_SELL_FILL_TIMEOUT_SEC", 60))
+    poll_sec = max(1, _env_int("PENSION_REBALANCE_SELL_FILL_POLL_SEC", 5))
+    deadline = time.monotonic() + timeout_sec
+    while True:
+        pending: list[dict[str, Any]] = []
+        for result in sell_results:
+            if not result.get("success"):
+                return False
+            code = str(result.get("code") or "").strip()
+            order_id = str(result.get("order_id") or "").strip()
+            qty = _to_int(result.get("qty"))
+            if not order_id:
+                pending.append(result)
+                continue
+            if _sell_order_filled(client, code=code, order_id=order_id, qty=qty):
+                continue
+            pending.append(result)
+
+        if not pending:
+            return True
+        if time.monotonic() >= deadline:
+            print("sell_fill_pending", pending)
+            return False
+        time.sleep(poll_sec)
+
+
+def _refresh_prices(client: PensionKISClient, holdings: list[PensionHolding], assets: list[PensionAsset]) -> dict[str, int]:
+    prices = {holding.code: holding.price for holding in holdings if holding.price > 0}
+    for asset in assets:
+        if asset.code not in prices:
+            prices[asset.code] = int(client.quote(asset.code).get("price") or 0)
+    return prices
+
+
+def _orderable_cash_for_buys(
+    *,
+    client: PensionKISClient,
+    assets: list[PensionAsset],
+    prices: dict[str, int],
+    cash: int,
+) -> int:
+    capacity_values = []
+    for asset in assets:
+        if asset.bucket in {"sp500", "momentum", "bond", "parking"}:
+            limit_price = _aggressive_limit_price(side="BUY", price=prices.get(asset.code, 0))
+            capacity = client.buy_order_capacity(asset.code, price=limit_price, order_type="00")
+            capacity_values.append(
+                max(
+                    capacity.get("ord_psbl_cash", 0),
+                    capacity.get("nrcvb_buy_amt", 0),
+                    capacity.get("max_buy_amt", 0),
+                )
+            )
+    positive_capacity_values = [value for value in capacity_values if value > 0]
+    orderable_cash = min(cash, max(positive_capacity_values)) if positive_capacity_values else cash
+    cash_buffer_pct = max(0.0, min(0.5, _env_float("PENSION_REBALANCE_ORDER_CASH_BUFFER_PCT", 0.10)))
+    return int(orderable_cash * (1.0 - cash_buffer_pct))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Plan or execute KIS pension-account rebalancing.")
     parser.add_argument("--regime", default="auto", help="auto, rising, falling, neutral")
@@ -347,30 +435,11 @@ def main() -> int:
     assets = _assets_from_env(env, selected_momentum_code=signal.selected_momentum_code if signal else None)
     holdings, cash = client.balance()
 
-    prices = {holding.code: holding.price for holding in holdings if holding.price > 0}
-    for asset in assets:
-        if asset.code not in prices:
-            prices[asset.code] = int(client.quote(asset.code).get("price") or 0)
+    prices = _refresh_prices(client, holdings, assets)
 
     orderable_cash = cash
     if args.execute:
-        capacity_values = []
-        for asset in assets:
-            if asset.bucket in {"sp500", "momentum"}:
-                limit_price = _aggressive_limit_price(side="BUY", price=prices.get(asset.code, 0))
-                capacity = client.buy_order_capacity(asset.code, price=limit_price, order_type="00")
-                capacity_values.append(
-                    max(
-                        capacity.get("ord_psbl_cash", 0),
-                        capacity.get("nrcvb_buy_amt", 0),
-                        capacity.get("max_buy_amt", 0),
-                    )
-                )
-        positive_capacity_values = [value for value in capacity_values if value > 0]
-        if positive_capacity_values:
-            orderable_cash = min(cash, max(positive_capacity_values))
-        cash_buffer_pct = max(0.0, min(0.5, _env_float("PENSION_REBALANCE_ORDER_CASH_BUFFER_PCT", 0.10)))
-        orderable_cash = int(orderable_cash * (1.0 - cash_buffer_pct))
+        orderable_cash = _orderable_cash_for_buys(client=client, assets=assets, prices=prices, cash=cash)
 
     lump_sum_threshold = max(0, _env_int("PENSION_CASH_SWEEP_LUMP_SUM_THRESHOLD", 6_000_000))
     if args.cash_sweep and lump_sum_threshold > 0 and orderable_cash >= lump_sum_threshold:
@@ -420,7 +489,51 @@ def main() -> int:
         )
 
     if args.execute:
-        plan.orders[:] = _apply_buy_capacity(client=client, orders=plan.orders, orderable_cash=orderable_cash)
+        sell_orders = [order for order in plan.orders if order.side == "SELL"]
+        if sell_orders:
+            sell_results: list[dict[str, Any]] = []
+            for order in sell_orders:
+                order_price = _aggressive_limit_price(side="SELL", price=order.price)
+                result = client.place_order(side=order.side, code=order.code, qty=order.qty, price=order_price)
+                print("sell_order_result", result)
+                sell_results.append(result)
+                if not result.get("success"):
+                    return 1
+            if not _wait_for_sell_fills(client, sell_results):
+                return 1
+
+            holdings, cash = client.balance()
+            prices = _refresh_prices(client, holdings, assets)
+            orderable_cash = _orderable_cash_for_buys(client=client, assets=assets, prices=prices, cash=cash)
+
+            if args.cash_sweep:
+                plan = build_pension_cash_sweep_plan(
+                    holdings=holdings,
+                    cash=orderable_cash,
+                    assets=assets,
+                    prices=prices,
+                    min_order_amount=args.min_order_amount,
+                    parking_code=_parking_code_from_env(env),
+                )
+            else:
+                assert signal is not None
+                plan = build_pension_rebalance_plan(
+                    holdings=holdings,
+                    cash=orderable_cash,
+                    assets=assets,
+                    prices=prices,
+                    regime=signal.regime,
+                    min_order_amount=args.min_order_amount,
+                    allow_sells=False,
+                    parking_code=_parking_code_from_env(env),
+                    gradual_equity_restore_step=max(
+                        0.0,
+                        min(0.5, _env_float("PENSION_REBALANCE_EQUITY_RESTORE_STEP_PCT", 0.20)),
+                    ),
+                )
+
+        buy_orders = [order for order in plan.orders if order.side == "BUY"]
+        plan.orders[:] = _apply_buy_capacity(client=client, orders=buy_orders, orderable_cash=orderable_cash)
 
     print("mode", "EXECUTE" if args.execute else "DRY_RUN")
     print("job", "CASH_SWEEP" if args.cash_sweep else "REBALANCE")
