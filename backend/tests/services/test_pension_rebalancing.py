@@ -192,6 +192,7 @@ def test_lump_sum_cash_can_be_distributed_without_selling_existing_holdings() ->
 def test_normalize_regime_accepts_korean_aliases() -> None:
     assert normalize_regime("상승장") == "rising"
     assert normalize_regime("하락장") == "falling"
+    assert normalize_regime("폭락장") == "crash"
 
 
 def test_quarterly_signal_uses_reference_return_for_regime_and_kospi_nasdaq_momentum() -> None:
@@ -223,6 +224,45 @@ def test_quarterly_signal_marks_falling_below_10m_ma_with_drawdown_and_weak_3m_r
     )
 
     assert signal.regime == "falling"
+
+
+def test_quarterly_signal_marks_crash_below_10m_ma_with_deep_drawdown() -> None:
+    signal = resolve_quarterly_market_signal(
+        reference_return_pct=2.0,
+        kospi_return_pct=1.0,
+        nasdaq_return_pct=2.0,
+        kospi_code="237350",
+        nasdaq_code="426030",
+        trend_metrics=EquityTrendMetrics(
+            current_price=78,
+            moving_average_10m=100.0,
+            drawdown_from_recent_high_pct=-22.0,
+            three_month_return_pct=1.0,
+        ),
+    )
+
+    assert signal.regime == "crash"
+
+
+def test_crash_market_targets_bond_at_50_and_keeps_sp500_at_40() -> None:
+    plan = build_pension_rebalance_plan(
+        holdings=[
+            PensionHolding("360200", "ACE 미국S&P500", 60, 10_000, 600_000),
+            PensionHolding("426030", "TIME 미국나스닥100액티브", 40, 10_000, 400_000),
+        ],
+        cash=0,
+        assets=ASSETS,
+        prices={"360200": 10_000, "237350": 10_000, "426030": 10_000, "BOND01": 10_000},
+        regime="crash",
+        min_order_amount=10_000,
+    )
+
+    assert plan.target_weights["sp500"] == 0.40
+    assert plan.target_weights["momentum"] == 0.10
+    assert plan.target_weights["bond"] == 0.50
+    assert any(order.side == "SELL" and order.bucket == "sp500" for order in plan.orders)
+    assert any(order.side == "SELL" and order.bucket == "momentum" for order in plan.orders)
+    assert any(order.side == "BUY" and order.bucket == "bond" for order in plan.orders)
 
 
 def test_quarterly_signal_recovers_above_10m_ma_with_positive_3m_return() -> None:

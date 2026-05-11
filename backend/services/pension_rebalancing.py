@@ -6,7 +6,7 @@ from math import floor
 from typing import Iterable, Literal
 
 
-Regime = Literal["rising", "falling", "neutral"]
+Regime = Literal["rising", "falling", "neutral", "crash"]
 Bucket = Literal["sp500", "momentum", "bond", "parking", "other"]
 Side = Literal["BUY", "SELL"]
 
@@ -72,8 +72,9 @@ class EquityTrendMetrics:
 
 DEFAULT_TARGETS: dict[Regime, dict[Bucket, float]] = {
     "rising": {"sp500": 0.40, "momentum": 0.60, "bond": 0.0, "other": 0.0},
+    "neutral": {"sp500": 0.55, "momentum": 0.25, "bond": 0.20, "other": 0.0},
     "falling": {"sp500": 0.50, "momentum": 0.20, "bond": 0.30, "other": 0.0},
-    "neutral": {"sp500": 0.60, "momentum": 0.30, "bond": 0.10, "other": 0.0},
+    "crash": {"sp500": 0.40, "momentum": 0.10, "bond": 0.50, "other": 0.0},
 }
 
 
@@ -94,10 +95,14 @@ def normalize_regime(value: str) -> Regime:
         "하락장": "falling",
         "보합": "neutral",
         "neutral": "neutral",
+        "crash": "crash",
+        "panic": "crash",
+        "폭락": "crash",
+        "폭락장": "crash",
     }
     normalized = aliases.get(raw, raw)
     if normalized not in DEFAULT_TARGETS:
-        raise ValueError("regime must be one of rising, falling, neutral")
+        raise ValueError("regime must be one of rising, falling, neutral, crash")
     return normalized  # type: ignore[return-value]
 
 
@@ -170,8 +175,10 @@ def resolve_quarterly_market_signal(
         above_10m = trend_metrics.current_price > trend_metrics.moving_average_10m
         drawdown = trend_metrics.drawdown_from_recent_high_pct
         three_month_return = trend_metrics.three_month_return_pct
-        if below_10m and drawdown <= -10.0 and (three_month_return < 0.0 or drawdown <= -20.0):
-            regime: Regime = "falling"
+        if below_10m and drawdown <= -20.0:
+            regime: Regime = "crash"
+        elif below_10m and drawdown <= -10.0 and three_month_return < 0.0:
+            regime = "falling"
         elif above_10m and three_month_return > 0.0:
             regime = "rising"
         else:

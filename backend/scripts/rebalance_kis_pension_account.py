@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import os
 import time
-from pathlib import Path
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from backend.integrations.kis.trading_adapter import KISDirectCredentials, create_trading_api
@@ -340,20 +340,6 @@ def _execute_orders(client: PensionKISClient, orders: list[PensionOrderPlan]) ->
     return 0
 
 
-def _has_open_order(client: PensionKISClient, *, code: str, order_id: str) -> bool:
-    for order in client.open_orders() or []:
-        order_code = str(order.get("code") or "").strip()
-        current_order_id = str(order.get("order_id") or "").strip()
-        remaining_qty = _to_int(order.get("remaining_qty"))
-        if remaining_qty <= 0:
-            continue
-        if order_id and current_order_id == order_id:
-            return True
-        if code and order_code == code and str(order.get("side") or "").lower() == "sell":
-            return True
-    return False
-
-
 def _sell_order_filled(client: PensionKISClient, *, code: str, order_id: str, qty: int) -> bool:
     fills = client.daily_order_fills(code=code, order_id=order_id, side="01")
     filled_qty = sum(_to_int(fill.get("filled_qty")) for fill in fills)
@@ -422,7 +408,7 @@ def _orderable_cash_for_buys(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Plan or execute KIS pension-account rebalancing.")
-    parser.add_argument("--regime", default="auto", help="auto, rising, falling, neutral")
+    parser.add_argument("--regime", default="auto", help="auto, rising, falling, neutral, crash")
     parser.add_argument("--execute", action="store_true", help="place limit orders; default is dry-run")
     parser.add_argument("--no-sells", action="store_true", help="only plan buys with available cash")
     parser.add_argument("--min-order-amount", type=int, default=50_000)
