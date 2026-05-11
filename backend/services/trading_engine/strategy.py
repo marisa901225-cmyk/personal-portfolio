@@ -225,12 +225,13 @@ def rank_swing_codes(
     global_signal: GlobalMarketSignal | None = None,
 ) -> list[str]:
     primary = candidates.model.copy()
+    popular = getattr(candidates, "popular", pd.DataFrame())
     if not primary.empty:
         primary["source_model"] = True
-        primary = _attach_popular_liquidity_signals(primary, candidates.popular)
+        primary = _attach_popular_liquidity_signals(primary, popular)
     primary = _append_day_theme_leaders_to_swing_primary(
         primary=primary,
-        popular=candidates.popular,
+        popular=popular,
         quotes=quotes,
         config=config,
         news_signal=news_signal,
