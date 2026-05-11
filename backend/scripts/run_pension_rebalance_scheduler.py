@@ -98,6 +98,42 @@ def _build_command(*, execute: bool) -> list[str]:
     return command
 
 
+def _build_cash_sweep_command(*, execute: bool) -> list[str]:
+    command = [
+        sys.executable,
+        "-m",
+        "backend.scripts.rebalance_kis_pension_account",
+        "--cash-sweep",
+    ]
+    min_order_amount = str(os.getenv("PENSION_CASH_SWEEP_MIN_ORDER_AMOUNT", "") or "").strip()
+    if not min_order_amount:
+        min_order_amount = str(os.getenv("PENSION_REBALANCE_MIN_ORDER_AMOUNT", "") or "").strip()
+    if min_order_amount:
+        command.extend(["--min-order-amount", min_order_amount])
+    if execute:
+        command.append("--execute")
+    return command
+
+
+def _run_cash_sweep(*, reason: str) -> int:
+    execute = _env_bool("PENSION_CASH_SWEEP_EXECUTE", _env_bool("PENSION_REBALANCE_EXECUTE", False))
+    command = _build_cash_sweep_command(execute=execute)
+    logger.info(
+        "starting pension cash sweep reason=%s mode=%s command=%s",
+        reason,
+        "EXECUTE" if execute else "DRY_RUN",
+        " ".join(command),
+    )
+    result = subprocess.run(command, cwd=str(PROJECT_ROOT.parent), text=True, capture_output=True)
+    if result.stdout:
+        logger.info("pension cash sweep stdout:\n%s", result.stdout.strip())
+    if result.stderr:
+        logger.warning("pension cash sweep stderr:\n%s", result.stderr.strip())
+    if result.returncode != 0:
+        logger.error("pension cash sweep failed returncode=%s", result.returncode)
+    return int(result.returncode)
+
+
 def _run_rebalance(*, reason: str, force: bool = False) -> int:
     now = datetime.now(KST)
     state_path = _state_path()
@@ -150,10 +186,19 @@ async def _run_rebalance_async(reason: str, *, force: bool = False) -> None:
         logger.error("pension rebalance job ended with failure returncode=%s", returncode)
 
 
+async def _run_cash_sweep_async(reason: str) -> None:
+    loop = asyncio.get_running_loop()
+    returncode = await loop.run_in_executor(None, lambda: _run_cash_sweep(reason=reason))
+    if returncode != 0:
+        logger.error("pension cash sweep job ended with failure returncode=%s", returncode)
+
+
 async def main() -> None:
     scheduler = AsyncIOScheduler(timezone=KST)
     hour = _env_int("PENSION_REBALANCE_HOUR", 10)
     minute = _env_int("PENSION_REBALANCE_MINUTE", 5)
+    cash_sweep_hour = _env_int("PENSION_CASH_SWEEP_HOUR", 10)
+    cash_sweep_minute = _env_int("PENSION_CASH_SWEEP_MINUTE", 15)
     scheduler.add_job(
         _run_rebalance_async,
         CronTrigger(day_of_week="mon-fri", hour=hour, minute=minute, timezone=KST),
@@ -163,17 +208,31 @@ async def main() -> None:
         max_instances=1,
         coalesce=True,
     )
+    scheduler.add_job(
+        _run_cash_sweep_async,
+        CronTrigger(day_of_week="mon-fri", hour=cash_sweep_hour, minute=cash_sweep_minute, timezone=KST),
+        args=["schedule"],
+        id="pension_cash_sweep_daily",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
     scheduler.start()
     logger.info(
-        "pension rebalance scheduler started hour=%s minute=%s execute=%s run_on_start=%s",
+        "pension rebalance scheduler started hour=%s minute=%s execute=%s run_on_start=%s cash_sweep_hour=%s cash_sweep_minute=%s cash_sweep_execute=%s",
         hour,
         minute,
         _env_bool("PENSION_REBALANCE_EXECUTE", False),
         _env_bool("PENSION_REBALANCE_RUN_ON_START", True),
+        cash_sweep_hour,
+        cash_sweep_minute,
+        _env_bool("PENSION_CASH_SWEEP_EXECUTE", _env_bool("PENSION_REBALANCE_EXECUTE", False)),
     )
 
     if _env_bool("PENSION_REBALANCE_RUN_ON_START", True):
         await _run_rebalance_async("startup", force=_env_bool("PENSION_REBALANCE_FORCE_START", False))
+    if _env_bool("PENSION_CASH_SWEEP_RUN_ON_START", False):
+        await _run_cash_sweep_async("startup")
 
     try:
         while True:

@@ -15,6 +15,7 @@ from backend.services.pension_rebalancing import (
     PensionHolding,
     PensionOrderPlan,
     QuarterlyMarketSignal,
+    build_pension_cash_sweep_plan,
     build_pension_rebalance_plan,
     normalize_regime,
     pct_return,
@@ -68,6 +69,16 @@ def _env_float(name: str, default: float) -> float:
         return default
     try:
         return float(raw)
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = str(os.getenv(name, "") or "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
     except ValueError:
         return default
 
@@ -451,18 +462,76 @@ def _resolve_quarterly_signal(
     return signal
 
 
+def _parking_code_from_env(env: dict[str, str]) -> str:
+    return str(
+        env.get("PENSION_REBALANCE_PARKING_CODE")
+        or env.get("TRADING_RISK_OFF_PARKING_CODE")
+        or TradeEngineConfig().risk_off_parking_code
+        or ""
+    ).strip()
+
+
+def _apply_buy_capacity(
+    *,
+    client: PensionKISClient,
+    orders: list[PensionOrderPlan],
+    orderable_cash: int,
+) -> list[PensionOrderPlan]:
+    remaining_orderable_cash = orderable_cash
+    adjusted_orders: list[PensionOrderPlan] = []
+    for order in orders:
+        if order.side != "BUY":
+            adjusted_orders.append(order)
+            continue
+        limit_price = _aggressive_limit_price(side="BUY", price=order.price)
+        capacity = client.buy_order_capacity(order.code, price=limit_price, order_type="00")
+        capacity_qty = max(capacity.get("nrcvb_buy_qty", 0), capacity.get("max_buy_qty", 0))
+        cash_qty = remaining_orderable_cash // max(1, limit_price)
+        qty_candidates = [order.qty, int(cash_qty)]
+        if capacity_qty > 0:
+            qty_candidates.append(capacity_qty)
+        adjusted_qty = min(qty_candidates)
+        if adjusted_qty <= 0:
+            continue
+        adjusted_amount = adjusted_qty * limit_price
+        adjusted_orders.append(
+            PensionOrderPlan(
+                side=order.side,
+                code=order.code,
+                bucket=order.bucket,
+                qty=adjusted_qty,
+                price=limit_price,
+                amount=adjusted_amount,
+                reason=order.reason,
+            )
+        )
+        remaining_orderable_cash = max(0, remaining_orderable_cash - adjusted_amount)
+    return adjusted_orders
+
+
+def _execute_orders(client: PensionKISClient, orders: list[PensionOrderPlan]) -> int:
+    for order in orders:
+        order_price = _aggressive_limit_price(side=order.side, price=order.price) if order.side == "SELL" else order.price
+        result = client.place_order(side=order.side, code=order.code, qty=order.qty, price=order_price)
+        print("order_result", result)
+        if not result.get("success"):
+            return 1
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Plan or execute KIS pension-account rebalancing.")
     parser.add_argument("--regime", default="auto", help="auto, rising, falling, neutral")
     parser.add_argument("--execute", action="store_true", help="place market orders; default is dry-run")
     parser.add_argument("--no-sells", action="store_true", help="only plan buys with available cash")
     parser.add_argument("--min-order-amount", type=int, default=50_000)
+    parser.add_argument("--cash-sweep", action="store_true", help="daily cash/parking sweep without quarterly rebalance")
     args = parser.parse_args()
 
     env = {**_load_env_file(DEFAULT_RUNTIME_ENV), **os.environ}
     client = PensionKISClient(env)
-    signal = _resolve_quarterly_signal(client, env, args.regime)
-    assets = _assets_from_env(env, selected_momentum_code=signal.selected_momentum_code)
+    signal = None if args.cash_sweep else _resolve_quarterly_signal(client, env, args.regime)
+    assets = _assets_from_env(env, selected_momentum_code=signal.selected_momentum_code if signal else None)
     holdings, cash = client.balance()
 
     prices = {holding.code: holding.price for holding in holdings if holding.price > 0}
@@ -490,68 +559,68 @@ def main() -> int:
         cash_buffer_pct = max(0.0, min(0.5, _env_float("PENSION_REBALANCE_ORDER_CASH_BUFFER_PCT", 0.10)))
         orderable_cash = int(orderable_cash * (1.0 - cash_buffer_pct))
 
-    plan = build_pension_rebalance_plan(
-        holdings=holdings,
-        cash=orderable_cash,
-        assets=assets,
-        prices=prices,
-        regime=signal.regime,
-        min_order_amount=args.min_order_amount,
-        allow_sells=not args.no_sells,
-        parking_code=str(
-            env.get("PENSION_REBALANCE_PARKING_CODE")
-            or env.get("TRADING_RISK_OFF_PARKING_CODE")
-            or TradeEngineConfig().risk_off_parking_code
-            or ""
-        ).strip(),
-        gradual_equity_restore_step=max(
-            0.0,
-            min(0.5, _env_float("PENSION_REBALANCE_EQUITY_RESTORE_STEP_PCT", 0.20)),
-        ),
-    )
+    lump_sum_threshold = max(0, _env_int("PENSION_CASH_SWEEP_LUMP_SUM_THRESHOLD", 6_000_000))
+    if args.cash_sweep and lump_sum_threshold > 0 and orderable_cash >= lump_sum_threshold:
+        signal = _resolve_quarterly_signal(client, env, args.regime)
+        assets = _assets_from_env(env, selected_momentum_code=signal.selected_momentum_code)
+        for asset in assets:
+            if asset.code not in prices:
+                prices[asset.code] = int(client.quote(asset.code).get("price") or 0)
+        plan = build_pension_rebalance_plan(
+            holdings=holdings,
+            cash=orderable_cash,
+            assets=assets,
+            prices=prices,
+            regime=signal.regime,
+            min_order_amount=args.min_order_amount,
+            allow_sells=False,
+            parking_code=_parking_code_from_env(env),
+            gradual_equity_restore_step=max(
+                0.0,
+                min(0.5, _env_float("PENSION_REBALANCE_EQUITY_RESTORE_STEP_PCT", 0.20)),
+            ),
+        )
+    elif args.cash_sweep:
+        plan = build_pension_cash_sweep_plan(
+            holdings=holdings,
+            cash=orderable_cash,
+            assets=assets,
+            prices=prices,
+            min_order_amount=args.min_order_amount,
+            parking_code=_parking_code_from_env(env),
+        )
+    else:
+        assert signal is not None
+        plan = build_pension_rebalance_plan(
+            holdings=holdings,
+            cash=orderable_cash,
+            assets=assets,
+            prices=prices,
+            regime=signal.regime,
+            min_order_amount=args.min_order_amount,
+            allow_sells=not args.no_sells,
+            parking_code=_parking_code_from_env(env),
+            gradual_equity_restore_step=max(
+                0.0,
+                min(0.5, _env_float("PENSION_REBALANCE_EQUITY_RESTORE_STEP_PCT", 0.20)),
+            ),
+        )
 
     if args.execute:
-        remaining_orderable_cash = orderable_cash
-        adjusted_orders: list[PensionOrderPlan] = []
-        for order in plan.orders:
-            if order.side != "BUY":
-                adjusted_orders.append(order)
-                continue
-            limit_price = _aggressive_limit_price(side="BUY", price=order.price)
-            capacity = client.buy_order_capacity(order.code, price=limit_price, order_type="00")
-            capacity_qty = max(capacity.get("nrcvb_buy_qty", 0), capacity.get("max_buy_qty", 0))
-            cash_qty = remaining_orderable_cash // max(1, limit_price)
-            qty_candidates = [order.qty, int(cash_qty)]
-            if capacity_qty > 0:
-                qty_candidates.append(capacity_qty)
-            adjusted_qty = min(qty_candidates)
-            if adjusted_qty <= 0:
-                continue
-            adjusted_amount = adjusted_qty * limit_price
-            adjusted_orders.append(
-                PensionOrderPlan(
-                    side=order.side,
-                    code=order.code,
-                    bucket=order.bucket,
-                    qty=adjusted_qty,
-                    price=limit_price,
-                    amount=adjusted_amount,
-                    reason=order.reason,
-                )
-            )
-            remaining_orderable_cash = max(0, remaining_orderable_cash - adjusted_amount)
-        plan.orders[:] = adjusted_orders
+        plan.orders[:] = _apply_buy_capacity(client=client, orders=plan.orders, orderable_cash=orderable_cash)
 
     print("mode", "EXECUTE" if args.execute else "DRY_RUN")
+    print("job", "CASH_SWEEP" if args.cash_sweep else "REBALANCE")
     print("regime", plan.regime)
-    print("quarterly_reference_return_pct", round(signal.reference_return_pct, 2))
-    print("quarterly_kospi_return_pct", round(signal.kospi_return_pct, 2))
-    print("quarterly_nasdaq_return_pct", round(signal.nasdaq_return_pct, 2))
-    print("reference_current_price", signal.current_price)
-    print("reference_moving_average_10m", round(signal.moving_average_10m, 2))
-    print("reference_drawdown_from_recent_high_pct", round(signal.drawdown_from_recent_high_pct, 2))
-    print("reference_three_month_return_pct", round(signal.three_month_return_pct, 2))
-    print("selected_momentum_code", signal.selected_momentum_code)
+    if signal is not None:
+        print("quarterly_reference_return_pct", round(signal.reference_return_pct, 2))
+        print("quarterly_kospi_return_pct", round(signal.kospi_return_pct, 2))
+        print("quarterly_nasdaq_return_pct", round(signal.nasdaq_return_pct, 2))
+        print("reference_current_price", signal.current_price)
+        print("reference_moving_average_10m", round(signal.moving_average_10m, 2))
+        print("reference_drawdown_from_recent_high_pct", round(signal.drawdown_from_recent_high_pct, 2))
+        print("reference_three_month_return_pct", round(signal.three_month_return_pct, 2))
+        print("selected_momentum_code", signal.selected_momentum_code)
     print("total_value", plan.total_value)
     print("cash", plan.cash)
     if args.execute:
@@ -570,13 +639,7 @@ def main() -> int:
     if not args.execute:
         return 0
 
-    for order in plan.orders:
-        order_price = _aggressive_limit_price(side=order.side, price=order.price) if order.side == "SELL" else order.price
-        result = client.place_order(side=order.side, code=order.code, qty=order.qty, price=order_price)
-        print("order_result", result)
-        if not result.get("success"):
-            return 1
-    return 0
+    return _execute_orders(client, plan.orders)
 
 
 if __name__ == "__main__":

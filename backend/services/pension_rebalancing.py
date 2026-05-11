@@ -425,3 +425,98 @@ def build_pension_rebalance_plan(
         orders=orders,
         estimated_cash_after_orders=estimated_cash,
     )
+
+
+def build_pension_cash_sweep_plan(
+    *,
+    holdings: list[PensionHolding],
+    cash: int,
+    assets: list[PensionAsset],
+    prices: dict[str, int],
+    min_order_amount: int = 50_000,
+    parking_code: str | None = None,
+) -> PensionRebalancePlan:
+    current_values = bucket_values(holdings, assets)
+    total_value = max(0, int(cash)) + sum(max(0, h.value) for h in holdings)
+    target_weights = {"sp500": 0.0, "momentum": 0.0, "bond": 0.0, "parking": 0.0, "other": 0.0}
+    if total_value <= 0:
+        return PensionRebalancePlan("neutral", 0, int(cash), target_weights, current_values, [], int(cash))
+
+    code_by_bucket: dict[Bucket, str] = {}
+    for asset in assets:
+        code_by_bucket.setdefault(asset.bucket, asset.code)
+
+    sp500_code = code_by_bucket.get("sp500")
+    parking_code = str(parking_code or code_by_bucket.get("parking") or "").strip()
+    sp500_price = int(prices.get(sp500_code or "") or 0)
+    parking_price = int(prices.get(parking_code) or 0)
+    estimated_cash = max(0, int(cash))
+    orders: list[PensionOrderPlan] = []
+
+    parking_holding = next((holding for holding in holdings if holding.code == parking_code), None)
+    if parking_holding and sp500_code and sp500_price > 0 and estimated_cash < sp500_price:
+        sell_target = max(min_order_amount, sp500_price - estimated_cash)
+        sell_qty = min(parking_holding.qty, floor((sell_target + parking_holding.price - 1) / parking_holding.price))
+        if sell_qty > 0 and sell_qty * parking_holding.price >= min_order_amount:
+            amount = sell_qty * parking_holding.price
+            orders.append(
+                PensionOrderPlan(
+                    side="SELL",
+                    code=parking_holding.code,
+                    bucket="parking",
+                    qty=sell_qty,
+                    price=parking_holding.price,
+                    amount=amount,
+                    reason="cash sweep parking exit for sp500",
+                )
+            )
+            estimated_cash += amount
+
+    if sp500_code and sp500_price > 0 and estimated_cash >= sp500_price:
+        qty = floor(estimated_cash / sp500_price)
+        if qty > 0 and qty * sp500_price >= min_order_amount:
+            amount = qty * sp500_price
+            orders.append(
+                PensionOrderPlan(
+                    side="BUY",
+                    code=sp500_code,
+                    bucket="sp500",
+                    qty=qty,
+                    price=sp500_price,
+                    amount=amount,
+                    reason="cash sweep buy sp500",
+                )
+            )
+            estimated_cash -= amount
+
+    if (
+        not any(order.side == "BUY" and order.bucket == "sp500" for order in orders)
+        and parking_code
+        and parking_price > 0
+        and estimated_cash >= max(min_order_amount, parking_price)
+    ):
+        qty = floor(estimated_cash / parking_price)
+        if qty > 0:
+            amount = qty * parking_price
+            orders.append(
+                PensionOrderPlan(
+                    side="BUY",
+                    code=parking_code,
+                    bucket="parking",
+                    qty=qty,
+                    price=parking_price,
+                    amount=amount,
+                    reason="cash sweep park residual cash",
+                )
+            )
+            estimated_cash -= amount
+
+    return PensionRebalancePlan(
+        regime="neutral",
+        total_value=total_value,
+        cash=int(cash),
+        target_weights=target_weights,
+        current_values=current_values,
+        orders=orders,
+        estimated_cash_after_orders=estimated_cash,
+    )

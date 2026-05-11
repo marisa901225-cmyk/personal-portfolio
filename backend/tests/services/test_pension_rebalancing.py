@@ -7,6 +7,7 @@ from backend.services.pension_rebalancing import (
     EquityTrendMetrics,
     PensionAsset,
     PensionHolding,
+    build_pension_cash_sweep_plan,
     build_pension_rebalance_plan,
     normalize_regime,
     pct_return,
@@ -121,6 +122,71 @@ def test_dividend_cash_trigger_exits_parking_and_buys_sp500() -> None:
     assert plan.orders[1].side == "BUY"
     assert plan.orders[1].code == "360200"
     assert plan.orders[1].bucket == "sp500"
+
+
+def test_cash_sweep_buys_sp500_when_cash_can_buy_a_share() -> None:
+    plan = build_pension_cash_sweep_plan(
+        holdings=[],
+        cash=120_000,
+        assets=ASSETS_WITH_PARKING,
+        prices={"360200": 100_000, "440650": 10_000},
+        min_order_amount=50_000,
+        parking_code="440650",
+    )
+
+    assert len(plan.orders) == 1
+    assert plan.orders[0].side == "BUY"
+    assert plan.orders[0].code == "360200"
+    assert plan.orders[0].bucket == "sp500"
+
+
+def test_cash_sweep_parks_cash_when_sp500_cannot_be_bought() -> None:
+    plan = build_pension_cash_sweep_plan(
+        holdings=[],
+        cash=80_000,
+        assets=ASSETS_WITH_PARKING,
+        prices={"360200": 100_000, "440650": 10_000},
+        min_order_amount=50_000,
+        parking_code="440650",
+    )
+
+    assert len(plan.orders) == 1
+    assert plan.orders[0].side == "BUY"
+    assert plan.orders[0].code == "440650"
+    assert plan.orders[0].bucket == "parking"
+
+
+def test_cash_sweep_sells_parking_before_sp500_when_combined_cash_is_enough() -> None:
+    plan = build_pension_cash_sweep_plan(
+        holdings=[PensionHolding("440650", "파킹 ETF", 5, 10_000, 50_000)],
+        cash=60_000,
+        assets=ASSETS_WITH_PARKING,
+        prices={"360200": 100_000, "440650": 10_000},
+        min_order_amount=50_000,
+        parking_code="440650",
+    )
+
+    assert plan.orders[0].side == "SELL"
+    assert plan.orders[0].code == "440650"
+    assert plan.orders[0].bucket == "parking"
+    assert plan.orders[1].side == "BUY"
+    assert plan.orders[1].code == "360200"
+
+
+def test_lump_sum_cash_can_be_distributed_without_selling_existing_holdings() -> None:
+    plan = build_pension_rebalance_plan(
+        holdings=[PensionHolding("360200", "ACE 미국S&P500", 100, 10_000, 1_000_000)],
+        cash=6_000_000,
+        assets=ASSETS,
+        prices={"360200": 10_000, "237350": 10_000, "426030": 10_000, "BOND01": 10_000},
+        regime="falling",
+        min_order_amount=50_000,
+        allow_sells=False,
+    )
+
+    assert not any(order.side == "SELL" for order in plan.orders)
+    assert any(order.side == "BUY" and order.bucket == "bond" for order in plan.orders)
+    assert any(order.side == "BUY" and order.bucket == "momentum" for order in plan.orders)
 
 
 def test_normalize_regime_accepts_korean_aliases() -> None:
