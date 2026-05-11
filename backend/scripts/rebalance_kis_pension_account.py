@@ -20,6 +20,7 @@ from backend.services.pension_rebalancing import (
     quarter_start,
     resolve_quarterly_market_signal,
 )
+from backend.services.trading_engine.config import TradeEngineConfig
 from backend.services.trading_engine.execution_support import (
     krx_tick_size,
     next_buy_retry_price,
@@ -336,6 +337,12 @@ def _assets_from_env(env: dict[str, str], *, selected_momentum_code: str | None 
         or "426030"
     ).strip()
     bond = str(env.get("PENSION_REBALANCE_US_BOND_CODE") or "").strip()
+    parking = str(
+        env.get("PENSION_REBALANCE_PARKING_CODE")
+        or env.get("TRADING_RISK_OFF_PARKING_CODE")
+        or TradeEngineConfig().risk_off_parking_code
+        or ""
+    ).strip()
     momentum_codes = [
         str(selected_momentum_code or "").strip(),
         kospi,
@@ -351,6 +358,8 @@ def _assets_from_env(env: dict[str, str], *, selected_momentum_code: str | None 
             seen.add(code)
     if bond:
         assets.append(PensionAsset(bond, "bond", "US Bond"))
+    if parking and parking not in seen:
+        assets.append(PensionAsset(parking, "parking", "Parking ETF"))
     return assets
 
 
@@ -455,6 +464,12 @@ def main() -> int:
         regime=signal.regime,
         min_order_amount=args.min_order_amount,
         allow_sells=not args.no_sells,
+        parking_code=str(
+            env.get("PENSION_REBALANCE_PARKING_CODE")
+            or env.get("TRADING_RISK_OFF_PARKING_CODE")
+            or TradeEngineConfig().risk_off_parking_code
+            or ""
+        ).strip(),
     )
 
     if args.execute:

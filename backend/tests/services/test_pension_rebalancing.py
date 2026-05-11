@@ -20,6 +20,11 @@ ASSETS = [
     PensionAsset("BOND01", "bond", "미국채권"),
 ]
 
+ASSETS_WITH_PARKING = [
+    *ASSETS,
+    PensionAsset("440650", "parking", "파킹 ETF"),
+]
+
 
 def test_rising_market_targets_sp500_at_40_and_momentum_etf_at_60() -> None:
     holdings = [
@@ -77,6 +82,43 @@ def test_leftover_cash_is_deployed_to_sp500() -> None:
     assert plan.orders[-1].side == "BUY"
     assert plan.orders[-1].code == "360200"
     assert plan.estimated_cash_after_orders < 10_000
+
+
+def test_residual_cash_below_sp500_unit_is_parked() -> None:
+    plan = build_pension_rebalance_plan(
+        holdings=[],
+        cash=80_000,
+        assets=ASSETS_WITH_PARKING,
+        prices={"360200": 100_000, "426030": 100_000, "BOND01": 100_000, "440650": 10_000},
+        regime="neutral",
+        min_order_amount=50_000,
+        allow_sells=False,
+        parking_code="440650",
+    )
+
+    assert plan.orders[-1].side == "BUY"
+    assert plan.orders[-1].code == "440650"
+    assert plan.orders[-1].bucket == "parking"
+    assert plan.estimated_cash_after_orders == 0
+
+
+def test_dividend_cash_trigger_exits_parking_and_buys_sp500() -> None:
+    plan = build_pension_rebalance_plan(
+        holdings=[PensionHolding("440650", "파킹 ETF", 10, 10_000, 100_000)],
+        cash=50_000,
+        assets=ASSETS_WITH_PARKING,
+        prices={"360200": 30_000, "426030": 100_000, "BOND01": 100_000, "440650": 10_000},
+        regime="neutral",
+        min_order_amount=50_000,
+        parking_code="440650",
+    )
+
+    assert plan.orders[0].side == "SELL"
+    assert plan.orders[0].code == "440650"
+    assert plan.orders[0].bucket == "parking"
+    assert plan.orders[1].side == "BUY"
+    assert plan.orders[1].code == "360200"
+    assert plan.orders[1].bucket == "sp500"
 
 
 def test_normalize_regime_accepts_korean_aliases() -> None:
