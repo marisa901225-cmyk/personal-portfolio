@@ -52,6 +52,7 @@ backend/storage/db/
 backend/storage/economy_snapshot/
 backend/storage/weather_cache/
 backend/storage/kis_config/
+backend/storage/kis_holiday_cache/
 backend/storage/trading_engine/
 backend/storage/trading_engine/credentials.json
 backend/storage/trading_engine/token.json
