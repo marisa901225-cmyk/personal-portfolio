@@ -351,6 +351,25 @@ class BotEntryFlowMixin:
                     entry_block_reason = reason
                     break
 
+            if review_applied and self.config.day_use_intraday_confirmation:
+                ok_recheck, meta = self._passes_day_intraday_confirmation(code=ranked_code)
+                if not ok_recheck:
+                    entry_block_reason = "DAY_ENTRY_RECHECK_FAILED"
+                    self._journal(
+                        "DAY_CANDIDATE_FILTERED",
+                        asof_date=self.state.trade_date,
+                        code=ranked_code,
+                        phase="entry_recheck",
+                        reason=meta.get("reason"),
+                        bars=meta.get("bars"),
+                        window_change_pct=meta.get("window_change_pct"),
+                        last_bar_change_pct=meta.get("last_bar_change_pct"),
+                        retrace_from_high_pct=meta.get("retrace_from_high_pct"),
+                        recent_range_pct=meta.get("recent_range_pct"),
+                        day_change_pct=meta.get("day_change_pct"),
+                    )
+                    continue
+
             quote = quotes.get(ranked_code) if isinstance(quotes, dict) else None
             order_type, price = _resolve_day_entry_order(
                 quote=quote,
@@ -392,11 +411,12 @@ class BotEntryFlowMixin:
             if pending_order is not None:
                 return
         if not fills:
-            self._pass("DAY_ENTRY_FAILED", regime)
+            pass_reason = entry_block_reason or "DAY_ENTRY_FAILED"
+            self._pass(pass_reason, regime)
             if review_applied:
                 self._notify_chart_review_skip(
                     strategy_label="DAY",
-                    reason="DAY_ENTRY_FAILED",
+                    reason=pass_reason,
                     code=resolved_ranked_codes[0] if resolved_ranked_codes else None,
                 )
             return

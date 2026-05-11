@@ -201,6 +201,7 @@ def summarize_finalize_pass_reasons(pass_reasons: dict[str, int]) -> str:
         "DAILY_MAX_LOSS": "일일 손실 한도 도달",
         "DAY_AFTERNOON_LOSS_LIMIT": "오후 단타 손실 제한",
         "DAY_ENTRY_FAILED": "단타 진입 실패",
+        "DAY_ENTRY_RECHECK_FAILED": "주문 직전 단타 흐름 약화",
         "FETCH_FAILED": "장중 데이터 조회 실패",
         "MAX_CONSECUTIVE_LOSSES": "연속 손실 제한",
         "STATE_LOAD_CORRUPT": "상태 파일 손상 감지",

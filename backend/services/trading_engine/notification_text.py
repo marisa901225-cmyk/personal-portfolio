@@ -31,6 +31,7 @@ _REASON_LABELS = {
     "DAILY_MAX_LOSS": "일일 손실 한도 도달",
     "DAY_AFTERNOON_LOSS_LIMIT": "오후 단타 손실 제한",
     "DAY_ENTRY_FAILED": "단타 진입 실패",
+    "DAY_ENTRY_RECHECK_FAILED": "주문 직전 단타 흐름 약화",
     "DAY_LLM_VETO": "단타 LLM 검토 보류",
     "ENTRY_WINDOW_CLOSED": "진입 시간창 아님",
     "FETCH_FAILED": "장중 데이터 조회 실패",

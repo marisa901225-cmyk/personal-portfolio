@@ -358,6 +358,81 @@ def test_day_entry_records_veto_when_chart_review_rejects_all(tmp_path) -> None:
     assert api.order_calls == []
     assert bot.state.pass_reasons_today["DAY_LLM_VETO"] == 1
 
+def test_day_entry_rechecks_intraday_after_chart_review_before_order(tmp_path) -> None:
+    asof = "20260511"
+    api = FakeAPI()
+    api._quotes["319400"] = {"price": 38_100, "change_pct": 0.66}
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        day_cash_ratio=0.20,
+        day_use_intraday_confirmation=True,
+        use_news_sentiment=False,
+        use_intraday_circuit_breaker=False,
+        day_chart_review_enabled=True,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.trade_date = asof
+    bot._ensure_journal(asof)
+    candidates = Candidates(
+        asof=asof,
+        popular=pd.DataFrame([{"code": "319400", "name": "현대무벡스"}]),
+        model=pd.DataFrame(),
+        etf=pd.DataFrame(),
+        merged=pd.DataFrame(),
+        quote_codes=[],
+    )
+
+    with (
+        patch(
+            "backend.services.trading_engine.bot.review_day_candidates_with_llm",
+            return_value=DayChartReviewResult(
+                shortlisted_codes=["319400"],
+                approved_codes=["319400"],
+                selected_code="319400",
+                summary="재돌파 시도",
+                chart_paths=[],
+                raw_response={},
+            ),
+        ),
+        patch.object(
+            bot,
+            "_passes_day_intraday_confirmation",
+            return_value=(
+                False,
+                {
+                    "reason": "WEAK_INTRADAY_WINDOW",
+                    "bars": 3,
+                    "window_change_pct": -0.26,
+                    "last_bar_change_pct": -0.13,
+                    "retrace_from_high_pct": -0.39,
+                    "recent_range_pct": 0.66,
+                    "day_change_pct": 0.66,
+                },
+            ),
+        ),
+    ):
+        bot._try_enter_day(
+            now=datetime(2026, 5, 11, 13, 3),
+            regime="RISK_ON",
+            candidates=candidates,
+            quotes=api._quotes,
+            news_signal=None,
+            ranked_codes=["319400"],
+            intraday_confirmation_done=True,
+        )
+
+    assert api.order_calls == []
+    assert bot.state.pass_reasons_today["DAY_ENTRY_RECHECK_FAILED"] == 1
+    with open(bot.journal.jsonl_path, encoding="utf-8") as handle:
+        rows = [json.loads(line) for line in handle if line.strip()]
+    filtered = [row for row in rows if row.get("event") == "DAY_CANDIDATE_FILTERED"]
+    assert filtered[-1]["code"] == "319400"
+    assert filtered[-1]["phase"] == "entry_recheck"
+    assert filtered[-1]["reason"] == "WEAK_INTRADAY_WINDOW"
+
 def test_bot_holds_profitable_broker_position_when_same_symbol_is_picked(tmp_path) -> None:
     asof = "20260408"
     api = FakeAPI()
