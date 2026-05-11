@@ -939,8 +939,8 @@ class TradingStrategyTests(unittest.TestCase):
         model_pool = pd.DataFrame(
             [
                 {
-                    "code": "APR001",
-                    "name": "에이피알",
+                    "code": "BASE01",
+                    "name": "기준종목",
                     "avg_value_20d": 900_000_000_000,
                     "ma20": 100,
                     "ma60": 95,
@@ -976,14 +976,14 @@ class TradingStrategyTests(unittest.TestCase):
         ranked = rank_swing_codes(candidates, quotes={}, config=cfg)
 
         self.assertEqual(ranked[0], "SEMI01")
-        self.assertIn("APR001", ranked)
+        self.assertIn("BASE01", ranked)
 
     def test_rank_swing_ignores_plain_day_popular_rows(self) -> None:
         model_pool = pd.DataFrame(
             [
                 {
-                    "code": "APR001",
-                    "name": "에이피알",
+                    "code": "BASE01",
+                    "name": "기준종목",
                     "avg_value_20d": 900_000_000_000,
                     "ma20": 100,
                     "ma60": 95,
@@ -1010,8 +1010,79 @@ class TradingStrategyTests(unittest.TestCase):
 
         ranked = rank_swing_codes(candidates, quotes={}, config=TradeEngineConfig())
 
-        self.assertEqual(ranked[0], "APR001")
+        self.assertEqual(ranked[0], "BASE01")
         self.assertNotIn("PLAIN1", ranked)
+
+    def test_rank_swing_excludes_cosmetics_names(self) -> None:
+        model_pool = pd.DataFrame(
+            [
+                {
+                    "code": "278470",
+                    "name": "에이피알",
+                    "avg_value_20d": 900_000_000_000,
+                    "ma20": 100,
+                    "ma60": 95,
+                    "close": 104,
+                    "change_pct": 1.2,
+                    "is_etf": False,
+                    "trend_tier": "strict",
+                },
+                {
+                    "code": "SEMI01",
+                    "name": "반도체리더",
+                    "avg_value_20d": 500_000_000_000,
+                    "ma20": 100,
+                    "ma60": 95,
+                    "close": 103,
+                    "change_pct": 1.0,
+                    "is_etf": False,
+                    "trend_tier": "relaxed",
+                },
+            ]
+        )
+        candidates = self._candidates_with_swing(model=model_pool, etf=pd.DataFrame())
+
+        ranked = rank_swing_codes(candidates, quotes={}, config=TradeEngineConfig())
+
+        self.assertEqual(ranked[0], "SEMI01")
+        self.assertNotIn("278470", ranked)
+
+    def test_rank_swing_excludes_cosmetics_day_theme_leader(self) -> None:
+        model_pool = pd.DataFrame(
+            [
+                {
+                    "code": "SEMI01",
+                    "name": "반도체리더",
+                    "avg_value_20d": 500_000_000_000,
+                    "ma20": 100,
+                    "ma60": 95,
+                    "close": 103,
+                    "change_pct": 1.0,
+                    "is_etf": False,
+                    "trend_tier": "relaxed",
+                }
+            ]
+        )
+        popular_pool = pd.DataFrame(
+            [
+                {
+                    "code": "APR001",
+                    "name": "에이피알",
+                    "avg_value_5d": 180_000_000_000,
+                    "close": 106,
+                    "change_pct": 6.5,
+                    "is_etf": False,
+                    "sector_bucket_selected": True,
+                    "theme_sector": "beauty",
+                }
+            ]
+        )
+        candidates = self._candidates_with_swing(model=model_pool, etf=pd.DataFrame(), popular=popular_pool)
+
+        ranked = rank_swing_codes(candidates, quotes={}, config=TradeEngineConfig())
+
+        self.assertEqual(ranked[0], "SEMI01")
+        self.assertNotIn("APR001", ranked)
 
     def test_score_day_row_applies_sector_news_bonus(self) -> None:
         row = pd.Series(

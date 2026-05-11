@@ -206,6 +206,21 @@ class TradeEngineConfig:
     swing_volatility_penalty_full_pct: float = 16.0
     swing_volatility_penalty_max: float = 8.0
     swing_hard_drop_exclude_pct: float = -6.0
+    swing_excluded_name_keywords: tuple[str, ...] = (
+        "화장품",
+        "코스메틱",
+        "뷰티",
+        "에이피알",
+        "아모레",
+        "LG생활건강",
+        "엘지생활건강",
+        "클리오",
+        "한국콜마",
+        "코스맥스",
+        "토니모리",
+        "잇츠한불",
+        "마녀공장",
+    )
     swing_industry_lookback_bars: int = 60
     swing_industry_trend_bonus_max: float = 14.0
     swing_industry_negative_penalty_max: float = 10.0

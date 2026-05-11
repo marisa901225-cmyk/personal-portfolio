@@ -248,6 +248,10 @@ def rank_swing_codes(
     if primary.empty:
         return []
 
+    primary = _drop_swing_excluded_names(primary, config)
+    if primary.empty:
+        return []
+
     if "is_etf" in primary.columns and primary["is_etf"].fillna(False).any():
         primary = primary[~primary.apply(lambda r: is_broad_market_etf(r.to_dict()), axis=1)]
         if primary.empty:
@@ -369,6 +373,17 @@ def _append_day_theme_leaders_to_swing_primary(
     else:
         leaders["avg_value_20d"] = leaders["avg_value_20d"].fillna(leaders["_avg_value_5d_num"])
     return pd.concat([primary, leaders], ignore_index=True, sort=False)
+
+
+def _drop_swing_excluded_names(df: pd.DataFrame, config: TradeEngineConfig) -> pd.DataFrame:
+    keywords = tuple(str(item).strip().lower() for item in getattr(config, "swing_excluded_name_keywords", ()) if str(item).strip())
+    if df.empty or "name" not in df.columns or not keywords:
+        return df
+
+    mask = df["name"].fillna("").astype(str).str.lower().map(
+        lambda name: any(keyword in name for keyword in keywords)
+    )
+    return df.loc[~mask].copy()
 
 
 def _is_day_theme_leader(
