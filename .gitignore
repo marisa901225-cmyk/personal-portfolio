@@ -89,6 +89,12 @@ backend/data/news_index.faiss
 backend/data/llm_fan_guard_state.json
 backend/data/llm_paid_fallback_notice_state.json
 backend/data/kis_rate_limit_restore_state.json
+
+# Local experiment artifacts
+experiments/*/debs/
+experiments/*/hf-cache/
+experiments/*/sysroot/
+experiments/*/vllm/
 backend/data/auth_secret_rotation_state.json
 backend/data/random_topic_state.json
 backend/data/random_topic_llm_session_state.json
