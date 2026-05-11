@@ -10,6 +10,7 @@ from typing import Any
 import requests
 
 from backend.services.pension_rebalancing import (
+    calculate_equity_trend_metrics,
     PensionAsset,
     PensionHolding,
     PensionOrderPlan,
@@ -31,6 +32,7 @@ from backend.services.trading_engine.execution_support import (
 DEFAULT_RUNTIME_ENV = Path("/app/runtime/myasset.secrets.env")
 DEFAULT_TOKEN_CACHE = Path("/app/runtime/kis_pension_token.json")
 DEFAULT_PROD_URL = "https://openapi.koreainvestment.com:9443"
+DEFAULT_US_SHORT_BOND_CODE = "0048J0"
 
 
 def _load_env_file(path: Path) -> dict[str, str]:
@@ -272,13 +274,20 @@ class PensionKISClient:
             "max_buy_qty": _to_int(row.get("max_buy_qty")),
         }
 
-    def daily_prices(self, code: str, *, start_date: str, end_date: str) -> list[tuple[str, int]]:
+    def chart_prices(
+        self,
+        code: str,
+        *,
+        start_date: str,
+        end_date: str,
+        period_div_code: str,
+    ) -> list[tuple[str, int]]:
         params = {
             "FID_COND_MRKT_DIV_CODE": "J",
             "FID_INPUT_ISCD": code,
             "FID_INPUT_DATE_1": start_date,
             "FID_INPUT_DATE_2": end_date,
-            "FID_PERIOD_DIV_CODE": "D",
+            "FID_PERIOD_DIV_CODE": period_div_code,
             "FID_ORG_ADJ_PRC": "0",
         }
         response = self.session.get(
@@ -289,7 +298,7 @@ class PensionKISClient:
         )
         data = response.json()
         if data.get("rt_cd") != "0":
-            raise RuntimeError(f"KIS daily prices failed code={code}: {data.get('msg_cd')} {data.get('msg1')}")
+            raise RuntimeError(f"KIS chart prices failed code={code}: {data.get('msg_cd')} {data.get('msg1')}")
         rows = data.get("output2") or []
         prices: list[tuple[str, int]] = []
         for row in rows:
@@ -298,6 +307,12 @@ class PensionKISClient:
             if trade_date and close > 0:
                 prices.append((trade_date, close))
         return sorted(prices)
+
+    def daily_prices(self, code: str, *, start_date: str, end_date: str) -> list[tuple[str, int]]:
+        return self.chart_prices(code, start_date=start_date, end_date=end_date, period_div_code="D")
+
+    def monthly_prices(self, code: str, *, start_date: str, end_date: str) -> list[tuple[str, int]]:
+        return self.chart_prices(code, start_date=start_date, end_date=end_date, period_div_code="M")
 
     def place_order(self, *, side: str, code: str, qty: int, price: int) -> dict[str, Any]:
         body = {
@@ -336,7 +351,7 @@ def _assets_from_env(env: dict[str, str], *, selected_momentum_code: str | None 
         or env.get("PENSION_REBALANCE_US_GROWTH_CODE")
         or "426030"
     ).strip()
-    bond = str(env.get("PENSION_REBALANCE_US_BOND_CODE") or "").strip()
+    bond = str(env.get("PENSION_REBALANCE_US_BOND_CODE") or DEFAULT_US_SHORT_BOND_CODE).strip()
     parking = str(
         env.get("PENSION_REBALANCE_PARKING_CODE")
         or env.get("TRADING_RISK_OFF_PARKING_CODE")
@@ -357,7 +372,7 @@ def _assets_from_env(env: dict[str, str], *, selected_momentum_code: str | None 
             assets.append(PensionAsset(code, "momentum", "Momentum ETF"))
             seen.add(code)
     if bond:
-        assets.append(PensionAsset(bond, "bond", "US Bond"))
+        assets.append(PensionAsset(bond, "bond", "US Short Bond"))
     if parking and parking not in seen:
         assets.append(PensionAsset(parking, "parking", "Parking ETF"))
     return assets
@@ -371,6 +386,10 @@ def _quarterly_return(client: PensionKISClient, code: str, *, today: date) -> fl
         quote = client.quote(code)
         return float(quote.get("change_pct") or 0.0)
     return pct_return(float(prices[0][1]), float(prices[-1][1]))
+
+
+def _trend_start(today: date) -> str:
+    return (today - timedelta(days=540)).strftime("%Y%m%d")
 
 
 def _resolve_quarterly_signal(
@@ -390,12 +409,19 @@ def _resolve_quarterly_signal(
     reference_return = _quarterly_return(client, sp500_code, today=today)
     kospi_return = _quarterly_return(client, kospi_code, today=today)
     nasdaq_return = _quarterly_return(client, nasdaq_code, today=today)
+    trend_start = _trend_start(today)
+    trend_end = today.strftime("%Y%m%d")
+    trend_metrics = calculate_equity_trend_metrics(
+        daily_prices=client.daily_prices(sp500_code, start_date=trend_start, end_date=trend_end),
+        monthly_prices=client.monthly_prices(sp500_code, start_date=trend_start, end_date=trend_end),
+    )
     signal = resolve_quarterly_market_signal(
         reference_return_pct=reference_return,
         kospi_return_pct=kospi_return,
         nasdaq_return_pct=nasdaq_return,
         kospi_code=kospi_code,
         nasdaq_code=nasdaq_code,
+        trend_metrics=trend_metrics,
     )
     if requested != "auto":
         return QuarterlyMarketSignal(
@@ -404,6 +430,10 @@ def _resolve_quarterly_signal(
             kospi_return_pct=signal.kospi_return_pct,
             nasdaq_return_pct=signal.nasdaq_return_pct,
             selected_momentum_code=signal.selected_momentum_code,
+            current_price=signal.current_price,
+            moving_average_10m=signal.moving_average_10m,
+            drawdown_from_recent_high_pct=signal.drawdown_from_recent_high_pct,
+            three_month_return_pct=signal.three_month_return_pct,
         )
     configured = str(env.get("PENSION_REBALANCE_REGIME") or "").strip()
     if configured:
@@ -413,6 +443,10 @@ def _resolve_quarterly_signal(
             kospi_return_pct=signal.kospi_return_pct,
             nasdaq_return_pct=signal.nasdaq_return_pct,
             selected_momentum_code=signal.selected_momentum_code,
+            current_price=signal.current_price,
+            moving_average_10m=signal.moving_average_10m,
+            drawdown_from_recent_high_pct=signal.drawdown_from_recent_high_pct,
+            three_month_return_pct=signal.three_month_return_pct,
         )
     return signal
 
@@ -470,6 +504,10 @@ def main() -> int:
             or TradeEngineConfig().risk_off_parking_code
             or ""
         ).strip(),
+        gradual_equity_restore_step=max(
+            0.0,
+            min(0.5, _env_float("PENSION_REBALANCE_EQUITY_RESTORE_STEP_PCT", 0.20)),
+        ),
     )
 
     if args.execute:
@@ -509,6 +547,10 @@ def main() -> int:
     print("quarterly_reference_return_pct", round(signal.reference_return_pct, 2))
     print("quarterly_kospi_return_pct", round(signal.kospi_return_pct, 2))
     print("quarterly_nasdaq_return_pct", round(signal.nasdaq_return_pct, 2))
+    print("reference_current_price", signal.current_price)
+    print("reference_moving_average_10m", round(signal.moving_average_10m, 2))
+    print("reference_drawdown_from_recent_high_pct", round(signal.drawdown_from_recent_high_pct, 2))
+    print("reference_three_month_return_pct", round(signal.three_month_return_pct, 2))
     print("selected_momentum_code", signal.selected_momentum_code)
     print("total_value", plan.total_value)
     print("cash", plan.cash)

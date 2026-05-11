@@ -56,6 +56,18 @@ class QuarterlyMarketSignal:
     kospi_return_pct: float
     nasdaq_return_pct: float
     selected_momentum_code: str
+    current_price: int = 0
+    moving_average_10m: float = 0.0
+    drawdown_from_recent_high_pct: float = 0.0
+    three_month_return_pct: float = 0.0
+
+
+@dataclass(frozen=True)
+class EquityTrendMetrics:
+    current_price: int
+    moving_average_10m: float
+    drawdown_from_recent_high_pct: float
+    three_month_return_pct: float
 
 
 DEFAULT_TARGETS: dict[Regime, dict[Bucket, float]] = {
@@ -100,6 +112,50 @@ def pct_return(start_price: float, end_price: float) -> float:
     return (end_price - start_price) / start_price * 100.0
 
 
+def _last_price_by_month(prices: Iterable[tuple[str, int]]) -> list[tuple[str, int]]:
+    by_month: dict[str, tuple[str, int]] = {}
+    for trade_date, price in sorted(prices):
+        if not trade_date or price <= 0:
+            continue
+        month_key = trade_date[:6]
+        by_month[month_key] = (trade_date, price)
+    return [by_month[key] for key in sorted(by_month)]
+
+
+def calculate_equity_trend_metrics(
+    *,
+    daily_prices: list[tuple[str, int]],
+    monthly_prices: list[tuple[str, int]] | None = None,
+) -> EquityTrendMetrics:
+    daily = [(trade_date, price) for trade_date, price in sorted(daily_prices) if trade_date and price > 0]
+    monthly = [(trade_date, price) for trade_date, price in sorted(monthly_prices or []) if trade_date and price > 0]
+    if not daily and not monthly:
+        return EquityTrendMetrics(0, 0.0, 0.0, 0.0)
+
+    current_price = (daily or monthly)[-1][1]
+    month_end_prices = monthly or _last_price_by_month(daily)
+    ma_source = month_end_prices[-10:]
+    moving_average_10m = sum(price for _, price in ma_source) / len(ma_source) if ma_source else 0.0
+
+    recent_high = max((price for _, price in (daily or monthly)), default=current_price)
+    drawdown = pct_return(float(recent_high), float(current_price)) if recent_high > 0 else 0.0
+
+    if len(month_end_prices) >= 4:
+        three_month_start = month_end_prices[-4][1]
+    elif len(daily) >= 64:
+        three_month_start = daily[-64][1]
+    else:
+        three_month_start = (daily or monthly)[0][1]
+    three_month_return = pct_return(float(three_month_start), float(current_price))
+
+    return EquityTrendMetrics(
+        current_price=int(current_price),
+        moving_average_10m=float(moving_average_10m),
+        drawdown_from_recent_high_pct=float(drawdown),
+        three_month_return_pct=float(three_month_return),
+    )
+
+
 def resolve_quarterly_market_signal(
     *,
     reference_return_pct: float,
@@ -107,8 +163,21 @@ def resolve_quarterly_market_signal(
     nasdaq_return_pct: float,
     kospi_code: str,
     nasdaq_code: str,
+    trend_metrics: EquityTrendMetrics | None = None,
 ) -> QuarterlyMarketSignal:
-    regime: Regime = "rising" if reference_return_pct > 0 else "falling"
+    if trend_metrics and trend_metrics.current_price > 0 and trend_metrics.moving_average_10m > 0:
+        below_10m = trend_metrics.current_price < trend_metrics.moving_average_10m
+        above_10m = trend_metrics.current_price > trend_metrics.moving_average_10m
+        drawdown = trend_metrics.drawdown_from_recent_high_pct
+        three_month_return = trend_metrics.three_month_return_pct
+        if below_10m and drawdown <= -10.0 and (three_month_return < 0.0 or drawdown <= -20.0):
+            regime: Regime = "falling"
+        elif above_10m and three_month_return > 0.0:
+            regime = "rising"
+        else:
+            regime = "neutral"
+    else:
+        regime = "rising" if reference_return_pct > 0 else "falling"
     selected_momentum_code = kospi_code if kospi_return_pct > nasdaq_return_pct else nasdaq_code
     return QuarterlyMarketSignal(
         regime=regime,
@@ -116,7 +185,41 @@ def resolve_quarterly_market_signal(
         kospi_return_pct=kospi_return_pct,
         nasdaq_return_pct=nasdaq_return_pct,
         selected_momentum_code=selected_momentum_code,
+        current_price=trend_metrics.current_price if trend_metrics else 0,
+        moving_average_10m=trend_metrics.moving_average_10m if trend_metrics else 0.0,
+        drawdown_from_recent_high_pct=trend_metrics.drawdown_from_recent_high_pct if trend_metrics else 0.0,
+        three_month_return_pct=trend_metrics.three_month_return_pct if trend_metrics else 0.0,
     )
+
+
+def _with_gradual_equity_restore(
+    *,
+    base_targets: dict[Bucket, float],
+    current_values: dict[Bucket, int],
+    total_value: int,
+    restore_step: float | None,
+) -> dict[Bucket, float]:
+    target_weights = dict(base_targets)
+    if restore_step is None or restore_step <= 0 or total_value <= 0:
+        return target_weights
+
+    base_equity_weight = target_weights.get("sp500", 0.0) + target_weights.get("momentum", 0.0)
+    if base_equity_weight <= 0:
+        return target_weights
+
+    current_equity_weight = (
+        current_values.get("sp500", 0) + current_values.get("momentum", 0)
+    ) / total_value
+    restored_equity_weight = min(base_equity_weight, max(0.0, current_equity_weight) + restore_step)
+    if restored_equity_weight >= base_equity_weight:
+        return target_weights
+
+    sp500_share = target_weights.get("sp500", 0.0) / base_equity_weight
+    momentum_share = target_weights.get("momentum", 0.0) / base_equity_weight
+    target_weights["sp500"] = restored_equity_weight * sp500_share
+    target_weights["momentum"] = restored_equity_weight * momentum_share
+    target_weights["bond"] = max(0.0, 1.0 - restored_equity_weight)
+    return target_weights
 
 
 def bucket_values(
@@ -142,10 +245,16 @@ def build_pension_rebalance_plan(
     deploy_leftover_to: Bucket = "sp500",
     parking_code: str | None = None,
     parking_cash_trigger_amount: int | None = None,
+    gradual_equity_restore_step: float | None = None,
 ) -> PensionRebalancePlan:
-    target_weights = DEFAULT_TARGETS[regime]
     current_values = bucket_values(holdings, assets)
     total_value = max(0, int(cash)) + sum(max(0, h.value) for h in holdings)
+    target_weights = _with_gradual_equity_restore(
+        base_targets=DEFAULT_TARGETS[regime],
+        current_values=current_values,
+        total_value=total_value,
+        restore_step=gradual_equity_restore_step if regime == "rising" else None,
+    )
     if total_value <= 0:
         return PensionRebalancePlan(regime, 0, int(cash), target_weights, current_values, [], int(cash))
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date
 
 from backend.services.pension_rebalancing import (
+    calculate_equity_trend_metrics,
+    EquityTrendMetrics,
     PensionAsset,
     PensionHolding,
     build_pension_rebalance_plan,
@@ -139,6 +141,60 @@ def test_quarterly_signal_uses_reference_return_for_regime_and_kospi_nasdaq_mome
     assert signal.selected_momentum_code == "237350"
 
 
+def test_quarterly_signal_marks_falling_below_10m_ma_with_drawdown_and_weak_3m_return() -> None:
+    signal = resolve_quarterly_market_signal(
+        reference_return_pct=2.0,
+        kospi_return_pct=1.0,
+        nasdaq_return_pct=2.0,
+        kospi_code="237350",
+        nasdaq_code="426030",
+        trend_metrics=EquityTrendMetrics(
+            current_price=88,
+            moving_average_10m=100.0,
+            drawdown_from_recent_high_pct=-12.0,
+            three_month_return_pct=-1.0,
+        ),
+    )
+
+    assert signal.regime == "falling"
+
+
+def test_quarterly_signal_recovers_above_10m_ma_with_positive_3m_return() -> None:
+    signal = resolve_quarterly_market_signal(
+        reference_return_pct=-1.0,
+        kospi_return_pct=1.0,
+        nasdaq_return_pct=2.0,
+        kospi_code="237350",
+        nasdaq_code="426030",
+        trend_metrics=EquityTrendMetrics(
+            current_price=105,
+            moving_average_10m=100.0,
+            drawdown_from_recent_high_pct=-4.0,
+            three_month_return_pct=3.0,
+        ),
+    )
+
+    assert signal.regime == "rising"
+
+
+def test_quarterly_signal_stays_neutral_when_3m_return_is_not_recovered() -> None:
+    signal = resolve_quarterly_market_signal(
+        reference_return_pct=1.0,
+        kospi_return_pct=1.0,
+        nasdaq_return_pct=2.0,
+        kospi_code="237350",
+        nasdaq_code="426030",
+        trend_metrics=EquityTrendMetrics(
+            current_price=105,
+            moving_average_10m=100.0,
+            drawdown_from_recent_high_pct=-4.0,
+            three_month_return_pct=-0.5,
+        ),
+    )
+
+    assert signal.regime == "neutral"
+
+
 def test_quarterly_signal_selects_nasdaq_when_it_leads() -> None:
     signal = resolve_quarterly_market_signal(
         reference_return_pct=-0.4,
@@ -152,9 +208,47 @@ def test_quarterly_signal_selects_nasdaq_when_it_leads() -> None:
     assert signal.selected_momentum_code == "426030"
 
 
+def test_equity_trend_metrics_use_10_month_average_drawdown_and_3m_return() -> None:
+    monthly_prices = [(f"2025{month:02d}28", 100 + month) for month in range(1, 11)]
+    daily_prices = [
+        ("20251001", 120),
+        ("20251002", 108),
+        ("20251003", 105),
+    ]
+
+    metrics = calculate_equity_trend_metrics(daily_prices=daily_prices, monthly_prices=monthly_prices)
+
+    assert metrics.current_price == 105
+    assert round(metrics.moving_average_10m, 2) == 105.5
+    assert round(metrics.drawdown_from_recent_high_pct, 2) == -12.5
+    assert round(metrics.three_month_return_pct, 2) == -1.87
+
+
 def test_quarter_start_and_pct_return() -> None:
     assert quarter_start(date(2026, 5, 11)) == date(2026, 4, 1)
     assert round(pct_return(100, 112.5), 2) == 12.5
+
+
+def test_rising_market_restores_equity_weight_gradually() -> None:
+    holdings = [
+        PensionHolding("360200", "ACE 미국S&P500", 50, 10_000, 500_000),
+        PensionHolding("426030", "TIME 미국나스닥100액티브", 20, 10_000, 200_000),
+        PensionHolding("BOND01", "미국채권", 30, 10_000, 300_000),
+    ]
+
+    plan = build_pension_rebalance_plan(
+        holdings=holdings,
+        cash=0,
+        assets=ASSETS,
+        prices={"360200": 10_000, "237350": 10_000, "426030": 10_000, "BOND01": 10_000},
+        regime="rising",
+        min_order_amount=10_000,
+        gradual_equity_restore_step=0.20,
+    )
+
+    assert round(plan.target_weights["sp500"], 2) == 0.36
+    assert round(plan.target_weights["momentum"], 2) == 0.54
+    assert round(plan.target_weights["bond"], 2) == 0.10
 
 
 def test_unselected_nasdaq_is_kept_inside_momentum_bucket() -> None:
