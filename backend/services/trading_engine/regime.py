@@ -23,6 +23,12 @@ def _is_in_cooldown(asof: str, last_panic_date: str | None, days: int = 3) -> bo
         return False
 
 
+def _is_same_day_panic(asof: str, last_panic_date: str | None) -> bool:
+    if not last_panic_date:
+        return False
+    return normalize_bar_date(asof) == normalize_bar_date(last_panic_date)
+
+
 def _find_recent_panic_date(bars: pd.DataFrame, close_s: pd.Series, *, fallback_date: str) -> str | None:
     pct_change = close_s.pct_change()
     recent_panic = pct_change.tail(3)
@@ -213,6 +219,10 @@ def get_regime(
     """
     # 1. Primary 로직: KIS에서 다시 받은 현재 일봉/시세를 먼저 신뢰한다.
     primary_regime, primary_panic_date = _single_regime(api, asof, primary_code, vol_threshold)
+
+    # 장중 CB로 오늘 패닉이 찍힌 뒤에는 당일 내내 신규 진입을 막는다.
+    if _is_same_day_panic(asof, last_panic_date):
+        return "RISK_OFF", None
 
     # 로컬 state의 last_panic_date 또는 최근 일봉 패닉은 오염될 수 있다.
     # KIS 실시간 proxy가 상승이면 과거/로컬 위험회피 신호를 무시한다.
