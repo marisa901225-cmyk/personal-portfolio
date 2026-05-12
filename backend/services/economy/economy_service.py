@@ -32,10 +32,15 @@ _PREMARKET_PRIMARY_KEYWORDS = (
     "fomc",
     "fed",
     "cpi",
+    "ppi",
+    "core ppi",
     "pce",
+    "producer price index",
     "inflation",
     "인플레이션",
     "물가",
+    "근원 ppi",
+    "생산자물가지수",
     "유가",
     "oil",
     "treasury",
@@ -92,6 +97,14 @@ _PREMARKET_CRYPTO_KEYWORDS = (
     "이더리움",
     "가상자산",
     "코인",
+)
+_PREMARKET_US_INFLATION_EVENT_TERMS = (
+    "ppi",
+    "core ppi",
+    "producer price index",
+    "근원 ppi",
+    "생산자물가지수",
+    "생산자물가",
 )
 
 class EconomyService:
@@ -371,9 +384,11 @@ class EconomyService:
         primary_hits = sum(1 for keyword in _PREMARKET_PRIMARY_KEYWORDS if keyword in text)
         context_hits = sum(1 for keyword in _PREMARKET_CONTEXT_KEYWORDS if keyword in text)
         exclude_hits = sum(1 for keyword in _PREMARKET_EXCLUDE_KEYWORDS if keyword in text)
+        us_inflation_event_hits = sum(1 for keyword in _PREMARKET_US_INFLATION_EVENT_TERMS if keyword in text)
 
         score += primary_hits * 2
         score += context_hits
+        score += us_inflation_event_hits * 4
         score -= exclude_hits * 4
 
         if category_tag in {"Tech/Semicon", "EV/Auto", "General"} and primary_hits < 2 and context_hits <= 0:
@@ -485,20 +500,50 @@ class EconomyService:
             ORDER BY datetime(COALESCE(published_at, created_at)) DESC
             LIMIT ?
         """
+        us_inflation_event_sql = """
+            SELECT
+                COALESCE(source_name, '') AS source_name,
+                COALESCE(category_tag, '') AS category_tag,
+                title,
+                COALESCE(published_at, created_at) AS published_at,
+                COALESCE(full_content, '') AS full_content
+            FROM game_news
+            WHERE source_type = 'news'
+              AND datetime(COALESCE(published_at, created_at)) >= datetime(?)
+              AND datetime(COALESCE(published_at, created_at)) <= datetime(?)
+              AND (
+                    lower(COALESCE(title, '')) LIKE '%ppi%' OR
+                    lower(COALESCE(title, '')) LIKE '%producer price index%' OR
+                    COALESCE(title, '') LIKE '%근원 PPI%' OR
+                    COALESCE(title, '') LIKE '%생산자물가지수%' OR
+                    COALESCE(title, '') LIKE '%생산자물가%'
+              )
+            ORDER BY datetime(COALESCE(published_at, created_at)) DESC
+            LIMIT ?
+        """
 
         try:
             with sqlite3.connect(db_file) as conn:
                 cur = conn.cursor()
                 domestic_rows = list(cur.execute(domestic_sql, (since_str, until_str, fetch_limit)))
                 global_rows = list(cur.execute(global_sql, (since_str, until_str, fetch_limit)))
+                event_since = now_kst.replace(tzinfo=None) - timedelta(hours=max(72, lookback_hours))
+                event_rows = list(
+                    cur.execute(
+                        us_inflation_event_sql,
+                        (event_since.strftime("%Y-%m-%d %H:%M:%S"), until_str, fetch_limit),
+                    )
+                )
         except Exception as exc:
             logger.error("Failed to load market outlook news context: %s", exc, exc_info=True)
             return "데이터 없음"
 
         domestic_rows = EconomyService._select_market_outlook_rows(domestic_rows, limit=limit)
         global_rows = EconomyService._select_market_outlook_rows(global_rows, limit=limit)
+        event_rows = EconomyService._select_market_outlook_rows(event_rows, limit=3)
 
         lines: list[str] = []
+        lines.extend(EconomyService._format_market_outlook_rows(event_rows, "[미국 물가 이벤트 뉴스]"))
         lines.extend(EconomyService._format_market_outlook_rows(domestic_rows, "[국내 시장전망 뉴스]"))
         lines.extend(EconomyService._format_market_outlook_rows(global_rows, "[해외 시장전망 뉴스]"))
         return "\n".join(lines).strip() or "데이터 없음"

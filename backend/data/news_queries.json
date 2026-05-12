@@ -13,6 +13,7 @@
         "환율 원달러 국채금리",
         "한국은행 금통위 기준금리",
         "FOMC 연준 CPI PCE 물가",
+        "미국 PPI 근원 PPI 생산자물가지수",
         "반도체 업황 HBM DRAM",
         "2차전지 전기차 배터리",
         "AI 반도체 데이터센터",
@@ -35,6 +36,8 @@
             "Nasdaq futures market outlook",
             "Federal Reserve interest rate outlook",
             "US CPI inflation market reaction",
+            "US PPI core PPI market reaction",
+            "US producer price index inflation outlook",
             "US Treasury yields market outlook",
             "WTI oil prices inflation market"
         ],
