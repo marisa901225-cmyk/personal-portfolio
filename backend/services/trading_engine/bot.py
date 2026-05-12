@@ -301,6 +301,8 @@ class HybridTradingBot(
                     window_minutes=self.config.intraday_cb_window_minutes,
                     window_drop_pct=self.config.intraday_cb_window_drop_pct,
                     day_change_pct=self.config.intraday_cb_day_change_pct,
+                    index_code=self.config.intraday_cb_index_code,
+                    index_day_change_pct=self.config.intraday_cb_index_day_change_pct,
                 )
                 if triggered:
                     regime = "RISK_OFF"
@@ -315,8 +317,10 @@ class HybridTradingBot(
                         "INTRADAY_CB",
                         asof_date=today,
                         code=self.config.market_proxy_code,
+                        index_code=cb_meta.get("index_code"),
                         reason=cb_meta.get("reason"),
                         day_change_pct=cb_meta.get("day_change_pct"),
+                        index_day_change_pct=cb_meta.get("index_day_change_pct"),
                         last_bar_drop_pct=cb_meta.get("last_bar_drop_pct"),
                         window_drop_pct=cb_meta.get("window_drop_pct"),
                         window_minutes=cb_meta.get("window_minutes"),

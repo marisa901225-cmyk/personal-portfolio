@@ -741,6 +741,14 @@ def _apply_regime_and_news_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_INTRADAY_CB_DAY_CHANGE_PCT",
         cfg.intraday_cb_day_change_pct,
     )
+    cfg.intraday_cb_index_code = _env_text(
+        "TRADING_ENGINE_INTRADAY_CB_INDEX_CODE",
+        cfg.intraday_cb_index_code,
+    )
+    cfg.intraday_cb_index_day_change_pct = _env_float(
+        "TRADING_ENGINE_INTRADAY_CB_INDEX_DAY_CHANGE_PCT",
+        cfg.intraday_cb_index_day_change_pct,
+    )
     cfg.intraday_cb_1bar_drop_pct = _env_float(
         "TRADING_ENGINE_INTRADAY_CB_1BAR_DROP_PCT",
         cfg.intraday_cb_1bar_drop_pct,

@@ -257,7 +257,9 @@ class TradeEngineConfig:
     use_kosdaq_confirmation: bool = False
     regime_vol_threshold: float = 0.05
     use_intraday_circuit_breaker: bool = True
-    intraday_cb_day_change_pct: float = -5.5
+    intraday_cb_day_change_pct: float = -3.0
+    intraday_cb_index_code: str = "0001"
+    intraday_cb_index_day_change_pct: float = -3.0
     intraday_cb_1bar_drop_pct: float = -2.5
     intraday_cb_window_minutes: int = 5
     intraday_cb_window_drop_pct: float = -4.0

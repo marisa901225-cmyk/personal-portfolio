@@ -115,6 +115,8 @@ def detect_intraday_circuit_breaker(
     window_minutes: int = 5,
     window_drop_pct: float = -2.0,
     day_change_pct: float = -3.0,
+    index_code: str | None = "0001",
+    index_day_change_pct: float | None = None,
 ) -> tuple[bool, dict[str, Any]]:
     """
     Intraday panic detector using minute bars when available.
@@ -123,24 +125,46 @@ def detect_intraday_circuit_breaker(
       (is_triggered, metadata)
       metadata keys: reason, day_change_pct, last_bar_drop_pct, window_drop_pct
     """
+    normalized_asof = _normalize_yyyymmdd(asof)
+    index_chg = _resolve_index_day_change_pct(api, str(index_code or ""), normalized_asof)
+    index_threshold = day_change_pct if index_day_change_pct is None else index_day_change_pct
+    if index_chg is not None and index_chg <= index_threshold:
+        return True, {
+            "reason": "INDEX_DAY_CHANGE_DROP",
+            "index_code": str(index_code or ""),
+            "index_day_change_pct": round(float(index_chg), 4),
+            "threshold_pct": round(float(index_threshold), 4),
+        }
+
     intraday_fn = getattr(api, "intraday_bars", None)
     if not callable(intraday_fn):
-        return False, {"reason": "UNSUPPORTED"}
+        return False, {
+            "reason": "UNSUPPORTED",
+            "index_day_change_pct": round(float(index_chg), 4) if index_chg is not None else None,
+        }
 
-    normalized_asof = _normalize_yyyymmdd(asof)
     lookback = max(15, int(window_minutes) + 5)
     try:
         bars = intraday_fn(code=code, asof=normalized_asof, lookback=lookback)
     except Exception:
-        return False, {"reason": "FETCH_FAILED"}
+        return False, {
+            "reason": "FETCH_FAILED",
+            "index_day_change_pct": round(float(index_chg), 4) if index_chg is not None else None,
+        }
 
     if bars is None or bars.empty:
-        return False, {"reason": "NO_DATA"}
+        return False, {
+            "reason": "NO_DATA",
+            "index_day_change_pct": round(float(index_chg), 4) if index_chg is not None else None,
+        }
 
     bars = sort_intraday_bars(bars)
     close_s = pd.to_numeric(bars.get("close"), errors="coerce").dropna()
     if len(close_s) < 2:
-        return False, {"reason": "INSUFFICIENT_DATA"}
+        return False, {
+            "reason": "INSUFFICIENT_DATA",
+            "index_day_change_pct": round(float(index_chg), 4) if index_chg is not None else None,
+        }
 
     day_chg = _resolve_day_change_pct(api, code, bars)
     if day_chg is not None and day_chg <= day_change_pct:
@@ -169,6 +193,7 @@ def detect_intraday_circuit_breaker(
     return False, {
         "reason": "OK",
         "day_change_pct": round(float(day_chg), 4) if day_chg is not None else None,
+        "index_day_change_pct": round(float(index_chg), 4) if index_chg is not None else None,
         "last_bar_drop_pct": round(float(last_bar_drop), 4),
     }
 
@@ -227,6 +252,37 @@ def _normalize_yyyymmdd(text: str) -> str:
     if "-" in raw:
         raw = raw.replace("-", "")
     return raw[:8]
+
+
+def _resolve_index_day_change_pct(api: TradingAPI, index_code: str, asof: str) -> float | None:
+    if not index_code:
+        return None
+    daily_index_fn = getattr(api, "daily_index_bars", None)
+    if not callable(daily_index_fn):
+        return None
+    try:
+        bars = daily_index_fn(index_code, end=asof, lookback=3)
+    except Exception:
+        return None
+    if bars is None or bars.empty:
+        return None
+
+    if "date" in bars.columns:
+        bars = bars.sort_values("date", ascending=True)
+        bars = bars[bars["date"].astype(str).str.replace("-", "", regex=False).str[:8] <= asof]
+    else:
+        bars = bars.sort_index(ascending=True)
+
+    close_s = pd.to_numeric(bars.get("close"), errors="coerce").dropna()
+    if len(close_s) < 2:
+        return None
+    prev = float(close_s.iloc[-2])
+    cur = float(close_s.iloc[-1])
+    if prev <= 0:
+        return None
+    return (cur / prev - 1.0) * 100.0
+
+
 def _resolve_day_change_pct(api: TradingAPI, code: str, bars: pd.DataFrame) -> float | None:
     bar_day_change_pct: float | None = None
     if "change_pct" in bars.columns:

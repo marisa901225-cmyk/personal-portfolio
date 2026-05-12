@@ -112,6 +112,50 @@ def test_detect_intraday_cb_uses_quote_day_change_when_intraday_change_is_stale(
     assert meta.get("reason") == "DAY_CHANGE_DROP"
     assert meta.get("day_change_pct") == -7.0
 
+def test_detect_intraday_cb_uses_index_drop_before_proxy_drop() -> None:
+    class IntradayAPI(FakeAPI):
+        def __init__(self) -> None:
+            super().__init__()
+            self._intraday: dict[tuple[str, str], pd.DataFrame] = {}
+
+        def intraday_bars(self, code: str, asof: str, lookback: int = 120) -> pd.DataFrame:
+            del lookback
+            return self._intraday.get((code, asof), pd.DataFrame())
+
+    api = IntradayAPI()
+    asof = "20260512"
+    proxy_code = "069500"
+    api._index_bars[("0001", asof)] = pd.DataFrame(
+        [
+            {"date": "20260509", "close": 7400.0},
+            {"date": "20260511", "close": 7822.24},
+            {"date": "20260512", "close": 7503.91},
+        ]
+    )
+    api._intraday[(proxy_code, asof)] = _make_intraday_bars(
+        asof,
+        [100.0, 99.9, 99.8],
+        last_change_pct=-2.0,
+    )
+    api._quotes[proxy_code] = {"price": 99800, "change_pct": -2.0}
+
+    triggered, meta = detect_intraday_circuit_breaker(
+        api,
+        asof=asof,
+        code=proxy_code,
+        one_bar_drop_pct=-10.0,
+        window_minutes=5,
+        window_drop_pct=-10.0,
+        day_change_pct=-3.0,
+        index_code="0001",
+        index_day_change_pct=-3.0,
+    )
+
+    assert triggered is True
+    assert meta.get("reason") == "INDEX_DAY_CHANGE_DROP"
+    assert meta.get("index_code") == "0001"
+    assert meta.get("index_day_change_pct") == -4.0696
+
 def test_detect_intraday_cb_last_bar_drop() -> None:
     class IntradayAPI(FakeAPI):
         def __init__(self) -> None:
