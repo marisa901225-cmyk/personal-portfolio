@@ -238,12 +238,24 @@ def test_get_regime_keeps_local_panic_cooldown_when_kis_quote_is_not_positive() 
     assert regime == "RISK_OFF"
     assert panic_date is None
 
-def test_get_regime_keeps_same_day_intraday_panic_even_when_quote_turns_positive() -> None:
+def test_get_regime_releases_same_day_intraday_panic_when_quote_turns_positive() -> None:
     asof = "20260512"
     api = FakeAPI()
     closes = [float(100 + idx) for idx in range(80)]
     api._bars[("069500", asof)] = _make_bars_from_closes(asof, closes)
     api._quotes["069500"] = {"price": 180.0, "change_pct": 1.5}
+
+    regime, panic_date = get_regime(api, asof, last_panic_date=asof)
+
+    assert regime == "RISK_ON"
+    assert panic_date is None
+
+def test_get_regime_keeps_same_day_intraday_panic_on_weak_blue_rebound() -> None:
+    asof = "20260512"
+    api = FakeAPI()
+    closes = [float(100 + idx) for idx in range(80)]
+    api._bars[("069500", asof)] = _make_bars_from_closes(asof, closes)
+    api._quotes["069500"] = {"price": 178.0, "change_pct": -0.3}
 
     regime, panic_date = get_regime(api, asof, last_panic_date=asof)
 

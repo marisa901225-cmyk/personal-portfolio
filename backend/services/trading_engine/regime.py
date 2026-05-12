@@ -220,14 +220,15 @@ def get_regime(
     # 1. Primary 로직: KIS에서 다시 받은 현재 일봉/시세를 먼저 신뢰한다.
     primary_regime, primary_panic_date = _single_regime(api, asof, primary_code, vol_threshold)
 
-    # 장중 CB로 오늘 패닉이 찍힌 뒤에는 당일 내내 신규 진입을 막는다.
-    if _is_same_day_panic(asof, last_panic_date):
-        return "RISK_OFF", None
-
     # 로컬 state의 last_panic_date 또는 최근 일봉 패닉은 오염될 수 있다.
     # KIS 실시간 proxy가 상승이면 과거/로컬 위험회피 신호를 무시한다.
     if _is_live_risk_on(api, primary_code):
         return "RISK_ON", None
+
+    # 장중 CB로 오늘 패닉이 찍힌 뒤에는 파란불/약반등 동안 신규 진입을 막는다.
+    # 단, KIS 실시간 proxy가 빨간불로 회복하면 위 live-risk-on 분기에서 해제된다.
+    if _is_same_day_panic(asof, last_panic_date):
+        return "RISK_OFF", None
 
     # 2. 로컬 쿨다운은 KIS 실시간 상승장 검증 뒤에만 적용한다.
     if _is_in_cooldown(asof, last_panic_date, days=3):
