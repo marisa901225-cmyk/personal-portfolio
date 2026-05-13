@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 import logging
 from time import perf_counter
+from typing import Any
 
 import pandas as pd
 
@@ -38,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 _MODEL_RELAXED_MIN_BARS = 60
 _MODEL_RELAXED_MAX_PREMIUM_TO_MA20 = 0.15
+_SWING_MA200_MIN_BARS = 200
 
 
 def popular_screener(
@@ -268,6 +271,16 @@ def model_screener(
             if not (pass_liquidity and trend_tier):
                 continue
 
+            ma200_setup = _resolve_swing_ma200_setup(
+                api,
+                code=code,
+                asof=asof,
+                initial_bars=bars,
+                config=cfg,
+            )
+            if ma200_setup is not None and not bool(ma200_setup.get("swing_ma200_setup")):
+                continue
+
             rows.append(
                 {
                     "code": code,
@@ -285,6 +298,7 @@ def model_screener(
                     "is_etf": False,
                     "trend_tier": trend_tier,
                     "master_is_index_member": bool(row.get("master_is_index_member", False)),
+                    **(ma200_setup or {}),
                     **industry_columns(code, industry_map),
                 }
             )
@@ -401,6 +415,131 @@ def etf_swing_screener(
             metrics.observe("etf_swing_screener_s", perf_counter() - started_at)
 
 
+def _resolve_swing_ma200_setup(
+    api: TradingAPI,
+    *,
+    code: str,
+    asof: str,
+    initial_bars: pd.DataFrame,
+    config: TradeEngineConfig,
+) -> dict[str, Any] | None:
+    watch_codes = {
+        str(item).strip()
+        for item in getattr(config, "swing_ma200_watch_codes", ())
+        if str(item).strip()
+    }
+    if str(code) not in watch_codes:
+        return None
+
+    bars = _load_deep_daily_bars(
+        api,
+        code=code,
+        end=asof,
+        min_bars=_SWING_MA200_MIN_BARS,
+        initial_bars=initial_bars,
+    )
+    if bars.empty or len(bars) < _SWING_MA200_MIN_BARS or "close" not in bars.columns:
+        return {"swing_ma200_setup": False, "swing_ma200_reason": "insufficient_bars"}
+
+    working = bars.copy()
+    working["close"] = pd.to_numeric(working["close"], errors="coerce")
+    working = working.dropna(subset=["close"])
+    if len(working) < _SWING_MA200_MIN_BARS:
+        return {"swing_ma200_setup": False, "swing_ma200_reason": "insufficient_close"}
+
+    working["ma200"] = working["close"].rolling(_SWING_MA200_MIN_BARS).mean()
+    valid = working.dropna(subset=["ma200"])
+    if valid.empty:
+        return {"swing_ma200_setup": False, "swing_ma200_reason": "missing_ma200"}
+
+    latest = valid.iloc[-1]
+    ma200 = parse_numeric(latest.get("ma200"))
+    close = parse_numeric(latest.get("close"))
+    if ma200 is None or ma200 <= 0 or close is None:
+        return {"swing_ma200_setup": False, "swing_ma200_reason": "invalid_ma200"}
+
+    lookback = max(1, int(getattr(config, "swing_ma200_touch_lookback_bars", 3)))
+    tolerance = max(0.0, float(getattr(config, "swing_ma200_touch_tolerance_pct", 1.0))) / 100.0
+    recent = valid.tail(lookback)
+    touched = False
+    for _, row in recent.iterrows():
+        row_ma200 = parse_numeric(row.get("ma200"))
+        if row_ma200 is None or row_ma200 <= 0:
+            continue
+        low = parse_numeric(row.get("low")) or parse_numeric(row.get("close"))
+        high = parse_numeric(row.get("high")) or parse_numeric(row.get("close"))
+        if low is None or high is None:
+            continue
+        if low <= row_ma200 * (1.0 + tolerance) and high >= row_ma200 * (1.0 - tolerance):
+            touched = True
+            break
+
+    distance_pct = ((float(close) / float(ma200)) - 1.0) * 100.0
+    max_distance_pct = float(getattr(config, "swing_ma200_max_distance_pct", 8.0))
+    setup = touched and distance_pct <= max_distance_pct
+    return {
+        "swing_ma200_setup": bool(setup),
+        "swing_ma200_recent_touch": bool(touched),
+        "swing_ma200": float(ma200),
+        "swing_ma200_distance_pct": float(distance_pct),
+        "swing_ma200_reason": "ok" if setup else "not_near_ma200",
+    }
+
+
+def _load_deep_daily_bars(
+    api: TradingAPI,
+    *,
+    code: str,
+    end: str,
+    min_bars: int,
+    initial_bars: pd.DataFrame,
+) -> pd.DataFrame:
+    frames = [initial_bars] if initial_bars is not None and not initial_bars.empty else []
+    seen_ends = {str(end)}
+    current_end = _previous_calendar_day_from_frame(initial_bars, fallback=end)
+
+    while sum(len(frame) for frame in frames) < min_bars and current_end and current_end not in seen_ends:
+        seen_ends.add(current_end)
+        try:
+            frame = api.daily_bars(code=code, end=current_end, lookback=100)
+        except Exception as exc:
+            logger.warning("swing ma200 deep bars failed code=%s end=%s error=%s", code, current_end, exc)
+            break
+        if frame is None or frame.empty:
+            break
+        frames.append(frame)
+        next_end = _previous_calendar_day_from_frame(frame, fallback=current_end)
+        if not next_end or next_end in seen_ends:
+            break
+        current_end = next_end
+
+    if not frames:
+        return pd.DataFrame()
+    merged = pd.concat(frames, ignore_index=True, sort=False)
+    if "date" not in merged.columns:
+        return merged.tail(min_bars).reset_index(drop=True)
+    return (
+        merged.drop_duplicates(subset=["date"], keep="last")
+        .sort_values("date")
+        .tail(max(min_bars, len(merged)))
+        .reset_index(drop=True)
+    )
+
+
+def _previous_calendar_day_from_frame(frame: pd.DataFrame, *, fallback: str) -> str:
+    date_value = None
+    if frame is not None and not frame.empty and "date" in frame.columns:
+        dates = frame["date"].dropna().astype(str)
+        if not dates.empty:
+            date_value = dates.min()
+    if not date_value:
+        date_value = str(fallback)
+    try:
+        return (datetime.strptime(str(date_value), "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
+    except ValueError:
+        return ""
+
+
 def _is_allowed_by_etf_policy(row: dict[str, object], include_etf: bool) -> bool:
     if not include_etf and is_etf_row(row):
         return False
@@ -512,6 +651,11 @@ def _ensure_model_columns(df: pd.DataFrame) -> pd.DataFrame:
         "industry_5d_change_pct",
         "market_warning_code",
         "management_issue_code",
+        "swing_ma200_setup",
+        "swing_ma200_recent_touch",
+        "swing_ma200",
+        "swing_ma200_distance_pct",
+        "swing_ma200_reason",
     ]
     for col in cols:
         if col not in df.columns:

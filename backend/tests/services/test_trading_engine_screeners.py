@@ -256,6 +256,61 @@ def test_model_screener_filters_live_management_warning_risk_candidates(
 
     assert list(out["code"]) == ["OK001"]
 
+
+def _make_hanwha_ma200_bars(asof: str, *, touch: bool) -> pd.DataFrame:
+    closes = [120.0] * 140
+    closes.extend(117.8 + (idx * 0.1) for idx in range(62))
+    bars = _make_bars_from_closes(asof, closes, value=250_000_000_000)
+    bars["low"] = bars["close"]
+    bars["high"] = bars["close"]
+    if touch:
+        bars.loc[bars.index[-2], "low"] = 120.0
+        bars.loc[bars.index[-2], "high"] = float(bars.loc[bars.index[-2], "close"])
+    return bars
+
+
+@patch("backend.services.trading_engine.screeners.load_stock_industry_db_map")
+@patch("backend.services.trading_engine.screeners.load_swing_universe_candidates")
+def test_model_screener_keeps_hanwha_ocean_after_recent_ma200_touch(
+    mock_load_universe,
+    mock_load_industry_map,
+) -> None:
+    asof = "20260213"
+    api = FakeAPI()
+    mock_load_industry_map.return_value = {}
+    mock_load_universe.return_value = [
+        {"code": "042660", "name": "한화오션", "mcap": 30_000_000_000_000, "is_etf": False},
+    ]
+    api._bars[("042660", asof)] = _make_hanwha_ma200_bars(asof, touch=True)
+
+    out = model_screener(api, asof=asof)
+
+    assert list(out["code"]) == ["042660"]
+    row = out.iloc[0]
+    assert bool(row["swing_ma200_setup"])
+    assert bool(row["swing_ma200_recent_touch"])
+    assert float(row["swing_ma200"]) > 0
+    assert 0.0 < float(row["swing_ma200_distance_pct"]) < 8.0
+
+
+@patch("backend.services.trading_engine.screeners.load_stock_industry_db_map")
+@patch("backend.services.trading_engine.screeners.load_swing_universe_candidates")
+def test_model_screener_drops_hanwha_ocean_without_recent_ma200_touch(
+    mock_load_universe,
+    mock_load_industry_map,
+) -> None:
+    asof = "20260213"
+    api = FakeAPI()
+    mock_load_industry_map.return_value = {}
+    mock_load_universe.return_value = [
+        {"code": "042660", "name": "한화오션", "mcap": 30_000_000_000_000, "is_etf": False},
+    ]
+    api._bars[("042660", asof)] = _make_hanwha_ma200_bars(asof, touch=False)
+
+    out = model_screener(api, asof=asof)
+
+    assert out.empty
+
 @patch("backend.services.trading_engine.stock_master.load_stock_master_map")
 def test_load_swing_universe_candidates_prefers_index_members_and_near_cutoff_large_caps(
     mock_load_stock_master_map,
@@ -554,4 +609,3 @@ def test_popular_screener_uses_db_industry_bucket_when_available(mock_load_indus
     assert "410002" in set(out["code"])
     assert bool(out[out["code"] == "410002"].iloc[0]["sector_bucket_selected"]) is True
     assert out[out["code"] == "410002"].iloc[0]["industry_bucket_name"] == "금융"
-

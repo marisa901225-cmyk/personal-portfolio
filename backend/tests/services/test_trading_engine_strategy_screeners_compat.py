@@ -90,6 +90,11 @@ def test_public_screeners_preserve_empty_dataframe_columns_and_order() -> None:
         "industry_5d_change_pct",
         "market_warning_code",
         "management_issue_code",
+        "swing_ma200_setup",
+        "swing_ma200_recent_touch",
+        "swing_ma200",
+        "swing_ma200_distance_pct",
+        "swing_ma200_reason",
     ]
 
     assert etf.empty

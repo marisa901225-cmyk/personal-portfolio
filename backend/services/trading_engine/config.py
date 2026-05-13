@@ -236,6 +236,11 @@ class TradeEngineConfig:
     swing_day_theme_leader_min_change_pct: float = 2.0
     swing_day_theme_leader_min_avg_value_5d: int = 30_000_000_000
     swing_day_theme_leader_bonus: float = 36.0
+    swing_ma200_watch_codes: tuple[str, ...] = ("042660",)
+    swing_ma200_touch_lookback_bars: int = 3
+    swing_ma200_touch_tolerance_pct: float = 1.0
+    swing_ma200_max_distance_pct: float = 8.0
+    swing_ma200_bonus: float = 16.0
     swing_global_sector_positive_bonus_max: float = 8.0
     swing_global_sector_negative_penalty_max: float = 10.0
     swing_global_market_negative_penalty_max: float = 2.5

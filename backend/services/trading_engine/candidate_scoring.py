@@ -76,6 +76,8 @@ def _score_swing_row(
         max_penalty=float(getattr(config, "swing_volatility_penalty_max", 8.0)),
     )
     score += _swing_popular_liquidity_score(row)
+    if _as_bool(row.get("swing_ma200_setup", False)):
+        score += float(getattr(config, "swing_ma200_bonus", 0.0))
     score += _swing_industry_trend_score(row, config)
     score += _news_score_bonus(
         row,
