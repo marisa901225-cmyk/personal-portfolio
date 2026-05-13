@@ -50,7 +50,7 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
         sensors_output: str,
         now_epoch: int,
         threshold_rpm: int = 1600,
-        stop_delay_sec: int = 30,
+        stop_delay_sec: int = 0,
         cooldown_sec: int = 3600,
         sensor_pattern: str = "",
         start_max_temp_c: str = "88",
@@ -106,6 +106,7 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
                 fan2:           0 RPM
             """,
             now_epoch=1_000,
+            stop_delay_sec=30,
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -115,6 +116,22 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
         self.assertIn('"last_seen_rpm": 1750', state_text)
         self.assertIn('"high_rpm_started_epoch": 1000', state_text)
         self.assertIn('"last_action": "observe_high_rpm"', state_text)
+
+    def test_initial_high_fan_rpm_stops_immediately_by_default(self) -> None:
+        result = self._run_guard(
+            sensors_output="""
+                xe-pci-0300
+                Adapter: PCI adapter
+                fan1:        1750 RPM
+            """,
+            now_epoch=1_000,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self._read_actions(), ["stop|0"])
+        state_text = self.state_file.read_text(encoding="utf-8")
+        self.assertIn('"last_trigger_rpm": 1750', state_text)
+        self.assertIn('"last_action": "stop"', state_text)
 
     def test_sustained_high_fan_rpm_enters_cooldown_and_stops_llm_services(self) -> None:
         self.state_file.write_text(
@@ -183,6 +200,7 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
                 fan1:        1750 RPM
             """,
             now_epoch=1_000,
+            stop_delay_sec=30,
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
