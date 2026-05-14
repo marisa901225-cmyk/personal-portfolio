@@ -24,6 +24,7 @@ from .strategy_ranking import (
     _resolve_candidate_price,
     _resolve_day_entry_budget_cash,
     _resolve_day_max_change_pct,
+    _resolve_swing_entry_budget_cash,
 )
 from .strategy_theme import (
     _candidate_sector_keywords,
@@ -258,6 +259,16 @@ def rank_swing_codes(
         if primary.empty:
             return []
 
+    primary["_swing_price_num"] = primary.apply(lambda r: _resolve_candidate_price(r, quotes), axis=1)
+    max_swing_entry_price = _resolve_swing_entry_budget_cash(config)
+    if max_swing_entry_price > 0:
+        primary = primary[
+            primary["_swing_price_num"].isna()
+            | (primary["_swing_price_num"] <= max_swing_entry_price)
+        ]
+        if primary.empty:
+            return []
+
     primary["_change_pct_num"] = primary.apply(lambda r: _resolve_change_pct(r, quotes), axis=1)
     primary = primary[
         primary["_change_pct_num"].isna()
@@ -289,9 +300,20 @@ def rank_swing_codes(
     ordered_codes = [str(code) for code in scored["code"].tolist()]
 
     if not use_etf_fallback:
+        etf_candidates = candidates.etf
+        if etf_candidates is not None and not etf_candidates.empty and max_swing_entry_price > 0:
+            etf_candidates = etf_candidates.copy()
+            etf_candidates["_swing_price_num"] = etf_candidates.apply(
+                lambda r: _resolve_candidate_price(r, quotes),
+                axis=1,
+            )
+            etf_candidates = etf_candidates[
+                etf_candidates["_swing_price_num"].isna()
+                | (etf_candidates["_swing_price_num"] <= max_swing_entry_price)
+            ]
         themed_etf_code = _pick_theme_day_swing_etf(
             stock_scored=scored,
-            etf_candidates=candidates.etf,
+            etf_candidates=etf_candidates,
             quotes=quotes,
             config=config,
             news_signal=news_signal,

@@ -1013,6 +1013,48 @@ class TradingStrategyTests(unittest.TestCase):
         self.assertEqual(ranked[0], "BASE01")
         self.assertNotIn("PLAIN1", ranked)
 
+    def test_rank_swing_excludes_stocks_above_one_share_budget(self) -> None:
+        model_pool = pd.DataFrame(
+            [
+                {
+                    "code": "003230",
+                    "name": "고가주",
+                    "avg_value_20d": 900_000_000_000,
+                    "ma20": 100,
+                    "ma60": 95,
+                    "close": 100_000,
+                    "change_pct": 1.2,
+                    "is_etf": False,
+                    "trend_tier": "strict",
+                },
+                {
+                    "code": "CHEAP1",
+                    "name": "예산내",
+                    "avg_value_20d": 500_000_000_000,
+                    "ma20": 100,
+                    "ma60": 95,
+                    "close": 790_000,
+                    "change_pct": 1.0,
+                    "is_etf": False,
+                    "trend_tier": "relaxed",
+                },
+            ]
+        )
+        candidates = self._candidates_with_swing(model=model_pool, etf=pd.DataFrame())
+        quotes = {
+            "003230": {"price": 1_400_000, "change_pct": 1.2},
+            "CHEAP1": {"price": 790_000, "change_pct": 1.0},
+        }
+
+        ranked = rank_swing_codes(
+            candidates,
+            quotes=quotes,
+            config=TradeEngineConfig(initial_capital=1_000_000, swing_cash_ratio=0.8),
+        )
+
+        self.assertEqual(ranked[0], "CHEAP1")
+        self.assertNotIn("003230", ranked)
+
     def test_rank_swing_excludes_cosmetics_names(self) -> None:
         model_pool = pd.DataFrame(
             [

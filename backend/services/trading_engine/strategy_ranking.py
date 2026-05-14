@@ -147,6 +147,12 @@ def _resolve_day_entry_budget_cash(config: TradeEngineConfig) -> float:
     return initial_capital * day_cash_ratio
 
 
+def _resolve_swing_entry_budget_cash(config: TradeEngineConfig) -> float:
+    initial_capital = max(0.0, float(getattr(config, "initial_capital", 0.0)))
+    swing_cash_ratio = max(0.0, float(getattr(config, "swing_cash_ratio", 0.0)))
+    return initial_capital * swing_cash_ratio
+
+
 def _merge_candidates(
     popular: pd.DataFrame,
     model: pd.DataFrame,
