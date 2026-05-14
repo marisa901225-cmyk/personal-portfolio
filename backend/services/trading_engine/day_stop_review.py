@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
+from ..prompt_loader import load_prompt
 from ..llm.service import LLMService
 from .config import TradeEngineConfig
 from .state import PositionState
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 DayStopDecision = Literal["EXIT", "HOLD"]
 DayOvernightCarryDecision = Literal["EXIT", "CARRY"]
+SwingStopDecision = Literal["EXIT", "HOLD"]
 
 _DAY_STOP_REVIEW_RESPONSE_FORMAT = {
     "type": "json_schema",
@@ -51,6 +53,23 @@ _DAY_OVERNIGHT_CARRY_RESPONSE_FORMAT = {
     },
 }
 
+_SWING_STOP_REVIEW_RESPONSE_FORMAT = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "swing_stop_review",
+        "schema": {
+            "type": "object",
+            "properties": {
+                "decision": {"type": "string", "enum": ["EXIT", "HOLD"]},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "reason": {"type": "string", "maxLength": 240},
+            },
+            "required": ["decision", "confidence", "reason"],
+            "additionalProperties": False,
+        },
+    },
+}
+
 
 @dataclass(slots=True)
 class DayStopReviewResult:
@@ -64,6 +83,15 @@ class DayStopReviewResult:
 @dataclass(slots=True)
 class DayOvernightCarryReviewResult:
     decision: DayOvernightCarryDecision
+    confidence: float
+    reason: str
+    route: str
+    raw_response: dict[str, object]
+
+
+@dataclass(slots=True)
+class SwingStopReviewResult:
+    decision: SwingStopDecision
     confidence: float
     reason: str
     route: str
@@ -97,6 +125,25 @@ def is_day_stop_review_candidate(
     ):
         return False
 
+    return True
+
+
+def is_swing_stop_review_candidate(
+    *,
+    config: TradeEngineConfig,
+    position: PositionState,
+    pnl_pct: float,
+    already_reviewed: bool,
+) -> bool:
+    if not bool(getattr(config, "swing_stop_llm_review_enabled", False)):
+        return False
+    if already_reviewed or position.type != "S":
+        return False
+    if pnl_pct > float(getattr(config, "swing_stop_loss_pct", -0.03)):
+        return False
+    hard_stop_pct = float(getattr(config, "swing_stop_llm_hard_stop_pct", -0.08))
+    if pnl_pct <= hard_stop_pct:
+        return False
     return True
 
 
@@ -261,6 +308,76 @@ def review_day_overnight_carry_with_llm(
     )
 
 
+def review_swing_stop_with_llm(
+    *,
+    code: str,
+    position: PositionState,
+    quote_price: float,
+    pnl_pct: float,
+    trend_meta: dict[str, object],
+    config: TradeEngineConfig,
+) -> SwingStopReviewResult | None:
+    """Ask the configured LLM whether a swing stop threshold should exit now."""
+    llm = LLMService.get_instance()
+    if not _has_llm_backend(llm):
+        return None
+
+    messages = _build_swing_stop_messages(
+        code=code,
+        position=position,
+        quote_price=quote_price,
+        pnl_pct=pnl_pct,
+        trend_meta=trend_meta,
+        config=config,
+    )
+
+    try:
+        if bool(getattr(config, "swing_stop_llm_review_use_paid", False)) and _paid_available(llm):
+            raw = llm.generate_paid_chat(
+                messages,
+                max_tokens=240,
+                temperature=0.0,
+                model=getattr(config, "swing_stop_llm_review_model", None),
+                reasoning_effort=getattr(config, "swing_stop_llm_review_reasoning_effort", "low"),
+                response_format=_SWING_STOP_REVIEW_RESPONSE_FORMAT,
+            )
+        else:
+            raw = llm.generate_chat(
+                messages,
+                max_tokens=240,
+                temperature=0.0,
+                response_format=_SWING_STOP_REVIEW_RESPONSE_FORMAT,
+                allow_paid_fallback=False,
+            )
+    except Exception:
+        logger.warning("swing stop LLM review failed code=%s", code, exc_info=True)
+        return None
+
+    parsed = _parse_review_response(raw)
+    if not parsed:
+        logger.warning("swing stop LLM review parse failed code=%s raw=%s", code, (raw or "")[:400])
+        return None
+
+    decision = str(parsed.get("decision") or "").strip().upper()
+    if decision not in {"EXIT", "HOLD"}:
+        return None
+
+    confidence = parse_numeric(parsed.get("confidence"))
+    confidence = max(0.0, min(1.0, float(confidence if confidence is not None else 0.0)))
+    min_hold_confidence = float(getattr(config, "swing_stop_llm_hold_confidence_min", 0.55))
+    if decision == "HOLD" and confidence < min_hold_confidence:
+        decision = "EXIT"
+
+    route = str(getattr(llm, "_last_route", None) or "unknown")
+    return SwingStopReviewResult(
+        decision=decision,  # type: ignore[arg-type]
+        confidence=confidence,
+        reason=str(parsed.get("reason") or "").strip()[:240],
+        route=route,
+        raw_response=dict(parsed),
+    )
+
+
 def _build_messages(
     *,
     code: str,
@@ -361,6 +478,49 @@ def _build_overnight_carry_messages(
         {"role": "system", "content": system},
         {"role": "user", "content": user},
     ]
+
+
+def _build_swing_stop_messages(
+    *,
+    code: str,
+    position: PositionState,
+    quote_price: float,
+    pnl_pct: float,
+    trend_meta: dict[str, object],
+    config: TradeEngineConfig,
+) -> list[dict[str, str]]:
+    payload = {
+        "code": code,
+        "strategy": position.type,
+        "entry_time": position.entry_time,
+        "entry_price": round(float(position.entry_price), 4),
+        "highest_price": round(float(position.highest_price or position.entry_price), 4),
+        "current_price": round(float(quote_price), 4),
+        "current_pnl_pct": round(float(pnl_pct) * 100.0, 4),
+        "stop_loss_pct": round(float(config.swing_stop_loss_pct) * 100.0, 4),
+        "hard_stop_pct": round(float(config.swing_stop_llm_hard_stop_pct) * 100.0, 4),
+        "trend": {
+            key: trend_meta.get(key)
+            for key in (
+                "reason",
+                "trend_broken",
+                "ma_window",
+                "ma_value",
+                "threshold",
+                "buffer_pct",
+                "distance_from_ma_pct",
+                "bars",
+            )
+            if key in trend_meta
+        },
+    }
+    data = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return [
+        {"role": "system", "content": load_prompt("trading_swing_stop_review_system")},
+        {"role": "user", "content": load_prompt("trading_swing_stop_review_user", data=data)},
+    ]
+
+
 def _has_llm_backend(llm: LLMService) -> bool:
     settings = getattr(llm, "settings", None)
     if settings is None:

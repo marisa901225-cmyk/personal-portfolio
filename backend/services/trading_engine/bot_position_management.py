@@ -6,6 +6,7 @@ from datetime import datetime
 from .day_stop_review import (
     review_day_overnight_carry_with_llm,
     review_day_stop_with_llm,
+    review_swing_stop_with_llm,
 )
 from .parking import manage_risk_off_parking
 from .position_exit_rules import (
@@ -13,6 +14,7 @@ from .position_exit_rules import (
     day_stop_llm_review_key as _day_stop_llm_review_key_helper,
     journal_day_overnight_carry_review as _journal_day_overnight_carry_review_helper,
     journal_day_stop_llm_review as _journal_day_stop_llm_review_helper,
+    review_swing_stop_decision as _review_swing_stop_decision_helper,
     resolve_day_stop_loss_pct as _resolve_day_stop_loss_pct_helper,
     should_carry_day_force_exit as _should_carry_day_force_exit_helper,
     should_hold_day_stop_after_llm as _should_hold_day_stop_after_llm_helper,
@@ -111,6 +113,26 @@ class BotPositionManagementMixin:
             reason=reason,
             logger=logger,
             review_day_overnight_carry_with_llm_fn=review_day_overnight_carry_with_llm,
+        )
+
+    def _review_swing_stop_decision(
+        self,
+        *,
+        code: str,
+        pos: PositionState,
+        quote_price: float,
+        pnl_pct: float,
+        trend_meta: dict[str, object],
+    ):
+        return _review_swing_stop_decision_helper(
+            self,
+            code=code,
+            pos=pos,
+            quote_price=quote_price,
+            pnl_pct=pnl_pct,
+            trend_meta=trend_meta,
+            logger=logger,
+            review_swing_stop_with_llm_fn=review_swing_stop_with_llm,
         )
 
     def _day_stop_intraday_meta(self, *, code: str) -> dict[str, object]:

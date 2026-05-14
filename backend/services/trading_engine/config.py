@@ -48,6 +48,12 @@ class TradeEngineConfig:
     swing_trend_ma_window: int = 20
     swing_trend_lookback_bars: int = 60
     swing_trend_break_buffer_pct: float = 0.0
+    swing_stop_llm_review_enabled: bool = True
+    swing_stop_llm_review_use_paid: bool = True
+    swing_stop_llm_review_model: str = "gpt-5.5"
+    swing_stop_llm_review_reasoning_effort: str = "low"
+    swing_stop_llm_hard_stop_pct: float = -0.08
+    swing_stop_llm_hold_confidence_min: float = 0.55
     swing_take_profit_pct: float = 0.05
     swing_trail_start: float = 0.05
     swing_trail_gap: float = -0.02

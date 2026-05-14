@@ -4,6 +4,7 @@ from datetime import datetime
 
 from .execution import exit_position
 from .notification_text import format_exit_message
+from .position_helpers import swing_trend_break_meta
 from .risk import should_exit_position
 from .utils import parse_numeric
 
@@ -22,13 +23,22 @@ def monitor_positions(bot, *, now: datetime, logger) -> None:
                 continue
 
             swing_trend_broken: bool | None = None
+            swing_trend_meta: dict[str, object] = {}
             day_lock_retrace_gap_pct_override: float | None = None
             day_lock_intraday_trend_broken: bool | None = None
             day_stop_loss_pct_override: float | None = None
             if pos.type == "S" and bot.config.swing_sl_requires_trend_break:
                 pnl_pct = (price / pos.entry_price) - 1.0 if pos.entry_price > 0 else 0.0
                 if pnl_pct <= bot.config.swing_stop_loss_pct:
-                    swing_trend_broken = bot._is_swing_trend_broken(code=code, quote_price=price, now=now)
+                    swing_trend_meta = swing_trend_break_meta(
+                        bot.api,
+                        bot.config,
+                        code=code,
+                        quote_price=price,
+                        now=now,
+                        logger=logger,
+                    )
+                    swing_trend_broken = bool(swing_trend_meta.get("trend_broken", False))
             elif pos.type == "T":
                 day_lock_retrace_gap_pct_override = bot._resolve_day_lock_retrace_gap_pct(code=code)
                 day_stop_loss_pct_override = bot._resolve_day_stop_loss_pct(code=code)
@@ -51,7 +61,40 @@ def monitor_positions(bot, *, now: datetime, logger) -> None:
                 day_stop_loss_pct_override=day_stop_loss_pct_override,
             )
             if not exit_now:
-                continue
+                if pos.type == "S" and pnl_pct <= bot.config.swing_stop_loss_pct:
+                    review = bot._review_swing_stop_decision(
+                        code=code,
+                        pos=pos,
+                        quote_price=price,
+                        pnl_pct=pnl_pct,
+                        trend_meta=swing_trend_meta,
+                    )
+                    if review is not None and review.decision == "EXIT":
+                        exit_now = True
+                        reason = "SL_LLM"
+                    else:
+                        continue
+                else:
+                    continue
+            if (
+                exit_now
+                and pos.type == "S"
+                and pnl_pct <= bot.config.swing_stop_loss_pct
+                and reason in {"SL", "SL_TREND"}
+            ):
+                review = bot._review_swing_stop_decision(
+                    code=code,
+                    pos=pos,
+                    quote_price=price,
+                    pnl_pct=pnl_pct,
+                    trend_meta=swing_trend_meta,
+                )
+                if review is not None:
+                    if review.decision == "HOLD":
+                        continue
+                    reason = "SL_LLM"
+                elif reason == "SL" and bot.config.swing_sl_requires_trend_break:
+                    continue
             if bot._should_hold_day_stop_after_llm(
                 code=code,
                 pos=pos,

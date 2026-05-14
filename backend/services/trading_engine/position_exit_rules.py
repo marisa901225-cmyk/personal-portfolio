@@ -8,8 +8,10 @@ import holidays
 from .day_stop_review import (
     is_day_overnight_carry_candidate,
     is_day_stop_review_candidate,
+    is_swing_stop_review_candidate,
     review_day_overnight_carry_with_llm,
     review_day_stop_with_llm,
+    review_swing_stop_with_llm,
 )
 from .intraday import passes_day_intraday_confirmation
 from .utils import parse_numeric
@@ -129,6 +131,50 @@ def should_carry_day_force_exit(
 
     bot.state.day_overnight_carry_positions[review_key] = bot.state.trade_date
     return True
+
+
+def review_swing_stop_decision(
+    bot,
+    *,
+    code: str,
+    pos,
+    quote_price: float,
+    pnl_pct: float,
+    trend_meta: dict[str, object],
+    logger,
+    review_swing_stop_with_llm_fn=review_swing_stop_with_llm,
+):
+    review_key = day_stop_llm_review_key(code=code, pos=pos)
+    already_reviewed = review_key in bot.state.swing_stop_llm_reviewed_positions
+    if not is_swing_stop_review_candidate(
+        config=bot.config,
+        position=pos,
+        pnl_pct=pnl_pct,
+        already_reviewed=already_reviewed,
+    ):
+        return None
+
+    bot.state.swing_stop_llm_reviewed_positions.add(review_key)
+    try:
+        review = review_swing_stop_with_llm_fn(
+            code=code,
+            position=pos,
+            quote_price=quote_price,
+            pnl_pct=pnl_pct,
+            trend_meta=trend_meta,
+            config=bot.config,
+        )
+    except Exception:
+        logger.warning("swing stop LLM review helper failed code=%s", code, exc_info=True)
+        review = None
+    journal_swing_stop_llm_review(
+        bot,
+        code=code,
+        review=review,
+        pnl_pct=pnl_pct,
+        trend_meta=trend_meta,
+    )
+    return review
 
 
 def day_overnight_carry_market_gap_meta(api, *, config, trade_date: str) -> dict[str, object]:
@@ -281,6 +327,32 @@ def journal_day_overnight_carry_review(
     )
 
 
+def journal_swing_stop_llm_review(
+    bot,
+    *,
+    code: str,
+    review,
+    pnl_pct: float,
+    trend_meta: dict[str, object],
+) -> None:
+    decision = review.decision if review is not None else "UNAVAILABLE"
+    bot._journal(
+        "SWING_STOP_LLM_REVIEW",
+        asof_date=bot.state.trade_date,
+        code=code,
+        decision=decision,
+        confidence=round(float(review.confidence), 4) if review is not None else 0.0,
+        route=review.route if review is not None else "unavailable",
+        review_reason=review.reason if review is not None else "LLM_UNAVAILABLE_OR_INVALID",
+        pnl_pct=round(float(pnl_pct) * 100.0, 4),
+        trend_broken=bool(trend_meta.get("trend_broken", False)),
+        trend_reason=str(trend_meta.get("reason") or ""),
+        ma_window=trend_meta.get("ma_window"),
+        ma_value=trend_meta.get("ma_value"),
+        distance_from_ma_pct=trend_meta.get("distance_from_ma_pct"),
+    )
+
+
 def day_stop_llm_review_key(*, code: str, pos) -> str:
     return f"{str(code).strip()}:{str(getattr(pos, 'entry_time', '')).strip()}"
 
@@ -293,6 +365,8 @@ __all__ = [
     "next_open_trading_day",
     "journal_day_overnight_carry_review",
     "journal_day_stop_llm_review",
+    "journal_swing_stop_llm_review",
+    "review_swing_stop_decision",
     "resolve_day_stop_loss_pct",
     "should_carry_day_force_exit",
     "should_hold_day_stop_after_llm",

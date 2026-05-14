@@ -59,6 +59,7 @@ _REASON_LABELS = {
     "RISK_OFF": "위험회피 장세",
     "RISK_ON": "위험선호 전환",
     "SL": "손절",
+    "SL_LLM": "LLM 검토 손절",
     "SL_TREND": "추세이탈 손절",
     "STATE_RECONCILE_ADD": "상태 동기화 신규 반영",
     "STATE_RECONCILE_DROP": "상태 동기화 정리",

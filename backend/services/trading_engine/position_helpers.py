@@ -20,31 +20,67 @@ def is_swing_trend_broken(
     now: datetime,
     logger: logging.Logger | None = None,
 ) -> bool:
+    meta = swing_trend_break_meta(
+        api,
+        config,
+        code=code,
+        quote_price=quote_price,
+        now=now,
+        logger=logger,
+    )
+    return bool(meta.get("trend_broken", False))
+
+
+def swing_trend_break_meta(
+    api: TradingAPI,
+    config: TradeEngineConfig,
+    *,
+    code: str,
+    quote_price: float,
+    now: datetime,
+    logger: logging.Logger | None = None,
+) -> dict[str, object]:
     ma_window = max(2, int(config.swing_trend_ma_window))
     lookback = max(ma_window + 5, int(config.swing_trend_lookback_bars))
     asof = now.strftime("%Y%m%d")
+    base_meta: dict[str, object] = {
+        "trend_broken": False,
+        "ma_window": ma_window,
+        "lookback_bars": lookback,
+        "quote_price": float(quote_price),
+    }
     try:
         bars = api.daily_bars(code, asof, lookback)
     except Exception:
         if logger is not None:
             logger.debug("trend check daily_bars failed code=%s", code, exc_info=True)
-        return False
+        return {**base_meta, "reason": "FETCH_FAILED"}
 
     if bars is None or bars.empty or "close" not in bars.columns:
-        return False
+        return {**base_meta, "reason": "NO_DAILY_BARS"}
 
     close_s = bars["close"]
     if len(close_s) < ma_window:
-        return False
+        return {**base_meta, "reason": "INSUFFICIENT_BARS", "bars": int(len(close_s))}
 
     ma_s = compute_sma(close_s, ma_window)
     ma_value = parse_numeric(ma_s.iloc[-1]) if len(ma_s) else None
     if ma_value is None or ma_value <= 0:
-        return False
+        return {**base_meta, "reason": "INVALID_MA", "bars": int(len(close_s))}
 
     buffer_pct = max(0.0, float(config.swing_trend_break_buffer_pct))
     threshold = ma_value * (1.0 - buffer_pct)
-    return quote_price < threshold
+    distance_pct = ((float(quote_price) / float(ma_value)) - 1.0) * 100.0
+    return {
+        **base_meta,
+        "trend_broken": float(quote_price) < threshold,
+        "ma_value": float(ma_value),
+        "threshold": float(threshold),
+        "buffer_pct": buffer_pct,
+        "distance_from_ma_pct": distance_pct,
+        "bars": int(len(close_s)),
+        "reason": "OK",
+    }
 
 
 def lock_profitable_existing_position(
@@ -155,4 +191,5 @@ __all__ = [
     "is_swing_trend_broken",
     "lock_profitable_existing_position",
     "reconcile_state_with_broker_positions",
+    "swing_trend_break_meta",
 ]

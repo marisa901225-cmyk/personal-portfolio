@@ -726,6 +726,30 @@ def _apply_swing_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_SWING_TREND_BREAK_BUFFER_PCT",
         cfg.swing_trend_break_buffer_pct,
     )
+    cfg.swing_stop_llm_review_enabled = _env_bool(
+        "TRADING_ENGINE_SWING_STOP_LLM_REVIEW_ENABLED",
+        cfg.swing_stop_llm_review_enabled,
+    )
+    cfg.swing_stop_llm_review_use_paid = _env_bool(
+        "TRADING_ENGINE_SWING_STOP_LLM_REVIEW_USE_PAID",
+        cfg.swing_stop_llm_review_use_paid,
+    )
+    cfg.swing_stop_llm_review_model = _env_text(
+        "TRADING_ENGINE_SWING_STOP_LLM_REVIEW_MODEL",
+        cfg.swing_stop_llm_review_model,
+    )
+    cfg.swing_stop_llm_review_reasoning_effort = _env_text(
+        "TRADING_ENGINE_SWING_STOP_LLM_REVIEW_REASONING_EFFORT",
+        cfg.swing_stop_llm_review_reasoning_effort,
+    )
+    cfg.swing_stop_llm_hard_stop_pct = _env_float(
+        "TRADING_ENGINE_SWING_STOP_LLM_HARD_STOP_PCT",
+        cfg.swing_stop_llm_hard_stop_pct,
+    )
+    cfg.swing_stop_llm_hold_confidence_min = _env_float(
+        "TRADING_ENGINE_SWING_STOP_LLM_HOLD_CONFIDENCE_MIN",
+        cfg.swing_stop_llm_hold_confidence_min,
+    )
 
 
 def _apply_regime_and_news_overrides(cfg: TradeEngineConfig) -> None:
