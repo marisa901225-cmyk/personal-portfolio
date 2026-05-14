@@ -186,7 +186,7 @@ is_day_relax_trading_day() {
 
   [[ "$DAY_RELAX_REQUIRE_TRADING_DAY" == "1" ]] || return 0
   if [[ ! -x "$PYTHON_BIN" ]]; then
-    log "day relax trading-day check skipped; python not executable: $PYTHON_BIN"
+    log "낮완화 영업일확인 스킵 python=$PYTHON_BIN"
     return 0
   fi
 
@@ -212,11 +212,11 @@ PY
       return 0
       ;;
     CLOSED)
-      log "day relax suppressed; KIS trading-day check reports closed date=${NOW_DATE}"
+      log "낮완화 비활성 휴장일 date=${NOW_DATE}"
       return 1
       ;;
     *)
-      log "day relax trading-day check inconclusive result=${result:-empty}; allowing weekday fallback"
+      log "낮완화 영업일확인 불명 result=${result:-empty}; 평일기준 허용"
       return 0
       ;;
   esac
@@ -260,7 +260,7 @@ fi
 
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
-  log "another guard process is already running; skipping this tick"
+  log "중복실행 스킵"
   exit 0
 fi
 
@@ -283,39 +283,39 @@ if [[ "$cooldown_active" == "1" ]]; then
       if [[ -n "$start_temp_c" ]] && temp_is_at_or_above_threshold "$start_temp_c" "$START_MAX_TEMP_C"; then
         next_retry_epoch="$((NOW_EPOCH + START_RETRY_SEC))"
         write_state 1 "$cooldown_started_epoch" "$next_retry_epoch" "$last_trigger_rpm" 0 0 "start_deferred_hot"
-        log "restart deferred: sensor temp ${start_temp_c}C reached start limit ${START_MAX_TEMP_C}C; retry after $(format_epoch "$next_retry_epoch")"
+        log "temp=${start_temp_c}C 제한=${START_MAX_TEMP_C}C; LLM시작연기 retry=$(format_epoch "$next_retry_epoch")"
         exit 0
       fi
 
       if [[ -z "$start_temp_c" ]]; then
-        log "restart temperature gate skipped; no temperature lines matched${TEMP_SENSOR_PATTERN:+ for pattern '$TEMP_SENSOR_PATTERN'}"
+        log "온도확인 스킵 매칭없음${TEMP_SENSOR_PATTERN:+ pattern=$TEMP_SENSOR_PATTERN}"
       fi
     else
-      log "restart temperature gate skipped; failed to read sensors output from $SENSORS_BIN"
+      log "온도확인 스킵 sensors실패 bin=$SENSORS_BIN"
     fi
   fi
 
-  log "restart delay elapsed at $(format_epoch "$cooldown_until_epoch"); restarting LLM services"
+  log "재시작대기 종료 at=$(format_epoch "$cooldown_until_epoch"); LLM시작"
   if run_schedule start; then
     write_state 0 0 0 "$last_trigger_rpm" 0 0 "start" "$NOW_EPOCH"
-    log "LLM services restarted after fan reset delay"
+    log "LLM시작 완료"
     exit 0
   fi
 
   write_state 1 "$cooldown_started_epoch" "$cooldown_until_epoch" "$last_trigger_rpm" 0 0 "start_failed"
-  log "failed to restart LLM services after cooldown"
+  log "LLM시작 실패"
   exit 1
 fi
 
 if ! sensors_output="$("$SENSORS_BIN" 2>/dev/null)"; then
-  log "failed to read sensors output from $SENSORS_BIN"
+  log "sensors실패 bin=$SENSORS_BIN"
   write_state 0 0 0 0 0 0 "sensors_error"
   exit 0
 fi
 
 max_rpm="$(printf '%s\n' "$sensors_output" | max_fan_rpm_from_output)"
 if [[ -z "$max_rpm" ]]; then
-  log "no fan RPM lines matched from sensors output${SENSOR_PATTERN:+ for pattern '$SENSOR_PATTERN'}"
+  log "rpm없음${SENSOR_PATTERN:+ pattern=$SENSOR_PATTERN}"
   write_state 0 0 0 0 0 0 "no_fan_data"
   exit 0
 fi
@@ -323,14 +323,14 @@ fi
 if (( max_rpm < THRESHOLD_RPM )); then
   if (( high_rpm_started_epoch > 0 || last_seen_rpm >= THRESHOLD_RPM )); then
     write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" 0 "rpm_normal"
-    log "fan RPM $max_rpm is below threshold $THRESHOLD_RPM; high RPM observation reset"
+    log "rpm=$max_rpm 기준=$THRESHOLD_RPM 정상; 관찰초기화"
   fi
   exit 0
 fi
 
 if in_day_relax_window; then
   write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" 0 "day_relax" "$current_last_start_epoch"
-  log "fan RPM $max_rpm exceeded threshold $THRESHOLD_RPM but day relax is active date=${NOW_DATE} time=${NOW_HHMM} window=${DAY_RELAX_START}-${DAY_RELAX_END}; keeping LLM services running"
+  log "rpm=$max_rpm 낮완화 date=${NOW_DATE} time=${NOW_HHMM}; LLM유지"
   exit 0
 fi
 
@@ -349,7 +349,7 @@ if (( critical_threshold_active == 0 && STARTUP_GRACE_SEC > 0 && current_last_st
   startup_elapsed_sec="$((NOW_EPOCH - current_last_start_epoch))"
   if (( startup_elapsed_sec >= 0 && startup_elapsed_sec < STARTUP_GRACE_SEC )); then
     write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" 0 "startup_grace" "$current_last_start_epoch"
-    log "fan RPM $max_rpm exceeded threshold $THRESHOLD_RPM during startup grace ${startup_elapsed_sec}s/${STARTUP_GRACE_SEC}s; deferring stop check"
+    log "rpm=$max_rpm 시작유예=${startup_elapsed_sec}/${STARTUP_GRACE_SEC}s; LLM유지"
     exit 0
   fi
 fi
@@ -361,25 +361,25 @@ fi
 high_rpm_elapsed_sec="$((NOW_EPOCH - high_rpm_started_epoch))"
 if (( high_rpm_elapsed_sec < active_stop_delay_sec )); then
   write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" "$high_rpm_started_epoch" "observe_high_rpm"
-  log "fan RPM $max_rpm exceeded $threshold_label $active_threshold_rpm for ${high_rpm_elapsed_sec}s; waiting for ${active_stop_delay_sec}s before stop check"
+  log "rpm=$max_rpm 유지=${high_rpm_elapsed_sec}/${active_stop_delay_sec}s 기준=$active_threshold_rpm; 대기"
   exit 0
 fi
 
 cooldown_until_epoch="$((NOW_EPOCH + COOLDOWN_SEC))"
-log "fan RPM $max_rpm stayed above $threshold_label $active_threshold_rpm for ${high_rpm_elapsed_sec}s; stopping LLM services"
+log "rpm=$max_rpm 유지=${high_rpm_elapsed_sec}s 기준=$active_threshold_rpm; LLM중지"
 
 if run_schedule stop; then
   if (( COOLDOWN_SEC > 0 )); then
     write_state 1 "$NOW_EPOCH" "$cooldown_until_epoch" "$max_rpm" "$max_rpm" 0 "stop" 0
-    log "LLM services stopped; restart delayed until $(format_epoch "$cooldown_until_epoch")"
+    log "LLM중지 완료; 재시작=$(format_epoch "$cooldown_until_epoch")"
     exit 0
   fi
 
   if (( RESTART_DELAY_SEC > 0 )); then
-    log "LLM services stopped; waiting ${RESTART_DELAY_SEC}s before temperature check and restart"
+    log "LLM중지 완료; ${RESTART_DELAY_SEC}s후 온도확인"
     sleep "$RESTART_DELAY_SEC"
   else
-    log "LLM services stopped; checking temperature before immediate restart"
+    log "LLM중지 완료; 온도확인"
   fi
 
   if temp_threshold_enabled "$START_MAX_TEMP_C"; then
@@ -388,31 +388,31 @@ if run_schedule stop; then
       if [[ -n "$restart_temp_c" ]] && temp_is_at_or_above_threshold "$restart_temp_c" "$START_MAX_TEMP_C"; then
         next_retry_epoch="$(($(date +%s) + START_RETRY_SEC))"
         write_state 1 "$NOW_EPOCH" "$next_retry_epoch" "$max_rpm" "$max_rpm" 0 "restart_deferred_hot" 0
-        log "restart deferred after stop: sensor temp ${restart_temp_c}C reached start limit ${START_MAX_TEMP_C}C; retry after $(format_epoch "$next_retry_epoch")"
+        log "temp=${restart_temp_c}C 제한=${START_MAX_TEMP_C}C; LLM시작연기 retry=$(format_epoch "$next_retry_epoch")"
         exit 0
       fi
 
       if [[ -z "$restart_temp_c" ]]; then
-        log "post-stop temperature gate skipped; no temperature lines matched${TEMP_SENSOR_PATTERN:+ for pattern '$TEMP_SENSOR_PATTERN'}"
+        log "중지후 온도확인 스킵 매칭없음${TEMP_SENSOR_PATTERN:+ pattern=$TEMP_SENSOR_PATTERN}"
       fi
     else
-      log "post-stop temperature gate skipped; failed to read sensors output from $SENSORS_BIN"
+      log "중지후 온도확인 스킵 sensors실패 bin=$SENSORS_BIN"
     fi
   fi
 
-  log "temperature is acceptable after stop; restarting LLM services"
+  log "온도정상; LLM시작"
   if run_schedule start; then
     write_state 0 0 0 "$max_rpm" 0 0 "restart_after_stop" "$(date +%s)"
-    log "LLM services restarted after fan reset"
+    log "LLM시작 완료"
     exit 0
   fi
 
   next_retry_epoch="$(($(date +%s) + START_RETRY_SEC))"
   write_state 1 "$NOW_EPOCH" "$next_retry_epoch" "$max_rpm" "$max_rpm" 0 "restart_failed" 0
-  log "failed to restart LLM services after fan reset; retry after $(format_epoch "$next_retry_epoch")"
+  log "LLM시작 실패; retry=$(format_epoch "$next_retry_epoch")"
   exit 1
 fi
 
 write_state 0 0 0 "$max_rpm" "$max_rpm" "$high_rpm_started_epoch" "stop_failed"
-log "failed to stop LLM services after high fan RPM $max_rpm"
+log "rpm=$max_rpm; LLM중지 실패"
 exit 1
