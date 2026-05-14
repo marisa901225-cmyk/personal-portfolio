@@ -59,6 +59,11 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
         temp_sensor_pattern: str = "",
         critical_threshold_rpm: int = 2000,
         critical_stop_delay_sec: int = 0,
+        day_relax_enabled: int = 0,
+        day_relax_require_trading_day: int = 0,
+        now_date: str = "20260514",
+        now_weekday: str = "4",
+        now_hhmm: str = "12:00",
     ) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
         env.update(
@@ -81,6 +86,11 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
                 "LLM_FAN_GUARD_TEMP_SENSOR_PATTERN": temp_sensor_pattern,
                 "LLM_FAN_GUARD_CRITICAL_THRESHOLD_RPM": str(critical_threshold_rpm),
                 "LLM_FAN_GUARD_CRITICAL_STOP_DELAY_SEC": str(critical_stop_delay_sec),
+                "LLM_FAN_GUARD_DAY_RELAX_ENABLED": str(day_relax_enabled),
+                "LLM_FAN_GUARD_DAY_RELAX_REQUIRE_TRADING_DAY": str(day_relax_require_trading_day),
+                "LLM_FAN_GUARD_NOW_DATE": now_date,
+                "LLM_FAN_GUARD_NOW_WEEKDAY": now_weekday,
+                "LLM_FAN_GUARD_NOW_HHMM": now_hhmm,
             }
         )
         return subprocess.run(
@@ -415,6 +425,42 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self._read_actions(), [])
+
+    def test_day_relax_window_keeps_llm_services_running_despite_high_rpm(self) -> None:
+        result = self._run_guard(
+            sensors_output="""
+                xe-pci-0300
+                Adapter: PCI adapter
+                fan1:        1810 RPM
+            """,
+            now_epoch=1_000,
+            day_relax_enabled=1,
+            now_weekday="4",
+            now_hhmm="08:30",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self._read_actions(), [])
+        state_text = self.state_file.read_text(encoding="utf-8")
+        self.assertIn('"last_seen_rpm": 1810', state_text)
+        self.assertIn('"high_rpm_started_epoch": 0', state_text)
+        self.assertIn('"last_action": "day_relax"', state_text)
+
+    def test_day_relax_window_does_not_apply_before_8am(self) -> None:
+        result = self._run_guard(
+            sensors_output="""
+                xe-pci-0300
+                Adapter: PCI adapter
+                fan1:        1810 RPM
+            """,
+            now_epoch=1_000,
+            day_relax_enabled=1,
+            now_weekday="4",
+            now_hhmm="07:59",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self._read_actions(), ["stop|0"])
 
 
 if __name__ == "__main__":

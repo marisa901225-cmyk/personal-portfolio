@@ -23,6 +23,14 @@ START_RETRY_SEC="${LLM_FAN_GUARD_START_RETRY_SEC:-300}"
 STARTUP_GRACE_SEC="${LLM_FAN_GUARD_STARTUP_GRACE_SEC:-600}"
 TEMP_SENSOR_PATTERN="${LLM_FAN_GUARD_TEMP_SENSOR_PATTERN:-$SENSOR_PATTERN}"
 NOW_EPOCH="${LLM_FAN_GUARD_NOW_EPOCH:-$(date +%s)}"
+DAY_RELAX_ENABLED="${LLM_FAN_GUARD_DAY_RELAX_ENABLED:-1}"
+DAY_RELAX_START="${LLM_FAN_GUARD_DAY_RELAX_START:-08:00}"
+DAY_RELAX_END="${LLM_FAN_GUARD_DAY_RELAX_END:-18:00}"
+DAY_RELAX_REQUIRE_TRADING_DAY="${LLM_FAN_GUARD_DAY_RELAX_REQUIRE_TRADING_DAY:-1}"
+PYTHON_BIN="${LLM_FAN_GUARD_PYTHON_BIN:-$PROJECT_ROOT/venv/bin/python}"
+NOW_DATE="${LLM_FAN_GUARD_NOW_DATE:-$(date -d "@$NOW_EPOCH" +%Y%m%d)}"
+NOW_WEEKDAY="${LLM_FAN_GUARD_NOW_WEEKDAY:-$(date -d "@$NOW_EPOCH" +%u)}"
+NOW_HHMM="${LLM_FAN_GUARD_NOW_HHMM:-$(date -d "@$NOW_EPOCH" +%H:%M)}"
 
 mkdir -p "$(dirname "$LOG_FILE")" "$(dirname "$STATE_FILE")"
 
@@ -159,6 +167,83 @@ temp_threshold_enabled() {
   awk -v threshold="$threshold_temp" 'BEGIN { exit !(threshold + 0 > 0) }'
 }
 
+hhmm_to_minutes() {
+  local value="$1"
+  local hour minute
+
+  if [[ ! "$value" =~ ^[0-9]{1,2}:[0-9]{2}$ ]]; then
+    echo "-1"
+    return
+  fi
+
+  hour="${value%%:*}"
+  minute="${value##*:}"
+  echo "$((10#$hour * 60 + 10#$minute))"
+}
+
+is_day_relax_trading_day() {
+  local result
+
+  [[ "$DAY_RELAX_REQUIRE_TRADING_DAY" == "1" ]] || return 0
+  if [[ ! -x "$PYTHON_BIN" ]]; then
+    log "day relax trading-day check skipped; python not executable: $PYTHON_BIN"
+    return 0
+  fi
+
+  result="$(
+    PYTHONPATH="$PROJECT_ROOT" "$PYTHON_BIN" - "$NOW_DATE" 2>/dev/null <<'PY'
+import sys
+from datetime import datetime
+
+from backend.scripts.run_pension_rebalance_scheduler import _is_scheduled_trading_day
+
+try:
+    now = datetime.strptime(sys.argv[1], "%Y%m%d")
+except (IndexError, ValueError):
+    print("UNKNOWN")
+    raise SystemExit(0)
+
+print("OPEN" if _is_scheduled_trading_day(now) else "CLOSED")
+PY
+  )"
+
+  case "$result" in
+    OPEN)
+      return 0
+      ;;
+    CLOSED)
+      log "day relax suppressed; KIS trading-day check reports closed date=${NOW_DATE}"
+      return 1
+      ;;
+    *)
+      log "day relax trading-day check inconclusive result=${result:-empty}; allowing weekday fallback"
+      return 0
+      ;;
+  esac
+}
+
+in_day_relax_window() {
+  local start_min end_min now_min
+
+  [[ "$DAY_RELAX_ENABLED" == "1" ]] || return 1
+  [[ "$NOW_WEEKDAY" =~ ^[1-5]$ ]] || return 1
+  is_day_relax_trading_day || return 1
+
+  start_min="$(hhmm_to_minutes "$DAY_RELAX_START")"
+  end_min="$(hhmm_to_minutes "$DAY_RELAX_END")"
+  now_min="$(hhmm_to_minutes "$NOW_HHMM")"
+
+  if (( start_min < 0 || end_min < 0 || now_min < 0 )); then
+    return 1
+  fi
+
+  if (( start_min <= end_min )); then
+    (( now_min >= start_min && now_min < end_min ))
+  else
+    (( now_min >= start_min || now_min < end_min ))
+  fi
+}
+
 run_schedule() {
   local action="$1"
 
@@ -240,6 +325,12 @@ if (( max_rpm < THRESHOLD_RPM )); then
     write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" 0 "rpm_normal"
     log "fan RPM $max_rpm is below threshold $THRESHOLD_RPM; high RPM observation reset"
   fi
+  exit 0
+fi
+
+if in_day_relax_window; then
+  write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" 0 "day_relax" "$current_last_start_epoch"
+  log "fan RPM $max_rpm exceeded threshold $THRESHOLD_RPM but day relax is active date=${NOW_DATE} time=${NOW_HHMM} window=${DAY_RELAX_START}-${DAY_RELAX_END}; keeping LLM services running"
   exit 0
 fi
 
