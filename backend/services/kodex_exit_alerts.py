@@ -127,6 +127,45 @@ def _aggregate_ohlcv(bars: pd.DataFrame, rule: str) -> pd.DataFrame:
     return grouped
 
 
+def _previous_calendar_day_from_frame(frame: pd.DataFrame, *, fallback: str) -> str:
+    date_value = None
+    if frame is not None and not frame.empty and "date" in frame.columns:
+        dates = frame["date"].dropna().astype(str)
+        if not dates.empty:
+            date_value = dates.min()
+    if not date_value:
+        date_value = str(fallback)
+    try:
+        return (datetime.strptime(str(date_value), "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d")
+    except ValueError:
+        return ""
+
+
+def _load_daily_history(api: Any, *, code: str, end: str, lookback: int) -> pd.DataFrame:
+    target = max(1, int(lookback or 1))
+    frames: list[pd.DataFrame] = []
+    seen_ends: set[str] = set()
+    current_end = str(end)
+
+    while sum(len(frame) for frame in frames) < target and current_end and current_end not in seen_ends:
+        seen_ends.add(current_end)
+        frame = api.daily_bars(code=code, end=current_end, lookback=min(target, 100))
+        if frame is None or frame.empty:
+            break
+        frames.append(frame)
+        next_end = _previous_calendar_day_from_frame(frame, fallback=current_end)
+        if not next_end or next_end in seen_ends:
+            break
+        current_end = next_end
+
+    if not frames:
+        return pd.DataFrame()
+    merged = pd.concat(frames, ignore_index=True, sort=False)
+    if "date" in merged.columns:
+        merged = merged.drop_duplicates(subset=["date"], keep="last").sort_values("date")
+    return merged.tail(target).reset_index(drop=True)
+
+
 def evaluate_daily_warning(
     bars: pd.DataFrame,
     quote: dict[str, Any],
@@ -296,7 +335,7 @@ async def check_kodex_kospi100_daily_warning(
     if not _is_trading_day(api, today):
         return False
 
-    bars = api.daily_bars(cfg.code, end=today, lookback=cfg.history_lookback)
+    bars = _load_daily_history(api, code=cfg.code, end=today, lookback=cfg.history_lookback)
     quote = api.quote(cfg.code)
     result = evaluate_daily_warning(bars, quote, today=today, config=cfg)
     if not result or not result["triggered"]:
@@ -345,7 +384,7 @@ async def check_kodex_kospi100_weekly_confirmation(
     if not _is_last_trading_day_of_week(api, today):
         return False
 
-    bars = api.daily_bars(cfg.code, end=today, lookback=cfg.history_lookback)
+    bars = _load_daily_history(api, code=cfg.code, end=today, lookback=cfg.history_lookback)
     quote = api.quote(cfg.code)
     result = evaluate_weekly_confirmation(bars, quote, today=today, config=cfg)
     if not result or not result["triggered"]:

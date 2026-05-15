@@ -5,6 +5,7 @@ import pandas as pd
 from backend.services.kodex_exit_alerts import (
     KodexExitAlertConfig,
     _is_last_trading_day_of_week,
+    _load_daily_history,
     evaluate_daily_warning,
     evaluate_weekly_confirmation,
 )
@@ -40,6 +41,17 @@ class _FakeApi:
 
     def is_trading_day(self, date: str) -> bool:
         return date in self.trading_days
+
+
+class _PagedDailyBarsApi:
+    def __init__(self, frame: pd.DataFrame) -> None:
+        self.frame = frame.sort_values("date").reset_index(drop=True)
+        self.calls: list[tuple[str, str, int]] = []
+
+    def daily_bars(self, code: str, end: str, lookback: int) -> pd.DataFrame:
+        self.calls.append((code, end, lookback))
+        eligible = self.frame[self.frame["date"] <= end]
+        return eligible.tail(min(lookback, 100)).reset_index(drop=True)
 
 
 class KodexExitAlertsTests(unittest.TestCase):
@@ -103,6 +115,31 @@ class KodexExitAlertsTests(unittest.TestCase):
 
         self.assertTrue(_is_last_trading_day_of_week(api, "20260423"))
         self.assertFalse(_is_last_trading_day_of_week(api, "20260422"))
+
+    def test_load_daily_history_pages_when_api_caps_rows(self):
+        dates = pd.bdate_range("2025-04-01", periods=260)
+        frame = pd.DataFrame(
+            [
+                {
+                    "date": dt.strftime("%Y%m%d"),
+                    "open": idx + 1,
+                    "high": idx + 2,
+                    "low": idx,
+                    "close": idx + 1,
+                    "volume": 1000,
+                }
+                for idx, dt in enumerate(dates)
+            ]
+        )
+        api = _PagedDailyBarsApi(frame)
+
+        result = _load_daily_history(api, code="237350", end=str(frame.iloc[-1]["date"]), lookback=260)
+
+        self.assertEqual(len(result), 260)
+        self.assertEqual(str(result.iloc[0]["date"]), str(frame.iloc[0]["date"]))
+        self.assertEqual(str(result.iloc[-1]["date"]), str(frame.iloc[-1]["date"]))
+        self.assertGreaterEqual(len(api.calls), 3)
+        self.assertTrue(all(call[2] == 100 for call in api.calls))
 
 
 if __name__ == "__main__":
