@@ -152,7 +152,8 @@ def reconcile_state_with_broker_positions(
             state.swing_entries_week += 1
         elif strategy_type == "T":
             state.day_entries_today += 1
-        state.blacklist_today.add(code)
+        if strategy_type != "P":
+            state.blacklist_today.add(code)
         if logger is not None:
             logger.warning(
                 "state reconcile added broker-only position code=%s type=%s qty=%s avg=%.4f",

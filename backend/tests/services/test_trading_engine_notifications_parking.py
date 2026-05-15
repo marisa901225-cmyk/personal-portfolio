@@ -67,6 +67,65 @@ def test_bot_rebuys_risk_off_parking_after_stale_local_position_is_dropped(tmp_p
     assert any(text.startswith("[상태동기화][정리] 440650") for text in notifier.texts)
     assert any(text.startswith("[진입][파킹] 440650") for text in notifier.texts)
 
+def test_bot_risk_off_parking_ignores_same_day_blacklist(tmp_path) -> None:
+    class SpyNotifier:
+        def __init__(self) -> None:
+            self.texts: list[str] = []
+            self.files: list[tuple[str, str | None]] = []
+
+        def enqueue_text(self, text: str) -> None:
+            self.texts.append(text)
+
+        def enqueue_file(self, path: str, caption: str | None = None) -> None:
+            self.files.append((path, caption))
+
+        def flush(self, timeout_sec: float = 2.0) -> None:
+            del timeout_sec
+
+        def close(self, timeout_sec: float = 2.0) -> None:
+            del timeout_sec
+
+    asof = "20260325"
+    api = FakeAPI()
+    api._bars[("069500", asof)] = pd.DataFrame(
+        [{"date": asof, "close": 100, "volume": 1}]
+    )
+    api._quotes["440650"] = {"price": 10_000, "change_pct": 0.1}
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        use_news_sentiment=False,
+        use_intraday_circuit_breaker=False,
+        risk_off_parking_enabled=True,
+        risk_off_parking_code="440650",
+        risk_off_parking_cash_ratio=0.95,
+    )
+    notifier = SpyNotifier()
+    bot = HybridTradingBot(api, config=cfg, notifier=notifier)  # type: ignore[arg-type]
+    bot.state.blacklist_today.add("440650")
+    empty_candidates = Candidates(
+        asof=asof,
+        popular=pd.DataFrame(),
+        model=pd.DataFrame(),
+        etf=pd.DataFrame(),
+        merged=pd.DataFrame(),
+        quote_codes=[],
+    )
+
+    with patch("backend.services.trading_engine.bot.get_regime", return_value=("RISK_OFF", asof)):
+        with patch("backend.services.trading_engine.bot.build_candidates", return_value=empty_candidates):
+            out = bot.run_once(now=datetime(2026, 3, 25, 10, 5))
+
+    assert out["status"] == "OK"
+    assert out["regime"] == "RISK_OFF"
+    assert api.order_calls == [
+        {"side": "BUY", "code": "440650", "qty": 95, "order_type": "best", "price": None}
+    ]
+    assert bot.state.open_positions["440650"].type == "P"
+    assert any(text.startswith("[진입][파킹] 440650") for text in notifier.texts)
+
 def test_bot_risk_off_failed_parking_order_does_not_emit_fake_entry(tmp_path) -> None:
     class RejectingAPI(FakeAPI):
         def place_order(self, side: str, code: str, qty: int, order_type: str, price: int | None) -> dict:

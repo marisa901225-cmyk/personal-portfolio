@@ -67,7 +67,7 @@ def enter_position(
 ) -> FillResult | None:
     existing_position = state.open_positions.get(code)
     broker_before_qty, _ = get_broker_position_snapshot(api=api, code=code)
-    if code in state.blacklist_today:
+    if position_type != "P" and code in state.blacklist_today:
         return None
     if position_type == "T" and code in get_day_reentry_blocked_codes(state):
         return None
