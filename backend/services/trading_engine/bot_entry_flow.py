@@ -485,12 +485,24 @@ class BotEntryFlowMixin:
         return _resolve_day_lock_retrace_gap_pct_helper(self, code=code, logger=logger)
 
     def _day_conditional_extra_min_order_amount_krw(self) -> int:
+        if self._count_reserved_day_positions() < 1:
+            return 0
         if not bool(getattr(self.config, "day_conditional_extra_entries_enabled", False)):
             return 0
-        base_limit = max(0, int(getattr(self.config, "max_day_entries_per_day", 0) or 0))
-        if int(getattr(self.state, "day_entries_today", 0) or 0) < base_limit:
-            return 0
         return max(0, int(getattr(self.config, "day_conditional_extra_min_order_amount_krw", 0) or 0))
+
+    def _count_reserved_day_positions(self) -> int:
+        reserved_codes = {
+            code
+            for code, pos in self.state.open_positions.items()
+            if getattr(pos, "type", "") == "T"
+        }
+        reserved_codes.update(
+            code
+            for code, pending_type in self.state.pending_entry_orders.items()
+            if pending_type == "T" and code not in self.state.open_positions
+        )
+        return len(reserved_codes)
 
     def _apply_day_chart_review(
         self,

@@ -516,6 +516,59 @@ def test_day_entry_conditional_extra_does_not_open_for_small_unused_swing_budget
     assert reason == "MAX_DAY_ENTRIES_DAY"
 
 
+def test_day_position_second_slot_depends_on_unused_swing_budget() -> None:
+    cfg = TradeEngineConfig(
+        max_day_entries_per_day=16,
+        max_day_positions=2,
+        day_conditional_extra_entries_enabled=True,
+        day_conditional_extra_entries=1,
+        day_conditional_extra_min_closed_trades=0,
+        day_conditional_extra_min_win_rate=0.0,
+    )
+    state = new_state("20260216")
+    state.day_entries_today = 1
+    state.open_positions["DAY01"] = PositionState(
+        type="T",
+        entry_time="2026-02-16T09:05:00",
+        entry_price=200_000.0,
+        qty=1,
+        highest_price=200_000.0,
+        entry_date="20260216",
+    )
+    state.open_positions["SWING01"] = PositionState(
+        type="S",
+        entry_time="2026-02-16T09:05:00",
+        entry_price=750_000.0,
+        qty=1,
+        highest_price=750_000.0,
+        entry_date="20260216",
+    )
+
+    ok_small_leftover, reason_small_leftover = can_enter(
+        "T",
+        state,
+        regime="RISK_ON",
+        candidates_count=1,
+        now=datetime(2026, 2, 16, 9, 10),
+        config=cfg,
+    )
+
+    state.open_positions["SWING01"].entry_price = 600_000.0
+    ok_enough_leftover, reason_enough_leftover = can_enter(
+        "T",
+        state,
+        regime="RISK_ON",
+        candidates_count=1,
+        now=datetime(2026, 2, 16, 9, 10),
+        config=cfg,
+    )
+
+    assert ok_small_leftover is False
+    assert reason_small_leftover == "MAX_DAY_POSITIONS"
+    assert ok_enough_leftover is True
+    assert reason_enough_leftover == "OK"
+
+
 def test_day_entry_limit_stays_capped_when_intraday_win_rate_is_weak() -> None:
     cfg = TradeEngineConfig(
         max_day_entries_per_day=4,

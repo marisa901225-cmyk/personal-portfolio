@@ -57,7 +57,7 @@ def can_enter(
     else:
         if state.day_entries_today >= _effective_max_day_entries_per_day(state, config):
             return False, "MAX_DAY_ENTRIES_DAY"
-        if _count_reserved_positions(state, "T") >= config.max_day_positions:
+        if _count_reserved_positions(state, "T") >= _effective_max_day_positions(state, config):
             return False, "MAX_DAY_POSITIONS"
         if _should_block_day_afternoon_entry(state=state, now=now, cfg=config):
             return False, "DAY_AFTERNOON_LOSS_LIMIT"
@@ -161,24 +161,7 @@ def _effective_max_day_entries_per_day(
     if extra_entries <= 0:
         return base_limit
 
-    wins = max(0, int(getattr(state, "day_wins_today", 0)))
-    losses = max(0, int(getattr(state, "day_losses_today", 0)))
-    closed_trades = wins + losses
-    min_closed_trades = max(0, int(getattr(cfg, "day_conditional_extra_min_closed_trades", 0)))
-    if closed_trades < min_closed_trades:
-        return base_limit
-
-    win_rate = wins / closed_trades if closed_trades else 0.0
-    min_win_rate = float(getattr(cfg, "day_conditional_extra_min_win_rate", 0.0))
-    if win_rate < min_win_rate:
-        return base_limit
-
-    min_realized_pnl = float(getattr(cfg, "day_conditional_extra_min_realized_pnl", 0.0))
-    if float(state.realized_pnl_today) < min_realized_pnl:
-        return base_limit
-
-    max_losses = max(0, int(getattr(cfg, "day_conditional_extra_max_consecutive_losses", 0)))
-    if int(state.consecutive_losses_today) > max_losses:
+    if not _conditional_extra_performance_allows(state=state, cfg=cfg):
         return base_limit
 
     return base_limit + _conditional_extra_entries_supported_by_budget(state=state, cfg=cfg, extra_entries=extra_entries)
@@ -203,6 +186,43 @@ def _conditional_extra_entries_supported_by_budget(
 
     affordable_slots = max(1, int(total_day_budget // extra_slot_floor))
     return max(0, min(1, extra_entries, affordable_slots - 1))
+
+
+def _effective_max_day_positions(state: TradeState, cfg: TradeEngineConfig) -> int:
+    configured_limit = max(0, int(getattr(cfg, "max_day_positions", 0) or 0))
+    if configured_limit <= 1:
+        return configured_limit
+    if not bool(getattr(cfg, "day_conditional_extra_entries_enabled", True)):
+        return 1
+    if not _conditional_extra_performance_allows(state=state, cfg=cfg):
+        return 1
+    budget_supported_slots = 1 + _conditional_extra_entries_supported_by_budget(
+        state=state,
+        cfg=cfg,
+        extra_entries=max(0, int(getattr(cfg, "day_conditional_extra_entries", 0) or 0)),
+    )
+    return max(1, min(configured_limit, budget_supported_slots))
+
+
+def _conditional_extra_performance_allows(*, state: TradeState, cfg: TradeEngineConfig) -> bool:
+    wins = max(0, int(getattr(state, "day_wins_today", 0)))
+    losses = max(0, int(getattr(state, "day_losses_today", 0)))
+    closed_trades = wins + losses
+    min_closed_trades = max(0, int(getattr(cfg, "day_conditional_extra_min_closed_trades", 0)))
+    if closed_trades < min_closed_trades:
+        return False
+
+    win_rate = wins / closed_trades if closed_trades else 0.0
+    min_win_rate = float(getattr(cfg, "day_conditional_extra_min_win_rate", 0.0))
+    if win_rate < min_win_rate:
+        return False
+
+    min_realized_pnl = float(getattr(cfg, "day_conditional_extra_min_realized_pnl", 0.0))
+    if float(state.realized_pnl_today) < min_realized_pnl:
+        return False
+
+    max_losses = max(0, int(getattr(cfg, "day_conditional_extra_max_consecutive_losses", 0)))
+    return int(state.consecutive_losses_today) <= max_losses
 
 
 def _unused_swing_budget_for_day(*, state: TradeState, cfg: TradeEngineConfig) -> float:
