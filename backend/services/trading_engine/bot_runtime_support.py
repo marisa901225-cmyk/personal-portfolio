@@ -104,13 +104,11 @@ def _conditional_day_budget_slots(
     if not _conditional_day_performance_allows_extra_slots(bot):
         return 1
 
-    base_day_budget = max(0.0, float(config.initial_capital) * float(config.day_cash_ratio))
-    min_order_amount = max(0.0, float(getattr(config, "day_conditional_extra_min_order_amount_krw", 0) or 0))
-    slot_budget_floor = max(base_day_budget, min_order_amount)
-    if slot_budget_floor <= 0:
-        return 1 + extra_entries
+    extra_slot_floor = _day_extra_slot_budget_floor(config)
+    if unused_swing_budget < extra_slot_floor:
+        return 1
 
-    affordable_slots = max(1, int(float(total_budget_cap) // slot_budget_floor))
+    affordable_slots = max(1, int(float(total_budget_cap) // extra_slot_floor))
     return max(1, min(2, 1 + extra_entries, affordable_slots))
 
 
@@ -135,6 +133,12 @@ def _conditional_day_performance_allows_extra_slots(bot) -> bool:
 
     max_losses = max(0, int(getattr(config, "day_conditional_extra_max_consecutive_losses", 0) or 0))
     return int(getattr(state, "consecutive_losses_today", 0) or 0) <= max_losses
+
+
+def _day_extra_slot_budget_floor(config: TradeEngineConfig) -> float:
+    base_day_budget = max(0.0, float(config.initial_capital) * float(config.day_cash_ratio))
+    min_order_amount = max(0.0, float(getattr(config, "day_conditional_extra_min_order_amount_krw", 0) or 0))
+    return max(base_day_budget, min_order_amount)
 
 
 def unused_swing_budget_for_day(bot, *, profit_buffer: float = 0.0) -> float:
@@ -162,9 +166,6 @@ def unused_swing_budget_for_day(bot, *, profit_buffer: float = 0.0) -> float:
         return 0.0
 
     unused_swing_budget = max(0.0, swing_budget_cap - deployed_swing_cost)
-    min_reuse_krw = max(0, int(getattr(bot.config, "day_reuse_unused_swing_cash_min_krw", 100_000)))
-    if unused_swing_budget < float(min_reuse_krw):
-        return 0.0
     return unused_swing_budget
 
 

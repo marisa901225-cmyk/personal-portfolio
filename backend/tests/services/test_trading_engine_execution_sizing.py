@@ -301,7 +301,7 @@ def test_day_entry_reuses_unused_swing_budget_when_leftover_exceeds_threshold(tm
     assert bot.state.open_positions["005930"].qty == 6
 
 
-def test_day_entry_does_not_reuse_unused_swing_budget_below_threshold(tmp_path) -> None:
+def test_day_entry_reuses_small_unused_swing_budget_in_base_slot(tmp_path) -> None:
     asof = "20260410"
     api = FakeAPI()
     api._cash_available = 400_000
@@ -360,9 +360,9 @@ def test_day_entry_does_not_reuse_unused_swing_budget_below_threshold(tmp_path) 
         )
 
     assert api.order_calls == [
-        {"side": "BUY", "code": "005930", "qty": 4, "order_type": "limit", "price": 50_100}
+        {"side": "BUY", "code": "005930", "qty": 5, "order_type": "limit", "price": 50_100}
     ]
-    assert bot.state.open_positions["005930"].qty == 4
+    assert bot.state.open_positions["005930"].qty == 5
 
 
 def test_day_entry_caps_large_reused_swing_budget_per_symbol(tmp_path) -> None:

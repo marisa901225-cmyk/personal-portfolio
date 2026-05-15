@@ -194,14 +194,14 @@ def _conditional_extra_entries_supported_by_budget(
     if unused_swing_budget <= 0:
         return 0
 
-    base_day_budget = max(0.0, float(cfg.initial_capital) * float(cfg.day_cash_ratio))
-    total_day_budget = base_day_budget + unused_swing_budget
-    min_order_amount = max(0.0, float(getattr(cfg, "day_conditional_extra_min_order_amount_krw", 0) or 0))
-    slot_budget_floor = max(base_day_budget, min_order_amount)
-    if slot_budget_floor <= 0:
+    total_day_budget = max(0.0, float(cfg.initial_capital) * float(cfg.day_cash_ratio)) + unused_swing_budget
+    extra_slot_floor = _day_extra_slot_budget_floor(cfg)
+    if extra_slot_floor <= 0:
         return extra_entries
+    if unused_swing_budget < extra_slot_floor:
+        return 0
 
-    affordable_slots = max(1, int(total_day_budget // slot_budget_floor))
+    affordable_slots = max(1, int(total_day_budget // extra_slot_floor))
     return max(0, min(1, extra_entries, affordable_slots - 1))
 
 
@@ -231,10 +231,13 @@ def _unused_swing_budget_for_day(*, state: TradeState, cfg: TradeEngineConfig) -
         return 0.0
 
     unused_swing_budget = max(0.0, swing_budget_cap - deployed_swing_cost)
-    min_reuse_krw = max(0, int(getattr(cfg, "day_reuse_unused_swing_cash_min_krw", 100_000) or 0))
-    if unused_swing_budget < float(min_reuse_krw):
-        return 0.0
     return unused_swing_budget
+
+
+def _day_extra_slot_budget_floor(cfg: TradeEngineConfig) -> float:
+    base_day_budget = max(0.0, float(cfg.initial_capital) * float(cfg.day_cash_ratio))
+    min_order_amount = max(0.0, float(getattr(cfg, "day_conditional_extra_min_order_amount_krw", 0) or 0))
+    return max(base_day_budget, min_order_amount)
 
 
 def _update_day_profit_lock(

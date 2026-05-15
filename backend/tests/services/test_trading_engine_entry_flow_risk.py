@@ -484,6 +484,38 @@ def test_day_entry_conditional_extra_requires_unused_swing_budget() -> None:
     assert reason_unused_swing == "OK"
 
 
+def test_day_entry_conditional_extra_does_not_open_for_small_unused_swing_budget() -> None:
+    cfg = TradeEngineConfig(
+        max_day_entries_per_day=1,
+        day_conditional_extra_entries_enabled=True,
+        day_conditional_extra_entries=2,
+        day_conditional_extra_min_closed_trades=0,
+        day_conditional_extra_min_win_rate=0.0,
+    )
+    state = new_state("20260216")
+    state.day_entries_today = 1
+    state.open_positions["SWING01"] = PositionState(
+        type="S",
+        entry_time="2026-02-16T09:05:00",
+        entry_price=750_000.0,
+        qty=1,
+        highest_price=750_000.0,
+        entry_date="20260216",
+    )
+
+    ok, reason = can_enter(
+        "T",
+        state,
+        regime="RISK_ON",
+        candidates_count=1,
+        now=datetime(2026, 2, 16, 9, 10),
+        config=cfg,
+    )
+
+    assert ok is False
+    assert reason == "MAX_DAY_ENTRIES_DAY"
+
+
 def test_day_entry_limit_stays_capped_when_intraday_win_rate_is_weak() -> None:
     cfg = TradeEngineConfig(
         max_day_entries_per_day=4,
