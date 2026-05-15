@@ -319,18 +319,20 @@ if [[ -z "$max_rpm" ]]; then
   write_state 0 0 0 0 0 0 "no_fan_data"
   exit 0
 fi
+max_temp_c="$(printf '%s\n' "$sensors_output" | max_temp_c_from_output)"
+temp_log="${max_temp_c:+ temp=${max_temp_c}C}"
 
 if (( max_rpm < THRESHOLD_RPM )); then
   if (( high_rpm_started_epoch > 0 || last_seen_rpm >= THRESHOLD_RPM )); then
     write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" 0 "rpm_normal"
-    log "rpm=$max_rpm 기준=$THRESHOLD_RPM 정상; 관찰초기화"
+    log "rpm=$max_rpm${temp_log} 기준=$THRESHOLD_RPM 정상; 관찰초기화"
   fi
   exit 0
 fi
 
 if in_day_relax_window; then
   write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" 0 "day_relax" "$current_last_start_epoch"
-  log "rpm=$max_rpm 낮완화 date=${NOW_DATE} time=${NOW_HHMM}; LLM유지"
+  log "rpm=$max_rpm${temp_log} 낮완화 date=${NOW_DATE} time=${NOW_HHMM}; LLM유지"
   exit 0
 fi
 
@@ -349,7 +351,7 @@ if (( critical_threshold_active == 0 && STARTUP_GRACE_SEC > 0 && current_last_st
   startup_elapsed_sec="$((NOW_EPOCH - current_last_start_epoch))"
   if (( startup_elapsed_sec >= 0 && startup_elapsed_sec < STARTUP_GRACE_SEC )); then
     write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" 0 "startup_grace" "$current_last_start_epoch"
-    log "rpm=$max_rpm 시작유예=${startup_elapsed_sec}/${STARTUP_GRACE_SEC}s; LLM유지"
+    log "rpm=$max_rpm${temp_log} 시작유예=${startup_elapsed_sec}/${STARTUP_GRACE_SEC}s; LLM유지"
     exit 0
   fi
 fi
@@ -361,12 +363,12 @@ fi
 high_rpm_elapsed_sec="$((NOW_EPOCH - high_rpm_started_epoch))"
 if (( high_rpm_elapsed_sec < active_stop_delay_sec )); then
   write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" "$high_rpm_started_epoch" "observe_high_rpm"
-  log "rpm=$max_rpm 유지=${high_rpm_elapsed_sec}/${active_stop_delay_sec}s 기준=$active_threshold_rpm; 대기"
+  log "rpm=$max_rpm${temp_log} 유지=${high_rpm_elapsed_sec}/${active_stop_delay_sec}s 기준=$active_threshold_rpm; 대기"
   exit 0
 fi
 
 cooldown_until_epoch="$((NOW_EPOCH + COOLDOWN_SEC))"
-log "rpm=$max_rpm 유지=${high_rpm_elapsed_sec}s 기준=$active_threshold_rpm; LLM중지"
+log "rpm=$max_rpm${temp_log} 유지=${high_rpm_elapsed_sec}s 기준=$active_threshold_rpm; LLM중지"
 
 if run_schedule stop; then
   if (( COOLDOWN_SEC > 0 )); then
@@ -414,5 +416,5 @@ if run_schedule stop; then
 fi
 
 write_state 0 0 0 "$max_rpm" "$max_rpm" "$high_rpm_started_epoch" "stop_failed"
-log "rpm=$max_rpm; LLM중지 실패"
+log "rpm=$max_rpm${temp_log}; LLM중지 실패"
 exit 1
