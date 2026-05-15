@@ -209,7 +209,11 @@ def _unused_swing_budget_for_day(*, state: TradeState, cfg: TradeEngineConfig) -
     if not bool(getattr(cfg, "day_reuse_unused_swing_cash_enabled", True)):
         return 0.0
 
-    swing_budget_cap = max(0.0, float(cfg.initial_capital) * float(cfg.swing_cash_ratio))
+    profit_buffer = max(0.0, float(getattr(state, "realized_pnl_total", 0.0) or 0.0))
+    swing_budget_cap = max(
+        0.0,
+        float(cfg.initial_capital) * float(cfg.swing_cash_ratio) + profit_buffer,
+    )
     if swing_budget_cap <= 0:
         return 0.0
 

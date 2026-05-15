@@ -33,24 +33,22 @@ def entry_sizing_fields(result: object) -> dict[str, object]:
 def strategy_budget_cash_cap(bot, *, cash_ratio: float, position_type: str | None = None) -> float | None:
     base_cap = max(0.0, float(bot.config.initial_capital) * float(cash_ratio))
     normalized_position_type = str(position_type or "").strip().upper()
+    profit_buffer = (
+        principal_buffer_from_account(bot, logger=logging.getLogger(__name__))
+        if bot.config.use_realized_profit_buffer
+        else 0.0
+    )
     unused_swing_budget = 0.0
-    if normalized_position_type == "T":
-        unused_swing_budget = unused_swing_budget_for_day(bot)
-        base_cap += unused_swing_budget
-    if not bot.config.use_realized_profit_buffer:
-        return _cap_day_entry_budget(
+    budget_cap = base_cap
+    if normalized_position_type == "S":
+        budget_cap += profit_buffer
+    elif normalized_position_type == "T":
+        unused_swing_budget = unused_swing_budget_for_day(
             bot,
-            _split_conditional_day_budget(
-                bot,
-                budget_cap=base_cap,
-                position_type=normalized_position_type,
-                unused_swing_budget=unused_swing_budget,
-            ),
-            normalized_position_type,
+            profit_buffer=profit_buffer,
         )
+        budget_cap += unused_swing_budget
 
-    profit_buffer = principal_buffer_from_account(bot, logger=logging.getLogger(__name__))
-    budget_cap = max(0.0, base_cap + profit_buffer)
     return _cap_day_entry_budget(
         bot,
         _split_conditional_day_budget(
@@ -139,11 +137,14 @@ def _conditional_day_performance_allows_extra_slots(bot) -> bool:
     return int(getattr(state, "consecutive_losses_today", 0) or 0) <= max_losses
 
 
-def unused_swing_budget_for_day(bot) -> float:
+def unused_swing_budget_for_day(bot, *, profit_buffer: float = 0.0) -> float:
     if not bool(getattr(bot.config, "day_reuse_unused_swing_cash_enabled", True)):
         return 0.0
 
-    swing_budget_cap = max(0.0, float(bot.config.initial_capital) * float(bot.config.swing_cash_ratio))
+    swing_budget_cap = max(
+        0.0,
+        float(bot.config.initial_capital) * float(bot.config.swing_cash_ratio) + max(0.0, float(profit_buffer)),
+    )
     if swing_budget_cap <= 0:
         return 0.0
 
