@@ -78,6 +78,10 @@ def _apply_general_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_MAX_CONSECUTIVE_LOSSES",
         cfg.day_conditional_extra_max_consecutive_losses,
     )
+    cfg.day_conditional_extra_min_order_amount_krw = _env_int(
+        "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_MIN_ORDER_AMOUNT_KRW",
+        cfg.day_conditional_extra_min_order_amount_krw,
+    )
     cfg.swing_cash_ratio = _env_float("TRADING_ENGINE_SWING_CASH_RATIO", cfg.swing_cash_ratio)
     cfg.day_cash_ratio = _env_float("TRADING_ENGINE_DAY_CASH_RATIO", cfg.day_cash_ratio)
     cfg.day_entry_budget_cap_krw = _env_int(

@@ -25,6 +25,7 @@ class TradeEngineConfig:
     day_conditional_extra_min_win_rate: float = 0.55
     day_conditional_extra_min_realized_pnl: float = 0.0
     day_conditional_extra_max_consecutive_losses: int = 0
+    day_conditional_extra_min_order_amount_krw: int = 100_000
 
     # Sizing
     swing_cash_ratio: float = 0.80

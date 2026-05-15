@@ -389,6 +389,7 @@ class BotEntryFlowMixin:
                 now=now,
                 order_type=order_type,
                 price=price,
+                min_order_amount_krw=self._day_conditional_extra_min_order_amount_krw(),
                 on_order_accepted=lambda order: self._record_pending_entry_order(
                     order,
                     strategy_type="T",
@@ -482,6 +483,14 @@ class BotEntryFlowMixin:
 
     def _resolve_day_lock_retrace_gap_pct(self, *, code: str) -> float | None:
         return _resolve_day_lock_retrace_gap_pct_helper(self, code=code, logger=logger)
+
+    def _day_conditional_extra_min_order_amount_krw(self) -> int:
+        if not bool(getattr(self.config, "day_conditional_extra_entries_enabled", False)):
+            return 0
+        base_limit = max(0, int(getattr(self.config, "max_day_entries_per_day", 0) or 0))
+        if int(getattr(self.state, "day_entries_today", 0) or 0) < base_limit:
+            return 0
+        return max(0, int(getattr(self.config, "day_conditional_extra_min_order_amount_krw", 0) or 0))
 
     def _apply_day_chart_review(
         self,

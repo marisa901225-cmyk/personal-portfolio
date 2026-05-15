@@ -331,6 +331,7 @@ def test_runtime_loads_position_limit_overrides_from_env() -> None:
             "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_MIN_WIN_RATE": "0.7",
             "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_MIN_REALIZED_PNL": "5000",
             "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_MAX_CONSECUTIVE_LOSSES": "1",
+            "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_MIN_ORDER_AMOUNT_KRW": "150000",
             "TRADING_ENGINE_DAY_AFTERNOON_ENTRY_START_WINDOW_INDEX": "3",
             "TRADING_ENGINE_DAY_AFTERNOON_LOSS_LIMIT_LOSS_COUNT": "1",
             "TRADING_ENGINE_DAY_STOPLOSS_EXCLUDE_AFTER_LOSSES": "3",
@@ -360,6 +361,7 @@ def test_runtime_loads_position_limit_overrides_from_env() -> None:
     assert cfg.day_conditional_extra_min_win_rate == 0.7
     assert cfg.day_conditional_extra_min_realized_pnl == 5000
     assert cfg.day_conditional_extra_max_consecutive_losses == 1
+    assert cfg.day_conditional_extra_min_order_amount_krw == 150_000
     assert cfg.day_afternoon_entry_start_window_index == 3
     assert cfg.day_afternoon_loss_limit_loss_count == 1
     assert cfg.day_stoploss_exclude_after_losses == 3

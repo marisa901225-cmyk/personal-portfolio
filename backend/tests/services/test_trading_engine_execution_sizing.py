@@ -366,6 +366,81 @@ def test_day_entry_caps_large_reused_swing_budget_per_symbol(tmp_path) -> None:
     ]
     assert bot.state.open_positions["005930"].qty == 6
 
+
+def test_conditional_extra_day_entry_skips_tiny_leftover_order(tmp_path) -> None:
+    class BuyableAPI(FakeAPI):
+        def buy_order_capacity(self, code: str, order_type: str, price: int | None) -> dict:
+            assert code == "034220"
+            assert order_type == "limit"
+            assert price == 16_620
+            return {
+                "ord_psbl_cash": 18_792,
+                "nrcvb_buy_amt": 18_792,
+                "nrcvb_buy_qty": 1,
+                "max_buy_qty": 1,
+                "psbl_qty_calc_unpr": 16_620,
+            }
+
+    asof = "20260410"
+    api = BuyableAPI()
+    api._cash_available = 34_723
+    api._quotes["034220"] = {"price": 16_620, "change_pct": 1.5}
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        use_news_sentiment=False,
+        use_intraday_circuit_breaker=False,
+        initial_capital=1_000_000,
+        max_day_entries_per_day=1,
+        max_day_positions=2,
+        day_conditional_extra_entries_enabled=True,
+        day_conditional_extra_entries=2,
+        day_conditional_extra_min_closed_trades=0,
+        day_conditional_extra_min_win_rate=0.0,
+        day_conditional_extra_min_order_amount_krw=100_000,
+        day_cash_ratio=0.20,
+        day_entry_budget_cap_krw=300_000,
+        day_reuse_unused_swing_cash_enabled=True,
+        day_reuse_unused_swing_cash_min_krw=100_000,
+        use_realized_profit_buffer=False,
+        day_use_intraday_confirmation=False,
+        day_chart_review_enabled=False,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.trade_date = asof
+    bot.state.day_entries_today = 1
+
+    candidates = Candidates(
+        asof=asof,
+        popular=pd.DataFrame(
+            [
+                {"code": "034220", "name": "LG디스플레이", "avg_value_5d": "90000000000", "close": 16620, "change_pct": "1.5", "is_etf": False},
+            ]
+        ),
+        model=pd.DataFrame(),
+        etf=pd.DataFrame(),
+        merged=pd.DataFrame(
+            [
+                {"code": "034220", "name": "LG디스플레이", "avg_value_5d": "90000000000"},
+            ]
+        ),
+        quote_codes=["034220"],
+    )
+
+    with patch("backend.services.trading_engine.bot.rank_daytrade_codes", return_value=["034220"]):
+        bot._try_enter_day(
+            now=datetime(2026, 4, 10, 9, 10),
+            regime="RISK_ON",
+            candidates=candidates,
+            quotes={"034220": api.quote("034220")},
+            news_signal=None,
+        )
+
+    assert api.order_calls == []
+    assert "034220" not in bot.state.open_positions
+
 def test_enter_position_returns_sizing_metadata() -> None:
     class BuyableAPI(FakeAPI):
         def buy_order_capacity(self, code: str, order_type: str, price: int | None) -> dict:
@@ -411,6 +486,46 @@ def test_enter_position_returns_sizing_metadata() -> None:
         "cash_ratio": 0.8,
         "order_type": "best",
     }
+
+
+def test_enter_position_skips_order_below_minimum_amount() -> None:
+    class BuyableAPI(FakeAPI):
+        def buy_order_capacity(self, code: str, order_type: str, price: int | None) -> dict:
+            assert code == "034220"
+            assert order_type == "limit"
+            assert price == 16_620
+            return {
+                "ord_psbl_cash": 18_792,
+                "nrcvb_buy_amt": 18_792,
+                "nrcvb_buy_qty": 1,
+                "max_buy_qty": 1,
+                "psbl_qty_calc_unpr": 16_620,
+            }
+
+    api = BuyableAPI()
+    api._cash_available = 34_723
+    api._quotes["034220"] = {"price": 16_620, "change_pct": 1.0}
+    state = new_state("20260408")
+
+    from backend.services.trading_engine.execution import enter_position
+
+    result = enter_position(
+        api,
+        state,
+        position_type="T",
+        code="034220",
+        cash_ratio=1.0,
+        budget_cash_cap=300_000,
+        min_order_amount_krw=100_000,
+        asof_date="20260408",
+        now=datetime(2026, 4, 8, 9, 10),
+        order_type="limit",
+        price=16_620,
+    )
+
+    assert result is None
+    assert api.order_calls == []
+    assert "034220" not in state.open_positions
 
 def test_enter_position_best_order_uses_quote_price_before_retrying_down() -> None:
     class BuyableAPI(FakeAPI):

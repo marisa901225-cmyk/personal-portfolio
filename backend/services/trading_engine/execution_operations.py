@@ -62,6 +62,7 @@ def enter_position(
     order_type: str = "MKT",
     price: int | None = None,
     budget_cash_cap: float | None = None,
+    min_order_amount_krw: int = 0,
     on_order_accepted: Callable[[OrderPayload], None] | None = None,
 ) -> FillResult | None:
     existing_position = state.open_positions.get(code)
@@ -134,7 +135,19 @@ def enter_position(
         budget_cash_cap=budget_cash_cap,
     )
     qty = calc_buy_qty(budget_cash=budget_cash, price_now=sizing.price_now)
+    min_order_amount = max(0, int(min_order_amount_krw or 0))
     if qty < 1:
+        return None
+    if _is_below_min_buy_amount(qty=qty, price=sizing.price_now, min_order_amount=min_order_amount):
+        logger.info(
+            "enter_position: buy amount below minimum code=%s qty=%d amount=%.0f min=%d cash=%.0f price=%.0f",
+            code,
+            qty,
+            float(qty) * float(sizing.price_now),
+            min_order_amount,
+            sizing.cash,
+            sizing.price_now,
+        )
         return None
 
     sizing_meta = {
@@ -220,6 +233,22 @@ def enter_position(
                     msg,
                 )
                 return None
+            if _is_below_min_buy_amount(
+                qty=next_qty,
+                price=refreshed_sizing.price_now,
+                min_order_amount=min_order_amount,
+            ):
+                logger.warning(
+                    "enter_position: reduced buy amount below minimum code=%s qty=%d amount=%.0f min=%d cash=%.0f price=%s msg=%s",
+                    code,
+                    next_qty,
+                    float(next_qty) * float(refreshed_sizing.price_now),
+                    min_order_amount,
+                    refreshed_sizing.cash,
+                    attempted_price,
+                    msg,
+                )
+                return None
 
             logger.warning(
                 "enter_position: reducing qty after insufficient cash code=%s qty=%d->%d cash=%.0f price=%s msg=%s",
@@ -265,6 +294,22 @@ def enter_position(
                 logger.warning(
                     "enter_position: higher-price retry skipped due to zero qty code=%s next_price=%s cash=%.0f msg=%s",
                     code,
+                    next_price,
+                    refreshed_sizing.cash,
+                    msg,
+                )
+                return None
+            if _is_below_min_buy_amount(
+                qty=next_qty,
+                price=refreshed_sizing.price_now,
+                min_order_amount=min_order_amount,
+            ):
+                logger.warning(
+                    "enter_position: higher-price retry skipped below minimum code=%s qty=%d amount=%.0f min=%d next_price=%s cash=%.0f msg=%s",
+                    code,
+                    next_qty,
+                    float(next_qty) * float(refreshed_sizing.price_now),
+                    min_order_amount,
                     next_price,
                     refreshed_sizing.cash,
                     msg,
@@ -567,3 +612,7 @@ def _refresh_quote_for_order(api: TradingAPI, *, code: str) -> OrderPayload:
 def is_insufficient_cash_rejection(message: str) -> bool:
     lowered = message.lower()
     return any(token.lower() in lowered for token in _INSUFFICIENT_CASH_MESSAGES)
+
+
+def _is_below_min_buy_amount(*, qty: int, price: float, min_order_amount: int) -> bool:
+    return min_order_amount > 0 and float(qty) * float(price) < float(min_order_amount)
