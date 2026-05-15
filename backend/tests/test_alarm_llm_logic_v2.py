@@ -548,6 +548,7 @@ class AlarmLlmLogicV2WeekendTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsInstance(result, str)
         self.assertTrue(result)
+        self.assertTrue(result.startswith("농담서비스 일시종료\n\n"))
         draft.assert_awaited()
 
     async def test_random_message_skips_after_weekday_6pm(self):

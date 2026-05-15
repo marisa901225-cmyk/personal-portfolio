@@ -25,6 +25,7 @@ _RE_EXPLANATORY_TAIL = re.compile(
     re.IGNORECASE,
 )
 _REPLACEMENT_CHAR = "\ufffd"
+_DAILY_SHUTDOWN_NOTICE = "농담서비스 일시종료"
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,6 +168,12 @@ def _has_explanatory_tail(text: str) -> bool:
 def _default_random_title(now: datetime) -> str:
     titles = ["오늘의 브리핑", "읽을거리", "짧은 메모", "오늘의 한 조각", "가벼운 이야기", "생각 한 스푼"]
     return titles[(now.minute // 10) % len(titles)]
+
+
+def _with_daily_shutdown_notice(now: datetime, body: str) -> str:
+    if now.hour == 18 and now.minute == 0:
+        return f"{_DAILY_SHUTDOWN_NOTICE}\n\n{body}"
+    return body
 
 
 def _pick_random_topic_plan(deps: _RandomTopicDeps) -> _RandomTopicPlan:
@@ -508,7 +515,7 @@ async def _generate_random_message_payload_async(
         deps.save_recent_category(plan.category)
         deps.save_last_random_topic_sent_at(now)
         logger.info("✅ Random wisdom success (Attempt %s/2)", attempt_no)
-        return _RandomMessagePayload(title=title, body=final_text)
+        return _RandomMessagePayload(title=title, body=_with_daily_shutdown_notice(now, final_text))
 
     if failure_reasons:
         logger.error(
