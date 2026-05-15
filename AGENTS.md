@@ -82,7 +82,7 @@
 - Before committing, inspect `git status` and stage only files that are part of the current task.
 - Never include unrelated user changes, generated artifacts, logs, secrets, or external files in the commit.
 - If unrelated changes are already present in the worktree, leave them untouched and mention that they were excluded.
-- Use a concise commit message that describes the user-facing outcome or maintenance fix.
+- Use a concise Korean commit message that describes the user-facing outcome or maintenance fix.
 
 ## Verification
 - Run the lightest meaningful verification before declaring work complete.
