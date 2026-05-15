@@ -332,7 +332,7 @@ fi
 
 if in_day_relax_window; then
   write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" 0 "day_relax" "$current_last_start_epoch"
-  log "rpm=$max_rpm${temp_log} 낮완화 date=${NOW_DATE} time=${NOW_HHMM}; LLM유지"
+  log "rpm=$max_rpm${temp_log} 낮완화; LLM유지"
   exit 0
 fi
 
