@@ -406,6 +406,14 @@ def test_day_entry_limit_expands_when_intraday_win_rate_is_healthy() -> None:
     state.day_losses_today = 0
     state.realized_pnl_today = 8_000.0
     state.day_entry_windows_used_today = {0, 1, 2}
+    state.open_positions["SWING01"] = PositionState(
+        type="S",
+        entry_time="2026-02-16T09:05:00",
+        entry_price=400_000.0,
+        qty=1,
+        highest_price=400_000.0,
+        entry_date="20260216",
+    )
 
     ok_extra_slot, reason_extra_slot = can_enter(
         "T",
@@ -430,6 +438,50 @@ def test_day_entry_limit_expands_when_intraday_win_rate_is_healthy() -> None:
     assert reason_extra_slot == "OK"
     assert ok_hard_cap is False
     assert reason_hard_cap == "MAX_DAY_ENTRIES_DAY"
+
+
+def test_day_entry_conditional_extra_requires_unused_swing_budget() -> None:
+    cfg = TradeEngineConfig(
+        max_day_entries_per_day=1,
+        day_conditional_extra_entries_enabled=True,
+        day_conditional_extra_entries=2,
+        day_conditional_extra_min_closed_trades=0,
+        day_conditional_extra_min_win_rate=0.0,
+    )
+    state = new_state("20260216")
+    state.day_entries_today = 1
+    state.open_positions["SWING01"] = PositionState(
+        type="S",
+        entry_time="2026-02-16T09:05:00",
+        entry_price=800_000.0,
+        qty=1,
+        highest_price=800_000.0,
+        entry_date="20260216",
+    )
+
+    ok_full_swing, reason_full_swing = can_enter(
+        "T",
+        state,
+        regime="RISK_ON",
+        candidates_count=1,
+        now=datetime(2026, 2, 16, 9, 10),
+        config=cfg,
+    )
+
+    state.open_positions["SWING01"].entry_price = 600_000.0
+    ok_unused_swing, reason_unused_swing = can_enter(
+        "T",
+        state,
+        regime="RISK_ON",
+        candidates_count=1,
+        now=datetime(2026, 2, 16, 9, 10),
+        config=cfg,
+    )
+
+    assert ok_full_swing is False
+    assert reason_full_swing == "MAX_DAY_ENTRIES_DAY"
+    assert ok_unused_swing is True
+    assert reason_unused_swing == "OK"
 
 
 def test_day_entry_limit_stays_capped_when_intraday_win_rate_is_weak() -> None:

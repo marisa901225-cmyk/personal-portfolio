@@ -181,7 +181,56 @@ def _effective_max_day_entries_per_day(
     if int(state.consecutive_losses_today) > max_losses:
         return base_limit
 
-    return base_limit + extra_entries
+    return base_limit + _conditional_extra_entries_supported_by_budget(state=state, cfg=cfg, extra_entries=extra_entries)
+
+
+def _conditional_extra_entries_supported_by_budget(
+    *,
+    state: TradeState,
+    cfg: TradeEngineConfig,
+    extra_entries: int,
+) -> int:
+    unused_swing_budget = _unused_swing_budget_for_day(state=state, cfg=cfg)
+    if unused_swing_budget <= 0:
+        return 0
+
+    base_day_budget = max(0.0, float(cfg.initial_capital) * float(cfg.day_cash_ratio))
+    total_day_budget = base_day_budget + unused_swing_budget
+    min_order_amount = max(0.0, float(getattr(cfg, "day_conditional_extra_min_order_amount_krw", 0) or 0))
+    slot_budget_floor = max(base_day_budget, min_order_amount)
+    if slot_budget_floor <= 0:
+        return extra_entries
+
+    affordable_slots = max(1, int(total_day_budget // slot_budget_floor))
+    return max(0, min(extra_entries, affordable_slots - 1))
+
+
+def _unused_swing_budget_for_day(*, state: TradeState, cfg: TradeEngineConfig) -> float:
+    if not bool(getattr(cfg, "day_reuse_unused_swing_cash_enabled", True)):
+        return 0.0
+
+    swing_budget_cap = max(0.0, float(cfg.initial_capital) * float(cfg.swing_cash_ratio))
+    if swing_budget_cap <= 0:
+        return 0.0
+
+    deployed_swing_cost = 0.0
+    for position in state.open_positions.values():
+        if getattr(position, "type", "") != "S":
+            continue
+        qty = max(0, int(getattr(position, "qty", 0) or 0))
+        entry_price = max(0.0, float(getattr(position, "entry_price", 0.0) or 0.0))
+        if qty <= 0 or entry_price <= 0:
+            continue
+        deployed_swing_cost += float(qty) * float(entry_price)
+
+    if deployed_swing_cost <= 0:
+        return 0.0
+
+    unused_swing_budget = max(0.0, swing_budget_cap - deployed_swing_cost)
+    min_reuse_krw = max(0, int(getattr(cfg, "day_reuse_unused_swing_cash_min_krw", 100_000) or 0))
+    if unused_swing_budget < float(min_reuse_krw):
+        return 0.0
+    return unused_swing_budget
 
 
 def _update_day_profit_lock(

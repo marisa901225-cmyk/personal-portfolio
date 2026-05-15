@@ -33,13 +33,34 @@ def entry_sizing_fields(result: object) -> dict[str, object]:
 def strategy_budget_cash_cap(bot, *, cash_ratio: float, position_type: str | None = None) -> float | None:
     base_cap = max(0.0, float(bot.config.initial_capital) * float(cash_ratio))
     normalized_position_type = str(position_type or "").strip().upper()
+    unused_swing_budget = 0.0
     if normalized_position_type == "T":
-        base_cap += unused_swing_budget_for_day(bot)
+        unused_swing_budget = unused_swing_budget_for_day(bot)
+        base_cap += unused_swing_budget
     if not bot.config.use_realized_profit_buffer:
-        return _cap_day_entry_budget(bot, base_cap, normalized_position_type)
+        return _cap_day_entry_budget(
+            bot,
+            _split_conditional_day_budget(
+                bot,
+                budget_cap=base_cap,
+                position_type=normalized_position_type,
+                unused_swing_budget=unused_swing_budget,
+            ),
+            normalized_position_type,
+        )
 
     profit_buffer = principal_buffer_from_account(bot, logger=logging.getLogger(__name__))
-    return _cap_day_entry_budget(bot, max(0.0, base_cap + profit_buffer), normalized_position_type)
+    budget_cap = max(0.0, base_cap + profit_buffer)
+    return _cap_day_entry_budget(
+        bot,
+        _split_conditional_day_budget(
+            bot,
+            budget_cap=budget_cap,
+            position_type=normalized_position_type,
+            unused_swing_budget=unused_swing_budget,
+        ),
+        normalized_position_type,
+    )
 
 
 def _cap_day_entry_budget(bot, budget_cap: float, position_type: str) -> float:
@@ -49,6 +70,73 @@ def _cap_day_entry_budget(bot, budget_cap: float, position_type: str) -> float:
     if per_entry_cap <= 0:
         return budget_cap
     return max(0.0, min(float(budget_cap), per_entry_cap))
+
+
+def _split_conditional_day_budget(
+    bot,
+    *,
+    budget_cap: float,
+    position_type: str,
+    unused_swing_budget: float,
+) -> float:
+    if position_type != "T":
+        return budget_cap
+    active_slots = _conditional_day_budget_slots(
+        bot,
+        total_budget_cap=budget_cap,
+        unused_swing_budget=unused_swing_budget,
+    )
+    if active_slots <= 1:
+        return budget_cap
+    return max(0.0, float(budget_cap) / float(active_slots))
+
+
+def _conditional_day_budget_slots(
+    bot,
+    *,
+    total_budget_cap: float,
+    unused_swing_budget: float,
+) -> int:
+    config: TradeEngineConfig = bot.config
+    if not bool(getattr(config, "day_conditional_extra_entries_enabled", False)):
+        return 1
+    extra_entries = max(0, int(getattr(config, "day_conditional_extra_entries", 0) or 0))
+    if extra_entries <= 0 or unused_swing_budget <= 0:
+        return 1
+    if not _conditional_day_performance_allows_extra_slots(bot):
+        return 1
+
+    base_day_budget = max(0.0, float(config.initial_capital) * float(config.day_cash_ratio))
+    min_order_amount = max(0.0, float(getattr(config, "day_conditional_extra_min_order_amount_krw", 0) or 0))
+    slot_budget_floor = max(base_day_budget, min_order_amount)
+    if slot_budget_floor <= 0:
+        return 1 + extra_entries
+
+    affordable_slots = max(1, int(float(total_budget_cap) // slot_budget_floor))
+    return max(1, min(1 + extra_entries, affordable_slots))
+
+
+def _conditional_day_performance_allows_extra_slots(bot) -> bool:
+    config = bot.config
+    state = bot.state
+    wins = max(0, int(getattr(state, "day_wins_today", 0) or 0))
+    losses = max(0, int(getattr(state, "day_losses_today", 0) or 0))
+    closed_trades = wins + losses
+    min_closed_trades = max(0, int(getattr(config, "day_conditional_extra_min_closed_trades", 0) or 0))
+    if closed_trades < min_closed_trades:
+        return False
+
+    win_rate = wins / closed_trades if closed_trades else 0.0
+    min_win_rate = float(getattr(config, "day_conditional_extra_min_win_rate", 0.0) or 0.0)
+    if win_rate < min_win_rate:
+        return False
+
+    min_realized_pnl = float(getattr(config, "day_conditional_extra_min_realized_pnl", 0.0) or 0.0)
+    if float(getattr(state, "realized_pnl_today", 0.0) or 0.0) < min_realized_pnl:
+        return False
+
+    max_losses = max(0, int(getattr(config, "day_conditional_extra_max_consecutive_losses", 0) or 0))
+    return int(getattr(state, "consecutive_losses_today", 0) or 0) <= max_losses
 
 
 def unused_swing_budget_for_day(bot) -> float:
