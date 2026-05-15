@@ -105,6 +105,7 @@ backend/scripts/shell/switch_vulkan_model.sh
 scripts/schedule_sleep_reboot.sh
 
 # Local Codex working files
+AGENTS.md
 .codex
 .skill-build/
 .agents/
