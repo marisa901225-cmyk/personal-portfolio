@@ -42,6 +42,7 @@ backend/storage/backups/
 data_backup_reference/*
 !data_backup_reference/README.md
 *.db
+*.sqlite3
 *.db-shm
 *.db-wal
 *.zip
