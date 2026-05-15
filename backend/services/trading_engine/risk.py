@@ -202,7 +202,7 @@ def _conditional_extra_entries_supported_by_budget(
         return extra_entries
 
     affordable_slots = max(1, int(total_day_budget // slot_budget_floor))
-    return max(0, min(extra_entries, affordable_slots - 1))
+    return max(0, min(1, extra_entries, affordable_slots - 1))
 
 
 def _unused_swing_budget_for_day(*, state: TradeState, cfg: TradeEngineConfig) -> float:

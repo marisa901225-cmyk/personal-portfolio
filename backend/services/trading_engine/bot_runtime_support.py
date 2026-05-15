@@ -113,7 +113,7 @@ def _conditional_day_budget_slots(
         return 1 + extra_entries
 
     affordable_slots = max(1, int(float(total_budget_cap) // slot_budget_floor))
-    return max(1, min(1 + extra_entries, affordable_slots))
+    return max(1, min(2, 1 + extra_entries, affordable_slots))
 
 
 def _conditional_day_performance_allows_extra_slots(bot) -> bool:

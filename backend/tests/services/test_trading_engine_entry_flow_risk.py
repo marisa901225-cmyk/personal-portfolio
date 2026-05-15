@@ -394,7 +394,7 @@ def test_day_afternoon_entry_blocks_after_two_stoploss_sized_losses() -> None:
     assert reason_afternoon_allowed == "OK"
 
 
-def test_day_entry_limit_expands_when_intraday_win_rate_is_healthy() -> None:
+def test_day_entry_limit_expands_by_one_slot_when_intraday_win_rate_is_healthy() -> None:
     cfg = TradeEngineConfig(
         max_day_entries_per_day=4,
         day_conditional_extra_entries_enabled=True,
@@ -424,7 +424,7 @@ def test_day_entry_limit_expands_when_intraday_win_rate_is_healthy() -> None:
         config=cfg,
     )
 
-    state.day_entries_today = 6
+    state.day_entries_today = 5
     ok_hard_cap, reason_hard_cap = can_enter(
         "T",
         state,
