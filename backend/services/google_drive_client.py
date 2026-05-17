@@ -73,7 +73,12 @@ class GoogleDriveService:
             return None
 
     @staticmethod
-    def upload_file(file_path: str, drive_folder_id: Optional[str], access_token: str) -> bool:
+    def upload_file(
+        file_path: str,
+        drive_folder_id: Optional[str],
+        access_token: str,
+        upload_name: Optional[str] = None,
+    ) -> bool:
         """
         파일을 구글 드라이브에 업로드합니다.
         """
@@ -85,7 +90,7 @@ class GoogleDriveService:
             
             # 메타데이터 설정 (파일명 등)
             import os
-            file_metadata = {"name": os.path.basename(file_path)}
+            file_metadata = {"name": upload_name or os.path.basename(file_path)}
             if drive_folder_id:
                 file_metadata["parents"] = [drive_folder_id]
 

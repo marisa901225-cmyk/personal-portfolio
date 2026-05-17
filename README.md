@@ -8,6 +8,7 @@
 - 뉴스/경제/e스포츠 수집과 텔레그램 브리핑
 - AI 리포트와 운영 보조 자동화
 - 개인용 소액 자동매매 엔진 실험
+- ComfyUI 이미지 생성과 구글드라이브 자동 업로드
 
 ## 현재 서비스 구성
 
@@ -19,6 +20,7 @@
 - `esports-monitor`: e스포츠 일정/상태 모니터
 - `sync-prices`: 시세/리포트 보조 동기화
 - `llama-server-light`, `llama-server-vulkan-huihui`: LLM 추론 서버
+- `comfyui`, `comfyui-gdrive-sync`: ComfyUI와 생성 이미지 구글드라이브 동기화
 
 핵심 데이터 저장은 SQLite 기반이며, 분석성 조회는 DuckDB를 함께 사용합니다.
 
@@ -53,6 +55,7 @@ ALARM_SUMMARY_LLM_BASE_URL=http://llama-server-vulkan-huihui:8083
 ALARM_RANDOM_LLM_BASE_URL=http://llama-server-vulkan-huihui:8083
 TRADING_ENGINE_SCHEDULE_INTERVAL_MIN=2
 TRADING_ENGINE_ENABLED=1
+COMFYUI_GDRIVE_FOLDER_NAME=Comfyui 이미지
 ```
 
 ```ini
@@ -67,6 +70,11 @@ KIS_MY_APP=...
 KIS_MY_SEC=...
 PANDASCORE_API_KEY=...
 AI_REPORT_API_KEY=...
+GOOGLE_DRIVE_CLIENT_ID=...
+GOOGLE_DRIVE_CLIENT_SECRET=...
+GOOGLE_DRIVE_REFRESH_TOKEN=...
+# 이미 만들어 둔 드라이브 폴더가 있으면 선택
+COMFYUI_GDRIVE_FOLDER_ID=
 ```
 
 ### 2. 실행
@@ -99,10 +107,20 @@ docker compose logs -f news-scheduler
 # 특정 서비스 재시작
 docker compose restart backend-api
 docker compose restart trading-scheduler
+docker compose restart comfyui comfyui-gdrive-sync
 
 # 이미지 재빌드 포함 재기동
 docker compose up -d --build
 ```
+
+## ComfyUI 구글드라이브 업로드
+
+`comfyui`는 계속 로컬 출력 폴더(`/mnt/one-touch/comfyui/output`)에 저장하고, `comfyui-gdrive-sync`가 새 이미지를 감시해서 구글드라이브 폴더로 추가 업로드합니다.
+
+- 기본 드라이브 폴더명은 `Comfyui 이미지`입니다.
+- `COMFYUI_GDRIVE_FOLDER_ID`를 비워두면 같은 이름의 폴더를 찾고, 없으면 새로 만듭니다.
+- 업로드 대상 확장자는 `png`, `jpg`, `jpeg`, `webp`, `gif`, `bmp`입니다.
+- 막 저장 중인 파일을 피하려고 기본 15초 이상 변경이 없는 파일만 업로드합니다.
 
 ## 디렉토리 가이드
 

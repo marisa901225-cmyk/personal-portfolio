@@ -135,6 +135,64 @@ services:
     networks:
       - appnet
 
+  comfyui:
+    build:
+      context: ./comfyui
+      dockerfile: Dockerfile
+    container_name: myasset-comfyui
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:8188:8188"
+    volumes:
+      - /home/dlckdgn/ai-models/ComfyUI/models:/opt/ComfyUI/models
+      - /mnt/one-touch/comfyui/input:/opt/ComfyUI/input
+      - /mnt/one-touch/comfyui/output:/opt/ComfyUI/output
+      - /mnt/one-touch/comfyui/user:/opt/ComfyUI/user
+    devices:
+      - /dev/dri:/dev/dri
+    environment:
+      - TZ=Asia/Seoul
+      - ONEAPI_DEVICE_SELECTOR=level_zero:0
+      - SYCL_CACHE_PERSISTENT=1
+      - PYTORCH_ENABLE_XPU_FALLBACK=1
+      - ZES_ENABLE_SYSMAN=1
+    command: python main.py --listen 0.0.0.0 --port 8188
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8188/" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    networks:
+      - appnet
+
+  comfyui-gdrive-sync:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: myasset-comfyui-gdrive-sync
+    restart: unless-stopped
+    volumes:
+      - ./backend:/app/backend
+      - ./backend/data:/app/backend/data
+      - /mnt/one-touch/comfyui/output:/comfyui-output:ro
+    command: python -m backend.scripts.comfyui_drive_sync
+    environment:
+      - PYTHONPATH=/app
+      - TZ=Asia/Seoul
+      - COMFYUI_OUTPUT_DIR=/comfyui-output
+      - COMFYUI_GDRIVE_SYNC_STATE_PATH=/app/backend/data/comfyui_gdrive_sync_state.json
+      - COMFYUI_GDRIVE_FOLDER_NAME=${COMFYUI_GDRIVE_FOLDER_NAME:-Comfyui 이미지}
+      - COMFYUI_GDRIVE_FOLDER_ID=${COMFYUI_GDRIVE_FOLDER_ID:-}
+      - COMFYUI_GDRIVE_POLL_INTERVAL_SEC=${COMFYUI_GDRIVE_POLL_INTERVAL_SEC:-30}
+      - COMFYUI_GDRIVE_STABLE_AGE_SEC=${COMFYUI_GDRIVE_STABLE_AGE_SEC:-15}
+    env_file: *backend_env_files
+    depends_on:
+      comfyui:
+        condition: service_started
+    networks:
+      - appnet
+
   # openvino-server:
   #   build:
   #     context: ./backend/openvino_server
