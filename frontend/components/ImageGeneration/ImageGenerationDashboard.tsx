@@ -1,9 +1,10 @@
-import React, { startTransition, useMemo, useState } from 'react';
+import React, { startTransition, useEffect, useMemo, useState } from 'react';
 import { ImagePlus, Loader2, Maximize2, RefreshCcw, Sparkles, Upload } from 'lucide-react';
 import {
   ApiClient,
   type BackendAnimeImageUpscaleResponse,
   type BackendComfyUIImageGenerationResponse,
+  type BackendServerGeneratedImage,
 } from '@/shared/api/client';
 import { alertError } from '@/shared/errors';
 
@@ -13,14 +14,26 @@ interface ImageGenerationDashboardProps {
   cookieAuth?: boolean;
 }
 
-type CanvasPreset = 'square' | 'portrait' | 'landscape';
+type CanvasPreset = 'square' | 'portrait' | 'landscape' | 'wide' | 'custom';
 type StudioMode = 'generate' | 'upscale';
 
 const CANVAS_PRESETS: Record<CanvasPreset, { label: string; width: number; height: number }> = {
-  square: { label: '정사각형', width: 1024, height: 1024 },
-  portrait: { label: '세로형', width: 896, height: 1152 },
-  landscape: { label: '가로형', width: 1344, height: 768 },
+  square: { label: '1024 정사각', width: 1024, height: 1024 },
+  portrait: { label: '896 세로', width: 896, height: 1152 },
+  landscape: { label: '1344 가로', width: 1344, height: 768 },
+  wide: { label: '1536 와이드', width: 1536, height: 864 },
+  custom: { label: '직접 입력', width: 1024, height: 1024 },
 };
+
+const clampResolution = (value: number) => Math.min(Math.max(value || 1024, 512), 1536);
+
+const formatServerImageTime = (value: string) =>
+  new Intl.DateTimeFormat('ko-KR', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
 
 const STARTER_PROMPTS = [
   '비 오는 창가에서 낮잠 자는 치즈 고양이, 따뜻한 동화풍 일러스트',
@@ -36,10 +49,15 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
   const [requestText, setRequestText] = useState(STARTER_PROMPTS[0]);
   const [mode, setMode] = useState<StudioMode>('generate');
   const [preset, setPreset] = useState<CanvasPreset>('square');
+  const [customWidth, setCustomWidth] = useState(1024);
+  const [customHeight, setCustomHeight] = useState(1024);
   const [steps, setSteps] = useState(20);
   const [seed, setSeed] = useState('');
   const [upscaleSourceDataUrl, setUpscaleSourceDataUrl] = useState('');
   const [upscaleSourceName, setUpscaleSourceName] = useState('');
+  const [selectedServerImagePath, setSelectedServerImagePath] = useState('');
+  const [serverImages, setServerImages] = useState<BackendServerGeneratedImage[]>([]);
+  const [isLoadingServerImages, setIsLoadingServerImages] = useState(false);
   const [upscaleModel, setUpscaleModel] = useState('realesrgan-x4plus-anime');
   const [result, setResult] = useState<BackendComfyUIImageGenerationResponse | null>(null);
   const [upscaleResult, setUpscaleResult] = useState<BackendAnimeImageUpscaleResponse | null>(null);
@@ -47,9 +65,40 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
   const [isPending, setIsPending] = useState(false);
 
   const isReady = Boolean(serverUrl?.trim() && (apiToken || cookieAuth));
-  const dimensions = useMemo(() => CANVAS_PRESETS[preset], [preset]);
+  const dimensions = useMemo(() => (
+    preset === 'custom'
+      ? { label: '직접 입력', width: clampResolution(customWidth), height: clampResolution(customHeight) }
+      : CANVAS_PRESETS[preset]
+  ), [customHeight, customWidth, preset]);
   const activeImageDataUrl = upscaleResult?.image_data_url ?? result?.image_data_url ?? upscaleSourceDataUrl;
   const activeImageLabel = upscaleResult?.filename ?? result?.request ?? upscaleSourceName;
+
+  const loadServerImages = async () => {
+    if (!isReady) return;
+    setIsLoadingServerImages(true);
+    try {
+      const client = new ApiClient(serverUrl, apiToken);
+      const response = await client.fetchServerGeneratedImages(24);
+      startTransition(() => setServerImages(response.images));
+    } catch (err) {
+      alertError('Server generated image list failed', err, {
+        default: '서버 생성 이미지 목록을 불러오지 못했습니다.',
+        unauthorized: '인증이 만료되었거나 올바르지 않습니다.',
+        network: '백엔드 서버에 연결할 수 없습니다.',
+      });
+      if (err instanceof Error) {
+        setError(err.message);
+      }
+    } finally {
+      setIsLoadingServerImages(false);
+    }
+  };
+
+  useEffect(() => {
+    if (mode === 'upscale' && isReady) {
+      void loadServerImages();
+    }
+  }, [mode, isReady]);
 
   const handleUpscaleSourceChange = (file?: File) => {
     if (!file) return;
@@ -63,6 +112,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
       startTransition(() => {
         setUpscaleSourceDataUrl(value);
         setUpscaleSourceName(file.name);
+        setSelectedServerImagePath('');
         setUpscaleResult(null);
         setError(null);
         setMode('upscale');
@@ -70,6 +120,17 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
     };
     reader.onerror = () => setError('이미지 파일을 읽지 못했습니다.');
     reader.readAsDataURL(file);
+  };
+
+  const handleSelectServerImage = (image: BackendServerGeneratedImage) => {
+    startTransition(() => {
+      setUpscaleSourceDataUrl(image.image_data_url);
+      setUpscaleSourceName(image.filename);
+      setSelectedServerImagePath(image.relative_path);
+      setUpscaleResult(null);
+      setError(null);
+      setMode('upscale');
+    });
   };
 
   const handleGenerate = async () => {
@@ -229,10 +290,10 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
               ))}
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="sm:col-span-2">
-                <div className="mb-2 text-sm font-semibold text-slate-800">캔버스 비율</div>
-                <div className="grid grid-cols-3 gap-2">
+            <div className="grid gap-4 sm:grid-cols-[1.4fr_0.8fr]">
+              <div>
+                <div className="mb-2 text-sm font-semibold text-slate-800">해상도</div>
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {(Object.entries(CANVAS_PRESETS) as Array<[CanvasPreset, { label: string; width: number; height: number }]>).map(([key, value]) => (
                     <button
                       key={key}
@@ -246,11 +307,41 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                     >
                       <div>{value.label}</div>
                       <div className="mt-1 text-[11px] text-slate-400">
-                        {value.width} × {value.height}
+                        {key === 'custom' ? `${dimensions.width} × ${dimensions.height}` : `${value.width} × ${value.height}`}
                       </div>
                     </button>
                   ))}
                 </div>
+                {preset === 'custom' && (
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <label className="text-xs font-semibold text-slate-600" htmlFor="custom-width">
+                      가로
+                      <input
+                        id="custom-width"
+                        type="number"
+                        min={512}
+                        max={1536}
+                        step={64}
+                        value={customWidth}
+                        onChange={(event) => setCustomWidth(clampResolution(Number(event.target.value)))}
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                      />
+                    </label>
+                    <label className="text-xs font-semibold text-slate-600" htmlFor="custom-height">
+                      세로
+                      <input
+                        id="custom-height"
+                        type="number"
+                        min={512}
+                        max={1536}
+                        step={64}
+                        value={customHeight}
+                        onChange={(event) => setCustomHeight(clampResolution(Number(event.target.value)))}
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                      />
+                    </label>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-4">
@@ -323,6 +414,59 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
               </>
             ) : (
               <div className="space-y-5">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-800">서버 생성 이미지</h3>
+                      <p className="mt-1 text-xs text-slate-500">ComfyUI output 폴더의 최근 이미지에서 바로 선택합니다.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void loadServerImages()}
+                      disabled={!isReady || isLoadingServerImages}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 disabled:cursor-not-allowed disabled:text-slate-400"
+                    >
+                      <RefreshCcw size={14} className={isLoadingServerImages ? 'animate-spin' : ''} />
+                      새로고침
+                    </button>
+                  </div>
+                  {isLoadingServerImages ? (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
+                      서버 이미지를 불러오는 중...
+                    </div>
+                  ) : serverImages.length > 0 ? (
+                    <div className="grid max-h-72 grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3">
+                      {serverImages.map((image) => (
+                        <button
+                          key={image.relative_path}
+                          type="button"
+                          onClick={() => handleSelectServerImage(image)}
+                          className={`overflow-hidden rounded-2xl border bg-white text-left transition ${
+                            selectedServerImagePath === image.relative_path
+                              ? 'border-indigo-500 ring-2 ring-indigo-100'
+                              : 'border-slate-200 hover:border-indigo-300'
+                          }`}
+                        >
+                          <img
+                            src={image.image_data_url}
+                            alt={image.filename}
+                            className="aspect-square w-full object-cover"
+                            loading="lazy"
+                          />
+                          <div className="space-y-1 px-2.5 py-2">
+                            <div className="truncate text-xs font-semibold text-slate-700">{image.filename}</div>
+                            <div className="text-[11px] text-slate-400">{formatServerImageTime(image.modified_at)}</div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
+                      아직 표시할 서버 생성 이미지가 없습니다.
+                    </div>
+                  )}
+                </div>
+
                 <label className="flex min-h-44 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center transition hover:border-indigo-300 hover:bg-white" htmlFor="upscale-source">
                   <Upload className="mb-3 text-indigo-500" size={28} />
                   <span className="text-sm font-semibold text-slate-800">
@@ -378,6 +522,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                     onClick={() => {
                       setUpscaleSourceDataUrl('');
                       setUpscaleSourceName('');
+                      setSelectedServerImagePath('');
                       setUpscaleResult(null);
                       setError(null);
                     }}

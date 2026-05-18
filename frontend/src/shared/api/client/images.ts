@@ -1,5 +1,9 @@
 import type { RequestFn } from './core';
-import type { BackendAnimeImageUpscaleResponse, BackendComfyUIImageGenerationResponse } from './types';
+import type {
+    BackendAnimeImageUpscaleResponse,
+    BackendComfyUIImageGenerationResponse,
+    BackendServerGeneratedImagesResponse,
+} from './types';
 
 export const generateComfyUIImage = (
     request: RequestFn,
@@ -28,4 +32,12 @@ export const upscaleAnimeImage = (
     request<BackendAnimeImageUpscaleResponse>('/api/images/upscale', {
         method: 'POST',
         body: JSON.stringify(payload),
+    });
+
+export const fetchServerGeneratedImages = (
+    request: RequestFn,
+    limit = 24,
+): Promise<BackendServerGeneratedImagesResponse> =>
+    request<BackendServerGeneratedImagesResponse>(`/api/images/generated?limit=${encodeURIComponent(String(limit))}`, {
+        method: 'GET',
     });

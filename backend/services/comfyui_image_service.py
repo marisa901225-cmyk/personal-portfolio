@@ -11,6 +11,7 @@ import tempfile
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -23,6 +24,7 @@ from ..core.schemas import (
     AnimeImageUpscaleResponse,
     ComfyUIImageGenerationRequest,
     ComfyUIImageGenerationResponse,
+    ServerGeneratedImage,
 )
 
 
@@ -40,6 +42,7 @@ DEFAULT_FILENAME_PREFIX = "e4b_comfyui"
 DEFAULT_CLIENT_ID = "myasset-e4b-comfyui"
 DEFAULT_TIMEOUT_SEC = 180
 MAX_UPSCALE_SOURCE_BYTES = 30 * 1024 * 1024
+SERVER_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 VRAM_MODE_ALWAYS = "always"
 VRAM_MODE_AUTO = "auto"
 VRAM_MODE_OFF = "off"
@@ -461,6 +464,43 @@ def _read_image_data_url(path: Path, output_format: str) -> str:
     content_type = "image/jpeg" if output_format == "jpg" else "image/png"
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
     return f"data:{content_type};base64,{encoded}"
+
+
+def _image_file_data_url(path: Path) -> str:
+    content_type = mimetypes.guess_type(path.name)[0] or "image/png"
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{content_type};base64,{encoded}"
+
+
+def list_server_generated_images(limit: int = 24) -> list[ServerGeneratedImage]:
+    output_dir = Path(settings.comfyui_output_dir)
+    if not output_dir.exists():
+        return []
+
+    candidates = [
+        path
+        for path in output_dir.rglob("*")
+        if path.is_file() and path.suffix.lower() in SERVER_IMAGE_EXTENSIONS
+    ]
+    candidates.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+
+    images: list[ServerGeneratedImage] = []
+    for path in candidates[: max(min(limit, 48), 1)]:
+        stat = path.stat()
+        try:
+            relative_path = path.relative_to(output_dir).as_posix()
+        except ValueError:
+            relative_path = path.name
+        images.append(
+            ServerGeneratedImage(
+                filename=path.name,
+                relative_path=relative_path,
+                size_bytes=stat.st_size,
+                modified_at=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+                image_data_url=_image_file_data_url(path),
+            )
+        )
+    return images
 
 
 def _query_gpu_memory() -> _GpuMemory | None:

@@ -479,3 +479,15 @@ class AnimeImageUpscaleResponse(BaseModel):
     scale: int
     filename: str
     image_data_url: str
+
+
+class ServerGeneratedImage(BaseModel):
+    filename: str
+    relative_path: str
+    size_bytes: int
+    modified_at: datetime
+    image_data_url: str
+
+
+class ServerGeneratedImagesResponse(BaseModel):
+    images: List[ServerGeneratedImage]

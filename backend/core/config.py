@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     llm_remote_model_dir: str = Field(default="/data", validation_alias="LLM_REMOTE_MODEL_DIR")
     llm_remote_model_path_file: Optional[str] = Field(default=None, validation_alias="LLM_REMOTE_MODEL_PATH_FILE")
     comfyui_base_url: str = Field(default="http://localhost:8188", validation_alias="COMFYUI_BASE_URL")
+    comfyui_output_dir: str = Field(default="/mnt/one-touch/comfyui/output", validation_alias="COMFYUI_OUTPUT_DIR")
     realesrgan_bin_path: str = Field(
         default="/home/dlckdgn/my-home-server/tools/realesrgan-ncnn-vulkan-dir/realesrgan-ncnn-vulkan",
         validation_alias="REALESRGAN_BIN_PATH",

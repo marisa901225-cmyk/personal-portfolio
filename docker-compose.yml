@@ -236,6 +236,7 @@ services:
       - ./backend/logs:/app/backend/logs
       - ${KIS_CONFIG_DIR:-/home/dlckdgn/KIS/config}:/root/KIS/config
       - /mnt/one-touch/backups:/mnt/one-touch/backups
+      - /mnt/one-touch/comfyui/output:/comfyui-output:ro
       - /home/dlckdgn/my-home-server/tools/realesrgan-ncnn-vulkan-dir:/opt/realesrgan-ncnn-vulkan-dir:ro
       - /var/run/docker.sock:/var/run/docker.sock
     devices:
@@ -245,6 +246,7 @@ services:
       - LLM_BASE_URL=http://llama-server-sycl-huihui:8084
       - LLM_REMOTE_DEFAULT_MODEL=supergemma4-Q8_0.gguf
       - COMFYUI_BASE_URL=http://comfyui:8188
+      - COMFYUI_OUTPUT_DIR=/comfyui-output
       - REALESRGAN_BIN_PATH=/opt/realesrgan-ncnn-vulkan-dir/realesrgan-ncnn-vulkan
       - REALESRGAN_MODEL_DIR=/opt/realesrgan-ncnn-vulkan-dir
       - REALESRGAN_COMFYUI_VRAM_MODE=auto

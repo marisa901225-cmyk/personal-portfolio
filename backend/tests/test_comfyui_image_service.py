@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 
 import pytest
 
@@ -10,6 +11,7 @@ from backend.services.comfyui_image_service import (
     ImageGenerationError,
     _GpuMemory,
     generate_image_with_e4b,
+    list_server_generated_images,
     upscale_anime_image,
 )
 
@@ -140,6 +142,28 @@ def test_generate_image_with_e4b_requires_tool_call(monkeypatch: pytest.MonkeyPa
 
     with pytest.raises(ImageGenerationError, match="did not produce a ComfyUI tool call"):
         generate_image_with_e4b(ComfyUIImageGenerationRequest(request="고양이 그림", width=1024, height=1024))
+
+
+def test_list_server_generated_images_reads_recent_output(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    output_dir = tmp_path / "output"
+    nested_dir = output_dir / "sub"
+    nested_dir.mkdir(parents=True)
+    older = output_dir / "older.png"
+    newer = nested_dir / "newer.webp"
+    ignored = output_dir / "note.txt"
+    older.write_bytes(b"\x89PNG\r\nolder")
+    newer.write_bytes(b"WEBP")
+    ignored.write_text("skip", encoding="utf-8")
+    os.utime(older, (100, 100))
+    os.utime(newer, (200, 200))
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.comfyui_output_dir", str(output_dir))
+
+    images = list_server_generated_images(limit=10)
+
+    assert [image.relative_path for image in images] == ["sub/newer.webp", "older.png"]
+    assert images[0].filename == "newer.webp"
+    assert images[0].image_data_url.startswith("data:image/webp;base64,")
+    assert images[1].image_data_url.startswith("data:image/png;base64,")
 
 
 def test_upscale_anime_image_runs_realesrgan_model(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

@@ -348,6 +348,18 @@ export interface BackendAnimeImageUpscaleResponse {
     image_data_url: string;
 }
 
+export interface BackendServerGeneratedImage {
+    filename: string;
+    relative_path: string;
+    size_bytes: number;
+    modified_at: string;
+    image_data_url: string;
+}
+
+export interface BackendServerGeneratedImagesResponse {
+    images: BackendServerGeneratedImage[];
+}
+
 // --- News ---
 
 export interface BackendNewsArticle {

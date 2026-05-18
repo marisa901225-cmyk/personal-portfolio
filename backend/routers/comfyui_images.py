@@ -11,17 +11,27 @@ from ..core.schemas import (
     AnimeImageUpscaleResponse,
     ComfyUIImageGenerationRequest,
     ComfyUIImageGenerationResponse,
+    ServerGeneratedImagesResponse,
 )
 from ..services.comfyui_image_service import (
     ImageGenerationError,
     ImageUpscaleError,
     generate_image_with_e4b,
+    list_server_generated_images,
     upscale_anime_image,
 )
 
 
 router = APIRouter(prefix="/api/images", tags=["images"], dependencies=[Depends(verify_api_token)])
 logger = logging.getLogger(__name__)
+
+
+@router.get("/generated", response_model=ServerGeneratedImagesResponse)
+def list_generated_images(
+    limit: int = 24,
+    _rate_limit: None = Depends(rate_limit(limit=30, window_sec=60, key_prefix="server_generated_images")),
+) -> ServerGeneratedImagesResponse:
+    return ServerGeneratedImagesResponse(images=list_server_generated_images(limit=limit))
 
 
 @router.post("/generate", response_model=ComfyUIImageGenerationResponse)

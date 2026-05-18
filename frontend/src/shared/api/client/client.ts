@@ -25,6 +25,7 @@ import type {
     BackendAssetCreatePayload,
     BackendComfyUIImageGenerationResponse,
     BackendAnimeImageUpscaleResponse,
+    BackendServerGeneratedImagesResponse,
 } from './types';
 import type { CreateHeadersFn, RequestFn } from './core';
 import { fetchPortfolio, restorePortfolio, fetchSnapshots, createSnapshot } from './portfolio';
@@ -70,7 +71,7 @@ import {
     updateExpense,
     uploadExpenseFile,
 } from './expenses';
-import { generateComfyUIImage, upscaleAnimeImage } from './images';
+import { fetchServerGeneratedImages, generateComfyUIImage, upscaleAnimeImage } from './images';
 
 export class ApiClient {
     private readonly baseUrl: string;
@@ -436,6 +437,10 @@ export class ApiClient {
         output_format?: 'png' | 'jpg';
     }): Promise<BackendAnimeImageUpscaleResponse> {
         return upscaleAnimeImage(this.requestFn, payload);
+    }
+
+    async fetchServerGeneratedImages(limit = 24): Promise<BackendServerGeneratedImagesResponse> {
+        return fetchServerGeneratedImages(this.requestFn, limit);
     }
 
     // --- News ---
