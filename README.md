@@ -161,3 +161,19 @@ frontend/
 - 프런트 인증 기본 경로는 네이버 로그인 + 쿠키 세션입니다.
 - 비상용으로 `API_TOKEN` 직접 입력 로그인도 남아 있습니다.
 - 트레이딩 엔진은 개인용 소액 계좌 실험 전제로 운영 중이며, 범용 SaaS 성격의 기능이 아닙니다.
+
+## Intel Xe 고주파음 대응
+
+Intel Xe GPU 전원관리 `auto` 상태에서 고주파음이 다시 들리면 idle reset 타이머를 다시 켭니다.
+
+```bash
+sudo systemctl enable --now intel-xe-idle-reset.timer
+```
+
+현재 상태 확인:
+
+```bash
+systemctl status intel-xe-idle-reset.timer --no-pager
+cat /sys/class/drm/card0/device/power/control
+cat /sys/class/drm/card0/device/power/runtime_status
+```

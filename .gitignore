@@ -120,3 +120,4 @@ subagent-runs/
 
 # Local translation workspace
 translations/
+.env*.local
