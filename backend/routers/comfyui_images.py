@@ -11,6 +11,7 @@ from ..core.schemas import (
     AnimeImageUpscaleResponse,
     ComfyUIImageGenerationRequest,
     ComfyUIImageGenerationResponse,
+    ComfyUIImagePromptPlanResponse,
     ServerGeneratedImageDataResponse,
     ServerGeneratedImagesResponse,
 )
@@ -20,6 +21,7 @@ from ..services.comfyui_image_service import (
     ImageUpscaleError,
     generate_image_with_e4b,
     list_server_generated_images,
+    plan_image_prompt_with_openrouter,
     upscale_anime_image,
 )
 
@@ -57,6 +59,18 @@ def generate_comfyui_image(
         return generate_image_with_e4b(payload)
     except ImageGenerationError as exc:
         logger.exception("ComfyUI image generation failed")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/plan-prompt", response_model=ComfyUIImagePromptPlanResponse)
+def plan_comfyui_prompt(
+    payload: ComfyUIImageGenerationRequest,
+    _rate_limit: None = Depends(rate_limit(limit=10, window_sec=60, key_prefix="comfyui_plan_prompt")),
+) -> ComfyUIImagePromptPlanResponse:
+    try:
+        return ComfyUIImagePromptPlanResponse(**plan_image_prompt_with_openrouter(payload))
+    except ImageGenerationError as exc:
+        logger.exception("ComfyUI prompt planning failed")
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 

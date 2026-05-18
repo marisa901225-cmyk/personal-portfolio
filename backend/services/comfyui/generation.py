@@ -8,7 +8,7 @@ from ...core.schemas import ComfyUIImageGenerationRequest, ComfyUIImageGeneratio
 from ..gpu_work_lock import gpu_heavy_work_lock
 from .constants import DEFAULT_UPSCALE_MODEL_NAME
 from .errors import ImageGenerationError
-from .planner import plan_image_generation
+from .planner import plan_image_generation, plan_prompt_via_openrouter
 from .vram_guard import release_local_llm_for_comfyui
 from .workflow import build_workflow, extract_image_entry, fetch_image_data_url, submit_prompt, wait_for_completion
 
@@ -78,3 +78,17 @@ def generate_image_with_e4b(request: ComfyUIImageGenerationRequest) -> ComfyUIIm
         upscale_model=upscale_model,
         image_data_url=image_data_url,
     )
+
+
+def plan_image_prompt_with_openrouter(request: ComfyUIImageGenerationRequest) -> dict[str, object]:
+    model, tool_spec = plan_prompt_via_openrouter(request)
+    return {
+        "model": model,
+        "prompt": tool_spec.prompt,
+        "negative_prompt": tool_spec.negative_prompt,
+        "width": tool_spec.width,
+        "height": tool_spec.height,
+        "steps": tool_spec.steps,
+        "cfg": tool_spec.cfg,
+        "seed": tool_spec.seed,
+    }

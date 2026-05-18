@@ -345,6 +345,17 @@ export interface BackendComfyUIImageGenerationResponse {
     image_data_url: string;
 }
 
+export interface BackendComfyUIImagePromptPlanResponse {
+    model: string;
+    prompt: string;
+    negative_prompt: string;
+    width: number;
+    height: number;
+    steps: number;
+    cfg: number;
+    seed: number;
+}
+
 export interface BackendAnimeImageUpscaleResponse {
     model: string;
     scale: number;

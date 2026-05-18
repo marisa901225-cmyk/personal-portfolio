@@ -445,6 +445,8 @@ class SchedulerStateRead(BaseModel):
 class ComfyUIImageGenerationRequest(BaseModel):
     request: str = Field(..., min_length=3, description="사용자의 자연어 이미지 생성 요청")
     model_type: Literal["anime", "realistic"] = "anime"
+    prompt_override: Optional[str] = Field(default=None, min_length=1)
+    negative_prompt_override: Optional[str] = Field(default=None, min_length=1)
     width: int = Field(default=1024, ge=256, le=1536)
     height: int = Field(default=1024, ge=256, le=1536)
     seed: Optional[int] = Field(default=None, ge=0)
@@ -473,6 +475,17 @@ class ComfyUIImageGenerationResponse(BaseModel):
     subfolder: str = ""
     upscale_model: Optional[str] = None
     image_data_url: str
+
+
+class ComfyUIImagePromptPlanResponse(BaseModel):
+    model: str
+    prompt: str
+    negative_prompt: str
+    width: int
+    height: int
+    steps: int
+    cfg: float
+    seed: int
 
 
 class AnimeImageUpscaleRequest(BaseModel):

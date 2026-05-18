@@ -130,6 +130,8 @@ describe('ApiClient', () => {
     const result = await client.generateComfyUIImage({
       request: '창가에서 자는 고양이',
       model_type: 'realistic',
+      prompt_override: '실사 고양이 사진',
+      negative_prompt_override: 'blurry',
       width: 1024,
       height: 1024,
       output_width: 3840,
@@ -144,11 +146,53 @@ describe('ApiClient', () => {
     expect((options as RequestInit).body).toBe(JSON.stringify({
       request: '창가에서 자는 고양이',
       model_type: 'realistic',
+      prompt_override: '실사 고양이 사진',
+      negative_prompt_override: 'blurry',
       width: 1024,
       height: 1024,
       output_width: 3840,
       output_height: 2160,
       upscale_model: 'RealESRGAN_x4plus.pth',
+    }));
+  });
+
+  it('planComfyUIImagePrompt posts prompt planning payload', async () => {
+    const client = new ApiClient(baseUrl, token);
+    const mockResponse = {
+      model: 'google/gemma-4-31b-it',
+      prompt: 'photorealistic Seoul street at night',
+      negative_prompt: 'blurry, low quality',
+      width: 1024,
+      height: 1024,
+      steps: 8,
+      cfg: 1,
+      seed: 1234,
+    };
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => mockResponse,
+    } as Response);
+
+    const result = await client.planComfyUIImagePrompt({
+      request: '서울 야경 실사',
+      model_type: 'realistic',
+      width: 1024,
+      height: 1024,
+      steps: 8,
+    });
+
+    expect(result).toEqual(mockResponse);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe(`${baseUrl}/api/images/plan-prompt`);
+    expect(options).toMatchObject({ method: 'POST' });
+    expect((options as RequestInit).body).toBe(JSON.stringify({
+      request: '서울 야경 실사',
+      model_type: 'realistic',
+      width: 1024,
+      height: 1024,
+      steps: 8,
     }));
   });
 

@@ -2,6 +2,7 @@ import type { RequestFn } from './core';
 import type {
     BackendAnimeImageUpscaleResponse,
     BackendComfyUIImageGenerationResponse,
+    BackendComfyUIImagePromptPlanResponse,
     BackendServerGeneratedImageDataResponse,
     BackendServerGeneratedImagesResponse,
 } from './types';
@@ -11,6 +12,8 @@ export const generateComfyUIImage = (
     payload: {
         request: string;
         model_type?: 'anime' | 'realistic';
+        prompt_override?: string;
+        negative_prompt_override?: string;
         width?: number;
         height?: number;
         seed?: number;
@@ -21,6 +24,22 @@ export const generateComfyUIImage = (
     },
 ): Promise<BackendComfyUIImageGenerationResponse> =>
     request<BackendComfyUIImageGenerationResponse>('/api/images/generate', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    });
+
+export const planComfyUIImagePrompt = (
+    request: RequestFn,
+    payload: {
+        request: string;
+        model_type?: 'anime' | 'realistic';
+        width?: number;
+        height?: number;
+        seed?: number;
+        steps?: number;
+    },
+): Promise<BackendComfyUIImagePromptPlanResponse> =>
+    request<BackendComfyUIImagePromptPlanResponse>('/api/images/plan-prompt', {
         method: 'POST',
         body: JSON.stringify(payload),
     });

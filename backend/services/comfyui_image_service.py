@@ -9,6 +9,7 @@ from .comfyui import (
     generate_image_with_e4b,
     get_server_generated_image_data_url,
     list_server_generated_images,
+    plan_image_prompt_with_openrouter,
     upscale_anime_image,
 )
 
@@ -18,6 +19,7 @@ __all__ = [
     "generate_image_with_e4b",
     "get_server_generated_image_data_url",
     "list_server_generated_images",
+    "plan_image_prompt_with_openrouter",
     "requests",
     "settings",
     "upscale_anime_image",

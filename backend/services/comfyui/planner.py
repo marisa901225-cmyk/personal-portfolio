@@ -99,6 +99,24 @@ def _tool_spec_from_arguments(arguments: dict[str, Any], request: ComfyUIImageGe
     )
 
 
+def direct_realistic_tool_spec(request: ComfyUIImageGenerationRequest) -> ToolSpec:
+    prompt = str(request.prompt_override or request.request or "").strip()
+    if not prompt:
+        raise ImageGenerationError("Realistic image prompt is empty")
+    seed = int(request.seed or random.randint(1, 2_147_483_647))
+    if seed < 1:
+        seed = random.randint(1, 2_147_483_647)
+    return ToolSpec(
+        prompt=prompt,
+        negative_prompt=str(request.negative_prompt_override or "").strip(),
+        width=min(max(int(request.width), 256), 1536),
+        height=min(max(int(request.height), 256), 1536),
+        steps=min(max(int(request.steps or 8), 8), 12),
+        cfg=1.0,
+        seed=seed,
+    )
+
+
 def _parse_json_object_from_content(content: Any) -> dict[str, Any] | None:
     if isinstance(content, list):
         content = "".join(str(part.get("text") or "") for part in content if isinstance(part, dict))
@@ -273,7 +291,15 @@ def _plan_image_generation_via_openrouter(
     raise ImageGenerationError("OpenRouter image planning failed")
 
 
+def plan_prompt_via_openrouter(request: ComfyUIImageGenerationRequest) -> tuple[str, ToolSpec]:
+    model, _tool_name, tool_spec = _plan_image_generation_via_openrouter(request)
+    return model, tool_spec
+
+
 def plan_image_generation(request: ComfyUIImageGenerationRequest) -> tuple[str, str, ToolSpec]:
+    if request.model_type == "realistic":
+        return "z-image-turbo-direct", "direct_prompt", direct_realistic_tool_spec(request)
+
     last_exc: Exception | None = None
 
     for base_url in _llm_base_url_candidates():

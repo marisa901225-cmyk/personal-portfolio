@@ -1,5 +1,5 @@
 from .errors import ImageGenerationError, ImageUpscaleError
-from .generation import generate_image_with_e4b
+from .generation import generate_image_with_e4b, plan_image_prompt_with_openrouter
 from .server_images import get_server_generated_image_data_url, list_server_generated_images
 from .upscale import upscale_anime_image
 
@@ -9,5 +9,6 @@ __all__ = [
     "generate_image_with_e4b",
     "get_server_generated_image_data_url",
     "list_server_generated_images",
+    "plan_image_prompt_with_openrouter",
     "upscale_anime_image",
 ]

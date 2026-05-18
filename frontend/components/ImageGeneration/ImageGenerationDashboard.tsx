@@ -71,6 +71,8 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
   const [mode, setMode] = useState<StudioMode>('generate');
   const [preset, setPreset] = useState<CanvasPreset>('square');
   const [imageModelType, setImageModelType] = useState<ImageModelType>('anime');
+  const [realisticPrompt, setRealisticPrompt] = useState('');
+  const [realisticNegativePrompt, setRealisticNegativePrompt] = useState('');
   const [customWidth, setCustomWidth] = useState(1024);
   const [customHeight, setCustomHeight] = useState(1024);
   const [generationOutput, setGenerationOutput] = useState<GenerationOutputPreset>('native');
@@ -84,6 +86,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
   const [selectedServerImagePath, setSelectedServerImagePath] = useState('');
   const [serverImages, setServerImages] = useState<BackendServerGeneratedImage[]>([]);
   const [isLoadingServerImages, setIsLoadingServerImages] = useState(false);
+  const [isPlanningPrompt, setIsPlanningPrompt] = useState(false);
   const [upscaleModel, setUpscaleModel] = useState('realesrgan-x4plus');
   const [revisionText, setRevisionText] = useState('');
   const [revisionMessages, setRevisionMessages] = useState<RevisionMessage[]>([]);
@@ -115,6 +118,51 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
   const activeImageDataUrl = upscaleResult?.image_data_url ?? result?.image_data_url ?? upscaleSourceDataUrl;
   const activeImageLabel = upscaleResult?.filename ?? result?.request ?? upscaleSourceName;
   const canReviseImage = Boolean(result || requestText.trim());
+
+  const handlePlanRealisticPrompt = async () => {
+    if (!serverUrl?.trim()) {
+      setError('먼저 서버 URL을 설정해주세요.');
+      return;
+    }
+    if (!apiToken && !cookieAuth) {
+      setError('네이버 로그인 또는 API 비밀번호가 필요합니다.');
+      return;
+    }
+    if (!requestText.trim()) {
+      setError('실사 프롬프트로 바꿀 요청 문장을 먼저 적어주세요.');
+      return;
+    }
+
+    setIsPlanningPrompt(true);
+    setError(null);
+    try {
+      const client = new ApiClient(serverUrl, apiToken);
+      const response = await client.planComfyUIImagePrompt({
+        request: requestText.trim(),
+        model_type: 'realistic',
+        width: dimensions.width,
+        height: dimensions.height,
+        steps: Math.min(steps, 12),
+        seed: seed.trim() ? Number(seed.trim()) : undefined,
+      });
+      startTransition(() => {
+        setRealisticPrompt(response.prompt);
+        setRealisticNegativePrompt(response.negative_prompt);
+        setSteps(response.steps);
+      });
+    } catch (err) {
+      alertError('Realistic prompt planning failed', err, {
+        default: 'OpenRouter 프롬프트 초안 생성에 실패했습니다. 한글 원문 그대로 생성할 수도 있습니다.',
+        unauthorized: '인증이 만료되었거나 올바르지 않습니다. 다시 로그인하거나 API 비밀번호를 확인해주세요.',
+        network: '백엔드 또는 OpenRouter에 연결할 수 없습니다.',
+      });
+      if (err instanceof Error) {
+        setError(err.message);
+      }
+    } finally {
+      setIsPlanningPrompt(false);
+    }
+  };
 
   const loadServerImages = async () => {
     if (!isReady) return;
@@ -214,9 +262,17 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
 
     try {
       const client = new ApiClient(serverUrl, apiToken);
+      const promptOverride = imageModelType === 'realistic' && realisticPrompt.trim()
+        ? realisticPrompt.trim()
+        : undefined;
+      const negativePromptOverride = imageModelType === 'realistic' && realisticNegativePrompt.trim()
+        ? realisticNegativePrompt.trim()
+        : undefined;
       const response = await client.generateComfyUIImage({
         request: requestText.trim(),
         model_type: imageModelType,
+        prompt_override: promptOverride,
+        negative_prompt_override: negativePromptOverride,
         width: dimensions.width,
         height: dimensions.height,
         steps: imageModelType === 'realistic' ? Math.min(steps, 12) : steps,
@@ -277,9 +333,14 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
 
     try {
       const client = new ApiClient(serverUrl, apiToken);
+      const nextModelType = result?.model_type ?? imageModelType;
       const response = await client.generateComfyUIImage({
         request: nextRequest,
-        model_type: result?.model_type ?? imageModelType,
+        model_type: nextModelType,
+        prompt_override: nextModelType === 'realistic' ? nextRequest : undefined,
+        negative_prompt_override: nextModelType === 'realistic' && realisticNegativePrompt.trim()
+          ? realisticNegativePrompt.trim()
+          : undefined,
         width: result?.generated_width ?? dimensions.width,
         height: result?.generated_height ?? dimensions.height,
         steps: (result?.model_type ?? imageModelType) === 'realistic' ? Math.min(steps, 12) : steps,
@@ -435,7 +496,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
 
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-800" htmlFor="image-request">
-                요청 문장
+                {imageModelType === 'realistic' ? '요청 문장 / 한글 원문' : '요청 문장'}
               </label>
               <textarea
                 id="image-request"
@@ -446,6 +507,54 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 outline-none transition focus:border-indigo-400 focus:bg-white"
               />
             </div>
+
+            {imageModelType === 'realistic' && (
+              <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="text-sm font-semibold text-emerald-900">실사 프롬프트 편집</h3>
+                    <p className="mt-1 text-xs text-emerald-700">
+                      비우면 한글 원문을 Z-Image Turbo에 그대로 넣고, 초안 버튼은 OpenRouter 31B로만 작성합니다.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handlePlanRealisticPrompt}
+                    disabled={!isReady || isPending || isPlanningPrompt || !requestText.trim()}
+                    className={`inline-flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-semibold transition ${
+                      !isReady || isPending || isPlanningPrompt || !requestText.trim()
+                        ? 'cursor-not-allowed bg-white/60 text-emerald-300'
+                        : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                    }`}
+                  >
+                    {isPlanningPrompt ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                    OpenRouter 31B 초안
+                  </button>
+                </div>
+                <label className="mb-2 block text-xs font-semibold text-emerald-800" htmlFor="realistic-prompt">
+                  프롬프트
+                </label>
+                <textarea
+                  id="realistic-prompt"
+                  value={realisticPrompt}
+                  onChange={(event) => setRealisticPrompt(event.target.value)}
+                  rows={4}
+                  placeholder="비워두면 위 한글 요청 문장이 그대로 들어갑니다."
+                  className="w-full resize-y rounded-2xl border border-emerald-100 bg-white px-3 py-2 text-sm leading-6 text-slate-700 outline-none transition focus:border-emerald-400"
+                />
+                <label className="mb-2 mt-3 block text-xs font-semibold text-emerald-800" htmlFor="realistic-negative-prompt">
+                  네거티브
+                </label>
+                <textarea
+                  id="realistic-negative-prompt"
+                  value={realisticNegativePrompt}
+                  onChange={(event) => setRealisticNegativePrompt(event.target.value)}
+                  rows={2}
+                  placeholder="예: blurry, low quality, watermark, distorted architecture"
+                  className="w-full resize-y rounded-2xl border border-emerald-100 bg-white px-3 py-2 text-sm leading-6 text-slate-700 outline-none transition focus:border-emerald-400"
+                />
+              </div>
+            )}
 
             <div className="grid gap-4 sm:grid-cols-[1.4fr_0.8fr]">
               <div>
