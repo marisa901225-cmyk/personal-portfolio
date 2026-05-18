@@ -43,6 +43,7 @@ from .routers.news import router as news_router
 from .routers.telegram_webhook import router as telegram_webhook_router
 from .routers.scheduler_state import router as scheduler_state_router
 from .routers.naver_auth import router as naver_auth_router
+from .routers.comfyui_images import router as comfyui_images_router
 
 
 # Logging Configuration (Sensitive Data Masking enabled)
@@ -150,6 +151,7 @@ app.include_router(news_router)
 app.include_router(telegram_webhook_router)
 app.include_router(scheduler_state_router)
 app.include_router(naver_auth_router)
+app.include_router(comfyui_images_router)
 
 
 # ============================================

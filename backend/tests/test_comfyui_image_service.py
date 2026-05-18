@@ -1,0 +1,189 @@
+from __future__ import annotations
+
+import base64
+import json
+
+import pytest
+
+from backend.core.schemas import AnimeImageUpscaleRequest, ComfyUIImageGenerationRequest
+from backend.services.comfyui_image_service import (
+    ImageGenerationError,
+    generate_image_with_e4b,
+    upscale_anime_image,
+)
+
+
+class _Response:
+    def __init__(self, *, json_data=None, content: bytes = b"", status_code: int = 200, headers=None, text: str = ""):
+        self._json_data = json_data
+        self.content = content
+        self.status_code = status_code
+        self.headers = headers or {}
+        self.text = text
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise RuntimeError(f"http {self.status_code}")
+
+    def json(self):
+        return self._json_data
+
+
+def test_generate_image_with_e4b_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.llm_base_url", "http://llm.test")
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.llm_remote_default_model", "cq_gemma4_e4b_q8.gguf")
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.comfyui_base_url", "http://comfy.test")
+
+    image_bytes = b"\x89PNG\r\nfake"
+    llm_response = _Response(
+        json_data={
+            "model": "cq_gemma4_e4b_q8.gguf",
+            "choices": [
+                {
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "function": {
+                                    "name": "generate_comfyui_image",
+                                    "arguments": (
+                                        '{"prompt":"warm cat by the window, storybook illustration",'
+                                        '"negative_prompt":"blurry",'
+                                        '"width":896,"height":1152,"steps":24,"cfg":4.5,"seed":12345}'
+                                    ),
+                                }
+                            }
+                        ]
+                    }
+                }
+            ],
+        }
+    )
+    prompt_response = _Response(json_data={"prompt_id": "abc-123"})
+    history_response = _Response(
+        json_data={
+            "abc-123": {
+                "status": {"completed": True},
+                "outputs": {
+                    "9": {
+                        "images": [
+                            {"filename": "e4b_comfyui_00001_.png", "subfolder": "", "type": "output"}
+                        ]
+                    }
+                },
+            }
+        }
+    )
+    view_response = _Response(content=image_bytes, headers={"Content-Type": "image/png"})
+
+    post_calls: list[tuple[str, dict]] = []
+    get_calls: list[tuple[str, dict]] = []
+
+    def fake_post(url: str, **kwargs):
+        post_calls.append((url, kwargs))
+        if url.endswith("/v1/chat/completions"):
+            return llm_response
+        if url.endswith("/prompt"):
+            return prompt_response
+        raise AssertionError(f"unexpected POST {url}")
+
+    def fake_get(url: str, **kwargs):
+        get_calls.append((url, kwargs))
+        if url.endswith("/v1/models"):
+            return _Response(json_data={"data": [{"id": "cq_gemma4_e4b_q8.gguf"}]})
+        if url.endswith("/history/abc-123"):
+            return history_response
+        if url.endswith("/view"):
+            return view_response
+        raise AssertionError(f"unexpected GET {url}")
+
+    monkeypatch.setattr("backend.services.comfyui_image_service.requests.post", fake_post)
+    monkeypatch.setattr("backend.services.comfyui_image_service.requests.get", fake_get)
+
+    result = generate_image_with_e4b(
+        ComfyUIImageGenerationRequest(request="창가에서 자는 고양이 일러스트", width=1024, height=1024)
+    )
+
+    assert result.prompt_id == "abc-123"
+    assert result.tool_name == "generate_comfyui_image"
+    assert result.width == 896
+    assert result.height == 1152
+    assert result.steps == 24
+    assert result.seed == 12345
+    assert result.filename == "e4b_comfyui_00001_.png"
+    assert result.image_data_url == f"data:image/png;base64,{base64.b64encode(image_bytes).decode('ascii')}"
+
+    workflow = post_calls[1][1]["json"]["prompt"]
+    assert workflow["5"]["inputs"]["text"] == "warm cat by the window, storybook illustration"
+    assert workflow["7"]["inputs"]["seed"] == 12345
+
+    params = get_calls[2][1]["params"]
+    assert params["filename"] == "e4b_comfyui_00001_.png"
+
+
+def test_generate_image_with_e4b_requires_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.llm_base_url", "http://llm.test")
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.llm_remote_default_model", "cq_gemma4_e4b_q8.gguf")
+
+    llm_response = _Response(
+        json_data={
+            "model": "cq_gemma4_e4b_q8.gguf",
+            "choices": [{"message": {"content": "직접 설명만 드릴게요"}}],
+        }
+    )
+
+    monkeypatch.setattr("backend.services.comfyui_image_service.requests.post", lambda *args, **kwargs: llm_response)
+    monkeypatch.setattr(
+        "backend.services.comfyui_image_service.requests.get",
+        lambda *args, **kwargs: _Response(json_data={"data": [{"id": "cq_gemma4_e4b_q8.gguf"}]}),
+    )
+
+    with pytest.raises(ImageGenerationError, match="did not produce a ComfyUI tool call"):
+        generate_image_with_e4b(ComfyUIImageGenerationRequest(request="고양이 그림", width=1024, height=1024))
+
+
+def test_upscale_anime_image_runs_realesrgan_model(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    tool_dir = tmp_path / "realesrgan"
+    models_dir = tool_dir / "models"
+    models_dir.mkdir(parents=True)
+    (models_dir / "realesrgan-x4plus-anime.bin").write_bytes(b"model")
+    (models_dir / "realesrgan-x4plus-anime.param").write_text("param", encoding="utf-8")
+
+    bin_path = tool_dir / "realesrgan-ncnn-vulkan"
+    bin_path.write_text(
+        "#!/usr/bin/env bash\n"
+        "while [[ $# -gt 0 ]]; do\n"
+        "  case \"$1\" in\n"
+        "    -i) input=\"$2\"; shift 2 ;;\n"
+        "    -o) output=\"$2\"; shift 2 ;;\n"
+        "    *) shift ;;\n"
+        "  esac\n"
+        "done\n"
+        "cp \"$input\" \"$output\"\n",
+        encoding="utf-8",
+    )
+    bin_path.chmod(0o755)
+
+    config_path = tmp_path / "models.json"
+    config_path.write_text(
+        json.dumps({"models": [{"id": "realesrgan-x4plus-anime", "scale": 4}]}),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_bin_path", str(bin_path))
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_model_dir", str(tool_dir))
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_models_config_path", str(config_path))
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_timeout_sec", 5)
+
+    source_bytes = b"\x89PNG\r\nfake"
+    result = upscale_anime_image(
+        AnimeImageUpscaleRequest(
+            image_data_url=f"data:image/png;base64,{base64.b64encode(source_bytes).decode('ascii')}",
+            model="realesrgan-x4plus-anime",
+            scale=4,
+        )
+    )
+
+    assert result.model == "realesrgan-x4plus-anime"
+    assert result.scale == 4
+    assert result.filename == "anime_upscaled_x4.png"
+    assert result.image_data_url == f"data:image/png;base64,{base64.b64encode(source_bytes).decode('ascii')}"

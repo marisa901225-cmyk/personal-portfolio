@@ -1,0 +1,16 @@
+{
+  "models": [
+    {
+      "id": "realesrgan-x4plus-anime",
+      "label": "RealESRGAN x4plus Anime",
+      "scale": 4,
+      "description": "Anime-focused RealESRGAN model from the home-server tool folder."
+    },
+    {
+      "id": "realesr-animevideov3",
+      "label": "RealESRGAN AnimeVideo v3",
+      "scale": 4,
+      "description": "Anime video model also works for still frames; scale can be 2, 3, or 4."
+    }
+  ]
+}

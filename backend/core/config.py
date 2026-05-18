@@ -89,6 +89,20 @@ class Settings(BaseSettings):
     llm_remote_default_model: str = Field(default="EXAONE-4.0-1.2B-Instruct-Q8_0.gguf", validation_alias="LLM_REMOTE_DEFAULT_MODEL")
     llm_remote_model_dir: str = Field(default="/data", validation_alias="LLM_REMOTE_MODEL_DIR")
     llm_remote_model_path_file: Optional[str] = Field(default=None, validation_alias="LLM_REMOTE_MODEL_PATH_FILE")
+    comfyui_base_url: str = Field(default="http://localhost:8188", validation_alias="COMFYUI_BASE_URL")
+    realesrgan_bin_path: str = Field(
+        default="/home/dlckdgn/my-home-server/tools/realesrgan-ncnn-vulkan-dir/realesrgan-ncnn-vulkan",
+        validation_alias="REALESRGAN_BIN_PATH",
+    )
+    realesrgan_model_dir: str = Field(
+        default="/home/dlckdgn/my-home-server/tools/realesrgan-ncnn-vulkan-dir",
+        validation_alias="REALESRGAN_MODEL_DIR",
+    )
+    realesrgan_models_config_path: str = Field(
+        default="backend/data/anime_upscale_models.json",
+        validation_alias="REALESRGAN_MODELS_CONFIG_PATH",
+    )
+    realesrgan_timeout_sec: int = Field(default=180, validation_alias="REALESRGAN_TIMEOUT_SEC")
 
     # KIS (한국투자증권) 설정
     kis_config_dir: Optional[str] = Field(default=None, validation_alias="KIS_CONFIG_DIR")

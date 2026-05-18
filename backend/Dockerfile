@@ -6,6 +6,9 @@ FROM myasset-base:latest
 # Install lightweight backup utilities (sqlite3 for hot backup, zip for encryption)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     iputils-ping \
+    libgomp1 \
+    libvulkan1 \
+    mesa-vulkan-drivers \
     sqlite3 \
     zip \
     && rm -rf /var/lib/apt/lists/*

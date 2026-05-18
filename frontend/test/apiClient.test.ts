@@ -1,6 +1,6 @@
 /* eslint-disable no-undef */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiClient, ApiError, type BackendHealthResponse, type BackendPortfolioResponse } from '@/shared/api/client';
+import { ApiClient, ApiError, type BackendAnimeImageUpscaleResponse, type BackendComfyUIImageGenerationResponse, type BackendHealthResponse, type BackendPortfolioResponse } from '@/shared/api/client';
 
 describe('ApiClient', () => {
   const baseUrl = 'http://localhost:8000';
@@ -96,6 +96,82 @@ describe('ApiClient', () => {
     const [url, options] = fetchMock.mock.calls[0];
     expect(url).toBe(`${baseUrl}/api/expenses/123`);
     expect(options).toMatchObject({ method: 'DELETE' });
+  });
+
+  it('generateComfyUIImage posts generation payload', async () => {
+    const client = new ApiClient(baseUrl, token);
+    const mockResponse: BackendComfyUIImageGenerationResponse = {
+      request: '창가에서 자는 고양이',
+      llm_model: 'cq_gemma4_e4b_q8.gguf',
+      tool_name: 'generate_comfyui_image',
+      tool_prompt: 'A warm storybook illustration of a cat sleeping by a window.',
+      negative_prompt: 'blurry',
+      width: 1024,
+      height: 1024,
+      steps: 20,
+      cfg: 4,
+      seed: 1234,
+      prompt_id: 'prompt-1',
+      filename: 'e4b.png',
+      subfolder: '',
+      image_data_url: 'data:image/png;base64,AAAA',
+    };
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => mockResponse,
+    } as Response);
+
+    const result = await client.generateComfyUIImage({
+      request: '창가에서 자는 고양이',
+      width: 1024,
+      height: 1024,
+    });
+
+    expect(result).toEqual(mockResponse);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe(`${baseUrl}/api/images/generate`);
+    expect(options).toMatchObject({ method: 'POST' });
+    expect((options as RequestInit).body).toBe(JSON.stringify({
+      request: '창가에서 자는 고양이',
+      width: 1024,
+      height: 1024,
+    }));
+  });
+
+  it('upscaleAnimeImage posts upscale payload', async () => {
+    const client = new ApiClient(baseUrl, token);
+    const mockResponse: BackendAnimeImageUpscaleResponse = {
+      model: 'realesrgan-x4plus-anime',
+      scale: 4,
+      filename: 'anime_upscaled_x4.png',
+      image_data_url: 'data:image/png;base64,BBBB',
+    };
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => mockResponse,
+    } as Response);
+
+    const result = await client.upscaleAnimeImage({
+      image_data_url: 'data:image/png;base64,AAAA',
+      model: 'realesrgan-x4plus-anime',
+      scale: 4,
+      output_format: 'png',
+    });
+
+    expect(result).toEqual(mockResponse);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe(`${baseUrl}/api/images/upscale`);
+    expect(options).toMatchObject({ method: 'POST' });
+    expect((options as RequestInit).body).toBe(JSON.stringify({
+      image_data_url: 'data:image/png;base64,AAAA',
+      model: 'realesrgan-x4plus-anime',
+      scale: 4,
+      output_format: 'png',
+    }));
   });
 
   it('throws ApiError when response is not ok', async () => {

@@ -10,6 +10,7 @@ export { TradesPage } from './TradesPage';
 export { ExchangePage } from './ExchangePage';
 export { ExpensesPage } from './ExpensesPage';
 export { AiReportPage } from './AiReportPage';
+export { ImageGenerationPage } from './ImageGenerationPage';
 export { AddAssetPage } from './AddAssetPage';
 export { SettingsPage } from './SettingsPage';
 export { AuthCallbackPage } from './AuthCallbackPage';

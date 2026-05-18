@@ -23,6 +23,8 @@ import type {
     BackendNewsSearchResponse,
     BackendAssetUpdatePayload,
     BackendAssetCreatePayload,
+    BackendComfyUIImageGenerationResponse,
+    BackendAnimeImageUpscaleResponse,
 } from './types';
 import type { CreateHeadersFn, RequestFn } from './core';
 import { fetchPortfolio, restorePortfolio, fetchSnapshots, createSnapshot } from './portfolio';
@@ -68,6 +70,7 @@ import {
     updateExpense,
     uploadExpenseFile,
 } from './expenses';
+import { generateComfyUIImage, upscaleAnimeImage } from './images';
 
 export class ApiClient {
     private readonly baseUrl: string;
@@ -412,6 +415,27 @@ export class ApiClient {
 
     async deleteReport(reportId: number): Promise<void> {
         return deleteReport(this.requestFn, reportId);
+    }
+
+    // --- Images ---
+
+    async generateComfyUIImage(payload: {
+        request: string;
+        width?: number;
+        height?: number;
+        seed?: number;
+        steps?: number;
+    }): Promise<BackendComfyUIImageGenerationResponse> {
+        return generateComfyUIImage(this.requestFn, payload);
+    }
+
+    async upscaleAnimeImage(payload: {
+        image_data_url: string;
+        model?: string;
+        scale?: number;
+        output_format?: 'png' | 'jpg';
+    }): Promise<BackendAnimeImageUpscaleResponse> {
+        return upscaleAnimeImage(this.requestFn, payload);
     }
 
     // --- News ---

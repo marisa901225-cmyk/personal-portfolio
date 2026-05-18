@@ -324,6 +324,30 @@ export interface BackendSavedAiReport {
     created_at: string;
 }
 
+export interface BackendComfyUIImageGenerationResponse {
+    request: string;
+    llm_model: string;
+    tool_name: string;
+    tool_prompt: string;
+    negative_prompt: string;
+    width: number;
+    height: number;
+    steps: number;
+    cfg: number;
+    seed: number;
+    prompt_id: string;
+    filename: string;
+    subfolder: string;
+    image_data_url: string;
+}
+
+export interface BackendAnimeImageUpscaleResponse {
+    model: string;
+    scale: number;
+    filename: string;
+    image_data_url: string;
+}
+
 // --- News ---
 
 export interface BackendNewsArticle {

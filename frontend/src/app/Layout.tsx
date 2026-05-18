@@ -9,6 +9,7 @@ import {
     ArrowLeftRight,
     Wallet,
     Sparkles,
+    ImagePlus,
     Bell,
     RefreshCw,
     AlertCircle,
@@ -29,6 +30,7 @@ const navItems = [
     { to: '/exchange', icon: ArrowLeftRight, label: '환전 내역' },
     { to: '/expenses', icon: Wallet, label: '가계부' },
     { to: '/ai-report', icon: Sparkles, label: 'AI 리포트' },
+    { to: '/image-generation', icon: ImagePlus, label: '이미지 생성' },
     { to: '/add-asset', icon: PlusCircle, label: '자산 추가' },
 ];
 
@@ -333,6 +335,7 @@ function getPageTitle(pathname: string): string {
         '/exchange': '환전 내역',
         '/expenses': '가계부',
         '/ai-report': 'AI 리포트',
+        '/image-generation': '이미지 생성',
         '/add-asset': '자산 추가',
         '/settings': '서버 설정',
     };
@@ -347,6 +350,7 @@ function getPageDescription(pathname: string): string {
         '/exchange': '환전 기록 조회 및 수정',
         '/expenses': '월별 지출/수입 분석',
         '/ai-report': '가계부 + 투자 리포트 생성',
+        '/image-generation': 'e4b가 ComfyUI를 자동 호출해 이미지 생성',
         '/add-asset': '새로운 자산 등록',
         '/settings': '연결 및 환경 설정',
     };

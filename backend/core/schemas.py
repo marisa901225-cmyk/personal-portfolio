@@ -440,3 +440,42 @@ class SchedulerStateRead(BaseModel):
     last_failure_at: Optional[datetime] = None
     message: Optional[str] = None
     updated_at: datetime
+
+
+class ComfyUIImageGenerationRequest(BaseModel):
+    request: str = Field(..., min_length=3, description="사용자의 자연어 이미지 생성 요청")
+    width: int = Field(default=1024, ge=256, le=1536)
+    height: int = Field(default=1024, ge=256, le=1536)
+    seed: Optional[int] = Field(default=None, ge=0)
+    steps: Optional[int] = Field(default=None, ge=8, le=60)
+
+
+class ComfyUIImageGenerationResponse(BaseModel):
+    request: str
+    llm_model: str
+    tool_name: str
+    tool_prompt: str
+    negative_prompt: str
+    width: int
+    height: int
+    steps: int
+    cfg: float
+    seed: int
+    prompt_id: str
+    filename: str
+    subfolder: str = ""
+    image_data_url: str
+
+
+class AnimeImageUpscaleRequest(BaseModel):
+    image_data_url: str = Field(..., min_length=32, description="업스케일할 이미지 data URL")
+    model: str = Field(default="realesrgan-x4plus-anime", min_length=1)
+    scale: int = Field(default=4, ge=2, le=4)
+    output_format: Literal["png", "jpg"] = "png"
+
+
+class AnimeImageUpscaleResponse(BaseModel):
+    model: str
+    scale: int
+    filename: str
+    image_data_url: str
