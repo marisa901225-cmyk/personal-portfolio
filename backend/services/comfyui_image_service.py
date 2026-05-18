@@ -9,10 +9,12 @@ import re
 import subprocess
 import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
+import httpx
 import requests
 
 from ..core.config import settings
@@ -38,6 +40,9 @@ DEFAULT_FILENAME_PREFIX = "e4b_comfyui"
 DEFAULT_CLIENT_ID = "myasset-e4b-comfyui"
 DEFAULT_TIMEOUT_SEC = 180
 MAX_UPSCALE_SOURCE_BYTES = 30 * 1024 * 1024
+VRAM_MODE_ALWAYS = "always"
+VRAM_MODE_AUTO = "auto"
+VRAM_MODE_OFF = "off"
 
 
 class ImageGenerationError(RuntimeError):
@@ -57,6 +62,25 @@ class _ToolSpec:
     steps: int
     cfg: float
     seed: int
+
+
+@dataclass(frozen=True)
+class _GpuMemory:
+    used_mb: float
+    utilization_percent: float
+
+    @property
+    def estimated_total_mb(self) -> float | None:
+        if self.utilization_percent <= 0:
+            return None
+        return self.used_mb * 100.0 / self.utilization_percent
+
+    @property
+    def estimated_free_mb(self) -> float | None:
+        total = self.estimated_total_mb
+        if total is None:
+            return None
+        return max(total - self.used_mb, 0.0)
 
 
 def _llm_headers() -> dict[str, str]:
@@ -439,6 +463,118 @@ def _read_image_data_url(path: Path, output_format: str) -> str:
     return f"data:{content_type};base64,{encoded}"
 
 
+def _query_gpu_memory() -> _GpuMemory | None:
+    try:
+        completed = subprocess.run(
+            [settings.xpu_smi_path, "stats", "-d", "0", "-j"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("Failed to query GPU memory with xpu-smi: %s", exc)
+        return None
+
+    try:
+        data = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        logger.warning("Failed to parse xpu-smi JSON output: %s", exc)
+        return None
+
+    metrics = data.get("device_level") or []
+    values = {
+        str(item.get("metrics_type") or ""): item.get("value")
+        for item in metrics
+        if isinstance(item, dict)
+    }
+    try:
+        used_mb = float(values["XPUM_STATS_MEMORY_USED"])
+        utilization_percent = float(values["XPUM_STATS_MEMORY_UTILIZATION"])
+    except (KeyError, TypeError, ValueError):
+        logger.warning("xpu-smi output did not include memory used/utilization metrics")
+        return None
+
+    return _GpuMemory(used_mb=used_mb, utilization_percent=utilization_percent)
+
+
+def _docker_client() -> httpx.Client:
+    transport = httpx.HTTPTransport(uds=settings.docker_socket_path)
+    return httpx.Client(transport=transport, base_url="http://docker", timeout=20.0)
+
+
+def _get_container_state(client: httpx.Client, container_name: str) -> tuple[str | None, bool]:
+    response = client.get(f"/containers/{container_name}/json")
+    if response.status_code == 404:
+        return None, False
+    response.raise_for_status()
+    data = response.json() or {}
+    state = data.get("State") or {}
+    return str(data.get("Id") or ""), bool(state.get("Running"))
+
+
+def _set_container_running(container_name: str, should_run: bool) -> bool:
+    action = "start" if should_run else "stop"
+    with _docker_client() as client:
+        container_id, running = _get_container_state(client, container_name)
+        if not container_id:
+            logger.warning("ComfyUI container not found for VRAM control: %s", container_name)
+            return False
+        if running == should_run:
+            return False
+
+        params = {"t": 10} if action == "stop" else None
+        response = client.post(f"/containers/{container_id}/{action}", params=params)
+        if response.status_code not in {204, 304}:
+            response.raise_for_status()
+        return True
+
+
+def _should_stop_comfyui_for_upscale() -> bool:
+    mode = (settings.realesrgan_comfyui_vram_mode or VRAM_MODE_AUTO).strip().lower()
+    if mode == VRAM_MODE_OFF:
+        return False
+    if mode == VRAM_MODE_ALWAYS:
+        return True
+
+    gpu_memory = _query_gpu_memory()
+    if gpu_memory is None:
+        return False
+    estimated_free_mb = gpu_memory.estimated_free_mb
+    if estimated_free_mb is None:
+        return False
+
+    should_stop = estimated_free_mb < settings.realesrgan_min_free_vram_mb
+    logger.info(
+        "Anime upscale VRAM check: used=%.1fMB util=%.1f%% free≈%.1fMB threshold=%.1fMB stop_comfyui=%s",
+        gpu_memory.used_mb,
+        gpu_memory.utilization_percent,
+        estimated_free_mb,
+        settings.realesrgan_min_free_vram_mb,
+        should_stop,
+    )
+    return should_stop
+
+
+@contextmanager
+def _comfyui_vram_guard() -> Iterator[None]:
+    stopped = False
+    if _should_stop_comfyui_for_upscale():
+        stopped = _set_container_running(settings.realesrgan_comfyui_container_name, should_run=False)
+        if stopped:
+            logger.info("Stopped ComfyUI before anime upscaling to free VRAM.")
+            time.sleep(2.0)
+    try:
+        yield
+    finally:
+        if stopped:
+            try:
+                _set_container_running(settings.realesrgan_comfyui_container_name, should_run=True)
+                logger.info("Restarted ComfyUI after anime upscaling.")
+            except Exception:
+                logger.exception("Failed to restart ComfyUI after anime upscaling")
+
+
 def upscale_anime_image(request: AnimeImageUpscaleRequest) -> AnimeImageUpscaleResponse:
     allowed_models = _load_anime_upscale_model_ids()
     if request.model not in allowed_models:
@@ -474,19 +610,22 @@ def upscale_anime_image(request: AnimeImageUpscaleRequest) -> AnimeImageUpscaleR
             request.output_format,
         ]
         try:
-            completed = subprocess.run(
-                command,
-                cwd=str(model_dir),
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=settings.realesrgan_timeout_sec,
-            )
+            with _comfyui_vram_guard():
+                completed = subprocess.run(
+                    command,
+                    cwd=str(model_dir),
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=settings.realesrgan_timeout_sec,
+                )
         except subprocess.TimeoutExpired as exc:
             raise ImageUpscaleError("Anime upscaling timed out") from exc
         except subprocess.CalledProcessError as exc:
             stderr = (exc.stderr or exc.stdout or "").strip()[-1200:]
             raise ImageUpscaleError(f"Anime upscaling failed: {stderr}") from exc
+        except httpx.HTTPError as exc:
+            raise ImageUpscaleError(f"Failed to control ComfyUI container for VRAM: {exc}") from exc
 
         if not output_path.is_file():
             stdout = (completed.stdout or "").strip()[-500:]

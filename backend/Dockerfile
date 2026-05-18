@@ -3,13 +3,16 @@
 #   docker build -f Dockerfile.base -t myasset-base:latest .
 FROM myasset-base:latest
 
-# Install lightweight backup utilities (sqlite3 for hot backup, zip for encryption)
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install runtime utilities. xpu-smi is used to check Intel GPU VRAM before upscaling.
+RUN printf 'deb [trusted=yes] https://ppa.launchpadcontent.net/kobuk-team/intel-graphics/ubuntu noble main\n' \
+    > /etc/apt/sources.list.d/kobuk-intel-graphics.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
     iputils-ping \
     libgomp1 \
     libvulkan1 \
     mesa-vulkan-drivers \
     sqlite3 \
+    xpu-smi \
     zip \
     && rm -rf /var/lib/apt/lists/*
 

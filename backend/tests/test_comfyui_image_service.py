@@ -8,6 +8,7 @@ import pytest
 from backend.core.schemas import AnimeImageUpscaleRequest, ComfyUIImageGenerationRequest
 from backend.services.comfyui_image_service import (
     ImageGenerationError,
+    _GpuMemory,
     generate_image_with_e4b,
     upscale_anime_image,
 )
@@ -173,6 +174,7 @@ def test_upscale_anime_image_runs_realesrgan_model(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_model_dir", str(tool_dir))
     monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_models_config_path", str(config_path))
     monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_timeout_sec", 5)
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_comfyui_vram_mode", "off")
 
     source_bytes = b"\x89PNG\r\nfake"
     result = upscale_anime_image(
@@ -187,3 +189,60 @@ def test_upscale_anime_image_runs_realesrgan_model(monkeypatch: pytest.MonkeyPat
     assert result.scale == 4
     assert result.filename == "anime_upscaled_x4.png"
     assert result.image_data_url == f"data:image/png;base64,{base64.b64encode(source_bytes).decode('ascii')}"
+
+
+def test_upscale_anime_image_stops_comfyui_when_vram_is_low(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    tool_dir = tmp_path / "realesrgan"
+    models_dir = tool_dir / "models"
+    models_dir.mkdir(parents=True)
+    (models_dir / "realesrgan-x4plus-anime.bin").write_bytes(b"model")
+    (models_dir / "realesrgan-x4plus-anime.param").write_text("param", encoding="utf-8")
+
+    bin_path = tool_dir / "realesrgan-ncnn-vulkan"
+    bin_path.write_text(
+        "#!/usr/bin/env bash\n"
+        "while [[ $# -gt 0 ]]; do\n"
+        "  case \"$1\" in\n"
+        "    -i) input=\"$2\"; shift 2 ;;\n"
+        "    -o) output=\"$2\"; shift 2 ;;\n"
+        "    *) shift ;;\n"
+        "  esac\n"
+        "done\n"
+        "cp \"$input\" \"$output\"\n",
+        encoding="utf-8",
+    )
+    bin_path.chmod(0o755)
+
+    config_path = tmp_path / "models.json"
+    config_path.write_text(
+        json.dumps({"models": [{"id": "realesrgan-x4plus-anime", "scale": 4}]}),
+        encoding="utf-8",
+    )
+
+    calls: list[bool] = []
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_bin_path", str(bin_path))
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_model_dir", str(tool_dir))
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_models_config_path", str(config_path))
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_timeout_sec", 5)
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_comfyui_vram_mode", "auto")
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_min_free_vram_mb", 1536.0)
+    monkeypatch.setattr(
+        "backend.services.comfyui_image_service._query_gpu_memory",
+        lambda: _GpuMemory(used_mb=10_928.0, utilization_percent=91.62),
+    )
+    monkeypatch.setattr(
+        "backend.services.comfyui_image_service._set_container_running",
+        lambda _container_name, *, should_run: calls.append(should_run) or True,
+    )
+
+    source_bytes = b"\x89PNG\r\nfake"
+    result = upscale_anime_image(
+        AnimeImageUpscaleRequest(
+            image_data_url=f"data:image/png;base64,{base64.b64encode(source_bytes).decode('ascii')}",
+            model="realesrgan-x4plus-anime",
+            scale=4,
+        )
+    )
+
+    assert result.filename == "anime_upscaled_x4.png"
+    assert calls == [False, True]

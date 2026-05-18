@@ -103,6 +103,14 @@ class Settings(BaseSettings):
         validation_alias="REALESRGAN_MODELS_CONFIG_PATH",
     )
     realesrgan_timeout_sec: int = Field(default=180, validation_alias="REALESRGAN_TIMEOUT_SEC")
+    realesrgan_comfyui_vram_mode: str = Field(default="auto", validation_alias="REALESRGAN_COMFYUI_VRAM_MODE")
+    realesrgan_min_free_vram_mb: float = Field(default=1536.0, validation_alias="REALESRGAN_MIN_FREE_VRAM_MB")
+    xpu_smi_path: str = Field(default="xpu-smi", validation_alias="XPU_SMI_PATH")
+    realesrgan_comfyui_container_name: str = Field(
+        default="myasset-comfyui",
+        validation_alias="REALESRGAN_COMFYUI_CONTAINER_NAME",
+    )
+    docker_socket_path: str = Field(default="/var/run/docker.sock", validation_alias="DOCKER_SOCKET_PATH")
 
     # KIS (한국투자증권) 설정
     kis_config_dir: Optional[str] = Field(default=None, validation_alias="KIS_CONFIG_DIR")
