@@ -189,7 +189,7 @@ def _build_image_planner_payload(
                 ),
             },
         ],
-        "max_tokens": 384,
+        "max_tokens": 768,
         "temperature": 0.2,
     }
     if prefer_json_content:
