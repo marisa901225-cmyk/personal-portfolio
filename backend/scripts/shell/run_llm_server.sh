@@ -43,6 +43,22 @@ resolve_model_path() {
     echo "$MODEL_PATH_DEFAULT"
 }
 
+resolve_mmproj_path() {
+    local model_path="$1"
+    local model_name
+    model_name=$(basename "$model_path" | tr '[:upper:]' '[:lower:]')
+
+    if [[ "$model_name" == *"e4b"* ]] && [ -f "/data/gemma-4-E4B.mmproj-Q8_0.gguf" ]; then
+        echo "/data/gemma-4-E4B.mmproj-Q8_0.gguf"
+        return
+    fi
+    if [[ "$model_name" == *"e2b"* ]] && [ -f "/data/mmproj-gemma-4-E2B-it-Q8_0.gguf" ]; then
+        echo "/data/mmproj-gemma-4-E2B-it-Q8_0.gguf"
+        return
+    fi
+    echo "$MMPROJ_PATH"
+}
+
 # 모델 이름에 따라 chat template 옵션 결정
 get_template_args() {
     local model_path="$1"
@@ -106,6 +122,7 @@ get_template_args() {
 
 while true; do
     MODEL_PATH=$(resolve_model_path)
+    RESOLVED_MMPROJ_PATH=$(resolve_mmproj_path "$MODEL_PATH")
     TEMPLATE_ARGS=$(get_template_args "$MODEL_PATH")
     DEVICE_ARGS=""
     if [ -n "$DEVICE" ]; then
@@ -119,8 +136,8 @@ while true; do
         CACHE_ARGS="$CACHE_ARGS --cache-type-v $CACHE_TYPE_V"
     fi
     MMPROJ_ARGS=""
-    if [ -n "$MMPROJ_PATH" ]; then
-        MMPROJ_ARGS="--mmproj $MMPROJ_PATH"
+    if [ -n "$RESOLVED_MMPROJ_PATH" ]; then
+        MMPROJ_ARGS="--mmproj $RESOLVED_MMPROJ_PATH"
     fi
     MEDIA_ARGS=""
     if [ -n "$MEDIA_PATH" ]; then
