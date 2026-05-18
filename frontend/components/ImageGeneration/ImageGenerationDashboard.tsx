@@ -532,7 +532,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                           <img
                             src={image.image_data_url}
                             alt={image.filename}
-                            className="aspect-square w-full object-cover"
+                            className="aspect-square w-full bg-slate-950 object-contain"
                             loading="lazy"
                           />
                           <div className="space-y-1 px-2.5 py-2">
@@ -693,7 +693,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                 <img
                   src={activeImageDataUrl}
                   alt={activeImageLabel || '이미지 결과'}
-                  className="aspect-square w-full object-cover"
+                  className="max-h-[72vh] w-full bg-slate-950 object-contain"
                 />
               ) : (
                 <div className="flex aspect-square items-center justify-center bg-[linear-gradient(135deg,rgba(99,102,241,0.18),rgba(15,23,42,0.95))] p-8 text-center">
