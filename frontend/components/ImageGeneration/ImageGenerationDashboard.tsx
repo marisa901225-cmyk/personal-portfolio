@@ -15,6 +15,7 @@ interface ImageGenerationDashboardProps {
 }
 
 type CanvasPreset = 'square' | 'portrait' | 'landscape' | 'wide' | 'custom';
+type UpscaleResolutionPreset = 'native4x' | 'fullhd' | 'square2k' | 'uhd4k' | 'custom';
 type StudioMode = 'generate' | 'upscale';
 
 const CANVAS_PRESETS: Record<CanvasPreset, { label: string; width: number; height: number }> = {
@@ -25,7 +26,16 @@ const CANVAS_PRESETS: Record<CanvasPreset, { label: string; width: number; heigh
   custom: { label: '직접 입력', width: 1024, height: 1024 },
 };
 
+const UPSCALE_RESOLUTION_PRESETS: Record<UpscaleResolutionPreset, { label: string; width?: number; height?: number }> = {
+  native4x: { label: '모델 x4 원본' },
+  fullhd: { label: 'FHD', width: 1920, height: 1080 },
+  square2k: { label: '2K 정사각', width: 2048, height: 2048 },
+  uhd4k: { label: '4K UHD', width: 3840, height: 2160 },
+  custom: { label: '직접 입력', width: 2048, height: 2048 },
+};
+
 const clampResolution = (value: number) => Math.min(Math.max(value || 1024, 512), 1536);
+const clampUpscaleResolution = (value: number) => Math.min(Math.max(value || 2048, 256), 4096);
 
 const formatServerImageTime = (value: string) =>
   new Intl.DateTimeFormat('ko-KR', {
@@ -51,6 +61,9 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
   const [preset, setPreset] = useState<CanvasPreset>('square');
   const [customWidth, setCustomWidth] = useState(1024);
   const [customHeight, setCustomHeight] = useState(1024);
+  const [upscaleResolution, setUpscaleResolution] = useState<UpscaleResolutionPreset>('native4x');
+  const [upscaleCustomWidth, setUpscaleCustomWidth] = useState(2048);
+  const [upscaleCustomHeight, setUpscaleCustomHeight] = useState(2048);
   const [steps, setSteps] = useState(20);
   const [seed, setSeed] = useState('');
   const [upscaleSourceDataUrl, setUpscaleSourceDataUrl] = useState('');
@@ -70,6 +83,19 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
       ? { label: '직접 입력', width: clampResolution(customWidth), height: clampResolution(customHeight) }
       : CANVAS_PRESETS[preset]
   ), [customHeight, customWidth, preset]);
+  const upscaleTarget = useMemo(() => {
+    if (upscaleResolution === 'native4x') {
+      return { label: '모델 x4 원본' };
+    }
+    if (upscaleResolution === 'custom') {
+      return {
+        label: '직접 입력',
+        width: clampUpscaleResolution(upscaleCustomWidth),
+        height: clampUpscaleResolution(upscaleCustomHeight),
+      };
+    }
+    return UPSCALE_RESOLUTION_PRESETS[upscaleResolution];
+  }, [upscaleCustomHeight, upscaleCustomWidth, upscaleResolution]);
   const activeImageDataUrl = upscaleResult?.image_data_url ?? result?.image_data_url ?? upscaleSourceDataUrl;
   const activeImageLabel = upscaleResult?.filename ?? result?.request ?? upscaleSourceName;
 
@@ -203,6 +229,8 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
         image_data_url: imageDataUrl,
         model: upscaleModel,
         scale: 4,
+        target_width: upscaleTarget.width,
+        target_height: upscaleTarget.height,
         output_format: 'png',
       });
       startTransition(() => {
@@ -497,6 +525,63 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                   </select>
                 </div>
 
+                <div>
+                  <div className="mb-2 text-sm font-semibold text-slate-800">업스케일 해상도</div>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                    {(Object.entries(UPSCALE_RESOLUTION_PRESETS) as Array<[UpscaleResolutionPreset, { label: string; width?: number; height?: number }]>).map(([key, value]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setUpscaleResolution(key)}
+                        className={`rounded-2xl border px-3 py-3 text-sm font-medium transition ${
+                          upscaleResolution === key
+                            ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                        }`}
+                      >
+                        <div>{value.label}</div>
+                        <div className="mt-1 text-[11px] text-slate-400">
+                          {key === 'native4x'
+                            ? '모델 결과 그대로'
+                            : key === 'custom'
+                              ? `${upscaleTarget.width} × ${upscaleTarget.height}`
+                              : `${value.width} × ${value.height}`}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  {upscaleResolution === 'custom' && (
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <label className="text-xs font-semibold text-slate-600" htmlFor="upscale-custom-width">
+                        가로
+                        <input
+                          id="upscale-custom-width"
+                          type="number"
+                          min={256}
+                          max={4096}
+                          step={64}
+                          value={upscaleCustomWidth}
+                          onChange={(event) => setUpscaleCustomWidth(clampUpscaleResolution(Number(event.target.value)))}
+                          className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                        />
+                      </label>
+                      <label className="text-xs font-semibold text-slate-600" htmlFor="upscale-custom-height">
+                        세로
+                        <input
+                          id="upscale-custom-height"
+                          type="number"
+                          min={256}
+                          max={4096}
+                          step={64}
+                          value={upscaleCustomHeight}
+                          onChange={(event) => setUpscaleCustomHeight(clampUpscaleResolution(Number(event.target.value)))}
+                          className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                        />
+                      </label>
+                    </div>
+                  )}
+                </div>
+
                 {error && (
                   <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                     {error}
@@ -591,6 +676,8 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                       <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Upscale</div>
                       <p className="mt-1 text-slate-200">
                         {upscaleResult.model} · x{upscaleResult.scale}
+                        {' · '}
+                        {upscaleResult.width} × {upscaleResult.height}
                       </p>
                     </div>
                   )}

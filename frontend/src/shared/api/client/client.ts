@@ -434,6 +434,8 @@ export class ApiClient {
         image_data_url: string;
         model?: string;
         scale?: number;
+        target_width?: number;
+        target_height?: number;
         output_format?: 'png' | 'jpg';
     }): Promise<BackendAnimeImageUpscaleResponse> {
         return upscaleAnimeImage(this.requestFn, payload);

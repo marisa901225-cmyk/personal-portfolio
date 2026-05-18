@@ -5,6 +5,7 @@ import json
 import os
 
 import pytest
+from PIL import Image
 
 from backend.core.schemas import AnimeImageUpscaleRequest, ComfyUIImageGenerationRequest
 from backend.services.comfyui_image_service import (
@@ -200,7 +201,9 @@ def test_upscale_anime_image_runs_realesrgan_model(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_timeout_sec", 5)
     monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_comfyui_vram_mode", "off")
 
-    source_bytes = b"\x89PNG\r\nfake"
+    source_path = tmp_path / "source.png"
+    Image.new("RGB", (2, 2), "white").save(source_path)
+    source_bytes = source_path.read_bytes()
     result = upscale_anime_image(
         AnimeImageUpscaleRequest(
             image_data_url=f"data:image/png;base64,{base64.b64encode(source_bytes).decode('ascii')}",
@@ -211,8 +214,67 @@ def test_upscale_anime_image_runs_realesrgan_model(monkeypatch: pytest.MonkeyPat
 
     assert result.model == "realesrgan-x4plus-anime"
     assert result.scale == 4
+    assert result.width == 2
+    assert result.height == 2
     assert result.filename == "anime_upscaled_x4.png"
     assert result.image_data_url == f"data:image/png;base64,{base64.b64encode(source_bytes).decode('ascii')}"
+
+
+def test_upscale_anime_image_resizes_to_target_resolution(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    tool_dir = tmp_path / "realesrgan"
+    models_dir = tool_dir / "models"
+    models_dir.mkdir(parents=True)
+    (models_dir / "realesrgan-x4plus-anime.bin").write_bytes(b"model")
+    (models_dir / "realesrgan-x4plus-anime.param").write_text("param", encoding="utf-8")
+
+    bin_path = tool_dir / "realesrgan-ncnn-vulkan"
+    bin_path.write_text(
+        "#!/usr/bin/env bash\n"
+        "while [[ $# -gt 0 ]]; do\n"
+        "  case \"$1\" in\n"
+        "    -i) input=\"$2\"; shift 2 ;;\n"
+        "    -o) output=\"$2\"; shift 2 ;;\n"
+        "    *) shift ;;\n"
+        "  esac\n"
+        "done\n"
+        "cp \"$input\" \"$output\"\n",
+        encoding="utf-8",
+    )
+    bin_path.chmod(0o755)
+
+    config_path = tmp_path / "models.json"
+    config_path.write_text(
+        json.dumps({"models": [{"id": "realesrgan-x4plus-anime", "scale": 4}]}),
+        encoding="utf-8",
+    )
+
+    source_path = tmp_path / "source.png"
+    Image.new("RGB", (2, 2), "white").save(source_path)
+    source_bytes = source_path.read_bytes()
+
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_bin_path", str(bin_path))
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_model_dir", str(tool_dir))
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_models_config_path", str(config_path))
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_timeout_sec", 5)
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_comfyui_vram_mode", "off")
+
+    result = upscale_anime_image(
+        AnimeImageUpscaleRequest(
+            image_data_url=f"data:image/png;base64,{base64.b64encode(source_bytes).decode('ascii')}",
+            model="realesrgan-x4plus-anime",
+            scale=4,
+            target_width=256,
+            target_height=256,
+        )
+    )
+
+    assert result.width == 256
+    assert result.height == 256
+    encoded = result.image_data_url.split(",", 1)[1]
+    output_path = tmp_path / "output.png"
+    output_path.write_bytes(base64.b64decode(encoded))
+    with Image.open(output_path) as image:
+        assert image.size == (256, 256)
 
 
 def test_upscale_anime_image_stops_comfyui_when_vram_is_low(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
@@ -259,7 +321,9 @@ def test_upscale_anime_image_stops_comfyui_when_vram_is_low(monkeypatch: pytest.
         lambda _container_name, *, should_run: calls.append(should_run) or True,
     )
 
-    source_bytes = b"\x89PNG\r\nfake"
+    source_path = tmp_path / "source.png"
+    Image.new("RGB", (2, 2), "white").save(source_path)
+    source_bytes = source_path.read_bytes()
     result = upscale_anime_image(
         AnimeImageUpscaleRequest(
             image_data_url=f"data:image/png;base64,{base64.b64encode(source_bytes).decode('ascii')}",

@@ -145,6 +145,8 @@ describe('ApiClient', () => {
     const mockResponse: BackendAnimeImageUpscaleResponse = {
       model: 'realesrgan-x4plus-anime',
       scale: 4,
+      width: 2048,
+      height: 2048,
       filename: 'anime_upscaled_x4.png',
       image_data_url: 'data:image/png;base64,BBBB',
     };
@@ -159,6 +161,8 @@ describe('ApiClient', () => {
       image_data_url: 'data:image/png;base64,AAAA',
       model: 'realesrgan-x4plus-anime',
       scale: 4,
+      target_width: 2048,
+      target_height: 2048,
       output_format: 'png',
     });
 
@@ -170,6 +174,8 @@ describe('ApiClient', () => {
       image_data_url: 'data:image/png;base64,AAAA',
       model: 'realesrgan-x4plus-anime',
       scale: 4,
+      target_width: 2048,
+      target_height: 2048,
       output_format: 'png',
     }));
   });

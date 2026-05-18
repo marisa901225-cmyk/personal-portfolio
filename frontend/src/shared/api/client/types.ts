@@ -344,6 +344,8 @@ export interface BackendComfyUIImageGenerationResponse {
 export interface BackendAnimeImageUpscaleResponse {
     model: string;
     scale: number;
+    width: number;
+    height: number;
     filename: string;
     image_data_url: string;
 }

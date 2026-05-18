@@ -17,6 +17,7 @@ from typing import Any, Iterator
 
 import httpx
 import requests
+from PIL import Image
 
 from ..core.config import settings
 from ..core.schemas import (
@@ -466,6 +467,25 @@ def _read_image_data_url(path: Path, output_format: str) -> str:
     return f"data:{content_type};base64,{encoded}"
 
 
+def _prepare_upscale_output(path: Path, request: AnimeImageUpscaleRequest) -> tuple[Path, int, int]:
+    target_width = request.target_width
+    target_height = request.target_height
+    if target_width is None and target_height is None:
+        with Image.open(path) as image:
+            return path, image.width, image.height
+
+    if target_width is None or target_height is None:
+        raise ImageUpscaleError("target_width and target_height must be provided together")
+
+    resized_path = path.with_name(f"resized.{request.output_format}")
+    with Image.open(path) as image:
+        resized = image.resize((target_width, target_height), Image.Resampling.LANCZOS)
+        if request.output_format == "jpg" and resized.mode not in {"RGB", "L"}:
+            resized = resized.convert("RGB")
+        resized.save(resized_path, format="JPEG" if request.output_format == "jpg" else "PNG")
+    return resized_path, target_width, target_height
+
+
 def _image_file_data_url(path: Path) -> str:
     content_type = mimetypes.guess_type(path.name)[0] or "image/png"
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
@@ -671,11 +691,14 @@ def upscale_anime_image(request: AnimeImageUpscaleRequest) -> AnimeImageUpscaleR
             stdout = (completed.stdout or "").strip()[-500:]
             raise ImageUpscaleError(f"Anime upscaling completed without an output file: {stdout}")
 
-        image_data_url = _read_image_data_url(output_path, request.output_format)
+        final_path, output_width, output_height = _prepare_upscale_output(output_path, request)
+        image_data_url = _read_image_data_url(final_path, request.output_format)
 
     return AnimeImageUpscaleResponse(
         model=request.model,
         scale=request.scale,
+        width=output_width,
+        height=output_height,
         filename=f"anime_upscaled_x{request.scale}.{request.output_format}",
         image_data_url=image_data_url,
     )

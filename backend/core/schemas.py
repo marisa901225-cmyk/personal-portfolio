@@ -471,12 +471,16 @@ class AnimeImageUpscaleRequest(BaseModel):
     image_data_url: str = Field(..., min_length=32, description="업스케일할 이미지 data URL")
     model: str = Field(default="realesrgan-x4plus-anime", min_length=1)
     scale: int = Field(default=4, ge=2, le=4)
+    target_width: Optional[int] = Field(default=None, ge=256, le=4096)
+    target_height: Optional[int] = Field(default=None, ge=256, le=4096)
     output_format: Literal["png", "jpg"] = "png"
 
 
 class AnimeImageUpscaleResponse(BaseModel):
     model: str
     scale: int
+    width: int
+    height: int
     filename: str
     image_data_url: str
 
