@@ -145,6 +145,24 @@ class AlarmLlmLogicV2ParityTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("사건:", stripped)
         self.assertTrue(stripped.startswith("제목: 로봇의 커피 사고"))
 
+    def test_random_message_strips_inline_and_spaced_reasoning_tags(self):
+        samples = [
+            (
+                "<reason> 사건: 분실물 센터에 온 이상한 물건을 찾다가, 사실은 자기 물건이 아니라는 걸 깨닫는 상황.\n"
+                "웃긴 디테일: 아주 비싼 기념품처럼 포장된 낡은 양말을 발견함.\n"
+                "마지막 반전: 그 물건이 사실은 내가 어제 실수로 버린 것임. </reason>\n"
+                "제목: 양말의 귀환\n본문:\n분실물 센터에 갔다."
+            ),
+            "< reason > 사건: 공백 태그 </ reason >\n제목: 공백 태그도 제거",
+        ]
+
+        for sample in samples:
+            stripped = _strip_reasoning_tags(sample)
+            self.assertNotIn("사건:", stripped)
+            self.assertNotIn("웃긴 디테일:", stripped)
+            self.assertNotIn("<reason", stripped.lower())
+            self.assertIn("제목:", stripped)
+
     def test_random_topic_session_resets_after_threshold(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = os.path.join(tmpdir, "random_topic_llm_session_state.json")
