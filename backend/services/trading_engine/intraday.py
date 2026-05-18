@@ -33,6 +33,37 @@ def sort_intraday_bars(bars: pd.DataFrame) -> pd.DataFrame:
     return view.sort_index(ascending=True)
 
 
+def compact_intraday_bars(bars: pd.DataFrame, *, limit: int = 12) -> list[dict[str, object]]:
+    """Return a short OHLCV trail suitable for LLM risk prompts."""
+    if bars is None or bars.empty:
+        return []
+
+    rows: list[dict[str, object]] = []
+    for row in sort_intraday_bars(bars).tail(max(1, int(limit))).to_dict("records"):
+        item: dict[str, object] = {}
+        time_value = row.get("time") or row.get("timestamp") or row.get("date")
+        if time_value is not None:
+            item["t"] = str(time_value).strip()
+        for source, target in (
+            ("open", "o"),
+            ("high", "h"),
+            ("low", "l"),
+            ("close", "c"),
+        ):
+            value = parse_numeric(row.get(source))
+            if value is not None:
+                item[target] = round(float(value), 4)
+        volume = parse_numeric(row.get("volume"))
+        if volume is not None:
+            item["v"] = int(volume) if float(volume).is_integer() else round(float(volume), 4)
+        change_pct = parse_numeric(row.get("change_pct"))
+        if change_pct is not None:
+            item["chg"] = round(float(change_pct), 4)
+        if item:
+            rows.append(item)
+    return rows
+
+
 def passes_day_intraday_confirmation(
     api: TradingAPI,
     *,
@@ -86,6 +117,7 @@ def passes_day_intraday_confirmation(
 
     meta = {
         "bars": int(len(recent)),
+        "recent_bars": compact_intraday_bars(sorted_bars, limit=lookback),
         "window_change_pct": round(window_change_pct, 4),
         "last_bar_change_pct": round(last_bar_change_pct, 4),
         "retrace_from_high_pct": round(retrace_from_high_pct, 4),

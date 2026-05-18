@@ -205,6 +205,7 @@ def test_monitor_positions_holds_day_stop_once_when_llm_approves_pullback(tmp_pa
         bot.monitor_positions(now=datetime(2026, 4, 24, 13, 36))
 
     mocked_review.assert_called_once()
+    assert mocked_review.call_args.kwargs["intraday_meta"]["recent_bars"][-1]["c"] == 18_430.0
     assert api.order_calls == []
     assert "027360" in bot.state.open_positions
     assert "027360:2026-04-24T13:02:24" in bot.state.day_stop_llm_reviewed_positions

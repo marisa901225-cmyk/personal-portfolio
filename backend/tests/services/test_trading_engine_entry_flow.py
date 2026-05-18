@@ -37,6 +37,8 @@ def test_passes_day_intraday_confirmation_allows_momentum_pullback_with_quote_fa
     assert ok is True
     assert meta["reason"] == "MOMENTUM_PULLBACK_OK"
     assert meta["day_change_pct"] == 19.97
+    assert meta["recent_bars"][-1]["c"] == 14540.0
+    assert len(meta["recent_bars"]) == 3
 
 def test_passes_day_intraday_confirmation_allows_high_volume_momentum_pullback_defaults() -> None:
     from backend.services.trading_engine.intraday import passes_day_intraday_confirmation
