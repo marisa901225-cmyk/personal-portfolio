@@ -71,7 +71,6 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
   const [mode, setMode] = useState<StudioMode>('generate');
   const [preset, setPreset] = useState<CanvasPreset>('square');
   const [imageModelType, setImageModelType] = useState<ImageModelType>('anime');
-  const [realisticPrompt, setRealisticPrompt] = useState('');
   const [realisticNegativePrompt, setRealisticNegativePrompt] = useState('');
   const [customWidth, setCustomWidth] = useState(1024);
   const [customHeight, setCustomHeight] = useState(1024);
@@ -146,7 +145,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
         seed: seed.trim() ? Number(seed.trim()) : undefined,
       });
       startTransition(() => {
-        setRealisticPrompt(response.prompt);
+        setRequestText(response.prompt);
         setRealisticNegativePrompt(response.negative_prompt);
         setSteps(response.steps);
       });
@@ -262,16 +261,13 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
 
     try {
       const client = new ApiClient(serverUrl, apiToken);
-      const promptOverride = imageModelType === 'realistic' && realisticPrompt.trim()
-        ? realisticPrompt.trim()
-        : undefined;
       const negativePromptOverride = imageModelType === 'realistic' && realisticNegativePrompt.trim()
         ? realisticNegativePrompt.trim()
         : undefined;
       const response = await client.generateComfyUIImage({
         request: requestText.trim(),
         model_type: imageModelType,
-        prompt_override: promptOverride,
+        prompt_override: imageModelType === 'realistic' ? requestText.trim() : undefined,
         negative_prompt_override: negativePromptOverride,
         width: dimensions.width,
         height: dimensions.height,
@@ -496,14 +492,14 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
 
             <div>
               <label className="mb-2 block text-sm font-semibold text-slate-800" htmlFor="image-request">
-                {imageModelType === 'realistic' ? '요청 문장 / 한글 원문' : '요청 문장'}
+                {imageModelType === 'realistic' ? '프롬프트' : '요청 문장'}
               </label>
               <textarea
                 id="image-request"
                 value={requestText}
                 onChange={(event) => setRequestText(event.target.value)}
                 rows={5}
-                placeholder="그리고 싶은 장면을 입력하세요."
+                placeholder={imageModelType === 'realistic' ? '한글 그대로 입력하거나 OpenRouter 초안으로 다듬어 쓰세요.' : '그리고 싶은 장면을 입력하세요.'}
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 outline-none transition focus:border-indigo-400 focus:bg-white"
               />
             </div>
@@ -514,7 +510,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                   <div>
                     <h3 className="text-sm font-semibold text-emerald-900">실사 프롬프트 편집</h3>
                     <p className="mt-1 text-xs text-emerald-700">
-                      비우면 한글 원문을 Z-Image Turbo에 그대로 넣고, 초안 버튼은 OpenRouter 31B로만 작성합니다.
+                      위 프롬프트가 그대로 Z-Image Turbo에 들어가고, 초안 버튼은 OpenRouter 31B 결과로 위 입력창을 교체합니다.
                     </p>
                   </div>
                   <button
@@ -531,18 +527,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                     OpenRouter 31B 초안
                   </button>
                 </div>
-                <label className="mb-2 block text-xs font-semibold text-emerald-800" htmlFor="realistic-prompt">
-                  프롬프트
-                </label>
-                <textarea
-                  id="realistic-prompt"
-                  value={realisticPrompt}
-                  onChange={(event) => setRealisticPrompt(event.target.value)}
-                  rows={4}
-                  placeholder="비워두면 위 한글 요청 문장이 그대로 들어갑니다."
-                  className="w-full resize-y rounded-2xl border border-emerald-100 bg-white px-3 py-2 text-sm leading-6 text-slate-700 outline-none transition focus:border-emerald-400"
-                />
-                <label className="mb-2 mt-3 block text-xs font-semibold text-emerald-800" htmlFor="realistic-negative-prompt">
+                <label className="mb-2 block text-xs font-semibold text-emerald-800" htmlFor="realistic-negative-prompt">
                   네거티브
                 </label>
                 <textarea
