@@ -1,9 +1,7 @@
 import logging
-import os
 import sys
 from contextlib import contextmanager
 
-from backend.core.db import SessionLocal
 from backend.core.logging_config import SensitiveDataFormatter
 
 # Setup logging
@@ -23,6 +21,8 @@ def setup_logging(level=logging.INFO):
 @contextmanager
 def session_scope():
     """Provide a transactional scope around a series of operations."""
+    from backend.core.db import SessionLocal
+
     session = SessionLocal()
     try:
         yield session

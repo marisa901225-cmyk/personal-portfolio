@@ -3,8 +3,10 @@ Telegram Webhook Router - 텔레그램 봇 웹훅 엔드포인트
 명령어를 적절한 핸들러로 라우팅
 """
 import os
+import json
 import logging
 
+import httpx
 from fastapi import APIRouter, Request, HTTPException
 
 from ..core.db import SessionLocal
@@ -17,6 +19,17 @@ logger = logging.getLogger(__name__)
 # 환경변수에서 시크릿 토큰과 허용된 채팅 ID 로드
 WEBHOOK_SECRET = os.getenv("X_TELEGRAM_BOT_API_SECRET_TOKEN") or os.getenv("TELEGRAM_WEBHOOK_SECRET_TOKEN")
 ALLOWED_CHAT_ID = os.getenv("ALARM_TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
+JELLYFIN_CONTAINER_NAME = os.getenv("TELEGRAM_JELLYFIN_CONTAINER_NAME", "jellyfin")
+JELLYFIN_COMPOSE_SERVICE = os.getenv("TELEGRAM_JELLYFIN_COMPOSE_SERVICE", "jellyfin")
+JELLYFIN_COMPOSE_PROJECT = os.getenv("TELEGRAM_JELLYFIN_COMPOSE_PROJECT", "my-home-server")
+DOCKER_STATUS_PROJECTS = {
+    item.strip()
+    for item in os.getenv("TELEGRAM_DOCKER_STATUS_PROJECTS", "personal-portfolio").split(",")
+    if item.strip()
+}
+NIGHT_LLM_CONTAINER_NAME = os.getenv("TELEGRAM_NIGHT_LLM_CONTAINER_NAME", "myasset-llm-light-gpu-night")
+HARUHI_LLM_CONTAINER_NAME = os.getenv("TELEGRAM_HARUHI_LLM_CONTAINER_NAME", "myasset-llm-sycl-huihui")
+DOCKER_SOCKET_PATH = os.getenv("TELEGRAM_DOCKER_SOCKET_PATH", "/var/run/docker.sock")
 
 
 @router.post("/webhook")
@@ -68,15 +81,32 @@ async def _handle_command(text: str, chat_id: str):
     parts = text[1:].split(maxsplit=1)
     cmd = parts[0] if len(parts) > 0 else ""
     arg = parts[1] if len(parts) > 1 else ""
+    # Group chats may send commands as /command@BotUsername.
+    cmd = cmd.split("@", maxsplit=1)[0]
     
     # /spam 접두사 지원 (하이브리드)
     if cmd == "spam":
         parts = arg.split(maxsplit=1)
         cmd = parts[0] if len(parts) > 0 else ""
         arg = parts[1] if len(parts) > 1 else ""
+        cmd = cmd.split("@", maxsplit=1)[0]
     
     # 지원하는 명령어 리스트
-    SUPPORTED_CMDS = ["add", "del", "list", "on", "off", "help", "report"]
+    SUPPORTED_CMDS = [
+        "add",
+        "del",
+        "list",
+        "on",
+        "off",
+        "help",
+        "report",
+        "docker_status",
+        "jellyfin_restart",
+        "night_llm_start",
+        "night_llm_stop",
+        "haruhi_llm_start",
+        "haruhi_llm_stop",
+    ]
     if cmd not in SUPPORTED_CMDS:
         return
     
@@ -86,6 +116,36 @@ async def _handle_command(text: str, chat_id: str):
     if cmd == "report":
         from ..services.reporting.template import build_telegram_steam_trend_message
         response_text = build_telegram_steam_trend_message(arg)
+        await send_telegram_message(response_text)
+        return
+
+    if cmd == "docker_status":
+        response_text = await _get_docker_status()
+        await send_telegram_message(response_text)
+        return
+
+    if cmd == "jellyfin_restart":
+        response_text = await _restart_jellyfin_container()
+        await send_telegram_message(response_text)
+        return
+
+    if cmd == "night_llm_start":
+        response_text = await _control_night_llm("start")
+        await send_telegram_message(response_text)
+        return
+
+    if cmd == "night_llm_stop":
+        response_text = await _control_night_llm("stop")
+        await send_telegram_message(response_text)
+        return
+
+    if cmd == "haruhi_llm_start":
+        response_text = await _control_haruhi_llm("start")
+        await send_telegram_message(response_text)
+        return
+
+    if cmd == "haruhi_llm_stop":
+        response_text = await _control_haruhi_llm("stop")
         await send_telegram_message(response_text)
         return
     
@@ -103,3 +163,179 @@ async def _handle_command(text: str, chat_id: str):
     
     if response_text:
         await send_telegram_message(response_text)
+
+
+async def _restart_jellyfin_container() -> str:
+    """Restart the configured Jellyfin container through the Docker Engine API."""
+    try:
+        transport = httpx.AsyncHTTPTransport(uds=DOCKER_SOCKET_PATH)
+        async with httpx.AsyncClient(transport=transport, base_url="http://docker", timeout=20.0) as client:
+            container_id, container_name = await _find_jellyfin_container(client)
+            if not container_id:
+                return f"❌ Jellyfin 컨테이너를 찾지 못했습니다: <code>{JELLYFIN_COMPOSE_PROJECT}/{JELLYFIN_COMPOSE_SERVICE}</code>"
+
+            restart_response = await client.post(f"/containers/{container_id}/restart", params={"t": 10})
+            restart_response.raise_for_status()
+
+        return f"✅ Jellyfin 재시작 명령을 보냈습니다: <code>{container_name}</code>"
+    except httpx.HTTPError as exc:
+        logger.error("Jellyfin restart failed through Docker API: %s", exc)
+        return f"❌ Jellyfin 재시작 실패: <code>{type(exc).__name__}</code>"
+    except Exception as exc:
+        logger.exception("Unexpected Jellyfin restart failure")
+        return f"❌ Jellyfin 재시작 중 예외 발생: <code>{type(exc).__name__}</code>"
+
+
+async def _get_docker_status() -> str:
+    try:
+        transport = httpx.AsyncHTTPTransport(uds=DOCKER_SOCKET_PATH)
+        async with httpx.AsyncClient(transport=transport, base_url="http://docker", timeout=20.0) as client:
+            response = await client.get("/containers/json", params={"all": "true"})
+            response.raise_for_status()
+            containers = _filter_docker_status_containers(response.json())
+
+        if not containers:
+            return "📦 <b>Docker 상태</b>\n표시할 컨테이너가 없습니다."
+
+        lines = ["📦 <b>Docker 상태</b>"]
+        for container in containers[:15]:
+            names = container.get("Names") or ["unknown"]
+            name = str(names[0]).lstrip("/")
+            state = str(container.get("State") or "")
+            status = str(container.get("Status") or state or "unknown")
+            icon = "🟢" if state == "running" else "🔴"
+            ports = _format_container_ports(container.get("Ports") or [])
+            line = f"{icon} <code>{name}</code> - {status}"
+            if ports:
+                line += f" ({ports})"
+            lines.append(line)
+
+        if len(containers) > 15:
+            lines.append(f"… 외 {len(containers) - 15}개")
+        return "\n".join(lines)
+    except httpx.HTTPError as exc:
+        logger.error("Docker status fetch failed through Docker API: %s", exc)
+        return f"❌ Docker 상태 조회 실패: <code>{type(exc).__name__}</code>"
+    except Exception as exc:
+        logger.exception("Unexpected Docker status failure")
+        return f"❌ Docker 상태 조회 중 예외 발생: <code>{type(exc).__name__}</code>"
+
+
+def _filter_docker_status_containers(containers: list[dict]) -> list[dict]:
+    filtered = [container for container in containers if _should_include_container_in_status(container)]
+    return sorted(
+        filtered,
+        key=lambda container: (
+            0 if str(container.get("State") or "") == "running" else 1,
+            str((container.get("Names") or ["unknown"])[0]).lstrip("/"),
+        ),
+    )
+
+
+def _should_include_container_in_status(container: dict) -> bool:
+    state = str(container.get("State") or "")
+    labels = container.get("Labels") or {}
+    project = str(labels.get("com.docker.compose.project") or "")
+    service = str(labels.get("com.docker.compose.service") or "")
+    names = container.get("Names") or []
+    primary_name = str(names[0]).lstrip("/") if names else ""
+
+    if state == "running":
+        return True
+    if project and project in DOCKER_STATUS_PROJECTS:
+        return True
+    if project == JELLYFIN_COMPOSE_PROJECT and service == JELLYFIN_COMPOSE_SERVICE:
+        return True
+    if primary_name == JELLYFIN_CONTAINER_NAME:
+        return True
+    return False
+
+
+async def _control_night_llm(action: str) -> str:
+    return await _control_container(
+        action=action,
+        container_name=NIGHT_LLM_CONTAINER_NAME,
+        label="나이트 LLM",
+    )
+
+
+async def _control_haruhi_llm(action: str) -> str:
+    return await _control_container(
+        action=action,
+        container_name=HARUHI_LLM_CONTAINER_NAME,
+        label="하루히 LLM",
+    )
+
+
+async def _control_container(*, action: str, container_name: str, label: str) -> str:
+    if action not in {"start", "stop"}:
+        logger.error("Unsupported container control action: %s", action)
+        return f"❌ 지원하지 않는 동작입니다: <code>{action}</code>"
+
+    action_kr = "시작" if action == "start" else "정지"
+    try:
+        transport = httpx.AsyncHTTPTransport(uds=DOCKER_SOCKET_PATH)
+        async with httpx.AsyncClient(transport=transport, base_url="http://docker", timeout=20.0) as client:
+            container_id = await _find_container_id_by_name(client, container_name)
+            if not container_id:
+                return f"❌ {label} 컨테이너를 찾지 못했습니다: <code>{container_name}</code>"
+
+            params = {"t": 10} if action == "stop" else None
+            response = await client.post(f"/containers/{container_id}/{action}", params=params)
+            if response.status_code == 304:
+                state_kr = "이미 실행 중입니다" if action == "start" else "이미 정지 상태입니다"
+                return f"ℹ️ {label}은 {state_kr}: <code>{container_name}</code>"
+            response.raise_for_status()
+
+        return f"✅ {label} {action_kr} 명령을 보냈습니다: <code>{container_name}</code>"
+    except httpx.HTTPError as exc:
+        logger.error("%s %s failed through Docker API: %s", label, action, exc)
+        return f"❌ {label} {action_kr} 실패: <code>{type(exc).__name__}</code>"
+    except Exception as exc:
+        logger.exception("Unexpected %s %s failure", label, action)
+        return f"❌ {label} {action_kr} 중 예외 발생: <code>{type(exc).__name__}</code>"
+
+
+async def _find_jellyfin_container(client: httpx.AsyncClient) -> tuple[str | None, str]:
+    filters = {
+        "label": [
+            f"com.docker.compose.project={JELLYFIN_COMPOSE_PROJECT}",
+            f"com.docker.compose.service={JELLYFIN_COMPOSE_SERVICE}",
+        ]
+    }
+    response = await client.get("/containers/json", params={"all": "true", "filters": json.dumps(filters)})
+    response.raise_for_status()
+    containers = response.json()
+
+    if containers:
+        container = containers[0]
+        names = container.get("Names") or [JELLYFIN_COMPOSE_SERVICE]
+        return container.get("Id"), str(names[0]).lstrip("/")
+
+    inspect_response = await client.get(f"/containers/{JELLYFIN_CONTAINER_NAME}/json")
+    if inspect_response.status_code == 404:
+        return None, JELLYFIN_CONTAINER_NAME
+    inspect_response.raise_for_status()
+    inspect_data = inspect_response.json()
+    return inspect_data.get("Id"), str(inspect_data.get("Name") or JELLYFIN_CONTAINER_NAME).lstrip("/")
+
+
+async def _find_container_id_by_name(client: httpx.AsyncClient, container_name: str) -> str | None:
+    inspect_response = await client.get(f"/containers/{container_name}/json")
+    if inspect_response.status_code == 404:
+        return None
+    inspect_response.raise_for_status()
+    inspect_data = inspect_response.json()
+    return inspect_data.get("Id")
+
+
+def _format_container_ports(ports: list[dict]) -> str:
+    rendered: list[str] = []
+    for port in ports:
+        public_port = port.get("PublicPort")
+        private_port = port.get("PrivatePort")
+        if public_port and private_port:
+            rendered.append(f"{public_port}->{private_port}")
+        elif private_port:
+            rendered.append(str(private_port))
+    return ", ".join(rendered)

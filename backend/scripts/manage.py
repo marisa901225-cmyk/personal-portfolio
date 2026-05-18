@@ -402,9 +402,31 @@ def run_collector(args):
     uvicorn.run(app, host=args.host, port=args.port)
 
 
+def _telegram_bot_commands() -> list[dict[str, str]]:
+    """Return the Telegram slash commands shown in the client command menu."""
+    return [
+        {"command": "report", "description": "리포트 생성 (예: /report 이번달, /report 스팀)"},
+        {"command": "list", "description": "스팸 필터 규칙 목록 보기"},
+        {"command": "add", "description": "스팸 필터 키워드 추가 (예: /add 키워드)"},
+        {"command": "del", "description": "스팸 필터 규칙 삭제 (예: /del ID)"},
+        {"command": "on", "description": "스팸 필터 규칙 활성화 (예: /on ID)"},
+        {"command": "off", "description": "스팸 필터 규칙 비활성화 (예: /off ID)"},
+        {"command": "docker_status", "description": "Docker 컨테이너 상태 확인"},
+        {"command": "jellyfin_restart", "description": "Jellyfin 컨테이너 재시작"},
+        {"command": "night_llm_start", "description": "나이트 LLM 시작"},
+        {"command": "night_llm_stop", "description": "나이트 LLM 정지"},
+        {"command": "haruhi_llm_start", "description": "하루히 LLM 시작"},
+        {"command": "haruhi_llm_stop", "description": "하루히 LLM 정지"},
+        {"command": "help", "description": "도움말 보기"},
+    ]
+
+
 def register_telegram(args):
     """Register telegram bot commands."""
     import asyncio
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
     
     async def _do_register():
         import httpx
@@ -413,16 +435,9 @@ def register_telegram(args):
             logging.error("ALARM_TELEGRAM_BOT_TOKEN not found in environment")
             return
 
-        commands = [
-            {"command": "report", "description": "리포트 생성 (예: /report 이번달, /report 스팀)"},
-            {"command": "list", "description": "스팸 필터 규칙 목록 보기"},
-            {"command": "add", "description": "스팸 필터 키워드 추가 (예: /add 키워드)"},
-            {"command": "del", "description": "스팸 필터 규칙 삭제 (예: /del ID)"},
-            {"command": "help", "description": "도움말 보기"}
-        ]
         url = f"https://api.telegram.org/bot{token}/setMyCommands"
         async with httpx.AsyncClient() as client:
-            resp = await client.post(url, json={"commands": commands})
+            resp = await client.post(url, json={"commands": _telegram_bot_commands()})
             if resp.json().get("ok"):
                 logging.info("Telegram commands registered successfully!")
             else:

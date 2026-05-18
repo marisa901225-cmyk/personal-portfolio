@@ -96,14 +96,20 @@ def _handle_toggle(arg: str, db: Session, enabled: bool) -> str:
 def _get_help_text() -> str:
     """도움말 텍스트"""
     return """<b>ℹ️ 봇 명령어 도움말</b>
-/help - 봇 명령어 도움말
-/reset - 대화 내용(컨텍스트) 초기화
-/model 목록 - 사용 가능한 LLM 모델 목록
-/model 교체 {별칭|파일명} - 실시간 모델 교체
+<code>/help</code> - 이 도움말 보기
+<code>/report [기간]</code> - 리포트 생성
 
 <b>스팸 규칙 관리</b>
-/add {키워드} - 새 키워드 추가 (콤마 구분 가능)
-/del {ID} - 규칙 완전 삭제
-/list - 전체 목록 및 상태 보기
-/on {ID} - 특정 규칙 활성화
-/off {ID} - 특정 규칙 비활성화"""
+<code>/list</code> - 최근 스팸 규칙 목록 보기
+<code>/add 키워드</code> - 새 키워드 추가 (콤마 구분 가능)
+<code>/del ID</code> - 규칙 완전 삭제
+<code>/on ID</code> - 규칙 활성화
+<code>/off ID</code> - 규칙 비활성화
+
+<b>서버 관리</b>
+<code>/docker_status</code> - Docker 컨테이너 실행/정지 상태와 포트 요약
+<code>/jellyfin_restart</code> - Jellyfin 컨테이너를 Docker API로 재시작
+<code>/night_llm_start</code> - 밤 전용 GPU LLM 컨테이너 시작
+<code>/night_llm_stop</code> - 밤 전용 GPU LLM 컨테이너 정지
+<code>/haruhi_llm_start</code> - 하루히 SYCL LLM 컨테이너 시작
+<code>/haruhi_llm_stop</code> - 하루히 SYCL LLM 컨테이너 정지"""
