@@ -10,7 +10,6 @@ from PIL import Image
 from backend.core.schemas import AnimeImageUpscaleRequest, ComfyUIImageGenerationRequest
 from backend.services.comfyui_image_service import (
     ImageGenerationError,
-    _GpuMemory,
     generate_image_with_e4b,
     get_server_generated_image_data_url,
     list_server_generated_images,
@@ -18,6 +17,7 @@ from backend.services.comfyui_image_service import (
 )
 from backend.services.comfyui.types import ToolSpec
 from backend.services.comfyui.workflow import build_workflow
+import backend.services.comfyui.upscale as upscale_module
 
 
 class _Response:
@@ -314,96 +314,20 @@ def test_get_server_generated_image_data_url_rejects_path_escape(monkeypatch: py
         get_server_generated_image_data_url("../outside.png")
 
 
-def test_upscale_anime_image_runs_realesrgan_model(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    tool_dir = tmp_path / "realesrgan"
-    models_dir = tool_dir / "models"
-    models_dir.mkdir(parents=True)
-    (models_dir / "realesrgan-x4plus-anime.bin").write_bytes(b"model")
-    (models_dir / "realesrgan-x4plus-anime.param").write_text("param", encoding="utf-8")
-
-    bin_path = tool_dir / "realesrgan-ncnn-vulkan"
-    bin_path.write_text(
-        "#!/usr/bin/env bash\n"
-        "while [[ $# -gt 0 ]]; do\n"
-        "  case \"$1\" in\n"
-        "    -i) input=\"$2\"; shift 2 ;;\n"
-        "    -o) output=\"$2\"; shift 2 ;;\n"
-        "    *) shift ;;\n"
-        "  esac\n"
-        "done\n"
-        "cp \"$input\" \"$output\"\n",
-        encoding="utf-8",
-    )
-    bin_path.chmod(0o755)
-
-    config_path = tmp_path / "models.json"
-    config_path.write_text(
-        json.dumps({"models": [{"id": "realesrgan-x4plus-anime", "scale": 4}]}),
-        encoding="utf-8",
-    )
-
-    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_bin_path", str(bin_path))
-    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_model_dir", str(tool_dir))
-    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_models_config_path", str(config_path))
-    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_timeout_sec", 5)
-    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_comfyui_vram_mode", "off")
-
+def test_upscale_anime_image_uses_comfyui_upscale_nodes(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     source_path = tmp_path / "source.png"
     Image.new("RGB", (2, 2), "white").save(source_path)
     source_bytes = source_path.read_bytes()
-    result = upscale_anime_image(
-        AnimeImageUpscaleRequest(
-            image_data_url=f"data:image/png;base64,{base64.b64encode(source_bytes).decode('ascii')}",
-            model="realesrgan-x4plus-anime",
-            scale=4,
-        )
-    )
+    output_path = tmp_path / "output.png"
+    Image.new("RGB", (256, 256), "blue").save(output_path)
+    output_data_url = f"data:image/png;base64,{base64.b64encode(output_path.read_bytes()).decode('ascii')}"
+    submitted: dict[str, dict] = {}
 
-    assert result.model == "realesrgan-x4plus-anime"
-    assert result.scale == 4
-    assert result.width == 2
-    assert result.height == 2
-    assert result.filename == "anime_upscaled_x4.png"
-    assert result.image_data_url == f"data:image/png;base64,{base64.b64encode(source_bytes).decode('ascii')}"
-
-
-def test_upscale_anime_image_resizes_to_target_resolution(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    tool_dir = tmp_path / "realesrgan"
-    models_dir = tool_dir / "models"
-    models_dir.mkdir(parents=True)
-    (models_dir / "realesrgan-x4plus-anime.bin").write_bytes(b"model")
-    (models_dir / "realesrgan-x4plus-anime.param").write_text("param", encoding="utf-8")
-
-    bin_path = tool_dir / "realesrgan-ncnn-vulkan"
-    bin_path.write_text(
-        "#!/usr/bin/env bash\n"
-        "while [[ $# -gt 0 ]]; do\n"
-        "  case \"$1\" in\n"
-        "    -i) input=\"$2\"; shift 2 ;;\n"
-        "    -o) output=\"$2\"; shift 2 ;;\n"
-        "    *) shift ;;\n"
-        "  esac\n"
-        "done\n"
-        "cp \"$input\" \"$output\"\n",
-        encoding="utf-8",
-    )
-    bin_path.chmod(0o755)
-
-    config_path = tmp_path / "models.json"
-    config_path.write_text(
-        json.dumps({"models": [{"id": "realesrgan-x4plus-anime", "scale": 4}]}),
-        encoding="utf-8",
-    )
-
-    source_path = tmp_path / "source.png"
-    Image.new("RGB", (2, 2), "white").save(source_path)
-    source_bytes = source_path.read_bytes()
-
-    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_bin_path", str(bin_path))
-    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_model_dir", str(tool_dir))
-    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_models_config_path", str(config_path))
-    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_timeout_sec", 5)
-    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_comfyui_vram_mode", "off")
+    monkeypatch.setattr(upscale_module, "_upload_comfyui_input", lambda _bytes, _ext: "source.png")
+    monkeypatch.setattr(upscale_module, "submit_prompt", lambda workflow: submitted.setdefault("workflow", workflow) or "prompt-1")
+    monkeypatch.setattr(upscale_module, "wait_for_completion", lambda _prompt_id, timeout_sec=180: {"outputs": {}})
+    monkeypatch.setattr(upscale_module, "extract_image_entry", lambda _history: {"filename": "anime_upscaled_00001_.png", "subfolder": "", "type": "output"})
+    monkeypatch.setattr(upscale_module, "fetch_image_data_url", lambda _entry: output_data_url)
 
     result = upscale_anime_image(
         AnimeImageUpscaleRequest(
@@ -415,69 +339,42 @@ def test_upscale_anime_image_resizes_to_target_resolution(monkeypatch: pytest.Mo
         )
     )
 
+    workflow = submitted["workflow"]
+    assert workflow["1"]["class_type"] == "LoadImage"
+    assert workflow["2"]["inputs"]["model_name"] == "RealESRGAN_x4plus_anime_6B.pth"
+    assert workflow["3"]["class_type"] == "ImageUpscaleWithModel"
+    assert workflow["4"]["inputs"]["width"] == 256
+    assert workflow["4"]["inputs"]["height"] == 256
+    assert workflow["5"]["inputs"]["images"] == ["4", 0]
+    assert result.model == "RealESRGAN_x4plus_anime_6B.pth"
     assert result.width == 256
     assert result.height == 256
-    encoded = result.image_data_url.split(",", 1)[1]
-    output_path = tmp_path / "output.png"
-    output_path.write_bytes(base64.b64decode(encoded))
-    with Image.open(output_path) as image:
-        assert image.size == (256, 256)
 
 
-def test_upscale_anime_image_stops_comfyui_when_vram_is_low(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    tool_dir = tmp_path / "realesrgan"
-    models_dir = tool_dir / "models"
-    models_dir.mkdir(parents=True)
-    (models_dir / "realesrgan-x4plus-anime.bin").write_bytes(b"model")
-    (models_dir / "realesrgan-x4plus-anime.param").write_text("param", encoding="utf-8")
-
-    bin_path = tool_dir / "realesrgan-ncnn-vulkan"
-    bin_path.write_text(
-        "#!/usr/bin/env bash\n"
-        "while [[ $# -gt 0 ]]; do\n"
-        "  case \"$1\" in\n"
-        "    -i) input=\"$2\"; shift 2 ;;\n"
-        "    -o) output=\"$2\"; shift 2 ;;\n"
-        "    *) shift ;;\n"
-        "  esac\n"
-        "done\n"
-        "cp \"$input\" \"$output\"\n",
-        encoding="utf-8",
-    )
-    bin_path.chmod(0o755)
-
-    config_path = tmp_path / "models.json"
-    config_path.write_text(
-        json.dumps({"models": [{"id": "realesrgan-x4plus-anime", "scale": 4}]}),
-        encoding="utf-8",
-    )
-
-    calls: list[bool] = []
-    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_bin_path", str(bin_path))
-    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_model_dir", str(tool_dir))
-    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_models_config_path", str(config_path))
-    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_timeout_sec", 5)
-    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_comfyui_vram_mode", "auto")
-    monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_min_free_vram_mb", 1536.0)
-    monkeypatch.setattr(
-        "backend.services.comfyui.vram.query_gpu_memory",
-        lambda: _GpuMemory(used_mb=10_928.0, utilization_percent=91.62),
-    )
-    monkeypatch.setattr(
-        "backend.services.comfyui.vram.set_container_running",
-        lambda _container_name, *, should_run: calls.append(should_run) or True,
-    )
-
+def test_upscale_anime_image_runs_native_model_size_without_target(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     source_path = tmp_path / "source.png"
     Image.new("RGB", (2, 2), "white").save(source_path)
-    source_bytes = source_path.read_bytes()
+    output_path = tmp_path / "output.png"
+    Image.new("RGB", (8, 8), "green").save(output_path)
+    output_data_url = f"data:image/png;base64,{base64.b64encode(output_path.read_bytes()).decode('ascii')}"
+    submitted: dict[str, dict] = {}
+
+    monkeypatch.setattr(upscale_module, "_upload_comfyui_input", lambda _bytes, _ext: "source.png")
+    monkeypatch.setattr(upscale_module, "submit_prompt", lambda workflow: submitted.setdefault("workflow", workflow) or "prompt-1")
+    monkeypatch.setattr(upscale_module, "wait_for_completion", lambda _prompt_id, timeout_sec=180: {"outputs": {}})
+    monkeypatch.setattr(upscale_module, "extract_image_entry", lambda _history: {"filename": "anime_upscaled_00001_.png", "subfolder": "", "type": "output"})
+    monkeypatch.setattr(upscale_module, "fetch_image_data_url", lambda _entry: output_data_url)
+
     result = upscale_anime_image(
         AnimeImageUpscaleRequest(
-            image_data_url=f"data:image/png;base64,{base64.b64encode(source_bytes).decode('ascii')}",
+            image_data_url=f"data:image/png;base64,{base64.b64encode(source_path.read_bytes()).decode('ascii')}",
             model="realesrgan-x4plus-anime",
             scale=4,
         )
     )
 
+    assert "4" not in submitted["workflow"]
+    assert submitted["workflow"]["5"]["inputs"]["images"] == ["3", 0]
+    assert result.width == 8
+    assert result.height == 8
     assert result.filename == "anime_upscaled_x4.png"
-    assert calls == [False, True]

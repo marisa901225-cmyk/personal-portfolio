@@ -627,8 +627,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                     onChange={(event) => setUpscaleModel(event.target.value)}
                     className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"
                   >
-                    <option value="realesrgan-x4plus-anime">RealESRGAN x4plus Anime</option>
-                    <option value="realesr-animevideov3">RealESRGAN AnimeVideo v3</option>
+                    <option value="realesrgan-x4plus-anime">ComfyUI RealESRGAN x4 Anime</option>
                   </select>
                 </div>
 

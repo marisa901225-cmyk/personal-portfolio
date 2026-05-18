@@ -99,26 +99,6 @@ class Settings(BaseSettings):
     llm_remote_model_path_file: Optional[str] = Field(default=None, validation_alias="LLM_REMOTE_MODEL_PATH_FILE")
     comfyui_base_url: str = Field(default="http://localhost:8188", validation_alias="COMFYUI_BASE_URL")
     comfyui_output_dir: str = Field(default="/mnt/one-touch/comfyui/output", validation_alias="COMFYUI_OUTPUT_DIR")
-    realesrgan_bin_path: str = Field(
-        default="/home/dlckdgn/my-home-server/tools/realesrgan-ncnn-vulkan-dir/realesrgan-ncnn-vulkan",
-        validation_alias="REALESRGAN_BIN_PATH",
-    )
-    realesrgan_model_dir: str = Field(
-        default="/home/dlckdgn/my-home-server/tools/realesrgan-ncnn-vulkan-dir",
-        validation_alias="REALESRGAN_MODEL_DIR",
-    )
-    realesrgan_models_config_path: str = Field(
-        default="backend/data/anime_upscale_models.json",
-        validation_alias="REALESRGAN_MODELS_CONFIG_PATH",
-    )
-    realesrgan_timeout_sec: int = Field(default=180, validation_alias="REALESRGAN_TIMEOUT_SEC")
-    realesrgan_comfyui_vram_mode: str = Field(default="auto", validation_alias="REALESRGAN_COMFYUI_VRAM_MODE")
-    realesrgan_min_free_vram_mb: float = Field(default=1536.0, validation_alias="REALESRGAN_MIN_FREE_VRAM_MB")
-    xpu_smi_path: str = Field(default="xpu-smi", validation_alias="XPU_SMI_PATH")
-    realesrgan_comfyui_container_name: str = Field(
-        default="myasset-comfyui",
-        validation_alias="REALESRGAN_COMFYUI_CONTAINER_NAME",
-    )
     docker_socket_path: str = Field(default="/var/run/docker.sock", validation_alias="DOCKER_SOCKET_PATH")
 
     # KIS (한국투자증권) 설정
