@@ -460,7 +460,8 @@ async def _generate_random_message_payload_async(
     if not messages:
         return None
 
-    options = deps.resolve_llm_options(llm_kwargs, default_max_tokens=512, default_temperature=0.85)
+    llm_kwargs = {"top_p": 0.95, "top_k": 64, **llm_kwargs}
+    options = deps.resolve_llm_options(llm_kwargs, default_max_tokens=512, default_temperature=1.0)
     paid_system_prompt = _load_paid_system_prompt("random_topic_gpt5_paid_system", deps)
     failure_reasons: List[str] = []
 
