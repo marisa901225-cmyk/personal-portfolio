@@ -1,5 +1,5 @@
 import React, { startTransition, useEffect, useMemo, useState } from 'react';
-import { ImagePlus, Loader2, Maximize2, RefreshCcw, Sparkles, Upload } from 'lucide-react';
+import { ImagePlus, Loader2, Maximize2, MessageCircle, RefreshCcw, Send, Sparkles, Upload } from 'lucide-react';
 import {
   ApiClient,
   type BackendAnimeImageUpscaleResponse,
@@ -17,6 +17,10 @@ interface ImageGenerationDashboardProps {
 type CanvasPreset = 'square' | 'classicPortrait' | 'classicLandscape' | 'storyPortrait' | 'cinemaLandscape' | 'phonePortrait' | 'phoneLandscape' | 'wide' | 'custom';
 type UpscaleResolutionPreset = 'native4x' | 'fullhd' | 'square2k' | 'uhd4k' | 'custom';
 type StudioMode = 'generate' | 'upscale';
+type RevisionMessage = {
+  role: 'user' | 'assistant';
+  text: string;
+};
 
 const CANVAS_PRESETS: Record<CanvasPreset, { label: string; width: number; height: number }> = {
   square: { label: '1:1 정사각', width: 1024, height: 1024 },
@@ -70,6 +74,8 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
   const [serverImages, setServerImages] = useState<BackendServerGeneratedImage[]>([]);
   const [isLoadingServerImages, setIsLoadingServerImages] = useState(false);
   const [upscaleModel, setUpscaleModel] = useState('realesrgan-x4plus-anime');
+  const [revisionText, setRevisionText] = useState('');
+  const [revisionMessages, setRevisionMessages] = useState<RevisionMessage[]>([]);
   const [result, setResult] = useState<BackendComfyUIImageGenerationResponse | null>(null);
   const [upscaleResult, setUpscaleResult] = useState<BackendAnimeImageUpscaleResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -96,6 +102,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
   }, [upscaleCustomHeight, upscaleCustomWidth, upscaleResolution]);
   const activeImageDataUrl = upscaleResult?.image_data_url ?? result?.image_data_url ?? upscaleSourceDataUrl;
   const activeImageLabel = upscaleResult?.filename ?? result?.request ?? upscaleSourceName;
+  const canReviseImage = Boolean(result || requestText.trim());
 
   const loadServerImages = async () => {
     if (!isReady) return;
@@ -191,6 +198,68 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
       setResult(null);
       alertError('ComfyUI image generation failed', err, {
         default: '이미지 생성에 실패했습니다. 잠시 후 다시 시도해주세요.',
+        unauthorized: '인증이 만료되었거나 올바르지 않습니다. 다시 로그인하거나 API 비밀번호를 확인해주세요.',
+        network: '백엔드 또는 ComfyUI 서버에 연결할 수 없습니다.',
+      });
+      if (err instanceof Error) {
+        setError(err.message);
+      }
+    } finally {
+      setIsPending(false);
+    }
+  };
+
+  const handleRevisionGenerate = async () => {
+    const revision = revisionText.trim();
+    const basePrompt = result?.tool_prompt || result?.request || requestText.trim();
+    if (!serverUrl?.trim()) {
+      setError('먼저 서버 URL을 설정해주세요.');
+      return;
+    }
+    if (!apiToken && !cookieAuth) {
+      setError('네이버 로그인 또는 API 비밀번호가 필요합니다.');
+      return;
+    }
+    if (!basePrompt) {
+      setError('먼저 기준이 될 이미지를 생성하거나 요청 문장을 입력해주세요.');
+      return;
+    }
+    if (!revision) {
+      setError('바꾸고 싶은 내용을 채팅창에 적어주세요.');
+      return;
+    }
+
+    const nextRequest = [
+      '이전 이미지의 전체 구도, 카메라 거리, 화면 비율, 배경 분위기는 최대한 유지한다.',
+      `기준 프롬프트: ${basePrompt}`,
+      `수정 요청: ${revision}`,
+      '수정 요청에 언급된 요소만 바꾸고 나머지는 가능한 한 유지한다.',
+    ].join('\n');
+
+    setIsPending(true);
+    setError(null);
+    setRevisionMessages((messages) => [...messages, { role: 'user', text: revision }]);
+
+    try {
+      const client = new ApiClient(serverUrl, apiToken);
+      const response = await client.generateComfyUIImage({
+        request: nextRequest,
+        width: result?.width ?? dimensions.width,
+        height: result?.height ?? dimensions.height,
+        steps,
+      });
+      startTransition(() => {
+        setResult(response);
+        setUpscaleResult(null);
+        setRevisionText('');
+        setRevisionMessages((messages) => [
+          ...messages,
+          { role: 'assistant', text: '수정 요청을 반영해서 다시 생성했습니다.' },
+        ]);
+      });
+    } catch (err) {
+      alertError('Image revision generation failed', err, {
+        default: '수정 이미지 생성에 실패했습니다. 잠시 후 다시 시도해주세요.',
         unauthorized: '인증이 만료되었거나 올바르지 않습니다. 다시 로그인하거나 API 비밀번호를 확인해주세요.',
         network: '백엔드 또는 ComfyUI 서버에 연결할 수 없습니다.',
       });
@@ -677,6 +746,75 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                       </p>
                     </div>
                   </div>
+              </div>
+            )}
+
+            {mode === 'generate' && (
+              <div className="mt-4 rounded-[22px] border border-white/10 bg-white/5 p-3">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-indigo-400/15 text-indigo-200">
+                      <MessageCircle size={17} />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-100">수정 채팅</h3>
+                      <p className="mt-0.5 text-[11px] text-slate-400">구도는 유지하고 바꿀 부분만 말해보세요.</p>
+                    </div>
+                  </div>
+                  {revisionMessages.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setRevisionMessages([])}
+                      className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] font-medium text-slate-300 transition hover:border-white/20 hover:text-white"
+                    >
+                      비우기
+                    </button>
+                  )}
+                </div>
+
+                <div className="mb-3 max-h-36 space-y-2 overflow-y-auto pr-1">
+                  {revisionMessages.length > 0 ? (
+                    revisionMessages.map((message, index) => (
+                      <div
+                        key={`${message.role}-${index}`}
+                        className={`rounded-2xl px-3 py-2 text-xs leading-5 ${
+                          message.role === 'user'
+                            ? 'ml-6 bg-indigo-500 text-white'
+                            : 'mr-6 border border-white/10 bg-white/10 text-slate-200'
+                        }`}
+                      >
+                        {message.text}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-white/10 px-3 py-3 text-xs leading-5 text-slate-400">
+                      예: 인물만 은발 남성으로 바꾸고, 배경과 구도는 유지해줘.
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <textarea
+                    value={revisionText}
+                    onChange={(event) => setRevisionText(event.target.value)}
+                    rows={2}
+                    placeholder="바꿀 부분만 적기"
+                    className="min-h-16 flex-1 resize-none rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-indigo-300"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleRevisionGenerate}
+                    disabled={!isReady || isPending || !canReviseImage || !revisionText.trim()}
+                    className={`flex h-16 w-14 items-center justify-center rounded-2xl transition ${
+                      !isReady || isPending || !canReviseImage || !revisionText.trim()
+                        ? 'cursor-not-allowed bg-white/5 text-slate-500'
+                        : 'bg-indigo-500 text-white hover:bg-indigo-400'
+                    }`}
+                    aria-label="수정 생성"
+                  >
+                    {isPending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+                  </button>
+                </div>
               </div>
             )}
           </div>
