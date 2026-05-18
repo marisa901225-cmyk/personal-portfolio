@@ -16,7 +16,7 @@ except ImportError:  # pragma: no cover - Linux containers provide fcntl.
 logger = logging.getLogger(__name__)
 
 _DEFAULT_LOCK_PATH = Path(__file__).resolve().parents[1] / "data" / "gpu_heavy_work.lock"
-_DEFAULT_TIMEOUT_SEC = 900.0
+_DEFAULT_TIMEOUT_SEC = 240.0
 _LOG_WAIT_AFTER_SEC = 1.0
 
 
