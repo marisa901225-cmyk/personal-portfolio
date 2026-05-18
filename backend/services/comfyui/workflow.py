@@ -9,6 +9,7 @@ import requests
 
 from ...core.config import settings
 from .constants import (
+    DEFAULT_4K_FILENAME_PREFIX,
     DEFAULT_CLIENT_ID,
     DEFAULT_CLIP_NAME,
     DEFAULT_FILENAME_PREFIX,
@@ -16,6 +17,7 @@ from .constants import (
     DEFAULT_SCHEDULER,
     DEFAULT_TIMEOUT_SEC,
     DEFAULT_UNET_NAME,
+    DEFAULT_UPSCALE_MODEL_NAME,
     DEFAULT_VAE_NAME,
 )
 from .errors import ImageGenerationError
@@ -26,8 +28,16 @@ def _comfyui_url(path: str) -> str:
     return f"{settings.comfyui_base_url.rstrip('/')}{path}"
 
 
-def build_workflow(tool_spec: ToolSpec) -> dict[str, Any]:
-    return {
+def build_workflow(
+    tool_spec: ToolSpec,
+    *,
+    output_width: int | None = None,
+    output_height: int | None = None,
+    upscale_model: str | None = None,
+) -> dict[str, Any]:
+    save_image_input: list[Any] = ["8", 0]
+    filename_prefix = DEFAULT_FILENAME_PREFIX
+    workflow: dict[str, Any] = {
         "1": {
             "class_type": "UNETLoader",
             "inputs": {"unet_name": DEFAULT_UNET_NAME, "weight_dtype": "default"},
@@ -73,9 +83,33 @@ def build_workflow(tool_spec: ToolSpec) -> dict[str, Any]:
         },
         "9": {
             "class_type": "SaveImage",
-            "inputs": {"images": ["8", 0], "filename_prefix": DEFAULT_FILENAME_PREFIX},
+            "inputs": {"images": save_image_input, "filename_prefix": filename_prefix},
         },
     }
+    if output_width is not None and output_height is not None:
+        workflow["10"] = {
+            "class_type": "UpscaleModelLoader",
+            "inputs": {"model_name": upscale_model or DEFAULT_UPSCALE_MODEL_NAME},
+        }
+        workflow["11"] = {
+            "class_type": "ImageUpscaleWithModel",
+            "inputs": {"upscale_model": ["10", 0], "image": ["8", 0]},
+        }
+        workflow["12"] = {
+            "class_type": "ImageScale",
+            "inputs": {
+                "image": ["11", 0],
+                "upscale_method": "lanczos",
+                "width": output_width,
+                "height": output_height,
+                "crop": "disabled",
+            },
+        }
+        workflow["9"]["inputs"] = {
+            "images": ["12", 0],
+            "filename_prefix": DEFAULT_4K_FILENAME_PREFIX,
+        }
+    return workflow
 
 
 def submit_prompt(workflow: dict[str, Any]) -> str:

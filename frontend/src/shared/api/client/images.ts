@@ -14,6 +14,9 @@ export const generateComfyUIImage = (
         height?: number;
         seed?: number;
         steps?: number;
+        output_width?: number;
+        output_height?: number;
+        upscale_model?: string;
     },
 ): Promise<BackendComfyUIImageGenerationResponse> =>
     request<BackendComfyUIImageGenerationResponse>('/api/images/generate', {

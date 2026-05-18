@@ -16,6 +16,8 @@ from backend.services.comfyui_image_service import (
     list_server_generated_images,
     upscale_anime_image,
 )
+from backend.services.comfyui.types import ToolSpec
+from backend.services.comfyui.workflow import build_workflow
 
 
 class _Response:
@@ -124,6 +126,30 @@ def test_generate_image_with_e4b_success(monkeypatch: pytest.MonkeyPatch) -> Non
 
     params = get_calls[2][1]["params"]
     assert params["filename"] == "e4b_comfyui_00001_.png"
+
+
+def test_build_workflow_routes_4k_output_through_upscale_model() -> None:
+    workflow = build_workflow(
+        ToolSpec(
+            prompt="anime character under neon rain",
+            negative_prompt="blurry",
+            width=1024,
+            height=1024,
+            steps=20,
+            cfg=4.0,
+            seed=123,
+        ),
+        output_width=3840,
+        output_height=2160,
+        upscale_model="RealESRGAN_x4plus_anime_6B.pth",
+    )
+
+    assert workflow["10"]["class_type"] == "UpscaleModelLoader"
+    assert workflow["10"]["inputs"]["model_name"] == "RealESRGAN_x4plus_anime_6B.pth"
+    assert workflow["11"]["class_type"] == "ImageUpscaleWithModel"
+    assert workflow["12"]["inputs"]["width"] == 3840
+    assert workflow["12"]["inputs"]["height"] == 2160
+    assert workflow["9"]["inputs"]["images"] == ["12", 0]
 
 
 def test_generate_image_with_e4b_falls_back_to_openrouter_gemma(monkeypatch: pytest.MonkeyPatch) -> None:

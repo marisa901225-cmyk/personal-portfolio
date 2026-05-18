@@ -330,6 +330,8 @@ export interface BackendComfyUIImageGenerationResponse {
     tool_name: string;
     tool_prompt: string;
     negative_prompt: string;
+    generated_width: number;
+    generated_height: number;
     width: number;
     height: number;
     steps: number;
@@ -338,6 +340,7 @@ export interface BackendComfyUIImageGenerationResponse {
     prompt_id: string;
     filename: string;
     subfolder: string;
+    upscale_model?: string | null;
     image_data_url: string;
 }
 

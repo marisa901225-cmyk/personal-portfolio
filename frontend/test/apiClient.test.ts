@@ -106,6 +106,8 @@ describe('ApiClient', () => {
       tool_name: 'generate_comfyui_image',
       tool_prompt: 'A warm storybook illustration of a cat sleeping by a window.',
       negative_prompt: 'blurry',
+      generated_width: 1024,
+      generated_height: 1024,
       width: 1024,
       height: 1024,
       steps: 20,
@@ -114,6 +116,7 @@ describe('ApiClient', () => {
       prompt_id: 'prompt-1',
       filename: 'e4b.png',
       subfolder: '',
+      upscale_model: null,
       image_data_url: 'data:image/png;base64,AAAA',
     };
     fetchMock.mockResolvedValueOnce({
@@ -127,6 +130,9 @@ describe('ApiClient', () => {
       request: '창가에서 자는 고양이',
       width: 1024,
       height: 1024,
+      output_width: 3840,
+      output_height: 2160,
+      upscale_model: 'RealESRGAN_x4plus_anime_6B.pth',
     });
 
     expect(result).toEqual(mockResponse);
@@ -137,6 +143,9 @@ describe('ApiClient', () => {
       request: '창가에서 자는 고양이',
       width: 1024,
       height: 1024,
+      output_width: 3840,
+      output_height: 2160,
+      upscale_model: 'RealESRGAN_x4plus_anime_6B.pth',
     }));
   });
 

@@ -448,6 +448,9 @@ class ComfyUIImageGenerationRequest(BaseModel):
     height: int = Field(default=1024, ge=256, le=1536)
     seed: Optional[int] = Field(default=None, ge=0)
     steps: Optional[int] = Field(default=None, ge=8, le=60)
+    output_width: Optional[int] = Field(default=None, ge=256, le=4096)
+    output_height: Optional[int] = Field(default=None, ge=256, le=4096)
+    upscale_model: Optional[str] = Field(default=None, min_length=1)
 
 
 class ComfyUIImageGenerationResponse(BaseModel):
@@ -456,6 +459,8 @@ class ComfyUIImageGenerationResponse(BaseModel):
     tool_name: str
     tool_prompt: str
     negative_prompt: str
+    generated_width: int
+    generated_height: int
     width: int
     height: int
     steps: int
@@ -464,6 +469,7 @@ class ComfyUIImageGenerationResponse(BaseModel):
     prompt_id: str
     filename: str
     subfolder: str = ""
+    upscale_model: Optional[str] = None
     image_data_url: str
 
 

@@ -15,6 +15,7 @@ interface ImageGenerationDashboardProps {
 }
 
 type CanvasPreset = 'square' | 'classicPortrait' | 'classicLandscape' | 'storyPortrait' | 'cinemaLandscape' | 'phonePortrait' | 'phoneLandscape' | 'wide' | 'custom';
+type GenerationOutputPreset = 'native' | 'uhd4k';
 type UpscaleResolutionPreset = 'native4x' | 'fullhd' | 'square2k' | 'uhd4k' | 'custom';
 type StudioMode = 'generate' | 'upscale';
 type RevisionMessage = {
@@ -42,6 +43,11 @@ const UPSCALE_RESOLUTION_PRESETS: Record<UpscaleResolutionPreset, { label: strin
   custom: { label: '직접 입력', width: 2048, height: 2048 },
 };
 
+const GENERATION_OUTPUT_PRESETS: Record<GenerationOutputPreset, { label: string; description: string; output_width?: number; output_height?: number }> = {
+  native: { label: '기본 저장', description: '생성 해상도 그대로 저장' },
+  uhd4k: { label: '4K 저장', description: 'RealESRGAN 노드로 3840 × 2160 출력', output_width: 3840, output_height: 2160 },
+};
+
 const clampResolution = (value: number) => Math.min(Math.max(value || 1024, 512), 1536);
 const clampUpscaleResolution = (value: number) => Math.min(Math.max(value || 2048, 256), 4096);
 
@@ -63,6 +69,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
   const [preset, setPreset] = useState<CanvasPreset>('square');
   const [customWidth, setCustomWidth] = useState(1024);
   const [customHeight, setCustomHeight] = useState(1024);
+  const [generationOutput, setGenerationOutput] = useState<GenerationOutputPreset>('native');
   const [upscaleResolution, setUpscaleResolution] = useState<UpscaleResolutionPreset>('native4x');
   const [upscaleCustomWidth, setUpscaleCustomWidth] = useState(2048);
   const [upscaleCustomHeight, setUpscaleCustomHeight] = useState(2048);
@@ -100,6 +107,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
     }
     return UPSCALE_RESOLUTION_PRESETS[upscaleResolution];
   }, [upscaleCustomHeight, upscaleCustomWidth, upscaleResolution]);
+  const generationOutputTarget = GENERATION_OUTPUT_PRESETS[generationOutput];
   const activeImageDataUrl = upscaleResult?.image_data_url ?? result?.image_data_url ?? upscaleSourceDataUrl;
   const activeImageLabel = upscaleResult?.filename ?? result?.request ?? upscaleSourceName;
   const canReviseImage = Boolean(result || requestText.trim());
@@ -208,6 +216,9 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
         height: dimensions.height,
         steps,
         seed: seed.trim() ? Number(seed.trim()) : undefined,
+        output_width: generationOutputTarget.output_width,
+        output_height: generationOutputTarget.output_height,
+        upscale_model: generationOutput === 'uhd4k' ? 'RealESRGAN_x4plus_anime_6B.pth' : undefined,
       });
       startTransition(() => {
         setResult(response);
@@ -263,9 +274,12 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
       const client = new ApiClient(serverUrl, apiToken);
       const response = await client.generateComfyUIImage({
         request: nextRequest,
-        width: result?.width ?? dimensions.width,
-        height: result?.height ?? dimensions.height,
+        width: result?.generated_width ?? dimensions.width,
+        height: result?.generated_height ?? dimensions.height,
         steps,
+        output_width: result?.upscale_model ? result.width : generationOutputTarget.output_width,
+        output_height: result?.upscale_model ? result.height : generationOutputTarget.output_height,
+        upscale_model: result?.upscale_model ?? (generationOutput === 'uhd4k' ? 'RealESRGAN_x4plus_anime_6B.pth' : undefined),
       });
       startTransition(() => {
         setResult(response);
@@ -446,6 +460,26 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
               </div>
 
               <div className="space-y-4">
+                <div>
+                  <div className="mb-2 text-sm font-semibold text-slate-800">출력</div>
+                  <div className="grid gap-2">
+                    {(Object.entries(GENERATION_OUTPUT_PRESETS) as Array<[GenerationOutputPreset, { label: string; description: string }]>).map(([key, value]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setGenerationOutput(key)}
+                        className={`rounded-2xl border px-3 py-3 text-left text-sm font-medium transition ${
+                          generationOutput === key
+                            ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                        }`}
+                      >
+                        <div>{value.label}</div>
+                        <div className="mt-1 text-[11px] text-slate-400">{value.description}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <div>
                   <label className="mb-2 block text-sm font-semibold text-slate-800" htmlFor="image-steps">
                     스텝
@@ -740,7 +774,10 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                     <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
                       <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Spec</div>
                       <p className="mt-1 text-slate-200">
-                        {result.width} × {result.height} · steps {result.steps} · cfg {result.cfg} · seed {result.seed}
+                        {result.generated_width} × {result.generated_height}
+                        {result.upscale_model ? ` -> ${result.width} × ${result.height}` : ''}
+                        {' · '}
+                        steps {result.steps} · cfg {result.cfg} · seed {result.seed}
                       </p>
                     </div>
                   )}
@@ -760,7 +797,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                         {upscaleResult
                           ? `anime_upscale -> ${upscaleResult.filename}`
                           : result
-                            ? `${result.llm_model} -> ${result.tool_name} -> ${result.filename}`
+                            ? `${result.llm_model} -> ${result.tool_name}${result.upscale_model ? ` -> ${result.upscale_model}` : ''} -> ${result.filename}`
                             : ''}
                       </p>
                     </div>

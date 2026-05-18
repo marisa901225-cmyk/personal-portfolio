@@ -5,6 +5,7 @@ import logging
 import requests
 
 from ...core.schemas import ComfyUIImageGenerationRequest, ComfyUIImageGenerationResponse
+from .constants import DEFAULT_UPSCALE_MODEL_NAME
 from .errors import ImageGenerationError
 from .planner import plan_image_generation
 from .workflow import build_workflow, extract_image_entry, fetch_image_data_url, submit_prompt, wait_for_completion
@@ -13,10 +14,29 @@ from .workflow import build_workflow, extract_image_entry, fetch_image_data_url,
 logger = logging.getLogger(__name__)
 
 
+def _resolve_output_target(request: ComfyUIImageGenerationRequest) -> tuple[int | None, int | None, str | None]:
+    if request.output_width is not None or request.output_height is not None:
+        if request.output_width is None or request.output_height is None:
+            raise ImageGenerationError("output_width and output_height must be provided together")
+        return request.output_width, request.output_height, request.upscale_model or DEFAULT_UPSCALE_MODEL_NAME
+
+    lowered = request.request.lower()
+    if "4k" in lowered or "uhd" in lowered or "3840" in lowered:
+        return 3840, 2160, request.upscale_model or DEFAULT_UPSCALE_MODEL_NAME
+
+    return None, None, None
+
+
 def generate_image_with_e4b(request: ComfyUIImageGenerationRequest) -> ComfyUIImageGenerationResponse:
     try:
         llm_model, tool_name, tool_spec = plan_image_generation(request)
-        workflow = build_workflow(tool_spec)
+        output_width, output_height, upscale_model = _resolve_output_target(request)
+        workflow = build_workflow(
+            tool_spec,
+            output_width=output_width,
+            output_height=output_height,
+            upscale_model=upscale_model,
+        )
         prompt_id = submit_prompt(workflow)
         history = wait_for_completion(prompt_id)
         image_entry = extract_image_entry(history)
@@ -39,13 +59,16 @@ def generate_image_with_e4b(request: ComfyUIImageGenerationRequest) -> ComfyUIIm
         tool_name=tool_name,
         tool_prompt=tool_spec.prompt,
         negative_prompt=tool_spec.negative_prompt,
-        width=tool_spec.width,
-        height=tool_spec.height,
+        generated_width=tool_spec.width,
+        generated_height=tool_spec.height,
+        width=output_width or tool_spec.width,
+        height=output_height or tool_spec.height,
         steps=tool_spec.steps,
         cfg=tool_spec.cfg,
         seed=tool_spec.seed,
         prompt_id=prompt_id,
         filename=image_entry["filename"],
         subfolder=image_entry["subfolder"],
+        upscale_model=upscale_model,
         image_data_url=image_data_url,
     )

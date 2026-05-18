@@ -432,6 +432,9 @@ export class ApiClient {
         height?: number;
         seed?: number;
         steps?: number;
+        output_width?: number;
+        output_height?: number;
+        upscale_model?: string;
     }): Promise<BackendComfyUIImageGenerationResponse> {
         return generateComfyUIImage(this.requestFn, payload);
     }
