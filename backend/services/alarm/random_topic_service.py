@@ -17,7 +17,6 @@ _RE_ENGLISH_REASONING = re.compile(
 )
 _RE_NON_KOREAN_CJK = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\u3040-\u30FF\u31F0-\u31FF]")
 _RE_RANDOM_TITLE_PREFIX = re.compile(r"^\s*(title|제목)\s*:\s*", re.IGNORECASE)
-_RE_RANDOM_BODY_PREFIX = re.compile(r"^\s*(body|본문)\s*:\s*", re.IGNORECASE)
 _RE_REASON_BLOCK = re.compile(r"<reason\b[^>]*>.*?</reason\s*>", re.IGNORECASE | re.DOTALL)
 _RE_REASON_TAIL = re.compile(r"<reason\b[^>]*>.*$", re.IGNORECASE | re.DOTALL)
 _RE_EXPLANATORY_TAIL = re.compile(
@@ -346,9 +345,9 @@ def _postprocess_random_body(raw: str, deps: _RandomTopicDeps) -> str:
             if cleaned_lines and cleaned_lines[-1]:
                 cleaned_lines.append("")
             continue
-        stripped = _RE_RANDOM_BODY_PREFIX.sub("", stripped).strip()
-        if stripped:
-            cleaned_lines.append(stripped)
+        if re.match(r"^(본문|body)\s*:\s*$", stripped, re.IGNORECASE):
+            continue
+        cleaned_lines.append(stripped)
     return _format_random_body_for_telegram("\n".join(cleaned_lines).strip())
 
 

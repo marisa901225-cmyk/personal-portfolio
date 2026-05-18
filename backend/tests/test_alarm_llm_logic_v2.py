@@ -145,17 +145,6 @@ class AlarmLlmLogicV2ParityTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("사건:", stripped)
         self.assertTrue(stripped.startswith("제목: 로봇의 커피 사고"))
 
-    def test_random_message_strips_inline_body_label(self):
-        from backend.services.alarm.random_topic_service import _postprocess_random_body
-
-        deps = MagicMock()
-        deps.postprocess_llm_text.side_effect = lambda text: text
-
-        body = _postprocess_random_body("본문: 로봇이 커피포트 앞에서 멈추고 회로만 깜빡였다.", deps)
-
-        self.assertNotIn("본문:", body)
-        self.assertTrue(body.startswith("로봇이"))
-
     def test_random_topic_session_resets_after_threshold(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = os.path.join(tmpdir, "random_topic_llm_session_state.json")
