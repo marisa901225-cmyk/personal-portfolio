@@ -71,7 +71,7 @@ services:
       - /dev/dri:/dev/dri
     environment:
       - TZ=Asia/Seoul
-      - LLM_MODEL_PATH=/data/cq_gemma4_e4b_q8.gguf
+      - LLM_MODEL_PATH=/data/gemma-4-E2B-it-Q8_0.gguf
       - LLM_MODEL_PATH_FILE=/data/__llama_server_vulkan_huihui__.txt
       - LLM_THREADS=6
       - LLM_N_GPU_LAYERS=all
@@ -83,7 +83,7 @@ services:
       - LLM_FLASH_ATTN=on
       - LLM_CACHE_TYPE_K=q4_0
       - LLM_CACHE_TYPE_V=q4_0
-      - LLM_MMPROJ_PATH=/data/gemma-4-E4B.mmproj-Q8_0.gguf
+      - LLM_MMPROJ_PATH=/data/mmproj-gemma-4-E2B-it-Q8_0.gguf
     entrypoint: [ "/bin/bash", "/run.sh" ]
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8083/health" ]
@@ -108,7 +108,7 @@ services:
       - /dev/dri:/dev/dri
     environment:
       - TZ=Asia/Seoul
-      - LLM_MODEL_PATH=/data/cq_gemma4_e4b_q8.gguf
+      - LLM_MODEL_PATH=/data/gemma-4-E2B-it-Q8_0.gguf
       - LLM_THREADS=6
       - LLM_N_GPU_LAYERS=all
       - LLM_SERVER_PORT=8084
@@ -120,7 +120,7 @@ services:
       - LLM_FLASH_ATTN=on
       - LLM_CACHE_TYPE_K=q4_0
       - LLM_CACHE_TYPE_V=q4_0
-      - LLM_MMPROJ_PATH=/data/gemma-4-E4B.mmproj-Q8_0.gguf
+      - LLM_MMPROJ_PATH=/data/mmproj-gemma-4-E2B-it-Q8_0.gguf
       - LLM_EXTRA_ARGS=--no-warmup
       - ONEAPI_DEVICE_SELECTOR=level_zero:0
       - GGML_SYCL_FORCE_MMQ=1
