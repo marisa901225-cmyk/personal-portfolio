@@ -434,11 +434,11 @@ def test_upscale_anime_image_stops_comfyui_when_vram_is_low(monkeypatch: pytest.
     monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_comfyui_vram_mode", "auto")
     monkeypatch.setattr("backend.services.comfyui_image_service.settings.realesrgan_min_free_vram_mb", 1536.0)
     monkeypatch.setattr(
-        "backend.services.comfyui_image_service._query_gpu_memory",
+        "backend.services.comfyui.vram.query_gpu_memory",
         lambda: _GpuMemory(used_mb=10_928.0, utilization_percent=91.62),
     )
     monkeypatch.setattr(
-        "backend.services.comfyui_image_service._set_container_running",
+        "backend.services.comfyui.vram.set_container_running",
         lambda _container_name, *, should_run: calls.append(should_run) or True,
     )
 

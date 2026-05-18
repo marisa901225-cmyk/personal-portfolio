@@ -1,0 +1,16 @@
+DEFAULT_NEGATIVE_PROMPT = "low quality, blurry, distorted, bad anatomy, watermark, text, logo"
+DEFAULT_STEPS = 20
+DEFAULT_CFG = 4.0
+DEFAULT_SAMPLER = "euler"
+DEFAULT_SCHEDULER = "simple"
+DEFAULT_UNET_NAME = "UltraReal_anima.safetensors"
+DEFAULT_CLIP_NAME = "qwen_3_06b_base.safetensors"
+DEFAULT_VAE_NAME = "qwen_image_vae.safetensors"
+DEFAULT_FILENAME_PREFIX = "ai_comfyui"
+DEFAULT_CLIENT_ID = "myasset-ai-comfyui"
+DEFAULT_TIMEOUT_SEC = 180
+MAX_UPSCALE_SOURCE_BYTES = 30 * 1024 * 1024
+SERVER_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+VRAM_MODE_ALWAYS = "always"
+VRAM_MODE_AUTO = "auto"
+VRAM_MODE_OFF = "off"
