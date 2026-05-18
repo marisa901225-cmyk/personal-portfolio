@@ -14,15 +14,19 @@ interface ImageGenerationDashboardProps {
   cookieAuth?: boolean;
 }
 
-type CanvasPreset = 'square' | 'portrait' | 'landscape' | 'wide' | 'custom';
+type CanvasPreset = 'square' | 'classicPortrait' | 'classicLandscape' | 'storyPortrait' | 'cinemaLandscape' | 'phonePortrait' | 'phoneLandscape' | 'wide' | 'custom';
 type UpscaleResolutionPreset = 'native4x' | 'fullhd' | 'square2k' | 'uhd4k' | 'custom';
 type StudioMode = 'generate' | 'upscale';
 
 const CANVAS_PRESETS: Record<CanvasPreset, { label: string; width: number; height: number }> = {
-  square: { label: '1024 정사각', width: 1024, height: 1024 },
-  portrait: { label: '896 세로', width: 896, height: 1152 },
-  landscape: { label: '1344 가로', width: 1344, height: 768 },
-  wide: { label: '1536 와이드', width: 1536, height: 864 },
+  square: { label: '1:1 정사각', width: 1024, height: 1024 },
+  classicPortrait: { label: '3:4 세로', width: 896, height: 1152 },
+  classicLandscape: { label: '4:3 가로', width: 1152, height: 896 },
+  storyPortrait: { label: '2:3 세로', width: 832, height: 1216 },
+  cinemaLandscape: { label: '3:2 가로', width: 1216, height: 832 },
+  phonePortrait: { label: '9:16 세로', width: 768, height: 1344 },
+  phoneLandscape: { label: '16:9 가로', width: 1344, height: 768 },
+  wide: { label: '21:9 와이드', width: 1536, height: 640 },
   custom: { label: '직접 입력', width: 1024, height: 1024 },
 };
 
@@ -45,18 +49,12 @@ const formatServerImageTime = (value: string) =>
     minute: '2-digit',
   }).format(new Date(value));
 
-const STARTER_PROMPTS = [
-  '비 오는 창가에서 낮잠 자는 치즈 고양이, 따뜻한 동화풍 일러스트',
-  '서울 골목길 네온사인 아래 서 있는 미래적인 재킷의 여성, 시네마틱 사진풍',
-  '우드톤 작업실 책상 위에 놓인 커피와 노트북, 아침 햇살, 감성 광고 비주얼',
-];
-
 export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> = ({
   serverUrl,
   apiToken,
   cookieAuth,
 }) => {
-  const [requestText, setRequestText] = useState(STARTER_PROMPTS[0]);
+  const [requestText, setRequestText] = useState('');
   const [mode, setMode] = useState<StudioMode>('generate');
   const [preset, setPreset] = useState<CanvasPreset>('square');
   const [customWidth, setCustomWidth] = useState(1024);
@@ -300,28 +298,15 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                 value={requestText}
                 onChange={(event) => setRequestText(event.target.value)}
                 rows={5}
-                placeholder="예: 빛바랜 필름 질감의 여름 해변, 모래 위에서 책 읽는 소녀, 따뜻한 역광"
+                placeholder="그리고 싶은 장면을 입력하세요."
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 outline-none transition focus:border-indigo-400 focus:bg-white"
               />
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              {STARTER_PROMPTS.map((prompt) => (
-                <button
-                  key={prompt}
-                  type="button"
-                  onClick={() => setRequestText(prompt)}
-                  className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700"
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
-
             <div className="grid gap-4 sm:grid-cols-[1.4fr_0.8fr]">
               <div>
-                <div className="mb-2 text-sm font-semibold text-slate-800">해상도</div>
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="mb-2 text-sm font-semibold text-slate-800">비율 / 해상도</div>
+                <div className="grid grid-cols-3 gap-2">
                   {(Object.entries(CANVAS_PRESETS) as Array<[CanvasPreset, { label: string; width: number; height: number }]>).map(([key, value]) => (
                     <button
                       key={key}
