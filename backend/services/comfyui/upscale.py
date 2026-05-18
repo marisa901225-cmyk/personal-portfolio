@@ -10,7 +10,7 @@ import requests
 from PIL import Image
 
 from ...core.schemas import AnimeImageUpscaleRequest, AnimeImageUpscaleResponse
-from .constants import DEFAULT_UPSCALE_MODEL_NAME, MAX_UPSCALE_SOURCE_BYTES
+from .constants import ANIME_UPSCALE_MODEL_NAME, DEFAULT_UPSCALE_MODEL_NAME, MAX_UPSCALE_SOURCE_BYTES
 from .errors import ImageUpscaleError
 from .workflow import _comfyui_url, extract_image_entry, fetch_image_data_url, submit_prompt, wait_for_completion
 
@@ -18,9 +18,11 @@ from .workflow import _comfyui_url, extract_image_entry, fetch_image_data_url, s
 logger = logging.getLogger(__name__)
 
 MODEL_ALIASES = {
-    "realesrgan-x4plus-anime": DEFAULT_UPSCALE_MODEL_NAME,
-    "realesr-animevideov3": DEFAULT_UPSCALE_MODEL_NAME,
+    "realesrgan-x4plus": DEFAULT_UPSCALE_MODEL_NAME,
     DEFAULT_UPSCALE_MODEL_NAME: DEFAULT_UPSCALE_MODEL_NAME,
+    "realesrgan-x4plus-anime": ANIME_UPSCALE_MODEL_NAME,
+    "realesr-animevideov3": ANIME_UPSCALE_MODEL_NAME,
+    ANIME_UPSCALE_MODEL_NAME: ANIME_UPSCALE_MODEL_NAME,
 }
 
 

@@ -132,7 +132,7 @@ describe('ApiClient', () => {
       height: 1024,
       output_width: 3840,
       output_height: 2160,
-      upscale_model: 'RealESRGAN_x4plus_anime_6B.pth',
+      upscale_model: 'RealESRGAN_x4plus.pth',
     });
 
     expect(result).toEqual(mockResponse);
@@ -145,7 +145,7 @@ describe('ApiClient', () => {
       height: 1024,
       output_width: 3840,
       output_height: 2160,
-      upscale_model: 'RealESRGAN_x4plus_anime_6B.pth',
+      upscale_model: 'RealESRGAN_x4plus.pth',
     }));
   });
 

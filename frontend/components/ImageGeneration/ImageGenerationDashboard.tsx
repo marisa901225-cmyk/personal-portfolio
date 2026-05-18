@@ -45,8 +45,10 @@ const UPSCALE_RESOLUTION_PRESETS: Record<UpscaleResolutionPreset, { label: strin
 
 const GENERATION_OUTPUT_PRESETS: Record<GenerationOutputPreset, { label: string; description: string; output_width?: number; output_height?: number }> = {
   native: { label: '기본 저장', description: '생성 해상도 그대로 저장' },
-  uhd4k: { label: '4K 저장', description: 'RealESRGAN 노드로 3840 × 2160 출력', output_width: 3840, output_height: 2160 },
+  uhd4k: { label: '4K 저장', description: '범용 RealESRGAN 노드로 3840 × 2160 출력', output_width: 3840, output_height: 2160 },
 };
+
+const GENERAL_UPSCALE_MODEL = 'RealESRGAN_x4plus.pth';
 
 const clampResolution = (value: number) => Math.min(Math.max(value || 1024, 512), 1536);
 const clampUpscaleResolution = (value: number) => Math.min(Math.max(value || 2048, 256), 4096);
@@ -80,7 +82,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
   const [selectedServerImagePath, setSelectedServerImagePath] = useState('');
   const [serverImages, setServerImages] = useState<BackendServerGeneratedImage[]>([]);
   const [isLoadingServerImages, setIsLoadingServerImages] = useState(false);
-  const [upscaleModel, setUpscaleModel] = useState('realesrgan-x4plus-anime');
+  const [upscaleModel, setUpscaleModel] = useState('realesrgan-x4plus');
   const [revisionText, setRevisionText] = useState('');
   const [revisionMessages, setRevisionMessages] = useState<RevisionMessage[]>([]);
   const [result, setResult] = useState<BackendComfyUIImageGenerationResponse | null>(null);
@@ -218,7 +220,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
         seed: seed.trim() ? Number(seed.trim()) : undefined,
         output_width: generationOutputTarget.output_width,
         output_height: generationOutputTarget.output_height,
-        upscale_model: generationOutput === 'uhd4k' ? 'RealESRGAN_x4plus_anime_6B.pth' : undefined,
+        upscale_model: generationOutput === 'uhd4k' ? GENERAL_UPSCALE_MODEL : undefined,
       });
       startTransition(() => {
         setResult(response);
@@ -279,7 +281,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
         steps,
         output_width: result?.upscale_model ? result.width : generationOutputTarget.output_width,
         output_height: result?.upscale_model ? result.height : generationOutputTarget.output_height,
-        upscale_model: result?.upscale_model ?? (generationOutput === 'uhd4k' ? 'RealESRGAN_x4plus_anime_6B.pth' : undefined),
+        upscale_model: result?.upscale_model ?? (generationOutput === 'uhd4k' ? GENERAL_UPSCALE_MODEL : undefined),
       });
       startTransition(() => {
         setResult(response);
@@ -619,7 +621,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
 
                 <div>
                   <label className="mb-2 block text-sm font-semibold text-slate-800" htmlFor="upscale-model">
-                    애니 업스케일 모델
+                    업스케일 모델
                   </label>
                   <select
                     id="upscale-model"
@@ -627,6 +629,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                     onChange={(event) => setUpscaleModel(event.target.value)}
                     className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"
                   >
+                    <option value="realesrgan-x4plus">ComfyUI RealESRGAN x4 범용</option>
                     <option value="realesrgan-x4plus-anime">ComfyUI RealESRGAN x4 Anime</option>
                   </select>
                 </div>

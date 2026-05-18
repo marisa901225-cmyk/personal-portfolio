@@ -233,11 +233,11 @@ def test_build_workflow_routes_4k_output_through_upscale_model() -> None:
         ),
         output_width=3840,
         output_height=2160,
-        upscale_model="RealESRGAN_x4plus_anime_6B.pth",
+        upscale_model="RealESRGAN_x4plus.pth",
     )
 
     assert workflow["10"]["class_type"] == "UpscaleModelLoader"
-    assert workflow["10"]["inputs"]["model_name"] == "RealESRGAN_x4plus_anime_6B.pth"
+    assert workflow["10"]["inputs"]["model_name"] == "RealESRGAN_x4plus.pth"
     assert workflow["11"]["class_type"] == "ImageUpscaleWithModel"
     assert workflow["12"]["inputs"]["width"] == 3840
     assert workflow["12"]["inputs"]["height"] == 2160
@@ -443,6 +443,32 @@ def test_upscale_anime_image_uses_comfyui_upscale_nodes(monkeypatch: pytest.Monk
     assert result.model == "RealESRGAN_x4plus_anime_6B.pth"
     assert result.width == 256
     assert result.height == 256
+
+
+def test_upscale_anime_image_supports_general_realesrgan_alias(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    source_path = tmp_path / "source.png"
+    Image.new("RGB", (2, 2), "white").save(source_path)
+    output_path = tmp_path / "output.png"
+    Image.new("RGB", (8, 8), "green").save(output_path)
+    output_data_url = f"data:image/png;base64,{base64.b64encode(output_path.read_bytes()).decode('ascii')}"
+    submitted: dict[str, dict] = {}
+
+    monkeypatch.setattr(upscale_module, "_upload_comfyui_input", lambda _bytes, _ext: "source.png")
+    monkeypatch.setattr(upscale_module, "submit_prompt", lambda workflow: submitted.setdefault("workflow", workflow) or "prompt-1")
+    monkeypatch.setattr(upscale_module, "wait_for_completion", lambda _prompt_id, timeout_sec=180: {"outputs": {}})
+    monkeypatch.setattr(upscale_module, "extract_image_entry", lambda _history: {"filename": "upscaled_00001_.png", "subfolder": "", "type": "output"})
+    monkeypatch.setattr(upscale_module, "fetch_image_data_url", lambda _entry: output_data_url)
+
+    result = upscale_anime_image(
+        AnimeImageUpscaleRequest(
+            image_data_url=f"data:image/png;base64,{base64.b64encode(source_path.read_bytes()).decode('ascii')}",
+            model="realesrgan-x4plus",
+            scale=4,
+        )
+    )
+
+    assert submitted["workflow"]["2"]["inputs"]["model_name"] == "RealESRGAN_x4plus.pth"
+    assert result.model == "RealESRGAN_x4plus.pth"
 
 
 def test_upscale_anime_image_runs_native_model_size_without_target(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
