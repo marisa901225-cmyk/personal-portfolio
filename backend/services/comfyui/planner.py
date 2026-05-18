@@ -34,10 +34,13 @@ def _openrouter_headers() -> dict[str, str]:
 
 def _llm_base_url_candidates() -> list[str]:
     candidates: list[str] = []
+    configured = str(settings.llm_base_url or "").strip().rstrip("/")
     raw_candidates = [
-        settings.llm_base_url,
+        configured if ":8084" in configured else None,
+        "http://llama-server-sycl-huihui:8084",
         "http://127.0.0.1:8084",
         "http://localhost:8084",
+        configured if ":8084" not in configured else None,
     ]
     for candidate in raw_candidates:
         value = str(candidate or "").strip().rstrip("/")

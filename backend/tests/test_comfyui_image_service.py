@@ -16,6 +16,7 @@ from backend.services.comfyui_image_service import (
     upscale_anime_image,
 )
 from backend.services.comfyui.types import ToolSpec
+from backend.services.comfyui.planner import _llm_base_url_candidates
 from backend.services.comfyui.workflow import build_workflow
 import backend.services.comfyui.upscale as upscale_module
 
@@ -128,6 +129,17 @@ def test_generate_image_with_e4b_success(monkeypatch: pytest.MonkeyPatch) -> Non
     assert params["filename"] == "e4b_comfyui_00001_.png"
 
 
+def test_image_planner_prefers_8084_before_stale_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("backend.services.comfyui.planner.settings.llm_base_url", "http://openvino-server:8082")
+
+    assert _llm_base_url_candidates() == [
+        "http://llama-server-sycl-huihui:8084",
+        "http://127.0.0.1:8084",
+        "http://localhost:8084",
+        "http://openvino-server:8082",
+    ]
+
+
 def test_build_workflow_routes_4k_output_through_upscale_model() -> None:
     workflow = build_workflow(
         ToolSpec(
@@ -212,6 +224,7 @@ def test_generate_image_with_e4b_falls_back_to_openrouter_gemma(monkeypatch: pyt
         post_calls.append((url, kwargs))
         if url in {
             "http://llm.test/v1/chat/completions",
+            "http://llama-server-sycl-huihui:8084/v1/chat/completions",
             "http://127.0.0.1:8084/v1/chat/completions",
             "http://localhost:8084/v1/chat/completions",
         }:
@@ -225,6 +238,7 @@ def test_generate_image_with_e4b_falls_back_to_openrouter_gemma(monkeypatch: pyt
     def fake_get(url: str, **kwargs):
         if url in {
             "http://llm.test/v1/models",
+            "http://llama-server-sycl-huihui:8084/v1/models",
             "http://127.0.0.1:8084/v1/models",
             "http://localhost:8084/v1/models",
         }:
