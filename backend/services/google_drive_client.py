@@ -7,6 +7,10 @@ logger = logging.getLogger(__name__)
 
 class GoogleDriveService:
     @staticmethod
+    def _escape_drive_query(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("'", "\\'")
+
+    @staticmethod
     def get_access_token(client_id: str, client_secret: str, refresh_token: str) -> Optional[str]:
         """
         Refresh Token을 사용하여 OAuth2 Access Token을 발급받습니다.
@@ -49,6 +53,32 @@ class GoogleDriveService:
         except Exception as e:
             logger.error(f"Failed to find folder: {e}")
             return None
+
+    @staticmethod
+    def file_exists_in_folder(file_name: str, drive_folder_id: str, access_token: str) -> bool:
+        """
+        특정 폴더 안에 같은 이름의 파일이 존재하는지 확인합니다.
+        """
+        try:
+            safe_name = GoogleDriveService._escape_drive_query(file_name)
+            safe_folder_id = GoogleDriveService._escape_drive_query(drive_folder_id)
+            url = "https://www.googleapis.com/drive/v3/files"
+            headers = {"Authorization": f"Bearer {access_token}"}
+            params = {
+                "q": (
+                    f"name = '{safe_name}' and '{safe_folder_id}' in parents "
+                    "and trashed = false"
+                ),
+                "fields": "files(id, name)",
+                "pageSize": 1,
+                "spaces": "drive",
+            }
+            response = requests.get(url, headers=headers, params=params, timeout=10)
+            response.raise_for_status()
+            return bool(response.json().get("files", []))
+        except Exception as e:
+            logger.error(f"Failed to check Google Drive file existence: {e}")
+            return False
 
     @staticmethod
     def create_folder(folder_name: str, access_token: str) -> Optional[str]:

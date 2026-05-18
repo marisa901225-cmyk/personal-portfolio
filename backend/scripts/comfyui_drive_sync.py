@@ -25,6 +25,7 @@ class SyncConfig:
     state_path: Path
     poll_interval_sec: int
     stable_age_sec: int
+    max_local_bytes: int
     folder_name: str
     folder_id: str | None
     client_id: str
@@ -48,11 +49,24 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_bytes(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Invalid byte size for %s=%r. Falling back to %s.", name, raw, default)
+        return default
+    return max(0, value)
+
+
 def _build_config() -> SyncConfig:
     output_dir = Path(os.getenv("COMFYUI_OUTPUT_DIR", "/comfyui-output")).resolve()
     state_path = Path(
         os.getenv("COMFYUI_GDRIVE_SYNC_STATE_PATH", "/app/backend/data/comfyui_gdrive_sync_state.json")
     ).resolve()
+    max_local_bytes = _env_bytes("COMFYUI_GDRIVE_MAX_LOCAL_BYTES", 1_073_741_824)
     folder_name = os.getenv("COMFYUI_GDRIVE_FOLDER_NAME", "Comfyui 이미지").strip() or "Comfyui 이미지"
     folder_id = os.getenv("COMFYUI_GDRIVE_FOLDER_ID", "").strip() or None
     client_id = os.getenv("GOOGLE_DRIVE_CLIENT_ID", "").strip()
@@ -78,6 +92,7 @@ def _build_config() -> SyncConfig:
         state_path=state_path,
         poll_interval_sec=poll_interval_sec,
         stable_age_sec=stable_age_sec,
+        max_local_bytes=max_local_bytes,
         folder_name=folder_name,
         folder_id=folder_id,
         client_id=client_id,
@@ -150,6 +165,90 @@ def _build_upload_name(config: SyncConfig, path: Path) -> str:
     return rel.replace("/", "__")
 
 
+def _collect_synced_images(config: SyncConfig, state: dict[str, dict[str, int]]) -> list[Path]:
+    if not config.output_dir.exists():
+        return []
+
+    synced: list[Path] = []
+    for rel in sorted(state):
+        path = config.output_dir / rel
+        if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES:
+            synced.append(path)
+    return synced
+
+
+def _compute_total_size(paths: list[Path]) -> int:
+    total = 0
+    for path in paths:
+        try:
+            total += path.stat().st_size
+        except FileNotFoundError:
+            continue
+    return total
+
+
+def _needs_cleanup(config: SyncConfig, state: dict[str, dict[str, int]]) -> bool:
+    if config.max_local_bytes <= 0:
+        return False
+    synced_paths = _collect_synced_images(config, state)
+    return _compute_total_size(synced_paths) > config.max_local_bytes
+
+
+def _prune_empty_dirs(root: Path) -> None:
+    if not root.exists():
+        return
+    for path in sorted(root.rglob("*"), reverse=True):
+        if path.is_dir():
+            try:
+                path.rmdir()
+            except OSError:
+                continue
+
+
+def _cleanup_local_files(
+    config: SyncConfig,
+    state: dict[str, dict[str, int]],
+    folder_id: str,
+    access_token: str,
+) -> None:
+    if config.max_local_bytes <= 0:
+        return
+
+    synced_paths = _collect_synced_images(config, state)
+    total_size = _compute_total_size(synced_paths)
+    if total_size <= config.max_local_bytes:
+        return
+
+    logger.info(
+        "ComfyUI output exceeds limit (%s > %s). Starting cleanup of drive-backed files.",
+        total_size,
+        config.max_local_bytes,
+    )
+
+    candidates = sorted(synced_paths, key=lambda path: path.stat().st_mtime)
+    for path in candidates:
+        if total_size <= config.max_local_bytes:
+            break
+
+        rel = path.relative_to(config.output_dir).as_posix()
+        upload_name = _build_upload_name(config, path)
+        if not GoogleDriveService.file_exists_in_folder(upload_name, folder_id, access_token):
+            logger.warning("Skipping delete because file is not confirmed on Drive: %s", rel)
+            continue
+
+        try:
+            size = path.stat().st_size
+            path.unlink()
+            total_size -= size
+            logger.info("Deleted local ComfyUI image after Drive verification: %s", rel)
+        except FileNotFoundError:
+            total_size = _compute_total_size(_collect_synced_images(config, state))
+        except Exception:
+            logger.exception("Failed to delete local ComfyUI image: %s", rel)
+
+    _prune_empty_dirs(config.output_dir)
+
+
 def run_sync_loop() -> int:
     _load_env()
     config = _build_config()
@@ -165,7 +264,8 @@ def run_sync_loop() -> int:
     while True:
         try:
             candidates = _discover_candidates(config, state)
-            if candidates:
+            should_cleanup = _needs_cleanup(config, state)
+            if candidates or should_cleanup:
                 access_token = GoogleDriveService.get_access_token(
                     config.client_id,
                     config.client_secret,
@@ -195,6 +295,7 @@ def run_sync_loop() -> int:
                                 _save_state(config.state_path, state)
                             else:
                                 logger.error("Upload failed for %s", rel)
+                        _cleanup_local_files(config, state, folder_id, access_token)
             time.sleep(config.poll_interval_sec)
         except KeyboardInterrupt:
             logger.info("Stopping ComfyUI Google Drive sync.")
