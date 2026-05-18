@@ -10,6 +10,7 @@ import requests
 from PIL import Image
 
 from ...core.schemas import AnimeImageUpscaleRequest, AnimeImageUpscaleResponse
+from ..gpu_work_lock import gpu_heavy_work_lock
 from .constants import ANIME_UPSCALE_MODEL_NAME, DEFAULT_UPSCALE_MODEL_NAME, MAX_UPSCALE_SOURCE_BYTES
 from .errors import ImageUpscaleError
 from .workflow import _comfyui_url, extract_image_entry, fetch_image_data_url, submit_prompt, wait_for_completion
@@ -118,17 +119,18 @@ def upscale_anime_image(request: AnimeImageUpscaleRequest) -> AnimeImageUpscaleR
     image_bytes, source_ext = _decode_image_data_url(request.image_data_url)
 
     try:
-        input_name = _upload_comfyui_input(image_bytes, source_ext)
-        workflow = _build_upscale_workflow(
-            input_name=input_name,
-            model_name=model_name,
-            target_width=request.target_width,
-            target_height=request.target_height,
-        )
-        prompt_id = submit_prompt(workflow)
-        history = wait_for_completion(prompt_id, timeout_sec=180)
-        image_entry = extract_image_entry(history)
-        image_data_url = fetch_image_data_url(image_entry)
+        with gpu_heavy_work_lock("comfyui_upscale"):
+            input_name = _upload_comfyui_input(image_bytes, source_ext)
+            workflow = _build_upscale_workflow(
+                input_name=input_name,
+                model_name=model_name,
+                target_width=request.target_width,
+                target_height=request.target_height,
+            )
+            prompt_id = submit_prompt(workflow)
+            history = wait_for_completion(prompt_id, timeout_sec=180)
+            image_entry = extract_image_entry(history)
+            image_data_url = fetch_image_data_url(image_entry)
     except requests.HTTPError as exc:
         body = exc.response.text[:500] if exc.response is not None else ""
         raise ImageUpscaleError(f"ComfyUI anime upscaling request failed: {exc}. {body}".strip()) from exc

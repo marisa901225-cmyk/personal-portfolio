@@ -5,6 +5,7 @@ import logging
 import requests
 
 from ...core.schemas import ComfyUIImageGenerationRequest, ComfyUIImageGenerationResponse
+from ..gpu_work_lock import gpu_heavy_work_lock
 from .constants import DEFAULT_UPSCALE_MODEL_NAME
 from .errors import ImageGenerationError
 from .planner import plan_image_generation
@@ -29,18 +30,19 @@ def _resolve_output_target(request: ComfyUIImageGenerationRequest) -> tuple[int 
 
 def generate_image_with_e4b(request: ComfyUIImageGenerationRequest) -> ComfyUIImageGenerationResponse:
     try:
-        llm_model, tool_name, tool_spec = plan_image_generation(request)
-        output_width, output_height, upscale_model = _resolve_output_target(request)
-        workflow = build_workflow(
-            tool_spec,
-            output_width=output_width,
-            output_height=output_height,
-            upscale_model=upscale_model,
-        )
-        prompt_id = submit_prompt(workflow)
-        history = wait_for_completion(prompt_id)
-        image_entry = extract_image_entry(history)
-        image_data_url = fetch_image_data_url(image_entry)
+        with gpu_heavy_work_lock("comfyui_generate"):
+            llm_model, tool_name, tool_spec = plan_image_generation(request)
+            output_width, output_height, upscale_model = _resolve_output_target(request)
+            workflow = build_workflow(
+                tool_spec,
+                output_width=output_width,
+                output_height=output_height,
+                upscale_model=upscale_model,
+            )
+            prompt_id = submit_prompt(workflow)
+            history = wait_for_completion(prompt_id)
+            image_entry = extract_image_entry(history)
+            image_data_url = fetch_image_data_url(image_entry)
     except requests.HTTPError as exc:
         body = ""
         if exc.response is not None:

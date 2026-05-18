@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from .sanitizer import clean_exaone_tokens
 from ..prompt_loader import load_prompt
+from ..gpu_work_lock import gpu_heavy_work_lock
 from ..llm_service import LLMService
 
 logger = logging.getLogger(__name__)
@@ -156,14 +157,17 @@ async def generate_with_main_llm_async(
     if llm_kwargs:
         kwargs.update(llm_kwargs)
 
-    return await asyncio.to_thread(
-        llm_service.generate_chat,
-        messages,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        stop=stop,
-        **kwargs
-    )
+    def _generate_with_lock() -> str:
+        with gpu_heavy_work_lock("alarm_main_llm"):
+            return llm_service.generate_chat(
+                messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stop=stop,
+                **kwargs,
+            )
+
+    return await asyncio.to_thread(_generate_with_lock)
 
 
 async def generate_with_light_llm_async(

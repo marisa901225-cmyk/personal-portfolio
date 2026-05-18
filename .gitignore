@@ -89,6 +89,7 @@ backend/data/alarm_heartbeat_state.json
 backend/data/google_drive_backup_state.json
 backend/data/news_index.faiss
 backend/data/llm_fan_guard_state.json
+backend/data/gpu_heavy_work.lock
 backend/data/llm_paid_fallback_notice_state.json
 backend/data/kis_rate_limit_restore_state.json
 
