@@ -162,6 +162,68 @@ def test_image_planner_json_payload_loads_shared_ultrareal_prompt() -> None:
     assert "UltraReal FineTune Anima" in system_prompt
 
 
+def test_generate_image_with_e4b_normalizes_negative_llm_seed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.llm_base_url", "http://llm.test")
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.llm_remote_default_model", "local-model.gguf")
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.open_api_key", None)
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.comfyui_base_url", "http://comfy.test")
+    monkeypatch.setattr("backend.services.comfyui.planner._llm_base_url_candidates", lambda: ["http://llm.test"])
+    monkeypatch.setattr("backend.services.comfyui.planner.random.randint", lambda _start, _end: 123456)
+
+    llm_response = _Response(
+        json_data={
+            "model": "local-model.gguf",
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "prompt": "cosplay portrait",
+                                "width": 1024,
+                                "height": 1024,
+                                "seed": -1,
+                            }
+                        )
+                    }
+                }
+            ],
+        }
+    )
+    prompt_response = _Response(json_data={"prompt_id": "seed-123"})
+    history_response = _Response(
+        json_data={
+            "seed-123": {
+                "status": {"completed": True},
+                "outputs": {"9": {"images": [{"filename": "seed.png", "subfolder": "", "type": "output"}]}},
+            }
+        }
+    )
+    view_response = _Response(content=b"\x89PNG\r\nseed", headers={"Content-Type": "image/png"})
+
+    def fake_post(url: str, **kwargs):
+        if url == "http://llm.test/v1/chat/completions":
+            return llm_response
+        if url == "http://comfy.test/prompt":
+            return prompt_response
+        raise AssertionError(f"unexpected POST {url}")
+
+    def fake_get(url: str, **kwargs):
+        if url == "http://llm.test/v1/models":
+            return _Response(json_data={"data": [{"id": "local-model.gguf"}]})
+        if url.endswith("/history/seed-123"):
+            return history_response
+        if url.endswith("/view"):
+            return view_response
+        raise AssertionError(f"unexpected GET {url}")
+
+    monkeypatch.setattr("backend.services.comfyui_image_service.requests.post", fake_post)
+    monkeypatch.setattr("backend.services.comfyui_image_service.requests.get", fake_get)
+
+    result = generate_image_with_e4b(ComfyUIImageGenerationRequest(request="seed test", width=1024, height=1024))
+
+    assert result.seed == 123456
+
+
 def test_generate_image_with_e4b_retries_local_tool_call_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("backend.services.comfyui_image_service.settings.llm_base_url", "http://llm.test")
     monkeypatch.setattr("backend.services.comfyui_image_service.settings.llm_remote_default_model", "local-model.gguf")
