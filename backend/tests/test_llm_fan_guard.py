@@ -20,6 +20,7 @@ class TestLlmFanGuard(unittest.TestCase):
         self.log_file = self.tmp_path / "llm_fan_guard.log"
         self.lock_file = self.tmp_path / "llm_fan_guard.lock"
         self.sensors_bin = self.tmp_path / "fake-sensors.sh"
+        self.xpu_smi_bin = self.tmp_path / "fake-xpu-smi.sh"
         self.schedule_script = self.tmp_path / "fake-llm-schedule.sh"
 
         self._write_executable(
@@ -27,6 +28,13 @@ class TestLlmFanGuard(unittest.TestCase):
             """#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "${FAKE_SENSORS_OUTPUT:-}"
+""",
+        )
+        self._write_executable(
+            self.xpu_smi_bin,
+            """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "${FAKE_XPU_SMI_OUTPUT:-}"
 """,
         )
         self._write_executable(
@@ -64,6 +72,9 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
         now_date: str = "20260514",
         now_weekday: str = "4",
         now_hhmm: str = "12:00",
+        xpu_smi_output: str = "",
+        stop_temp_c: str = "86",
+        critical_stop_temp_c: str = "92",
     ) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
         env.update(
@@ -75,12 +86,16 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
                 "LLM_FAN_GUARD_LOCK_FILE": str(self.lock_file),
                 "LLM_FAN_GUARD_SCHEDULE_SCRIPT": str(self.schedule_script),
                 "LLM_FAN_GUARD_SENSORS_BIN": str(self.sensors_bin),
+                "LLM_FAN_GUARD_XPU_SMI_BIN": str(self.xpu_smi_bin),
+                "FAKE_XPU_SMI_OUTPUT": textwrap.dedent(xpu_smi_output).strip(),
                 "LLM_FAN_GUARD_THRESHOLD_RPM": str(threshold_rpm),
                 "LLM_FAN_GUARD_COOLDOWN_SEC": str(cooldown_sec),
                 "LLM_FAN_GUARD_NOW_EPOCH": str(now_epoch),
                 "LLM_FAN_GUARD_SENSOR_PATTERN": sensor_pattern,
                 "LLM_FAN_GUARD_STOP_DELAY_SEC": str(stop_delay_sec),
                 "LLM_FAN_GUARD_START_MAX_TEMP_C": str(start_max_temp_c),
+                "LLM_FAN_GUARD_STOP_TEMP_C": str(stop_temp_c),
+                "LLM_FAN_GUARD_CRITICAL_STOP_TEMP_C": str(critical_stop_temp_c),
                 "LLM_FAN_GUARD_START_RETRY_SEC": str(start_retry_sec),
                 "LLM_FAN_GUARD_STARTUP_GRACE_SEC": str(startup_grace_sec),
                 "LLM_FAN_GUARD_TEMP_SENSOR_PATTERN": temp_sensor_pattern,
@@ -445,6 +460,45 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
         self.assertIn('"last_seen_rpm": 1810', state_text)
         self.assertIn('"high_rpm_started_epoch": 0', state_text)
         self.assertIn('"last_action": "day_relax"', state_text)
+
+    def test_xpu_smi_temperature_stops_llm_even_when_fan_rpm_is_low(self) -> None:
+        result = self._run_guard(
+            sensors_output="""
+                xe-pci-0300
+                Adapter: PCI adapter
+                fan1:         900 RPM
+                pkg:          +45.0 C
+            """,
+            xpu_smi_output="""
+                {
+                    "device_id": 0,
+                    "device_level": [
+                        {
+                            "metrics_type": "XPUM_STATS_GPU_CORE_TEMPERATURE",
+                            "value": 84.0
+                        },
+                        {
+                            "metrics_type": "XPUM_STATS_MEMORY_TEMPERATURE",
+                            "value": 88.0
+                        }
+                    ]
+                }
+            """,
+            now_epoch=1_000,
+            stop_temp_c="86",
+            critical_stop_temp_c="92",
+            day_relax_enabled=1,
+            now_weekday="4",
+            now_hhmm="08:30",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self._read_actions(), ["stop|0"])
+        state_text = self.state_file.read_text(encoding="utf-8")
+        self.assertIn('"last_action": "stop"', state_text)
+        log_text = self.log_file.read_text(encoding="utf-8")
+        self.assertIn("temp=88", log_text)
+        self.assertIn("temp; LLM중지", log_text)
 
     def test_day_relax_window_does_not_apply_before_8am(self) -> None:
         result = self._run_guard(

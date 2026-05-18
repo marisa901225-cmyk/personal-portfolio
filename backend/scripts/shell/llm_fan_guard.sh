@@ -9,6 +9,7 @@ STATE_FILE="${LLM_FAN_GUARD_STATE_FILE:-$PROJECT_ROOT/backend/data/llm_fan_guard
 LOCK_FILE="${LLM_FAN_GUARD_LOCK_FILE:-/tmp/llm_fan_guard.lock}"
 SCHEDULE_SCRIPT="${LLM_FAN_GUARD_SCHEDULE_SCRIPT:-$PROJECT_ROOT/backend/scripts/shell/llm_service_schedule.sh}"
 SENSORS_BIN="${LLM_FAN_GUARD_SENSORS_BIN:-sensors}"
+XPU_SMI_BIN="${LLM_FAN_GUARD_XPU_SMI_BIN:-xpu-smi}"
 
 ENABLED="${LLM_FAN_GUARD_ENABLED:-1}"
 THRESHOLD_RPM="${LLM_FAN_GUARD_THRESHOLD_RPM:-1600}"
@@ -19,6 +20,8 @@ COOLDOWN_SEC="${LLM_FAN_GUARD_COOLDOWN_SEC:-0}"
 RESTART_DELAY_SEC="${LLM_FAN_GUARD_RESTART_DELAY_SEC:-10}"
 SENSOR_PATTERN="${LLM_FAN_GUARD_SENSOR_PATTERN:-}"
 START_MAX_TEMP_C="${LLM_FAN_GUARD_START_MAX_TEMP_C:-88}"
+STOP_TEMP_C="${LLM_FAN_GUARD_STOP_TEMP_C:-86}"
+CRITICAL_STOP_TEMP_C="${LLM_FAN_GUARD_CRITICAL_STOP_TEMP_C:-92}"
 START_RETRY_SEC="${LLM_FAN_GUARD_START_RETRY_SEC:-300}"
 STARTUP_GRACE_SEC="${LLM_FAN_GUARD_STARTUP_GRACE_SEC:-600}"
 TEMP_SENSOR_PATTERN="${LLM_FAN_GUARD_TEMP_SENSOR_PATTERN:-$SENSOR_PATTERN}"
@@ -154,6 +157,65 @@ max_temp_c_from_output() {
   '
 }
 
+max_temp_c_from_xpu_smi_output() {
+  awk '
+    BEGIN {
+      max = -1
+    }
+    /"metrics_type"[[:space:]]*:[[:space:]]*"XPUM_STATS_(GPU_CORE|MEMORY)_TEMPERATURE"/ {
+      in_temp_metric = 1
+      next
+    }
+    in_temp_metric && /"value"[[:space:]]*:/ {
+      value_text = $0
+      sub(/.*"value"[[:space:]]*:[[:space:]]*/, "", value_text)
+      sub(/[^0-9.].*$/, "", value_text)
+      if (value_text != "") {
+        temp = value_text + 0
+        if (temp > max) {
+          max = temp
+        }
+      }
+      in_temp_metric = 0
+    }
+    END {
+      if (max >= 0) {
+        print max
+      }
+    }
+  '
+}
+
+read_sensor_output() {
+  "$SENSORS_BIN" 2>/dev/null
+}
+
+read_xpu_smi_output() {
+  "$XPU_SMI_BIN" stats -d 0 -j 2>/dev/null
+}
+
+current_max_temp_c() {
+  local xpu_output sensors_output temp
+
+  if xpu_output="$(read_xpu_smi_output)"; then
+    temp="$(printf '%s\n' "$xpu_output" | max_temp_c_from_xpu_smi_output)"
+    if [[ -n "$temp" ]]; then
+      printf '%s' "$temp"
+      return 0
+    fi
+  fi
+
+  if sensors_output="$(read_sensor_output)"; then
+    temp="$(printf '%s\n' "$sensors_output" | max_temp_c_from_output)"
+    if [[ -n "$temp" ]]; then
+      printf '%s' "$temp"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
 temp_is_at_or_above_threshold() {
   local current_temp="$1"
   local threshold_temp="$2"
@@ -162,6 +224,12 @@ temp_is_at_or_above_threshold() {
 }
 
 temp_threshold_enabled() {
+  local threshold_temp="$1"
+
+  awk -v threshold="$threshold_temp" 'BEGIN { exit !(threshold + 0 > 0) }'
+}
+
+temp_stop_threshold_enabled() {
   local threshold_temp="$1"
 
   awk -v threshold="$threshold_temp" 'BEGIN { exit !(threshold + 0 > 0) }'
@@ -278,8 +346,7 @@ if [[ "$cooldown_active" == "1" ]]; then
   fi
 
   if temp_threshold_enabled "$START_MAX_TEMP_C"; then
-    if sensors_output="$("$SENSORS_BIN" 2>/dev/null)"; then
-      start_temp_c="$(printf '%s\n' "$sensors_output" | max_temp_c_from_output)"
+    if start_temp_c="$(current_max_temp_c)"; then
       if [[ -n "$start_temp_c" ]] && temp_is_at_or_above_threshold "$start_temp_c" "$START_MAX_TEMP_C"; then
         next_retry_epoch="$((NOW_EPOCH + START_RETRY_SEC))"
         write_state 1 "$cooldown_started_epoch" "$next_retry_epoch" "$last_trigger_rpm" 0 0 "start_deferred_hot"
@@ -291,7 +358,7 @@ if [[ "$cooldown_active" == "1" ]]; then
         log "온도확인 스킵 매칭없음${TEMP_SENSOR_PATTERN:+ pattern=$TEMP_SENSOR_PATTERN}"
       fi
     else
-      log "온도확인 스킵 sensors실패 bin=$SENSORS_BIN"
+      log "온도확인 스킵 xpu_smi/sensors실패 bin=$XPU_SMI_BIN/$SENSORS_BIN"
     fi
   fi
 
@@ -307,7 +374,7 @@ if [[ "$cooldown_active" == "1" ]]; then
   exit 1
 fi
 
-if ! sensors_output="$("$SENSORS_BIN" 2>/dev/null)"; then
+if ! sensors_output="$(read_sensor_output)"; then
   log "sensors실패 bin=$SENSORS_BIN"
   write_state 0 0 0 0 0 0 "sensors_error"
   exit 0
@@ -319,10 +386,23 @@ if [[ -z "$max_rpm" ]]; then
   write_state 0 0 0 0 0 0 "no_fan_data"
   exit 0
 fi
-max_temp_c="$(printf '%s\n' "$sensors_output" | max_temp_c_from_output)"
+max_temp_c="$(current_max_temp_c || true)"
 temp_log="${max_temp_c:+ temp=${max_temp_c}C}"
 
-if (( max_rpm < THRESHOLD_RPM )); then
+temp_trigger_active=0
+if [[ -n "$max_temp_c" ]]; then
+  if temp_stop_threshold_enabled "$CRITICAL_STOP_TEMP_C" && temp_is_at_or_above_threshold "$max_temp_c" "$CRITICAL_STOP_TEMP_C"; then
+    temp_trigger_active=1
+    active_temp_threshold="$CRITICAL_STOP_TEMP_C"
+    temp_threshold_label="critical temp"
+  elif temp_stop_threshold_enabled "$STOP_TEMP_C" && temp_is_at_or_above_threshold "$max_temp_c" "$STOP_TEMP_C"; then
+    temp_trigger_active=1
+    active_temp_threshold="$STOP_TEMP_C"
+    temp_threshold_label="temp"
+  fi
+fi
+
+if (( temp_trigger_active == 0 && max_rpm < THRESHOLD_RPM )); then
   if (( high_rpm_started_epoch > 0 || last_seen_rpm >= THRESHOLD_RPM )); then
     write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" 0 "rpm_normal"
     log "rpm=$max_rpm${temp_log} 기준=$THRESHOLD_RPM 정상; 관찰초기화"
@@ -330,7 +410,7 @@ if (( max_rpm < THRESHOLD_RPM )); then
   exit 0
 fi
 
-if in_day_relax_window; then
+if (( temp_trigger_active == 0 )) && in_day_relax_window; then
   write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" 0 "day_relax" "$current_last_start_epoch"
   log "rpm=$max_rpm${temp_log} 낮완화; LLM유지"
   exit 0
@@ -344,6 +424,12 @@ if (( CRITICAL_THRESHOLD_RPM > 0 && max_rpm >= CRITICAL_THRESHOLD_RPM )); then
   active_threshold_rpm="$CRITICAL_THRESHOLD_RPM"
   active_stop_delay_sec="$CRITICAL_STOP_DELAY_SEC"
   threshold_label="critical threshold"
+  critical_threshold_active=1
+fi
+if (( temp_trigger_active == 1 )); then
+  active_threshold_rpm="$max_rpm"
+  active_stop_delay_sec=0
+  threshold_label="$temp_threshold_label"
   critical_threshold_active=1
 fi
 
@@ -368,7 +454,7 @@ if (( high_rpm_elapsed_sec < active_stop_delay_sec )); then
 fi
 
 cooldown_until_epoch="$((NOW_EPOCH + COOLDOWN_SEC))"
-log "rpm=$max_rpm${temp_log} 유지=${high_rpm_elapsed_sec}s 기준=$active_threshold_rpm; LLM중지"
+log "rpm=$max_rpm${temp_log} 유지=${high_rpm_elapsed_sec}s 기준=$active_threshold_rpm ${threshold_label}; LLM중지"
 
 if run_schedule stop; then
   if (( COOLDOWN_SEC > 0 )); then
@@ -385,8 +471,7 @@ if run_schedule stop; then
   fi
 
   if temp_threshold_enabled "$START_MAX_TEMP_C"; then
-    if sensors_output="$("$SENSORS_BIN" 2>/dev/null)"; then
-      restart_temp_c="$(printf '%s\n' "$sensors_output" | max_temp_c_from_output)"
+    if restart_temp_c="$(current_max_temp_c)"; then
       if [[ -n "$restart_temp_c" ]] && temp_is_at_or_above_threshold "$restart_temp_c" "$START_MAX_TEMP_C"; then
         next_retry_epoch="$(($(date +%s) + START_RETRY_SEC))"
         write_state 1 "$NOW_EPOCH" "$next_retry_epoch" "$max_rpm" "$max_rpm" 0 "restart_deferred_hot" 0
@@ -398,7 +483,7 @@ if run_schedule stop; then
         log "중지후 온도확인 스킵 매칭없음${TEMP_SENSOR_PATTERN:+ pattern=$TEMP_SENSOR_PATTERN}"
       fi
     else
-      log "중지후 온도확인 스킵 sensors실패 bin=$SENSORS_BIN"
+      log "중지후 온도확인 스킵 xpu_smi/sensors실패 bin=$XPU_SMI_BIN/$SENSORS_BIN"
     fi
   fi
 
