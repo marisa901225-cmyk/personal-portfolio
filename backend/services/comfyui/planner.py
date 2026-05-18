@@ -10,7 +10,7 @@ import requests
 
 from ...core.config import settings
 from ...core.schemas import ComfyUIImageGenerationRequest
-from .constants import DEFAULT_CFG, DEFAULT_NEGATIVE_PROMPT, DEFAULT_STEPS
+from .constants import DEFAULT_CFG, DEFAULT_NEGATIVE_PROMPT, DEFAULT_STEPS, LOCAL_IMAGE_PLANNER_RETRIES
 from .errors import ImageGenerationError
 from .types import ToolSpec
 
@@ -272,17 +272,33 @@ def plan_image_generation(request: ComfyUIImageGenerationRequest) -> tuple[str, 
         except requests.RequestException:
             logger.warning("Failed to auto-discover AI model id from %s; falling back to configured default.", base_url)
 
-        payload = _build_image_planner_payload(request, model=llm_model)
-        try:
-            response = requests.post(f"{base_url}/v1/chat/completions", headers=_llm_headers(), json=payload, timeout=60)
-            response.raise_for_status()
-            data = response.json() or {}
-            tool_name, tool_spec = _extract_tool_spec(data, request)
-            resolved_model = str(data.get("model") or llm_model)
-            return resolved_model, tool_name, tool_spec
-        except (requests.RequestException, ImageGenerationError) as exc:
-            last_exc = exc
-            logger.warning("Local image planning request failed via %s: %s", base_url, exc)
-            continue
+        for attempt in range(LOCAL_IMAGE_PLANNER_RETRIES + 1):
+            payload = _build_image_planner_payload(request, model=llm_model)
+            try:
+                response = requests.post(
+                    f"{base_url}/v1/chat/completions",
+                    headers=_llm_headers(),
+                    json=payload,
+                    timeout=60,
+                )
+                response.raise_for_status()
+                data = response.json() or {}
+                tool_name, tool_spec = _extract_tool_spec(data, request)
+                resolved_model = str(data.get("model") or llm_model)
+                return resolved_model, tool_name, tool_spec
+            except requests.RequestException as exc:
+                last_exc = exc
+                logger.warning("Local image planning request failed via %s: %s", base_url, exc)
+                break
+            except ImageGenerationError as exc:
+                last_exc = exc
+                logger.warning(
+                    "Local image planning request failed via %s attempt=%d/%d: %s",
+                    base_url,
+                    attempt + 1,
+                    LOCAL_IMAGE_PLANNER_RETRIES + 1,
+                    exc,
+                )
+                continue
 
     return _plan_image_generation_via_openrouter(request, previous_error=last_exc)
