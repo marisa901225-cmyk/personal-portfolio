@@ -14,6 +14,7 @@ except Exception:  # pragma: no cover
 import requests
 from requests import exceptions as req_exc
 
+from ...gpu_work_lock import gpu_heavy_work_lock
 from .base import LLMBackend
 from ..config import Settings
 
@@ -331,7 +332,8 @@ class RemoteLlamaBackend(LLMBackend):
                 payload[k] = kwargs[k]
 
         try:
-            resp = self._request_json_with_retries("POST", url, payload=payload)
+            with gpu_heavy_work_lock("remote_llm_chat"):
+                resp = self._request_json_with_retries("POST", url, payload=payload)
             self._last_token_metrics = self._extract_token_metrics(resp)
             content = self._extract_content(resp)
             if not content:

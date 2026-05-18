@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -696,6 +697,40 @@ class TestLLMService(unittest.TestCase):
                 },
             )
             self.assertIsNone(backend.consume_last_token_metrics())
+        finally:
+            backend.close()
+
+    def test_remote_backend_chat_uses_gpu_work_lock(self):
+        settings = SimpleNamespace(
+            llm_base_url="http://default-server:8080",
+            llm_api_key=None,
+            llm_timeout=30,
+        )
+        backend = RemoteLlamaBackend(settings)
+        labels: list[str] = []
+
+        @contextmanager
+        def recording_lock(label: str):
+            labels.append(label)
+            yield
+
+        try:
+            with (
+                patch.object(backend, "_get_model_id", return_value="gemma-test"),
+                patch(
+                    "backend.services.llm.backends.remote.gpu_heavy_work_lock",
+                    side_effect=recording_lock,
+                ),
+                patch.object(
+                    backend,
+                    "_request_json_with_retries",
+                    return_value={"choices": [{"message": {"content": "ok"}}]},
+                ),
+            ):
+                out = backend.chat([{"role": "user", "content": "hi"}])
+
+            self.assertEqual(out, "ok")
+            self.assertEqual(labels, ["remote_llm_chat"])
         finally:
             backend.close()
 
