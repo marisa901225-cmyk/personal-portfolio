@@ -16,7 +16,7 @@ from backend.services.comfyui_image_service import (
     upscale_anime_image,
 )
 from backend.services.comfyui.types import ToolSpec
-from backend.services.comfyui.planner import _llm_base_url_candidates
+from backend.services.comfyui.planner import _build_image_planner_payload, _llm_base_url_candidates
 from backend.services.comfyui.workflow import build_workflow
 import backend.services.comfyui.upscale as upscale_module
 
@@ -138,6 +138,28 @@ def test_image_planner_prefers_8084_before_stale_config(monkeypatch: pytest.Monk
         "http://localhost:8084",
         "http://openvino-server:8082",
     ]
+
+
+def test_image_planner_payload_loads_shared_ultrareal_prompt() -> None:
+    request = ComfyUIImageGenerationRequest(request="비 오는 골목의 검은 우산", width=1024, height=1024)
+
+    payload = _build_image_planner_payload(request, model="local-model.gguf")
+
+    system_prompt = payload["messages"][0]["content"]
+    assert "UltraReal FineTune Anima" in system_prompt
+    assert "Always call the generate_comfyui_image tool" in system_prompt
+    assert "rain-soaked alley" in system_prompt
+
+
+def test_image_planner_json_payload_loads_shared_ultrareal_prompt() -> None:
+    request = ComfyUIImageGenerationRequest(request="창가에서 자는 고양이", width=1024, height=1024)
+
+    payload = _build_image_planner_payload(request, model="google/gemma-4-31b-it", prefer_json_content=True)
+
+    system_prompt = payload["messages"][0]["content"]
+    assert payload["response_format"] == {"type": "json_object"}
+    assert "Return JSON only" in system_prompt
+    assert "UltraReal FineTune Anima" in system_prompt
 
 
 def test_generate_image_with_e4b_retries_local_tool_call_failure(monkeypatch: pytest.MonkeyPatch) -> None:

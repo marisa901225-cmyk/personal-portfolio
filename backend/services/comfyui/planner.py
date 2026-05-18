@@ -10,12 +10,26 @@ import requests
 
 from ...core.config import settings
 from ...core.schemas import ComfyUIImageGenerationRequest
+from ..prompt_loader import load_prompt
 from .constants import DEFAULT_CFG, DEFAULT_NEGATIVE_PROMPT, DEFAULT_STEPS, LOCAL_IMAGE_PLANNER_RETRIES
 from .errors import ImageGenerationError
 from .types import ToolSpec
 
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_IMAGE_PLANNER_PROMPT = (
+    "You are an image generation planner. "
+    "Always call the generate_comfyui_image tool for image requests. "
+    "Rewrite the user's request into a vivid English prompt suitable for image generation. "
+    "Keep the user's requested width and height when provided."
+)
+
+DEFAULT_IMAGE_PLANNER_JSON_PROMPT = (
+    "You are an image generation planner. Return JSON only with keys: "
+    "prompt, negative_prompt, width, height, steps, cfg, seed. "
+    "Write a vivid English prompt suitable for ComfyUI image generation."
+)
 
 
 def _llm_headers() -> dict[str, str]:
@@ -152,17 +166,16 @@ def _build_image_planner_payload(
     model: str,
     prefer_json_content: bool = False,
 ) -> dict[str, Any]:
+    system_prompt = (
+        load_prompt("comfyui_image_planner_json" if prefer_json_content else "comfyui_image_planner")
+        or (DEFAULT_IMAGE_PLANNER_JSON_PROMPT if prefer_json_content else DEFAULT_IMAGE_PLANNER_PROMPT)
+    )
     payload: dict[str, Any] = {
         "model": model,
         "messages": [
             {
                 "role": "system",
-                "content": (
-                    "You are an image generation planner. "
-                    "Always call the generate_comfyui_image tool for image requests. "
-                    "Rewrite the user's request into a vivid English prompt suitable for image generation. "
-                    "Keep the user's requested width and height when provided."
-                ),
+                "content": system_prompt,
             },
             {
                 "role": "user",
@@ -181,11 +194,7 @@ def _build_image_planner_payload(
         payload["messages"] = [
             {
                 "role": "system",
-                "content": (
-                    "You are an image generation planner. Return JSON only with keys: "
-                    "prompt, negative_prompt, width, height, steps, cfg, seed. "
-                    "Write a vivid English prompt suitable for ComfyUI image generation."
-                ),
+                "content": system_prompt,
             },
             payload["messages"][1],
         ]
