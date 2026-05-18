@@ -4,8 +4,10 @@ set -euo pipefail
 PROJECT_ROOT="/home/dlckdgn/personal-portfolio"
 COMPOSE_FILE="$PROJECT_ROOT/docker-compose.yml"
 LOG_FILE="$PROJECT_ROOT/backend/logs/llm_schedule.log"
+MANUAL_STOP_FLAG_FILE="${LLM_MANUAL_STOP_FLAG_FILE:-$PROJECT_ROOT/backend/data/llm_manual_stop.flag}"
 DAY_TARGET_SERVICES=(llama-server-light llama-server-sycl-huihui)
 ALLOW_WEEKEND_START="${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}"
+IGNORE_MANUAL_STOP="${LLM_SCHEDULE_IGNORE_MANUAL_STOP:-0}"
 
 ACTION="${1:-}"
 
@@ -52,6 +54,11 @@ get_target_services() {
 
 case "$ACTION" in
   start)
+    if [[ "$IGNORE_MANUAL_STOP" != "1" && -f "$MANUAL_STOP_FLAG_FILE" ]]; then
+      echo "$(timestamp) [LLM-SCHEDULE] manual stop flag present, start skipped: $MANUAL_STOP_FLAG_FILE" >> "$LOG_FILE"
+      exit 0
+    fi
+
     if is_weekend && [[ "$ALLOW_WEEKEND_START" != "1" ]]; then
       echo "$(timestamp) [LLM-SCHEDULE] weekend start skipped" >> "$LOG_FILE"
       exit 0

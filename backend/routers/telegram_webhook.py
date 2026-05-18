@@ -5,6 +5,7 @@ Telegram Webhook Router - 텔레그램 봇 웹훅 엔드포인트
 import os
 import json
 import logging
+from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Request, HTTPException
@@ -29,6 +30,12 @@ DOCKER_STATUS_PROJECTS = {
 }
 HARUHI_LLM_CONTAINER_NAME = os.getenv("TELEGRAM_HARUHI_LLM_CONTAINER_NAME", "myasset-llm-sycl-huihui")
 DOCKER_SOCKET_PATH = os.getenv("TELEGRAM_DOCKER_SOCKET_PATH", "/var/run/docker.sock")
+LLM_MANUAL_STOP_FLAG_FILE = Path(
+    os.getenv(
+        "LLM_MANUAL_STOP_FLAG_FILE",
+        str(Path(__file__).resolve().parents[1] / "data" / "llm_manual_stop.flag"),
+    )
+)
 
 
 @router.post("/webhook")
@@ -239,11 +246,31 @@ def _should_include_container_in_status(container: dict) -> bool:
 
 
 async def _control_haruhi_llm(action: str) -> str:
-    return await _control_container(
+    if action == "start":
+        _clear_llm_manual_stop_flag()
+
+    result = await _control_container(
         action=action,
         container_name=HARUHI_LLM_CONTAINER_NAME,
         label="하루히 LLM",
     )
+
+    if action == "stop":
+        _write_llm_manual_stop_flag()
+
+    return result
+
+
+def _write_llm_manual_stop_flag() -> None:
+    LLM_MANUAL_STOP_FLAG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    LLM_MANUAL_STOP_FLAG_FILE.write_text("telegram_haruhi_llm_stop\n", encoding="utf-8")
+
+
+def _clear_llm_manual_stop_flag() -> None:
+    try:
+        LLM_MANUAL_STOP_FLAG_FILE.unlink()
+    except FileNotFoundError:
+        return
 
 
 async def _control_container(*, action: str, container_name: str, label: str) -> str:

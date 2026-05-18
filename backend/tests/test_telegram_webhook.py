@@ -1,4 +1,8 @@
+import asyncio
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 import pytest
 
 from fastapi.testclient import TestClient
@@ -20,6 +24,10 @@ class TelegramWebhookAuthTests(unittest.TestCase):
         self._orig_docker_status = telegram_webhook._get_docker_status
         self._orig_restart = telegram_webhook._restart_jellyfin_container
         self._orig_haruhi = telegram_webhook._control_haruhi_llm
+        self._orig_control_container = telegram_webhook._control_container
+        self._orig_manual_stop_flag = telegram_webhook.LLM_MANUAL_STOP_FLAG_FILE
+        self._tmpdir = TemporaryDirectory()
+        telegram_webhook.LLM_MANUAL_STOP_FLAG_FILE = Path(self._tmpdir.name) / "llm_manual_stop.flag"
 
     def tearDown(self):
         telegram_webhook.WEBHOOK_SECRET = self._orig_secret
@@ -28,6 +36,9 @@ class TelegramWebhookAuthTests(unittest.TestCase):
         telegram_webhook._get_docker_status = self._orig_docker_status
         telegram_webhook._restart_jellyfin_container = self._orig_restart
         telegram_webhook._control_haruhi_llm = self._orig_haruhi
+        telegram_webhook._control_container = self._orig_control_container
+        telegram_webhook.LLM_MANUAL_STOP_FLAG_FILE = self._orig_manual_stop_flag
+        self._tmpdir.cleanup()
 
     def _headers(self, secret: str | None = None) -> dict[str, str]:
         return {"X-Telegram-Bot-Api-Secret-Token": secret or self.valid_secret}
@@ -265,3 +276,22 @@ class TelegramWebhookAuthTests(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json(), {"ok": True})
         self.assertEqual(sent_messages, ["✅ 하루히 LLM 정지 명령을 보냈습니다"])
+
+    def test_haruhi_llm_control_sets_and_clears_manual_stop_flag(self):
+        calls: list[str] = []
+
+        async def fake_control_container(*, action: str, container_name: str, label: str):
+            calls.append(action)
+            return f"ok {action}"
+
+        telegram_webhook._control_container = fake_control_container
+
+        stop_result = asyncio.run(telegram_webhook._control_haruhi_llm("stop"))
+        self.assertEqual(stop_result, "ok stop")
+        self.assertTrue(telegram_webhook.LLM_MANUAL_STOP_FLAG_FILE.exists())
+        self.assertEqual(telegram_webhook.LLM_MANUAL_STOP_FLAG_FILE.read_text(encoding="utf-8"), "telegram_haruhi_llm_stop\n")
+
+        start_result = asyncio.run(telegram_webhook._control_haruhi_llm("start"))
+        self.assertEqual(start_result, "ok start")
+        self.assertFalse(telegram_webhook.LLM_MANUAL_STOP_FLAG_FILE.exists())
+        self.assertEqual(calls, ["stop", "start"])
