@@ -32,7 +32,7 @@ class LLMService:
         self.paid_backend = OpenAIPaidBackend(self.settings)
         self._last_error: Optional[str] = None
         self._last_used_paid: bool = False  # 이번 호출이 유료였나
-        self._last_route: Optional[str] = None  # "remote" | "paid" | "remote_failed_no_paid" | "paid_failed" | "no_backend" | "remote_failed_paid_disabled" | "paid_disabled" | None
+        self._last_route: Optional[str] = None  # "remote" | "paid" | "remote_failed_no_paid" | "paid_failed" | "no_backend" | "remote_failed_paid_disabled" | "paid_disabled" | "paid_not_configured" | None
         LLMService._instance = self
 
     @classmethod
@@ -74,6 +74,7 @@ class LLMService:
         stop: Optional[list] = None,
         seed: Optional[int] = None,
         allow_paid_fallback: bool = True,
+        force_paid_only: bool = False,
         **kwargs,
     ) -> str:
         # 호출 시작 시 라우팅 상태 초기화
@@ -84,6 +85,32 @@ class LLMService:
         requested_model = kwargs.get("model")
         paid_kwargs = dict(kwargs)
         paid_kwargs.pop("model", None)  # model은 명시 인자로만 전달
+
+        if force_paid_only:
+            if not self.settings.is_paid_configured():
+                self._last_error = "Paid LLM is not configured"
+                self._last_route = "paid_not_configured"
+                return ""
+
+            paid_model = requested_model or self.settings.ai_report_model
+            out_paid = self.paid_backend.chat(
+                messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                model=paid_model,
+                stop=stop,
+                seed=seed,
+                **paid_kwargs,
+            )
+            if out_paid:
+                self._last_error = None
+                self._last_used_paid = True
+                self._last_route = "paid"
+                return out_paid
+            self._last_error = getattr(self.paid_backend, "_last_error", None) or "Paid LLM failed"
+            self._last_route = "paid_failed"
+            return ""
 
         # 1) 원격 백엔드 우선
         if self.settings.is_remote_configured():

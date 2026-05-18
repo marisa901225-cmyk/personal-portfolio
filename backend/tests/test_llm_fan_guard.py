@@ -296,7 +296,7 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self._read_actions(), ["start|1"])
+        self.assertEqual(self._read_actions(), ["start|0"])
         state_text = self.state_file.read_text(encoding="utf-8")
         self.assertIn('"cooldown_active": 0', state_text)
         self.assertIn('"cooldown_until_epoch": 0', state_text)

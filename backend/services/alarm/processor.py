@@ -49,6 +49,29 @@ def _env_optional(key: str) -> Optional[str]:
     return value or None
 
 
+def _is_weekend(now: Optional[datetime] = None) -> bool:
+    return (now or datetime.now()).weekday() >= 5
+
+
+def _force_paid_only_for_weekend(
+    model_override: Optional[str],
+    summary_model: Optional[str],
+    summary_llm_kwargs: dict,
+    random_model: Optional[str],
+    random_llm_kwargs: dict,
+) -> tuple[Optional[str], dict, Optional[str], dict]:
+    if not _is_weekend():
+        return summary_model, summary_llm_kwargs, random_model, random_llm_kwargs
+
+    def paid_kwargs(source: dict) -> dict:
+        next_kwargs = dict(source)
+        next_kwargs.pop("base_url_override", None)
+        next_kwargs["force_paid_only"] = True
+        return next_kwargs
+
+    return model_override, paid_kwargs(summary_llm_kwargs), model_override, paid_kwargs(random_llm_kwargs)
+
+
 def _sanitize_shared_llm_kwargs(llm_kwargs: dict, *, route: str) -> dict:
     shared_kwargs = {
         key: value
@@ -193,6 +216,13 @@ async def process_pending_alarms(db: Session, model_override: Optional[str] = No
         senders: Set[str] = set()
         summary_model, summary_llm_kwargs = _resolve_alarm_llm_route("summary", model_override, llm_kwargs)
         random_model, random_llm_kwargs = _resolve_alarm_llm_route("random", model_override, llm_kwargs)
+        summary_model, summary_llm_kwargs, random_model, random_llm_kwargs = _force_paid_only_for_weekend(
+            model_override,
+            summary_model,
+            summary_llm_kwargs,
+            random_model,
+            random_llm_kwargs,
+        )
         
         filtered_count = 0
         filtered_reasons = {"광고/프로모션": 0, "OTP/보안": 0, "플레이스홀더": 0}

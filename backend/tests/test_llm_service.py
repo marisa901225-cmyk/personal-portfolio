@@ -66,6 +66,30 @@ class TestLLMService(unittest.TestCase):
                     self.assertEqual(out, "remote-ok")
                     remote_chat.assert_called()
 
+    def test_generate_chat_force_paid_only_skips_remote_when_configured(self):
+        LLMService._instance = None
+        llm = LLMService.get_instance()
+        llm.settings.llm_base_url = "http://localhost:8080"
+        llm.settings.ai_report_api_key = "test-key"
+        llm.settings.ai_report_model = "gpt-5.2"
+
+        with (
+            patch.object(llm.backend, "chat", side_effect=AssertionError("remote should not be used")),
+            patch.object(llm.paid_backend, "chat", return_value="paid-ok") as paid_chat,
+        ):
+            out = llm.generate_chat(
+                [{"role": "user", "content": "hi"}],
+                force_paid_only=True,
+                stop=["STOP"],
+            )
+
+        self.assertEqual(out, "paid-ok")
+        self.assertTrue(llm.last_used_paid())
+        self.assertEqual(llm.last_route(), "paid")
+        _, called_kwargs = paid_chat.call_args
+        self.assertEqual(called_kwargs.get("model"), "gpt-5.2")
+        self.assertEqual(called_kwargs.get("stop"), ["STOP"])
+
     def test_generate_chat_falls_back_to_paid_on_remote_failure(self):
         LLMService._instance = None
         llm = LLMService.get_instance()
