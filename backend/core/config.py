@@ -79,6 +79,14 @@ class Settings(BaseSettings):
         default="google/gemini-3-flash-preview",
         validation_alias="MORNING_OPENROUTER_MODEL",
     )
+    image_generation_openrouter_base_url: str = Field(
+        default="https://openrouter.ai/api/v1",
+        validation_alias="IMAGE_GENERATION_OPENROUTER_BASE_URL",
+    )
+    image_generation_openrouter_model: str = Field(
+        default="google/gemma-4-31b-it",
+        validation_alias="IMAGE_GENERATION_OPENROUTER_MODEL",
+    )
     morning_allow_paid_fallback: bool = Field(
         default=False,
         validation_alias="MORNING_ALLOW_PAID_FALLBACK",

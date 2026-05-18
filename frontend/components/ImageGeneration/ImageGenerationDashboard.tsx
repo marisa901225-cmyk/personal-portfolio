@@ -323,16 +323,16 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
       <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
         <div className="relative bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.20),_transparent_36%),linear-gradient(135deg,#0f172a_0%,#1e1b4b_52%,#312e81_100%)] px-6 py-7 text-white">
           <div className="absolute right-6 top-6 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold tracking-[0.18em] text-indigo-100">
-            E4B + COMFYUI
+            AI + COMFYUI
           </div>
           <div className="max-w-2xl">
             <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-indigo-50">
               <Sparkles size={14} />
-              자연어 요청을 e4b가 ComfyUI 프롬프트로 자동 변환
+              자연어 요청을 AI가 ComfyUI 프롬프트로 자동 변환
             </div>
             <h2 className="text-2xl font-bold tracking-tight">이미지 생성 스튜디오</h2>
             <p className="mt-2 text-sm leading-6 text-indigo-100/90">
-              장면만 적으면 e4b가 tool call로 ComfyUI를 실행하고, 결과 이미지를 바로 가져옵니다.
+              장면만 적으면 AI가 tool call로 ComfyUI를 실행하고, 결과 이미지를 바로 가져옵니다.
             </p>
           </div>
         </div>

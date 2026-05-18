@@ -350,7 +350,7 @@ function getPageDescription(pathname: string): string {
         '/exchange': '환전 기록 조회 및 수정',
         '/expenses': '월별 지출/수입 분석',
         '/ai-report': '가계부 + 투자 리포트 생성',
-        '/image-generation': 'e4b가 ComfyUI를 자동 호출해 이미지 생성',
+        '/image-generation': 'AI가 ComfyUI를 자동 호출해 이미지 생성',
         '/add-asset': '새로운 자산 등록',
         '/settings': '연결 및 환경 설정',
     };

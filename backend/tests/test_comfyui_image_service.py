@@ -36,6 +36,7 @@ class _Response:
 def test_generate_image_with_e4b_success(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("backend.services.comfyui_image_service.settings.llm_base_url", "http://llm.test")
     monkeypatch.setattr("backend.services.comfyui_image_service.settings.llm_remote_default_model", "cq_gemma4_e4b_q8.gguf")
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.open_api_key", None)
     monkeypatch.setattr("backend.services.comfyui_image_service.settings.comfyui_base_url", "http://comfy.test")
 
     image_bytes = b"\x89PNG\r\nfake"
@@ -124,9 +125,110 @@ def test_generate_image_with_e4b_success(monkeypatch: pytest.MonkeyPatch) -> Non
     assert params["filename"] == "e4b_comfyui_00001_.png"
 
 
+def test_generate_image_with_e4b_falls_back_to_openrouter_gemma(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.llm_base_url", "http://llm.test")
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.llm_remote_default_model", "local-model.gguf")
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.open_api_key", "openrouter-key")
+    monkeypatch.setattr(
+        "backend.services.comfyui_image_service.settings.image_generation_openrouter_base_url",
+        "https://openrouter.test/api/v1",
+    )
+    monkeypatch.setattr(
+        "backend.services.comfyui_image_service.settings.image_generation_openrouter_model",
+        "google/gemma-4-31b-it",
+    )
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.comfyui_base_url", "http://comfy.test")
+
+    image_bytes = b"\x89PNG\r\nfallback"
+    openrouter_response = _Response(
+        json_data={
+            "model": "google/gemma-4-31b-it",
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "prompt": "cinematic anime alley in the rain, black umbrella",
+                                "negative_prompt": "blurry",
+                                "width": 1024,
+                                "height": 1024,
+                                "steps": 20,
+                                "cfg": 4,
+                                "seed": 999,
+                            }
+                        )
+                    }
+                }
+            ],
+        }
+    )
+    prompt_response = _Response(json_data={"prompt_id": "fallback-123"})
+    history_response = _Response(
+        json_data={
+            "fallback-123": {
+                "status": {"completed": True},
+                "outputs": {
+                    "9": {
+                        "images": [
+                            {"filename": "ai_comfyui_00001_.png", "subfolder": "", "type": "output"}
+                        ]
+                    }
+                },
+            }
+        }
+    )
+    view_response = _Response(content=image_bytes, headers={"Content-Type": "image/png"})
+
+    post_calls: list[tuple[str, dict]] = []
+
+    def fake_post(url: str, **kwargs):
+        post_calls.append((url, kwargs))
+        if url in {
+            "http://llm.test/v1/chat/completions",
+            "http://127.0.0.1:8084/v1/chat/completions",
+            "http://localhost:8084/v1/chat/completions",
+        }:
+            raise requests.ConnectionError("local llm down")
+        if url == "https://openrouter.test/api/v1/chat/completions":
+            return openrouter_response
+        if url == "http://comfy.test/prompt":
+            return prompt_response
+        raise AssertionError(f"unexpected POST {url}")
+
+    def fake_get(url: str, **kwargs):
+        if url in {
+            "http://llm.test/v1/models",
+            "http://127.0.0.1:8084/v1/models",
+            "http://localhost:8084/v1/models",
+        }:
+            raise requests.ConnectionError("local llm down")
+        if url.endswith("/history/fallback-123"):
+            return history_response
+        if url.endswith("/view"):
+            return view_response
+        raise AssertionError(f"unexpected GET {url}")
+
+    import requests
+
+    monkeypatch.setattr("backend.services.comfyui_image_service.requests.post", fake_post)
+    monkeypatch.setattr("backend.services.comfyui_image_service.requests.get", fake_get)
+
+    result = generate_image_with_e4b(
+        ComfyUIImageGenerationRequest(request="비 오는 골목의 검은 우산", width=1024, height=1024)
+    )
+
+    assert result.llm_model == "google/gemma-4-31b-it"
+    assert result.tool_prompt == "cinematic anime alley in the rain, black umbrella"
+    assert result.seed == 999
+    assert result.filename == "ai_comfyui_00001_.png"
+    openrouter_call = next(call for call in post_calls if call[0] == "https://openrouter.test/api/v1/chat/completions")
+    assert openrouter_call[1]["headers"]["Authorization"] == "Bearer openrouter-key"
+
+
 def test_generate_image_with_e4b_requires_tool_call(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("backend.services.comfyui_image_service.settings.llm_base_url", "http://llm.test")
     monkeypatch.setattr("backend.services.comfyui_image_service.settings.llm_remote_default_model", "cq_gemma4_e4b_q8.gguf")
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.open_api_key", None)
 
     llm_response = _Response(
         json_data={
