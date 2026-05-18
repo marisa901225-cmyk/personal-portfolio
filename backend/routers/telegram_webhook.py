@@ -27,7 +27,6 @@ DOCKER_STATUS_PROJECTS = {
     for item in os.getenv("TELEGRAM_DOCKER_STATUS_PROJECTS", "personal-portfolio").split(",")
     if item.strip()
 }
-NIGHT_LLM_CONTAINER_NAME = os.getenv("TELEGRAM_NIGHT_LLM_CONTAINER_NAME", "myasset-llm-light-gpu-night")
 HARUHI_LLM_CONTAINER_NAME = os.getenv("TELEGRAM_HARUHI_LLM_CONTAINER_NAME", "myasset-llm-sycl-huihui")
 DOCKER_SOCKET_PATH = os.getenv("TELEGRAM_DOCKER_SOCKET_PATH", "/var/run/docker.sock")
 
@@ -102,8 +101,6 @@ async def _handle_command(text: str, chat_id: str):
         "report",
         "docker_status",
         "jellyfin_restart",
-        "night_llm_start",
-        "night_llm_stop",
         "haruhi_llm_start",
         "haruhi_llm_stop",
     ]
@@ -126,16 +123,6 @@ async def _handle_command(text: str, chat_id: str):
 
     if cmd == "jellyfin_restart":
         response_text = await _restart_jellyfin_container()
-        await send_telegram_message(response_text)
-        return
-
-    if cmd == "night_llm_start":
-        response_text = await _control_night_llm("start")
-        await send_telegram_message(response_text)
-        return
-
-    if cmd == "night_llm_stop":
-        response_text = await _control_night_llm("stop")
         await send_telegram_message(response_text)
         return
 
@@ -249,14 +236,6 @@ def _should_include_container_in_status(container: dict) -> bool:
     if primary_name == JELLYFIN_CONTAINER_NAME:
         return True
     return False
-
-
-async def _control_night_llm(action: str) -> str:
-    return await _control_container(
-        action=action,
-        container_name=NIGHT_LLM_CONTAINER_NAME,
-        label="나이트 LLM",
-    )
 
 
 async def _control_haruhi_llm(action: str) -> str:

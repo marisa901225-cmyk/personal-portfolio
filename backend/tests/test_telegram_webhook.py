@@ -19,7 +19,6 @@ class TelegramWebhookAuthTests(unittest.TestCase):
         self._orig_send = telegram_webhook.send_telegram_message
         self._orig_docker_status = telegram_webhook._get_docker_status
         self._orig_restart = telegram_webhook._restart_jellyfin_container
-        self._orig_night = telegram_webhook._control_night_llm
         self._orig_haruhi = telegram_webhook._control_haruhi_llm
 
     def tearDown(self):
@@ -28,7 +27,6 @@ class TelegramWebhookAuthTests(unittest.TestCase):
         telegram_webhook.send_telegram_message = self._orig_send
         telegram_webhook._get_docker_status = self._orig_docker_status
         telegram_webhook._restart_jellyfin_container = self._orig_restart
-        telegram_webhook._control_night_llm = self._orig_night
         telegram_webhook._control_haruhi_llm = self._orig_haruhi
 
     def _headers(self, secret: str | None = None) -> dict[str, str]:
@@ -236,40 +234,12 @@ class TelegramWebhookAuthTests(unittest.TestCase):
         self.assertEqual(len(sent_messages), 1)
         self.assertIn("/docker_status", sent_messages[0])
         self.assertIn("/jellyfin_restart", sent_messages[0])
-        self.assertIn("/night_llm_start", sent_messages[0])
-        self.assertIn("/night_llm_stop", sent_messages[0])
         self.assertIn("/haruhi_llm_start", sent_messages[0])
         self.assertIn("/haruhi_llm_stop", sent_messages[0])
         self.assertIn("Docker 컨테이너 실행/정지 상태와 포트 요약", sent_messages[0])
-        self.assertIn("밤 전용 GPU LLM 컨테이너 시작", sent_messages[0])
         self.assertIn("하루히 SYCL LLM 컨테이너 정지", sent_messages[0])
         self.assertNotIn("/model", sent_messages[0])
         self.assertNotIn("/reset", sent_messages[0])
-
-    def test_night_llm_start_command_sends_result(self):
-        telegram_webhook.WEBHOOK_SECRET = self.valid_secret
-        telegram_webhook.ALLOWED_CHAT_ID = self.valid_chat_id
-        sent_messages: list[str] = []
-
-        async def fake_control(action: str):
-            self.assertEqual(action, "start")
-            return "✅ 나이트 LLM 시작 명령을 보냈습니다"
-
-        async def fake_send(text: str):
-            sent_messages.append(text)
-            return True
-
-        telegram_webhook._control_night_llm = fake_control
-        telegram_webhook.send_telegram_message = fake_send
-
-        res = self.client.post(
-            "/api/telegram/webhook",
-            headers=self._headers(),
-            json={"message": {"chat": {"id": self.valid_chat_id}, "text": "/night_llm_start"}},
-        )
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json(), {"ok": True})
-        self.assertEqual(sent_messages, ["✅ 나이트 LLM 시작 명령을 보냈습니다"])
 
     def test_haruhi_llm_stop_command_sends_result(self):
         telegram_webhook.WEBHOOK_SECRET = self.valid_secret

@@ -30,8 +30,6 @@ DAY_RELAX_ENABLED="${LLM_FAN_GUARD_DAY_RELAX_ENABLED:-1}"
 DAY_RELAX_START="${LLM_FAN_GUARD_DAY_RELAX_START:-08:00}"
 DAY_RELAX_END="${LLM_FAN_GUARD_DAY_RELAX_END:-18:00}"
 DAY_RELAX_REQUIRE_TRADING_DAY="${LLM_FAN_GUARD_DAY_RELAX_REQUIRE_TRADING_DAY:-1}"
-NIGHT_GUARD_START="${LLM_FAN_GUARD_NIGHT_START:-22:10}"
-NIGHT_GUARD_END="${LLM_FAN_GUARD_NIGHT_END:-05:55}"
 PYTHON_BIN="${LLM_FAN_GUARD_PYTHON_BIN:-$PROJECT_ROOT/venv/bin/python}"
 NOW_DATE="${LLM_FAN_GUARD_NOW_DATE:-$(date -d "@$NOW_EPOCH" +%Y%m%d)}"
 NOW_WEEKDAY="${LLM_FAN_GUARD_NOW_WEEKDAY:-$(date -d "@$NOW_EPOCH" +%u)}"
@@ -314,40 +312,9 @@ in_day_relax_window() {
   fi
 }
 
-in_night_guard_window() {
-  local start_min end_min now_min
-
-  start_min="$(hhmm_to_minutes "$NIGHT_GUARD_START")"
-  end_min="$(hhmm_to_minutes "$NIGHT_GUARD_END")"
-  now_min="$(hhmm_to_minutes "$NOW_HHMM")"
-
-  if (( start_min < 0 || end_min < 0 || now_min < 0 )); then
-    return 1
-  fi
-
-  if (( start_min <= end_min )); then
-    (( now_min >= start_min && now_min < end_min ))
-  else
-    (( now_min >= start_min || now_min < end_min ))
-  fi
-}
-
 run_schedule() {
   local action="$1"
-  local schedule_action="$action"
-
-  if in_night_guard_window; then
-    case "$action" in
-      start)
-        schedule_action="night-start"
-        ;;
-      stop)
-        schedule_action="night-stop"
-        ;;
-    esac
-  fi
-
-  bash "$SCHEDULE_SCRIPT" "$schedule_action"
+  bash "$SCHEDULE_SCRIPT" "$action"
 }
 
 if [[ "$ENABLED" != "1" ]]; then

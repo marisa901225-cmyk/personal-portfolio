@@ -6,7 +6,5 @@ def test_registered_telegram_commands_include_webhook_server_commands():
 
     assert "docker_status" in commands
     assert "jellyfin_restart" in commands
-    assert "night_llm_start" in commands
-    assert "night_llm_stop" in commands
     assert "haruhi_llm_start" in commands
     assert "haruhi_llm_stop" in commands

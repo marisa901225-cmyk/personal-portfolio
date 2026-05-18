@@ -413,8 +413,6 @@ def _telegram_bot_commands() -> list[dict[str, str]]:
         {"command": "off", "description": "스팸 필터 규칙 비활성화 (예: /off ID)"},
         {"command": "docker_status", "description": "Docker 컨테이너 상태 확인"},
         {"command": "jellyfin_restart", "description": "Jellyfin 컨테이너 재시작"},
-        {"command": "night_llm_start", "description": "나이트 LLM 시작"},
-        {"command": "night_llm_stop", "description": "나이트 LLM 정지"},
         {"command": "haruhi_llm_start", "description": "하루히 LLM 시작"},
         {"command": "haruhi_llm_stop", "description": "하루히 LLM 정지"},
         {"command": "help", "description": "도움말 보기"},
