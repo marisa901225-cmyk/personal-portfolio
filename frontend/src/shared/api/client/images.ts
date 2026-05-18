@@ -2,6 +2,7 @@ import type { RequestFn } from './core';
 import type {
     BackendAnimeImageUpscaleResponse,
     BackendComfyUIImageGenerationResponse,
+    BackendServerGeneratedImageDataResponse,
     BackendServerGeneratedImagesResponse,
 } from './types';
 
@@ -41,5 +42,13 @@ export const fetchServerGeneratedImages = (
     limit = 24,
 ): Promise<BackendServerGeneratedImagesResponse> =>
     request<BackendServerGeneratedImagesResponse>(`/api/images/generated?limit=${encodeURIComponent(String(limit))}`, {
+        method: 'GET',
+    });
+
+export const fetchServerGeneratedImageData = (
+    request: RequestFn,
+    path: string,
+): Promise<BackendServerGeneratedImageDataResponse> =>
+    request<BackendServerGeneratedImageDataResponse>(`/api/images/generated/data?path=${encodeURIComponent(path)}`, {
         method: 'GET',
     });

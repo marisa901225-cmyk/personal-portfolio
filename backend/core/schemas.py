@@ -490,8 +490,13 @@ class ServerGeneratedImage(BaseModel):
     relative_path: str
     size_bytes: int
     modified_at: datetime
-    image_data_url: str
+    thumbnail_data_url: str
+    image_data_url: Optional[str] = None
 
 
 class ServerGeneratedImagesResponse(BaseModel):
     images: List[ServerGeneratedImage]
+
+
+class ServerGeneratedImageDataResponse(BaseModel):
+    image_data_url: str

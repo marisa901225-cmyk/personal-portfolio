@@ -11,9 +11,11 @@ from ..core.schemas import (
     AnimeImageUpscaleResponse,
     ComfyUIImageGenerationRequest,
     ComfyUIImageGenerationResponse,
+    ServerGeneratedImageDataResponse,
     ServerGeneratedImagesResponse,
 )
 from ..services.comfyui_image_service import (
+    get_server_generated_image_data_url,
     ImageGenerationError,
     ImageUpscaleError,
     generate_image_with_e4b,
@@ -29,9 +31,21 @@ logger = logging.getLogger(__name__)
 @router.get("/generated", response_model=ServerGeneratedImagesResponse)
 def list_generated_images(
     limit: int = 24,
+    include_data: bool = False,
     _rate_limit: None = Depends(rate_limit(limit=30, window_sec=60, key_prefix="server_generated_images")),
 ) -> ServerGeneratedImagesResponse:
-    return ServerGeneratedImagesResponse(images=list_server_generated_images(limit=limit))
+    return ServerGeneratedImagesResponse(images=list_server_generated_images(limit=limit, include_data=include_data))
+
+
+@router.get("/generated/data", response_model=ServerGeneratedImageDataResponse)
+def get_generated_image_data(
+    path: str,
+    _rate_limit: None = Depends(rate_limit(limit=60, window_sec=60, key_prefix="server_generated_image_data")),
+) -> ServerGeneratedImageDataResponse:
+    try:
+        return ServerGeneratedImageDataResponse(image_data_url=get_server_generated_image_data_url(path))
+    except ImageGenerationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/generate", response_model=ComfyUIImageGenerationResponse)

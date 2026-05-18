@@ -189,7 +189,8 @@ describe('ApiClient', () => {
           relative_path: 'e4b_comfyui_00001_.png',
           size_bytes: 4,
           modified_at: '2026-05-18T12:00:00Z',
-          image_data_url: 'data:image/png;base64,AAAA',
+          thumbnail_data_url: 'data:image/webp;base64,AAAA',
+          image_data_url: null,
         },
       ],
     };
@@ -205,6 +206,24 @@ describe('ApiClient', () => {
     expect(result).toEqual(mockResponse);
     const [url, options] = fetchMock.mock.calls[0];
     expect(url).toBe(`${baseUrl}/api/images/generated?limit=12`);
+    expect(options).toMatchObject({ method: 'GET' });
+  });
+
+  it('fetchServerGeneratedImageData loads a selected original image', async () => {
+    const client = new ApiClient(baseUrl, token);
+    const mockResponse = { image_data_url: 'data:image/png;base64,AAAA' };
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => mockResponse,
+    } as Response);
+
+    const result = await client.fetchServerGeneratedImageData('sub/image 1.png');
+
+    expect(result).toEqual(mockResponse);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe(`${baseUrl}/api/images/generated/data?path=sub%2Fimage%201.png`);
     expect(options).toMatchObject({ method: 'GET' });
   });
 

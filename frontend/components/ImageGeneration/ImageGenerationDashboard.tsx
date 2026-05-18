@@ -153,9 +153,28 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
     reader.readAsDataURL(file);
   };
 
-  const handleSelectServerImage = (image: BackendServerGeneratedImage) => {
+  const handleSelectServerImage = async (image: BackendServerGeneratedImage) => {
+    let imageDataUrl = image.image_data_url;
+    if (!imageDataUrl) {
+      try {
+        const client = new ApiClient(serverUrl, apiToken);
+        const response = await client.fetchServerGeneratedImageData(image.relative_path);
+        imageDataUrl = response.image_data_url;
+      } catch (err) {
+        alertError('Server generated image load failed', err, {
+          default: '선택한 서버 이미지를 불러오지 못했습니다.',
+          unauthorized: '인증이 만료되었거나 올바르지 않습니다.',
+          network: '백엔드 서버에 연결할 수 없습니다.',
+        });
+        if (err instanceof Error) {
+          setError(err.message);
+        }
+        return;
+      }
+    }
+
     startTransition(() => {
-      setUpscaleSourceDataUrl(image.image_data_url);
+      setUpscaleSourceDataUrl(imageDataUrl);
       setUpscaleSourceName(image.filename);
       setSelectedServerImagePath(image.relative_path);
       setUpscaleResult(null);
@@ -522,7 +541,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                         <button
                           key={image.relative_path}
                           type="button"
-                          onClick={() => handleSelectServerImage(image)}
+                          onClick={() => void handleSelectServerImage(image)}
                           className={`overflow-hidden rounded-2xl border bg-white text-left transition ${
                             selectedServerImagePath === image.relative_path
                               ? 'border-indigo-500 ring-2 ring-indigo-100'
@@ -530,7 +549,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                           }`}
                         >
                           <img
-                            src={image.image_data_url}
+                            src={image.thumbnail_data_url || image.image_data_url || ''}
                             alt={image.filename}
                             className="aspect-square w-full bg-slate-950 object-contain"
                             loading="lazy"

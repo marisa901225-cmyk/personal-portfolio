@@ -12,6 +12,7 @@ from backend.services.comfyui_image_service import (
     ImageGenerationError,
     _GpuMemory,
     generate_image_with_e4b,
+    get_server_generated_image_data_url,
     list_server_generated_images,
     upscale_anime_image,
 )
@@ -265,8 +266,26 @@ def test_list_server_generated_images_reads_recent_output(monkeypatch: pytest.Mo
 
     assert [image.relative_path for image in images] == ["sub/newer.webp", "older.png"]
     assert images[0].filename == "newer.webp"
-    assert images[0].image_data_url.startswith("data:image/webp;base64,")
-    assert images[1].image_data_url.startswith("data:image/png;base64,")
+    assert images[0].thumbnail_data_url.startswith("data:image/webp;base64,")
+    assert images[0].image_data_url is None
+    assert images[1].thumbnail_data_url.startswith("data:image/png;base64,")
+
+    images_with_data = list_server_generated_images(limit=1, include_data=True)
+
+    assert images_with_data[0].image_data_url == f"data:image/webp;base64,{base64.b64encode(b'WEBP').decode('ascii')}"
+
+
+def test_get_server_generated_image_data_url_rejects_path_escape(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+    (output_dir / "ok.png").write_bytes(b"\x89PNG\r\nok")
+    outside = tmp_path / "outside.png"
+    outside.write_bytes(b"secret")
+    monkeypatch.setattr("backend.services.comfyui_image_service.settings.comfyui_output_dir", str(output_dir))
+
+    assert get_server_generated_image_data_url("ok.png").startswith("data:image/png;base64,")
+    with pytest.raises(ImageGenerationError, match="Invalid generated image path"):
+        get_server_generated_image_data_url("../outside.png")
 
 
 def test_upscale_anime_image_runs_realesrgan_model(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

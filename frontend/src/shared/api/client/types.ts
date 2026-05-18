@@ -355,11 +355,16 @@ export interface BackendServerGeneratedImage {
     relative_path: string;
     size_bytes: number;
     modified_at: string;
-    image_data_url: string;
+    thumbnail_data_url: string;
+    image_data_url?: string | null;
 }
 
 export interface BackendServerGeneratedImagesResponse {
     images: BackendServerGeneratedImage[];
+}
+
+export interface BackendServerGeneratedImageDataResponse {
+    image_data_url: string;
 }
 
 // --- News ---
