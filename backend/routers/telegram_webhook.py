@@ -5,7 +5,9 @@ Telegram Webhook Router - 텔레그램 봇 웹훅 엔드포인트
 import os
 import json
 import logging
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import APIRouter, Request, HTTPException
@@ -36,6 +38,8 @@ LLM_MANUAL_STOP_FLAG_FILE = Path(
         str(Path(__file__).resolve().parents[1] / "data" / "llm_manual_stop.flag"),
     )
 )
+LLM_MANUAL_STOP_RESUME_HOUR = int(os.getenv("LLM_MANUAL_STOP_RESUME_HOUR", "8"))
+LLM_MANUAL_STOP_TIMEZONE = os.getenv("LLM_MANUAL_STOP_TIMEZONE", "Asia/Seoul")
 
 
 @router.post("/webhook")
@@ -263,7 +267,21 @@ async def _control_haruhi_llm(action: str) -> str:
 
 def _write_llm_manual_stop_flag() -> None:
     LLM_MANUAL_STOP_FLAG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    LLM_MANUAL_STOP_FLAG_FILE.write_text("telegram_haruhi_llm_stop\n", encoding="utf-8")
+    resume_epoch = _next_llm_manual_stop_resume_epoch()
+    LLM_MANUAL_STOP_FLAG_FILE.write_text(
+        f"telegram_haruhi_llm_stop\nresume_epoch={resume_epoch}\n",
+        encoding="utf-8",
+    )
+
+
+def _next_llm_manual_stop_resume_epoch() -> int:
+    timezone = ZoneInfo(LLM_MANUAL_STOP_TIMEZONE)
+    now = datetime.now(timezone)
+    resume_hour = min(max(LLM_MANUAL_STOP_RESUME_HOUR, 0), 23)
+    resume_at = now.replace(hour=resume_hour, minute=0, second=0, microsecond=0)
+    if resume_at <= now:
+        resume_at += timedelta(days=1)
+    return int(resume_at.timestamp())
 
 
 def _clear_llm_manual_stop_flag() -> None:

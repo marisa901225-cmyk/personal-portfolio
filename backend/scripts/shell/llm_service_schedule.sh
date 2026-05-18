@@ -52,11 +52,36 @@ get_target_services() {
   printf '%s\n' "${selected[@]}"
 }
 
+manual_stop_resume_epoch() {
+  if [[ ! -f "$MANUAL_STOP_FLAG_FILE" ]]; then
+    return 1
+  fi
+
+  local value
+  value="$(grep -E '^resume_epoch=[0-9]+$' "$MANUAL_STOP_FLAG_FILE" 2>/dev/null | head -n 1 | cut -d= -f2 || true)"
+  if [[ -n "$value" ]]; then
+    printf '%s' "$value"
+    return 0
+  fi
+
+  return 1
+}
+
 case "$ACTION" in
   start)
     if [[ "$IGNORE_MANUAL_STOP" != "1" && -f "$MANUAL_STOP_FLAG_FILE" ]]; then
-      echo "$(timestamp) [LLM-SCHEDULE] manual stop flag present, start skipped: $MANUAL_STOP_FLAG_FILE" >> "$LOG_FILE"
-      exit 0
+      now_epoch="$(date +%s)"
+      if resume_epoch="$(manual_stop_resume_epoch)" && (( now_epoch >= resume_epoch )); then
+        rm -f "$MANUAL_STOP_FLAG_FILE"
+        echo "$(timestamp) [LLM-SCHEDULE] manual stop flag expired, removed: $MANUAL_STOP_FLAG_FILE" >> "$LOG_FILE"
+      else
+        resume_message=""
+        if [[ -n "${resume_epoch:-}" ]]; then
+          resume_message=" until $(date -d "@$resume_epoch" +"%Y-%m-%d %H:%M:%S %Z")"
+        fi
+        echo "$(timestamp) [LLM-SCHEDULE] manual stop flag present${resume_message}, start skipped: $MANUAL_STOP_FLAG_FILE" >> "$LOG_FILE"
+        exit 0
+      fi
     fi
 
     if is_weekend && [[ "$ALLOW_WEEKEND_START" != "1" ]]; then

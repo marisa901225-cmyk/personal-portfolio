@@ -1,4 +1,5 @@
 import asyncio
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -289,7 +290,10 @@ class TelegramWebhookAuthTests(unittest.TestCase):
         stop_result = asyncio.run(telegram_webhook._control_haruhi_llm("stop"))
         self.assertEqual(stop_result, "ok stop")
         self.assertTrue(telegram_webhook.LLM_MANUAL_STOP_FLAG_FILE.exists())
-        self.assertEqual(telegram_webhook.LLM_MANUAL_STOP_FLAG_FILE.read_text(encoding="utf-8"), "telegram_haruhi_llm_stop\n")
+        flag_text = telegram_webhook.LLM_MANUAL_STOP_FLAG_FILE.read_text(encoding="utf-8")
+        self.assertIn("telegram_haruhi_llm_stop\n", flag_text)
+        resume_line = next(line for line in flag_text.splitlines() if line.startswith("resume_epoch="))
+        self.assertGreater(int(resume_line.split("=", maxsplit=1)[1]), int(time.time()))
 
         start_result = asyncio.run(telegram_webhook._control_haruhi_llm("start"))
         self.assertEqual(start_result, "ok start")
