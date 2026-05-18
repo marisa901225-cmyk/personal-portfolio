@@ -409,10 +409,16 @@ def _build_messages(
             if key in intraday_meta
         },
     }
-    system = "Korean day-trade risk guard. Return JSON only. HOLD only for a shallow pullback with live momentum; uncertain/weak = EXIT."
+    system = (
+        "You are a Korean intraday trading risk guard. Decide whether a triggered day-trade stop "
+        "is a fast-rising stock pullback worth holding for one more monitor cycle. "
+        "Return HOLD only when the pullback is shallow, momentum is still constructive, and the "
+        "risk/reward of immediate selling is poor. If uncertain, choose EXIT."
+    )
     user = (
-        "손절선 터치. HOLD는 1회만, 약하면 EXIT.\n"
-        f"{json.dumps(payload, ensure_ascii=False, sort_keys=True)}"
+        "단타 손절선이 닿았습니다. 급등주 눌림목으로 1회 보류할지 판단하세요.\n"
+        "규칙: HOLD는 한 번만 허용됩니다. 애매하거나 데이터가 약하면 EXIT입니다.\n"
+        f"데이터:\n{json.dumps(payload, ensure_ascii=False, sort_keys=True)}"
     )
     return [
         {"role": "system", "content": system},
