@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend.services.alarm import llm_logic, llm_logic_v2
 from backend.services.alarm.random_topic_policy import _hourly_reset_llm_context, record_random_topic_llm_usage
-from backend.services.alarm.random_topic_service import _format_random_body_for_telegram
+from backend.services.alarm.random_topic_service import _format_random_body_for_telegram, _strip_reasoning_tags
 
 
 def _sentence_lines(text: str) -> str:
@@ -127,6 +127,34 @@ class AlarmLlmLogicV2ParityTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertGreaterEqual(len(lines), 2)
         self.assertLessEqual(len(lines), 4)
+
+    def test_random_message_strips_fake_reasoning_tags(self):
+        text = (
+            "<reason>\n"
+            "사건: 로봇 팔이 커피를 쏟는다.\n"
+            "웃긴 디테일: AI가 청소 경로를 고민한다.\n"
+            "</reason>\n"
+            "제목: 로봇의 커피 사고\n"
+            "본문:\n"
+            "로봇 팔이 커피포트 앞에서 멈칫하더니 컵 대신 회의록에 라떼를 부었다."
+        )
+
+        stripped = _strip_reasoning_tags(text)
+
+        self.assertNotIn("<reason>", stripped)
+        self.assertNotIn("사건:", stripped)
+        self.assertTrue(stripped.startswith("제목: 로봇의 커피 사고"))
+
+    def test_random_message_strips_inline_body_label(self):
+        from backend.services.alarm.random_topic_service import _postprocess_random_body
+
+        deps = MagicMock()
+        deps.postprocess_llm_text.side_effect = lambda text: text
+
+        body = _postprocess_random_body("본문: 로봇이 커피포트 앞에서 멈추고 회로만 깜빡였다.", deps)
+
+        self.assertNotIn("본문:", body)
+        self.assertTrue(body.startswith("로봇이"))
 
     def test_random_topic_session_resets_after_threshold(self):
         with tempfile.TemporaryDirectory() as tmpdir:

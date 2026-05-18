@@ -17,6 +17,9 @@ _RE_ENGLISH_REASONING = re.compile(
 )
 _RE_NON_KOREAN_CJK = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\u3040-\u30FF\u31F0-\u31FF]")
 _RE_RANDOM_TITLE_PREFIX = re.compile(r"^\s*(title|제목)\s*:\s*", re.IGNORECASE)
+_RE_RANDOM_BODY_PREFIX = re.compile(r"^\s*(body|본문)\s*:\s*", re.IGNORECASE)
+_RE_REASON_BLOCK = re.compile(r"<reason\b[^>]*>.*?</reason\s*>", re.IGNORECASE | re.DOTALL)
+_RE_REASON_TAIL = re.compile(r"<reason\b[^>]*>.*$", re.IGNORECASE | re.DOTALL)
 _RE_EXPLANATORY_TAIL = re.compile(
     r"(^\s*(결론적으로|정리하면|한마디로|요컨대)\b)|"
     r"(바랍니다|좋겠습니다|해보세요|하시길|권합니다)|"
@@ -149,6 +152,12 @@ def _format_random_body_for_telegram(text: str) -> str:
         lines = _pack_lines(max_chars=64)
 
     return "\n".join(lines).strip()
+
+
+def _strip_reasoning_tags(text: str) -> str:
+    """Remove fake reasoning scaffolding before validation or delivery."""
+    without_blocks = _RE_REASON_BLOCK.sub("", text or "")
+    return _RE_REASON_TAIL.sub("", without_blocks).strip()
 
 
 def _get_last_sentence(text: str) -> str:
@@ -288,6 +297,7 @@ def _build_random_title_messages(
 
 
 async def _finalize_random_message(raw: str, attempt_no: int, deps: _RandomTopicDeps) -> str:
+    raw = _strip_reasoning_tags(raw)
     korean_ratio = deps.get_korean_ratio(raw)
     has_non_ko_cjk = _has_non_korean_cjk_chars(raw)
     has_replacement = _has_replacement_char(raw)
@@ -310,13 +320,13 @@ async def _finalize_random_message(raw: str, attempt_no: int, deps: _RandomTopic
 
 
 def _prepare_random_draft(raw: str, deps: _RandomTopicDeps) -> str:
-    draft = raw or ""
+    draft = _strip_reasoning_tags(raw or "")
     deps.dump_llm_draft("random_wisdom_draft", draft)
     return draft
 
 
 def _postprocess_random_title(raw: str, deps: _RandomTopicDeps) -> str:
-    text = deps.postprocess_llm_text(raw or "")
+    text = deps.postprocess_llm_text(_strip_reasoning_tags(raw or ""))
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if not lines:
         return ""
@@ -327,7 +337,7 @@ def _postprocess_random_title(raw: str, deps: _RandomTopicDeps) -> str:
 
 
 def _postprocess_random_body(raw: str, deps: _RandomTopicDeps) -> str:
-    text = deps.postprocess_llm_text(raw or "")
+    text = deps.postprocess_llm_text(_strip_reasoning_tags(raw or ""))
     lines = [line.rstrip() for line in text.splitlines()]
     cleaned_lines: List[str] = []
     for line in lines:
@@ -336,14 +346,14 @@ def _postprocess_random_body(raw: str, deps: _RandomTopicDeps) -> str:
             if cleaned_lines and cleaned_lines[-1]:
                 cleaned_lines.append("")
             continue
-        if re.match(r"^(본문|body)\s*:\s*$", stripped, re.IGNORECASE):
-            continue
-        cleaned_lines.append(stripped)
+        stripped = _RE_RANDOM_BODY_PREFIX.sub("", stripped).strip()
+        if stripped:
+            cleaned_lines.append(stripped)
     return _format_random_body_for_telegram("\n".join(cleaned_lines).strip())
 
 
 def _extract_random_payload(raw: str, deps: _RandomTopicDeps) -> Optional[_RandomMessagePayload]:
-    text = (raw or "").strip()
+    text = _strip_reasoning_tags(raw or "")
     if not text:
         return None
 
