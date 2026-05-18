@@ -17,6 +17,15 @@ _RE_ENGLISH_REASONING = re.compile(
 )
 _RE_NON_KOREAN_CJK = re.compile(r"[\u3400-\u4DBF\u4E00-\u9FFF\u3040-\u30FF\u31F0-\u31FF]")
 _RE_RANDOM_TITLE_PREFIX = re.compile(r"^\s*(title|제목)\s*:\s*", re.IGNORECASE)
+_RE_RANDOM_INLINE_PAYLOAD = re.compile(
+    r"^\s*(?:제목|title)\s*:\s*(?P<title>.+?)\s+(?:본문|body)\s*:\s*(?P<body>.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
+_RE_RANDOM_BODY_PREFIX = re.compile(r"^\s*(?:본문|body)\s*:\s*", re.IGNORECASE)
+_RE_RANDOM_TITLE_BODY_PREFIX = re.compile(
+    r"^\s*(?:제목|title)\s*:\s*.+?(?:\n+|\s+)(?:본문|body)\s*:\s*",
+    re.IGNORECASE | re.DOTALL,
+)
 _RE_REASON_BLOCK = re.compile(r"<\s*reason\b[^>]*>.*?<\s*/\s*reason\s*>", re.IGNORECASE | re.DOTALL)
 _RE_REASON_TAIL = re.compile(r"<\s*reason\b[^>]*>.*$", re.IGNORECASE | re.DOTALL)
 _RE_EXPLANATORY_TAIL = re.compile(
@@ -319,7 +328,7 @@ async def _finalize_random_message(raw: str, attempt_no: int, deps: _RandomTopic
 
 
 def _prepare_random_draft(raw: str, deps: _RandomTopicDeps) -> str:
-    draft = _strip_reasoning_tags(raw or "")
+    draft = _postprocess_random_body(raw or "", deps)
     deps.dump_llm_draft("random_wisdom_draft", draft)
     return draft
 
@@ -337,6 +346,8 @@ def _postprocess_random_title(raw: str, deps: _RandomTopicDeps) -> str:
 
 def _postprocess_random_body(raw: str, deps: _RandomTopicDeps) -> str:
     text = deps.postprocess_llm_text(_strip_reasoning_tags(raw or ""))
+    text = _RE_RANDOM_TITLE_BODY_PREFIX.sub("", text).strip()
+    text = _RE_RANDOM_BODY_PREFIX.sub("", text).strip()
     lines = [line.rstrip() for line in text.splitlines()]
     cleaned_lines: List[str] = []
     for line in lines:
@@ -346,6 +357,8 @@ def _postprocess_random_body(raw: str, deps: _RandomTopicDeps) -> str:
                 cleaned_lines.append("")
             continue
         if re.match(r"^(본문|body)\s*:\s*$", stripped, re.IGNORECASE):
+            continue
+        if re.match(r"^(제목|title)\s*:\s*", stripped, re.IGNORECASE):
             continue
         cleaned_lines.append(stripped)
     return _format_random_body_for_telegram("\n".join(cleaned_lines).strip())
@@ -366,6 +379,13 @@ def _extract_random_payload(raw: str, deps: _RandomTopicDeps) -> Optional[_Rando
             body = _postprocess_random_body(str(data.get("body", "")), deps)
             if body:
                 return _RandomMessagePayload(title=title, body=body)
+
+    inline_match = _RE_RANDOM_INLINE_PAYLOAD.search(text)
+    if inline_match:
+        title = _postprocess_random_title(inline_match.group("title"), deps)
+        body = _postprocess_random_body(inline_match.group("body"), deps)
+        if body:
+            return _RandomMessagePayload(title=title, body=body)
 
     match = re.search(
         r"^\s*(?:제목|title)\s*:\s*(?P<title>[^\n]+?)\s*(?:\n+|\r\n+)(?P<body>.+)$",

@@ -7,7 +7,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend.services.alarm import llm_logic, llm_logic_v2
 from backend.services.alarm.random_topic_policy import _hourly_reset_llm_context, record_random_topic_llm_usage
-from backend.services.alarm.random_topic_service import _format_random_body_for_telegram, _strip_reasoning_tags
+from backend.services.alarm.random_topic_service import (
+    _extract_random_payload,
+    _format_random_body_for_telegram,
+    _postprocess_random_body,
+    _strip_reasoning_tags,
+)
 
 
 def _sentence_lines(text: str) -> str:
@@ -162,6 +167,41 @@ class AlarmLlmLogicV2ParityTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("웃긴 디테일:", stripped)
             self.assertNotIn("<reason", stripped.lower())
             self.assertIn("제목:", stripped)
+
+    def test_random_payload_extracts_inline_title_and_body_after_reasoning(self):
+        raw = (
+            "<reason> 사건: 하이틴 멜로/코믹 참사. "
+            "웃긴 디테일: 로맨틱한 순간에 뜬금없이 소리가 나는 상황. "
+            "반전: 주변 인물의 사소한 습관 때문. </reason>"
+            "제목: 비 오는 날의 심쿵 유발 재난 본문: "
+            "자, 지금이 아니면 절대 들을 수 없는 이야기! "
+            "비 오는 날 하이틴 멜로의 결정적 순간에 복도 스피커가 갑자기 삐걱댔다. "
+            "알고 보니 옆자리 친구가 긴장하면 의자를 발끝으로 두드리는 습관 때문이었다."
+        )
+        deps = MagicMock()
+        deps.postprocess_llm_text.side_effect = lambda text: text
+
+        payload = _extract_random_payload(raw, deps)
+
+        self.assertIsNotNone(payload)
+        assert payload is not None
+        self.assertEqual(payload.title, "비 오는 날의 심쿵 유발 재난")
+        self.assertNotIn("<reason>", payload.body)
+        self.assertNotIn("사건:", payload.body)
+        self.assertNotIn("제목:", payload.body)
+        self.assertNotIn("본문:", payload.body)
+        self.assertIn("자, 지금이 아니면", payload.body)
+
+    def test_random_body_postprocess_removes_inline_labels_when_parse_falls_back(self):
+        deps = MagicMock()
+        deps.postprocess_llm_text.side_effect = lambda text: text
+        raw = "제목: 소리 나는 고백 참사 본문: 자, 지금이 아니면 절대 들을 수 없는 이야기! 의자 삐걱 소리가 고백을 삼켰다."
+
+        body = _postprocess_random_body(raw, deps)
+
+        self.assertNotIn("제목:", body)
+        self.assertNotIn("본문:", body)
+        self.assertTrue(body.startswith("자, 지금이 아니면"))
 
     def test_random_topic_session_resets_after_threshold(self):
         with tempfile.TemporaryDirectory() as tmpdir:

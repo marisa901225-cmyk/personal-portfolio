@@ -110,7 +110,7 @@ services:
       - TZ=Asia/Seoul
       - LLM_MODEL_PATH=/data/gemma-4-E2B-it-Q8_0.gguf
       - LLM_THREADS=6
-      - LLM_N_GPU_LAYERS=all
+      - LLM_N_GPU_LAYERS=36
       - LLM_SERVER_PORT=8084
       - LLM_CTX_SIZE=10000
       - LLM_PARALLEL=1
