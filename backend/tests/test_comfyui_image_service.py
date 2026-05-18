@@ -17,6 +17,8 @@ from backend.services.comfyui_image_service import (
 )
 from backend.services.comfyui.types import ToolSpec
 from backend.services.comfyui.planner import _build_image_planner_payload, _llm_base_url_candidates
+import backend.services.comfyui.generation as generation_module
+import backend.services.comfyui.vram_guard as vram_guard_module
 from backend.services.comfyui.workflow import build_workflow
 import backend.services.comfyui.upscale as upscale_module
 
@@ -326,6 +328,115 @@ def test_build_workflow_routes_4k_output_through_upscale_model() -> None:
     assert workflow["12"]["inputs"]["width"] == 3840
     assert workflow["12"]["inputs"]["height"] == 2160
     assert workflow["9"]["inputs"]["images"] == ["12", 0]
+
+
+def test_vram_guard_releases_only_for_explicit_realistic_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(vram_guard_module.settings, "comfyui_release_llm_vram_mode", "auto")
+
+    assert vram_guard_module.should_release_local_llm_for_model("realistic")
+    assert not vram_guard_module.should_release_local_llm_for_model("anime")
+
+
+def test_generate_image_releases_local_llm_after_planning_for_realistic_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    monkeypatch.setattr(vram_guard_module.settings, "comfyui_release_llm_vram_mode", "auto")
+    monkeypatch.setattr(vram_guard_module.settings, "comfyui_release_llm_container_name", "llm-test")
+    monkeypatch.setattr(vram_guard_module.settings, "docker_socket_path", "/var/run/docker.sock")
+
+    monkeypatch.setattr(
+        generation_module,
+        "plan_image_generation",
+        lambda _request: (
+            "local-model.gguf",
+            "generate_comfyui_image",
+            ToolSpec(
+                prompt="photorealistic city street at night",
+                negative_prompt="blurry",
+                width=1024,
+                height=1024,
+                steps=20,
+                cfg=4.0,
+                seed=11,
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        vram_guard_module,
+        "stop_container",
+        lambda **_kwargs: calls.append("stop") or True,
+    )
+    monkeypatch.setattr(
+        vram_guard_module,
+        "start_container",
+        lambda **_kwargs: calls.append("start"),
+    )
+    monkeypatch.setattr(
+        vram_guard_module,
+        "wait_container_ready",
+        lambda **_kwargs: calls.append("ready"),
+    )
+    monkeypatch.setattr(generation_module, "submit_prompt", lambda _workflow: calls.append("submit") or "prompt-1")
+    monkeypatch.setattr(
+        generation_module,
+        "wait_for_completion",
+        lambda _prompt_id: calls.append("wait") or {"outputs": {}},
+    )
+    monkeypatch.setattr(
+        generation_module,
+        "extract_image_entry",
+        lambda _history: {"filename": "city.png", "subfolder": "", "type": "output"},
+    )
+    monkeypatch.setattr(
+        generation_module,
+        "fetch_image_data_url",
+        lambda _entry: calls.append("fetch") or "data:image/png;base64,ZmFrZQ==",
+    )
+
+    result = generate_image_with_e4b(
+        ComfyUIImageGenerationRequest(
+            request="z-image turbo로 실사 도시 야경",
+            model_type="realistic",
+            width=1024,
+            height=1024,
+        )
+    )
+
+    assert result.filename == "city.png"
+    assert result.model_type == "realistic"
+    assert calls == ["stop", "submit", "wait", "fetch", "start", "ready"]
+
+
+def test_build_workflow_uses_z_image_turbo_for_realistic_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("backend.services.comfyui.workflow.settings.comfyui_z_image_unet_name", "z-image-turbo-fp8-e4m3fn.safetensors")
+    monkeypatch.setattr("backend.services.comfyui.workflow.settings.comfyui_z_image_clip_name", "qwen3-4b-fp8-scaled.safetensors")
+    monkeypatch.setattr("backend.services.comfyui.workflow.settings.comfyui_z_image_vae_name", "ae.safetensors")
+
+    workflow = build_workflow(
+        ToolSpec(
+            prompt="photorealistic city at night",
+            negative_prompt="blurry",
+            width=1024,
+            height=1024,
+            steps=8,
+            cfg=1.0,
+            seed=123,
+        ),
+        model_type="realistic",
+    )
+
+    assert workflow["1"]["inputs"] == {
+        "unet_name": "z-image-turbo-fp8-e4m3fn.safetensors",
+        "weight_dtype": "fp8_e4m3fn",
+    }
+    assert workflow["2"]["inputs"]["clip_name"] == "qwen3-4b-fp8-scaled.safetensors"
+    assert workflow["2"]["inputs"]["type"] == "lumina2"
+    assert workflow["3"]["inputs"]["vae_name"] == "ae.safetensors"
+    assert workflow["7"]["class_type"] == "ModelSamplingAuraFlow"
+    assert workflow["8"]["inputs"]["steps"] == 8
+    assert workflow["8"]["inputs"]["cfg"] == 1.0
 
 
 def test_generate_image_with_e4b_falls_back_to_openrouter_gemma(monkeypatch: pytest.MonkeyPatch) -> None:

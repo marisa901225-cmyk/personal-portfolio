@@ -100,6 +100,22 @@ class Settings(BaseSettings):
     comfyui_base_url: str = Field(default="http://localhost:8188", validation_alias="COMFYUI_BASE_URL")
     comfyui_output_dir: str = Field(default="/mnt/one-touch/comfyui/output", validation_alias="COMFYUI_OUTPUT_DIR")
     docker_socket_path: str = Field(default="/var/run/docker.sock", validation_alias="DOCKER_SOCKET_PATH")
+    comfyui_release_llm_vram_mode: str = Field(default="auto", validation_alias="COMFYUI_RELEASE_LLM_VRAM_MODE")
+    comfyui_release_llm_container_name: str = Field(
+        default="myasset-llm-sycl-huihui",
+        validation_alias="COMFYUI_RELEASE_LLM_CONTAINER_NAME",
+    )
+    comfyui_release_llm_stop_timeout_sec: int = Field(default=20, validation_alias="COMFYUI_RELEASE_LLM_STOP_TIMEOUT_SEC")
+    comfyui_release_llm_start_timeout_sec: int = Field(default=180, validation_alias="COMFYUI_RELEASE_LLM_START_TIMEOUT_SEC")
+    comfyui_z_image_unet_name: str = Field(
+        default="z-image-turbo-fp8-e4m3fn.safetensors",
+        validation_alias="COMFYUI_Z_IMAGE_UNET_NAME",
+    )
+    comfyui_z_image_clip_name: str = Field(
+        default="qwen3-4b-fp8-scaled.safetensors",
+        validation_alias="COMFYUI_Z_IMAGE_CLIP_NAME",
+    )
+    comfyui_z_image_vae_name: str = Field(default="ae.safetensors", validation_alias="COMFYUI_Z_IMAGE_VAE_NAME")
 
     # KIS (한국투자증권) 설정
     kis_config_dir: Optional[str] = Field(default=None, validation_alias="KIS_CONFIG_DIR")

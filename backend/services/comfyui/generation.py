@@ -9,6 +9,7 @@ from ..gpu_work_lock import gpu_heavy_work_lock
 from .constants import DEFAULT_UPSCALE_MODEL_NAME
 from .errors import ImageGenerationError
 from .planner import plan_image_generation
+from .vram_guard import release_local_llm_for_comfyui
 from .workflow import build_workflow, extract_image_entry, fetch_image_data_url, submit_prompt, wait_for_completion
 
 
@@ -35,14 +36,16 @@ def generate_image_with_e4b(request: ComfyUIImageGenerationRequest) -> ComfyUIIm
             output_width, output_height, upscale_model = _resolve_output_target(request)
             workflow = build_workflow(
                 tool_spec,
+                model_type=request.model_type,
                 output_width=output_width,
                 output_height=output_height,
                 upscale_model=upscale_model,
             )
-            prompt_id = submit_prompt(workflow)
-            history = wait_for_completion(prompt_id)
-            image_entry = extract_image_entry(history)
-            image_data_url = fetch_image_data_url(image_entry)
+            with release_local_llm_for_comfyui(request.model_type):
+                prompt_id = submit_prompt(workflow)
+                history = wait_for_completion(prompt_id)
+                image_entry = extract_image_entry(history)
+                image_data_url = fetch_image_data_url(image_entry)
     except requests.HTTPError as exc:
         body = ""
         if exc.response is not None:
@@ -57,6 +60,7 @@ def generate_image_with_e4b(request: ComfyUIImageGenerationRequest) -> ComfyUIIm
     logger.info("Generated ComfyUI image via e4b tool call: prompt_id=%s file=%s", prompt_id, image_entry["filename"])
     return ComfyUIImageGenerationResponse(
         request=request.request,
+        model_type=request.model_type,
         llm_model=llm_model,
         tool_name=tool_name,
         tool_prompt=tool_spec.prompt,

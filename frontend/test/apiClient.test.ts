@@ -102,6 +102,7 @@ describe('ApiClient', () => {
     const client = new ApiClient(baseUrl, token);
     const mockResponse: BackendComfyUIImageGenerationResponse = {
       request: '창가에서 자는 고양이',
+      model_type: 'anime',
       llm_model: 'cq_gemma4_e4b_q8.gguf',
       tool_name: 'generate_comfyui_image',
       tool_prompt: 'A warm storybook illustration of a cat sleeping by a window.',
@@ -128,6 +129,7 @@ describe('ApiClient', () => {
 
     const result = await client.generateComfyUIImage({
       request: '창가에서 자는 고양이',
+      model_type: 'realistic',
       width: 1024,
       height: 1024,
       output_width: 3840,
@@ -141,6 +143,7 @@ describe('ApiClient', () => {
     expect(options).toMatchObject({ method: 'POST' });
     expect((options as RequestInit).body).toBe(JSON.stringify({
       request: '창가에서 자는 고양이',
+      model_type: 'realistic',
       width: 1024,
       height: 1024,
       output_width: 3840,

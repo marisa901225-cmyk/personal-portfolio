@@ -444,6 +444,7 @@ class SchedulerStateRead(BaseModel):
 
 class ComfyUIImageGenerationRequest(BaseModel):
     request: str = Field(..., min_length=3, description="사용자의 자연어 이미지 생성 요청")
+    model_type: Literal["anime", "realistic"] = "anime"
     width: int = Field(default=1024, ge=256, le=1536)
     height: int = Field(default=1024, ge=256, le=1536)
     seed: Optional[int] = Field(default=None, ge=0)
@@ -455,6 +456,7 @@ class ComfyUIImageGenerationRequest(BaseModel):
 
 class ComfyUIImageGenerationResponse(BaseModel):
     request: str
+    model_type: Literal["anime", "realistic"] = "anime"
     llm_model: str
     tool_name: str
     tool_prompt: str

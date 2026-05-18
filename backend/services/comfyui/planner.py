@@ -73,8 +73,12 @@ def _tool_spec_from_arguments(arguments: dict[str, Any], request: ComfyUIImageGe
     negative_prompt = str(arguments.get("negative_prompt") or DEFAULT_NEGATIVE_PROMPT).strip() or DEFAULT_NEGATIVE_PROMPT
     width = int(arguments.get("width") or request.width)
     height = int(arguments.get("height") or request.height)
-    steps = int(arguments.get("steps") or request.steps or DEFAULT_STEPS)
-    cfg = float(arguments.get("cfg") or DEFAULT_CFG)
+    if request.model_type == "realistic":
+        steps = int(request.steps or 8)
+        cfg = 1.0
+    else:
+        steps = int(arguments.get("steps") or request.steps or DEFAULT_STEPS)
+        cfg = float(arguments.get("cfg") or DEFAULT_CFG)
     seed = int(arguments.get("seed") or request.seed or random.randint(1, 2_147_483_647))
     if seed < 1:
         seed = random.randint(1, 2_147_483_647)
@@ -183,9 +187,10 @@ def _build_image_planner_payload(
                 "role": "user",
                 "content": (
                     f"User request: {request.request}\n"
+                    f"Model mode: {request.model_type}\n"
                     f"Preferred width: {request.width}\n"
                     f"Preferred height: {request.height}\n"
-                    f"Preferred steps: {request.steps or DEFAULT_STEPS}"
+                    f"Preferred steps: {request.steps or (8 if request.model_type == 'realistic' else DEFAULT_STEPS)}"
                 ),
             },
         ],

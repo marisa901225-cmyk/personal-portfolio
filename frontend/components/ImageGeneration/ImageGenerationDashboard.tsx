@@ -18,6 +18,7 @@ type CanvasPreset = 'square' | 'classicPortrait' | 'classicLandscape' | 'storyPo
 type GenerationOutputPreset = 'native' | 'uhd4k';
 type UpscaleResolutionPreset = 'native4x' | 'fullhd' | 'square2k' | 'uhd4k' | 'custom';
 type StudioMode = 'generate' | 'upscale';
+type ImageModelType = 'anime' | 'realistic';
 type RevisionMessage = {
   role: 'user' | 'assistant';
   text: string;
@@ -69,6 +70,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
   const [requestText, setRequestText] = useState('');
   const [mode, setMode] = useState<StudioMode>('generate');
   const [preset, setPreset] = useState<CanvasPreset>('square');
+  const [imageModelType, setImageModelType] = useState<ImageModelType>('anime');
   const [customWidth, setCustomWidth] = useState(1024);
   const [customHeight, setCustomHeight] = useState(1024);
   const [generationOutput, setGenerationOutput] = useState<GenerationOutputPreset>('native');
@@ -214,9 +216,10 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
       const client = new ApiClient(serverUrl, apiToken);
       const response = await client.generateComfyUIImage({
         request: requestText.trim(),
+        model_type: imageModelType,
         width: dimensions.width,
         height: dimensions.height,
-        steps,
+        steps: imageModelType === 'realistic' ? Math.min(steps, 12) : steps,
         seed: seed.trim() ? Number(seed.trim()) : undefined,
         output_width: generationOutputTarget.output_width,
         output_height: generationOutputTarget.output_height,
@@ -276,9 +279,10 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
       const client = new ApiClient(serverUrl, apiToken);
       const response = await client.generateComfyUIImage({
         request: nextRequest,
+        model_type: result?.model_type ?? imageModelType,
         width: result?.generated_width ?? dimensions.width,
         height: result?.generated_height ?? dimensions.height,
-        steps,
+        steps: (result?.model_type ?? imageModelType) === 'realistic' ? Math.min(steps, 12) : steps,
         output_width: result?.upscale_model ? result.width : generationOutputTarget.output_width,
         output_height: result?.upscale_model ? result.height : generationOutputTarget.output_height,
         upscale_model: result?.upscale_model ?? (generationOutput === 'uhd4k' ? GENERAL_UPSCALE_MODEL : undefined),
@@ -394,6 +398,42 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
             {mode === 'generate' ? (
               <>
             <div>
+              <div className="mb-2 text-sm font-semibold text-slate-800">생성 모델</div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImageModelType('anime');
+                    setSteps((value) => (value <= 12 ? 20 : value));
+                  }}
+                  className={`rounded-2xl border px-4 py-3 text-left transition ${
+                    imageModelType === 'anime'
+                      ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                      : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="text-sm font-semibold">애니/인물</div>
+                  <div className="mt-1 text-xs text-slate-500">UltraReal Anima, 코스프레/인물 중심</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setImageModelType('realistic');
+                    setSteps(8);
+                  }}
+                  className={`rounded-2xl border px-4 py-3 text-left transition ${
+                    imageModelType === 'realistic'
+                      ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                      : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                  }`}
+                >
+                  <div className="text-sm font-semibold">실사 Turbo</div>
+                  <div className="mt-1 text-xs text-slate-500">Z-Image Turbo FP8, 도시/풍경/실사 테스트</div>
+                </button>
+              </div>
+            </div>
+
+            <div>
               <label className="mb-2 block text-sm font-semibold text-slate-800" htmlFor="image-request">
                 요청 문장
               </label>
@@ -490,9 +530,12 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                     id="image-steps"
                     type="number"
                     min={8}
-                    max={60}
+                    max={imageModelType === 'realistic' ? 12 : 60}
                     value={steps}
-                    onChange={(event) => setSteps(Math.min(Math.max(Number(event.target.value) || 20, 8), 60))}
+                    onChange={(event) => {
+                      const maxSteps = imageModelType === 'realistic' ? 12 : 60;
+                      setSteps(Math.min(Math.max(Number(event.target.value) || 20, 8), maxSteps));
+                    }}
                     className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"
                   />
                 </div>
@@ -779,6 +822,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                         {result.generated_width} × {result.generated_height}
                         {result.upscale_model ? ` -> ${result.width} × ${result.height}` : ''}
                         {' · '}
+                        {result.model_type === 'realistic' ? 'Z-Image Turbo · ' : ''}
                         steps {result.steps} · cfg {result.cfg} · seed {result.seed}
                       </p>
                     </div>
@@ -799,7 +843,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                         {upscaleResult
                           ? `anime_upscale -> ${upscaleResult.filename}`
                           : result
-                            ? `${result.llm_model} -> ${result.tool_name}${result.upscale_model ? ` -> ${result.upscale_model}` : ''} -> ${result.filename}`
+                            ? `${result.llm_model} -> ${result.model_type} -> ${result.tool_name}${result.upscale_model ? ` -> ${result.upscale_model}` : ''} -> ${result.filename}`
                             : ''}
                       </p>
                     </div>

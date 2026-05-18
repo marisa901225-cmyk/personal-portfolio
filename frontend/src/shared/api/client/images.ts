@@ -10,6 +10,7 @@ export const generateComfyUIImage = (
     request: RequestFn,
     payload: {
         request: string;
+        model_type?: 'anime' | 'realistic';
         width?: number;
         height?: number;
         seed?: number;

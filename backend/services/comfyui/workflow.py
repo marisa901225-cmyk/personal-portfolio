@@ -19,6 +19,8 @@ from .constants import (
     DEFAULT_UNET_NAME,
     DEFAULT_UPSCALE_MODEL_NAME,
     DEFAULT_VAE_NAME,
+    REALISTIC_4K_FILENAME_PREFIX,
+    REALISTIC_FILENAME_PREFIX,
 )
 from .errors import ImageGenerationError
 from .types import ToolSpec
@@ -31,10 +33,19 @@ def _comfyui_url(path: str) -> str:
 def build_workflow(
     tool_spec: ToolSpec,
     *,
+    model_type: str = "anime",
     output_width: int | None = None,
     output_height: int | None = None,
     upscale_model: str | None = None,
 ) -> dict[str, Any]:
+    if model_type == "realistic":
+        return build_z_image_turbo_workflow(
+            tool_spec,
+            output_width=output_width,
+            output_height=output_height,
+            upscale_model=upscale_model,
+        )
+
     save_image_input: list[Any] = ["8", 0]
     filename_prefix = DEFAULT_FILENAME_PREFIX
     workflow: dict[str, Any] = {
@@ -108,6 +119,92 @@ def build_workflow(
         workflow["9"]["inputs"] = {
             "images": ["12", 0],
             "filename_prefix": DEFAULT_4K_FILENAME_PREFIX,
+        }
+    return workflow
+
+
+def build_z_image_turbo_workflow(
+    tool_spec: ToolSpec,
+    *,
+    output_width: int | None = None,
+    output_height: int | None = None,
+    upscale_model: str | None = None,
+) -> dict[str, Any]:
+    workflow: dict[str, Any] = {
+        "1": {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": settings.comfyui_z_image_unet_name, "weight_dtype": "fp8_e4m3fn"},
+        },
+        "2": {
+            "class_type": "CLIPLoader",
+            "inputs": {"clip_name": settings.comfyui_z_image_clip_name, "type": "lumina2", "device": "default"},
+        },
+        "3": {
+            "class_type": "VAELoader",
+            "inputs": {"vae_name": settings.comfyui_z_image_vae_name},
+        },
+        "4": {
+            "class_type": "EmptySD3LatentImage",
+            "inputs": {"width": tool_spec.width, "height": tool_spec.height, "batch_size": 1},
+        },
+        "5": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"clip": ["2", 0], "text": tool_spec.prompt},
+        },
+        "6": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"clip": ["2", 0], "text": ""},
+        },
+        "7": {
+            "class_type": "ModelSamplingAuraFlow",
+            "inputs": {"model": ["1", 0], "shift": 3.1},
+        },
+        "8": {
+            "class_type": "KSampler",
+            "inputs": {
+                "model": ["7", 0],
+                "positive": ["5", 0],
+                "negative": ["6", 0],
+                "latent_image": ["4", 0],
+                "seed": tool_spec.seed,
+                "steps": tool_spec.steps,
+                "cfg": tool_spec.cfg,
+                "sampler_name": "euler",
+                "scheduler": "simple",
+                "denoise": 1.0,
+            },
+        },
+        "9": {
+            "class_type": "VAEDecode",
+            "inputs": {"samples": ["8", 0], "vae": ["3", 0]},
+        },
+        "10": {
+            "class_type": "SaveImage",
+            "inputs": {"images": ["9", 0], "filename_prefix": REALISTIC_FILENAME_PREFIX},
+        },
+    }
+    if output_width is not None and output_height is not None:
+        workflow["11"] = {
+            "class_type": "UpscaleModelLoader",
+            "inputs": {"model_name": upscale_model or DEFAULT_UPSCALE_MODEL_NAME},
+        }
+        workflow["12"] = {
+            "class_type": "ImageUpscaleWithModel",
+            "inputs": {"upscale_model": ["11", 0], "image": ["9", 0]},
+        }
+        workflow["13"] = {
+            "class_type": "ImageScale",
+            "inputs": {
+                "image": ["12", 0],
+                "upscale_method": "lanczos",
+                "width": output_width,
+                "height": output_height,
+                "crop": "disabled",
+            },
+        }
+        workflow["10"]["inputs"] = {
+            "images": ["13", 0],
+            "filename_prefix": REALISTIC_4K_FILENAME_PREFIX,
         }
     return workflow
 

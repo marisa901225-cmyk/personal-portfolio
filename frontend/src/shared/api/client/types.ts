@@ -326,6 +326,7 @@ export interface BackendSavedAiReport {
 
 export interface BackendComfyUIImageGenerationResponse {
     request: string;
+    model_type: 'anime' | 'realistic';
     llm_model: string;
     tool_name: string;
     tool_prompt: string;
