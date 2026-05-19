@@ -147,7 +147,6 @@ def save_recent_category(category: str) -> None:
         os.makedirs(os.path.dirname(_RECENT_CATEGORY_FILE), exist_ok=True)
         with open(_RECENT_CATEGORY_FILE, "w", encoding="utf-8") as f:
             json.dump(_recent_categories, f, ensure_ascii=False)
-        logger.info(f"📍 Recent categories saved: {_recent_categories}")
     except Exception as e:
         logger.error(f"❌ Failed to save recent categories: {e}", exc_info=True)
 
