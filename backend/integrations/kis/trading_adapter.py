@@ -213,10 +213,19 @@ class KISTradingBase:
             data=json.dumps(payload),
             timeout=(_KIS_HTTP_CONNECT_TIMEOUT_SEC, _KIS_HTTP_READ_TIMEOUT_SEC),
         )
-        data = response.json()
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
         token = str(data.get("access_token") or "").strip()
         if response.status_code >= 400 or not token:
-            raise RuntimeError(f"KIS direct auth failed: {response.status_code} {data.get('msg_cd')} {data.get('msg1')}")
+            error_code = data.get("msg_cd") or data.get("error_code")
+            error_message = data.get("msg1") or data.get("error_description")
+            if not error_message:
+                error_message = (response.text or "").strip()[:300]
+            raise RuntimeError(
+                f"KIS direct auth failed: {response.status_code} {error_code} {error_message}"
+            )
         self._direct_access_token = token
         expires_raw = str(data.get("access_token_token_expired") or "").strip()
         if expires_raw:
