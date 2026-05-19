@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -80,6 +81,19 @@ _KIS_VALUE_RANK_PRICE_BUCKETS: tuple[tuple[str, str], ...] = (
     ("500000", "9999999"),
 )
 _AUTH_EXPIRY_BUFFER_SEC = 60
+_SLOT2_EXPECTED_CALLERS: tuple[str, ...] = (
+    "backend.scripts.run_pension_rebalance_scheduler",
+    "backend.scripts.rebalance_kis_pension_account",
+    "backend.scripts.check_kis_pension_account",
+)
+
+
+def _slot2_unexpected_context() -> str | None:
+    cmdline = " ".join(sys.argv)
+    for expected in _SLOT2_EXPECTED_CALLERS:
+        if expected in cmdline:
+            return None
+    return cmdline
 
 
 @dataclass(slots=True, frozen=True)
@@ -235,6 +249,14 @@ class KISTradingBase:
                 self._direct_token_expires_at = None
         if credentials.token_slot is not None:
             save_kis_token(token, self._direct_token_expires_at, slot=credentials.token_slot)
+            if int(credentials.token_slot) == 2:
+                unexpected_cmdline = _slot2_unexpected_context()
+                if unexpected_cmdline:
+                    logger.warning(
+                        "[KIS Token][slot=2] 예상 외 발급 감지 cmd=%s expires_at=%s",
+                        unexpected_cmdline,
+                        self._direct_token_expires_at,
+                    )
         return token
 
     def _throttle_rest(self) -> None:
