@@ -194,7 +194,7 @@ class KISTradingBase:
                 self._direct_access_token = cached_token
                 self._direct_token_expires_at = cached_expires_at
                 if self._direct_token_is_valid():
-                    logger.info(
+                    logger.debug(
                         "[KIS TradingAPI] direct token reused from DB slot=%s expires_at=%s",
                         credentials.token_slot,
                         cached_expires_at,

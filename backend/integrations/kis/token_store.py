@@ -166,7 +166,7 @@ def read_kis_token_record(
             token_payload = getattr(setting, token_field, None)
             expires_at = getattr(setting, expires_field, None)
             if not token_payload:
-                logger.info("[KIS Token][slot=%s] 저장된 토큰 없음", slot)
+                logger.debug("[KIS Token][slot=%s] 저장된 토큰 없음", slot)
                 return None, None
             
             # 만료 시간 검사
@@ -180,7 +180,7 @@ def read_kis_token_record(
                 
                 # 완전 만료 (30분 미만) - 반드시 재발급 필요
                 if time_until_expiry <= timedelta(hours=HARD_EXPIRY_BUFFER_HOURS):
-                    logger.warning(
+                    logger.debug(
                         "[KIS Token][slot=%s] ⚠️ 토큰 만료 임박! (expires_at=%s, 남은시간=%s)",
                         slot, expires_at, time_until_expiry
                     )
@@ -188,7 +188,7 @@ def read_kis_token_record(
                 
                 # 갱신 필요 (2시간 미만) - 토큰은 반환하되 백그라운드 갱신 트리거
                 if slot == 0 and time_until_expiry <= timedelta(hours=REFRESH_WINDOW_HOURS):
-                    logger.info(
+                    logger.debug(
                         "[KIS Token][slot=%s] 🔄 갱신 윈도우 진입 (expires_at=%s, 남은시간=%s). 백그라운드 갱신을 시도합니다.",
                         slot, expires_at, time_until_expiry
                     )
@@ -238,7 +238,7 @@ def save_kis_token(
         setattr(setting, token_field, _encrypt_token(token))
         setattr(setting, expires_field, expires_at)
         db.commit()
-        logger.info("[KIS Token][slot=%s] 토큰 저장 완료 - 만료시간: %s", slot, expires_at)
+        logger.debug("[KIS Token][slot=%s] 토큰 저장 완료 - 만료시간: %s", slot, expires_at)
     except Exception as exc:
         logger.warning("Failed to save KIS token to DB (slot=%s): %s", slot, exc)
     finally:

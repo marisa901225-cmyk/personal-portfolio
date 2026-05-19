@@ -250,7 +250,7 @@ def auth(svr="prod", product=None, url=None, force=False):
             
             # 백오프 대기
             if circuit_state.backoff_seconds > 0:
-                logger.info(
+                logger.debug(
                     "[KIS Auth] 백오프 대기 중... (%.1f초, failure_count=%d)",
                     circuit_state.backoff_seconds, circuit_state.failure_count
                 )
@@ -263,7 +263,7 @@ def auth(svr="prod", product=None, url=None, force=False):
         if circuit_enabled:
             lock_acquired, lock_session = acquire_token_refresh_lock()
             if not lock_acquired:
-                logger.info("[KIS Auth] 다른 프로세스가 토큰 갱신 중, 대기 후 재시도...")
+                logger.debug("[KIS Auth] 다른 프로세스가 토큰 갱신 중, 대기 후 재시도...")
                 time.sleep(2)
                 # 다시 토큰 확인 (다른 프로세스가 갱신했을 수 있음)
                 my_token = read_token()
@@ -289,7 +289,7 @@ def auth(svr="prod", product=None, url=None, force=False):
             cmd_line = " ".join(sys.argv)
             stack_summary = "".join(traceback.format_stack()[-5:])
 
-            logger.warning(
+            logger.debug(
                 "🚨 [KIS Auth] 새 토큰 발급 시도 감지! 🚨\n"
                 "pid=%s, cmd=%s\nforce=%s\n"
                 "Call Stack:\n%s",
@@ -305,7 +305,7 @@ def auth(svr="prod", product=None, url=None, force=False):
             if rescode == 200:
                 my_token = _getResultObject(res.json()).access_token
                 my_expired = _getResultObject(res.json()).access_token_token_expired
-                logger.warning("[KIS Auth] ✅ 토큰 발급 성공! 만료시간: %s", my_expired)
+                logger.debug("[KIS Auth] 토큰 발급 성공. expires_at=%s", my_expired)
                 save_token(my_token, my_expired)
                 
                 # 서킷브레이커 성공 기록
