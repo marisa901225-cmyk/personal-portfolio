@@ -65,6 +65,31 @@ read_state_number() {
   fi
 }
 
+read_state_string() {
+  local key="$1"
+  local default_value="${2:-}"
+  local value=""
+
+  if [[ -f "$STATE_FILE" ]]; then
+    value="$(sed -n "s/.*\"$key\": \"\\([^\"]*\\)\".*/\\1/p" "$STATE_FILE" | head -n 1 || true)"
+  fi
+
+  if [[ -n "$value" ]]; then
+    printf '%s' "$value"
+  else
+    printf '%s' "$default_value"
+  fi
+}
+
+log_once_per_action() {
+  local action="$1"
+  local message="$2"
+
+  if [[ "${current_last_action:-}" != "$action" ]]; then
+    log "$message"
+  fi
+}
+
 write_state() {
   local cooldown_active="$1"
   local cooldown_started_epoch="$2"
@@ -334,6 +359,7 @@ last_trigger_rpm="$(read_state_number last_trigger_rpm 0)"
 last_seen_rpm="$(read_state_number last_seen_rpm 0)"
 high_rpm_started_epoch="$(read_state_number high_rpm_started_epoch 0)"
 current_last_start_epoch="$(read_state_number last_start_epoch 0)"
+current_last_action="$(read_state_string last_action "")"
 
 if [[ "$cooldown_active" == "1" ]]; then
   if (( NOW_EPOCH < cooldown_until_epoch )); then
@@ -399,15 +425,15 @@ fi
 
 if (( temp_trigger_active == 0 && max_rpm < THRESHOLD_RPM )); then
   if (( high_rpm_started_epoch > 0 || last_seen_rpm >= THRESHOLD_RPM )); then
+    log_once_per_action "rpm_normal" "rpm=$max_rpm${temp_log} 기준=$THRESHOLD_RPM 정상; 관찰초기화"
     write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" 0 "rpm_normal"
-    log "rpm=$max_rpm${temp_log} 기준=$THRESHOLD_RPM 정상; 관찰초기화"
   fi
   exit 0
 fi
 
 if (( temp_trigger_active == 0 )) && in_day_relax_window; then
+  log_once_per_action "day_relax" "rpm=$max_rpm${temp_log} 낮완화; LLM유지"
   write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" 0 "day_relax" "$current_last_start_epoch"
-  log "rpm=$max_rpm${temp_log} 낮완화; LLM유지"
   exit 0
 fi
 
@@ -431,8 +457,8 @@ fi
 if (( critical_threshold_active == 0 && STARTUP_GRACE_SEC > 0 && current_last_start_epoch > 0 )); then
   startup_elapsed_sec="$((NOW_EPOCH - current_last_start_epoch))"
   if (( startup_elapsed_sec >= 0 && startup_elapsed_sec < STARTUP_GRACE_SEC )); then
+    log_once_per_action "startup_grace" "rpm=$max_rpm${temp_log} 시작유예=${startup_elapsed_sec}/${STARTUP_GRACE_SEC}s; LLM유지"
     write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" 0 "startup_grace" "$current_last_start_epoch"
-    log "rpm=$max_rpm${temp_log} 시작유예=${startup_elapsed_sec}/${STARTUP_GRACE_SEC}s; LLM유지"
     exit 0
   fi
 fi
@@ -443,8 +469,8 @@ fi
 
 high_rpm_elapsed_sec="$((NOW_EPOCH - high_rpm_started_epoch))"
 if (( high_rpm_elapsed_sec < active_stop_delay_sec )); then
+  log_once_per_action "observe_high_rpm" "rpm=$max_rpm${temp_log} 유지=${high_rpm_elapsed_sec}/${active_stop_delay_sec}s 기준=$active_threshold_rpm; 대기"
   write_state 0 0 0 "$last_trigger_rpm" "$max_rpm" "$high_rpm_started_epoch" "observe_high_rpm"
-  log "rpm=$max_rpm${temp_log} 유지=${high_rpm_elapsed_sec}/${active_stop_delay_sec}s 기준=$active_threshold_rpm; 대기"
   exit 0
 fi
 
