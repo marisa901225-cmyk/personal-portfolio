@@ -155,7 +155,7 @@ async def _generate_alarm_summary_async(
 
     for attempt in range(2):
         attempt_no = attempt + 1
-        logger.info("Generating alarm summary (Attempt %s/2)...", attempt_no)
+        logger.debug("Generating alarm summary (Attempt %s/2)...", attempt_no)
         content = prompt_content if attempt_no == 1 else (prompt_content + extra_guard)
         extra_kwargs = dict(options.extra_kwargs)
         extra_kwargs.setdefault("reasoning_effort", "none")

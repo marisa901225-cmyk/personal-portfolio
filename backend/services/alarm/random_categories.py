@@ -43,7 +43,7 @@ def _load_config() -> Dict:
         _config_cache = config
         _config_mtime = current_mtime
         
-        logger.info(f"🔄 Random topic config loaded/reloaded from {CONFIG_FILE}")
+        logger.debug("Random topic config loaded/reloaded from %s", CONFIG_FILE)
         return config
     
     except FileNotFoundError:
@@ -173,7 +173,7 @@ def save_last_random_topic_sent_at(sent_at: datetime) -> None:
         os.makedirs(os.path.dirname(_RANDOM_TOPIC_STATE_FILE), exist_ok=True)
         with open(_RANDOM_TOPIC_STATE_FILE, "w", encoding="utf-8") as f:
             json.dump({"last_sent_at": sent_at.isoformat(timespec="seconds")}, f, ensure_ascii=False)
-        logger.info(f"🕒 Last random topic state updated: {sent_at.isoformat(timespec='seconds')}")
+        logger.debug("Last random topic state updated: %s", sent_at.isoformat(timespec="seconds"))
     except Exception as e:
         logger.error(f"❌ Failed to save last random topic state: {e}", exc_info=True)
 

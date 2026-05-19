@@ -229,7 +229,7 @@ def _pick_random_topic_plan(deps: _RandomTopicDeps) -> _RandomTopicPlan:
 
 
 def _log_random_plan(now: datetime, plan: _RandomTopicPlan, deps: _RandomTopicDeps) -> None:
-    logger.info(
+    logger.debug(
         "🎲 Topic: '%s', Voice: '%s', Format: '%s', Opener: '%s', Twist: '%s'",
         plan.category,
         plan.voice,
@@ -311,7 +311,7 @@ async def _finalize_random_message(raw: str, attempt_no: int, deps: _RandomTopic
     has_replacement = _has_replacement_char(raw)
     final_text = raw
     if korean_ratio < 0.7 or has_non_ko_cjk or has_replacement:
-        logger.info(
+        logger.debug(
             "✂️ Attempt %s: Refining (ratio=%.2f, non_ko_cjk=%s, replacement_char=%s)...",
             attempt_no,
             korean_ratio,
@@ -496,7 +496,7 @@ async def _generate_random_message_payload_async(
 
     for attempt in range(2):
         attempt_no = attempt + 1
-        logger.info("Generating random wisdom (Attempt %s/2)...", attempt_no)
+        logger.debug("Generating random wisdom (Attempt %s/2)...", attempt_no)
         try:
             raw = await deps.generate_with_main_llm_async(
                 messages,
@@ -544,7 +544,7 @@ async def _generate_random_message_payload_async(
 
         deps.save_recent_category(plan.category)
         deps.save_last_random_topic_sent_at(now)
-        logger.info("✅ Random wisdom success (Attempt %s/2)", attempt_no)
+        logger.debug("Random wisdom success (Attempt %s/2)", attempt_no)
         return _RandomMessagePayload(title=title, body=_with_daily_shutdown_notice(now, final_text))
 
     if failure_reasons:

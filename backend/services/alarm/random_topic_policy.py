@@ -99,7 +99,7 @@ def _hourly_reset_llm_context(
             "reset_count": reset_count,
         }
     )
-    logger.info("Random topic LLM context reset performed at %s tokens (threshold=%s).", session_tokens, threshold)
+    logger.debug("Random topic LLM context reset performed at %s tokens (threshold=%s).", session_tokens, threshold)
 
 
 def record_random_topic_llm_usage(metrics: object, *, now: Optional[datetime] = None) -> None:

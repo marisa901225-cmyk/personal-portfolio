@@ -47,7 +47,7 @@ async def close_light_client():
     """애플리케이션 종료 시 AsyncClient를 닫는다."""
     global _light_async_client
     if _light_async_client is not None:
-        logger.info("Closing Light LLM AsyncClient...")
+        logger.debug("Closing Light LLM AsyncClient...")
         await _light_async_client.aclose()
         _light_async_client = None
 
@@ -73,7 +73,7 @@ async def _get_light_model_id() -> str:
         if items and isinstance(items[0], dict):
             model_id = items[0].get("id", "Qwen3-0.6B")
             _light_model_id_cache = model_id
-            logger.info(f"Light LLM model ID detected: {model_id}")
+            logger.debug("Light LLM model ID detected: %s", model_id)
             return model_id
     except Exception as e:
         logger.warning(f"Failed to get light model id: {e}")
