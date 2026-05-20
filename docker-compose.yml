@@ -175,11 +175,13 @@ services:
     volumes:
       - ./backend:/app/backend
       - ./backend/data:/app/backend/data
+      - ${MYASSET_SECRETS_ENV_FILE:-/home/dlckdgn/ai-models/myasset.secrets.env}:/app/runtime/myasset.secrets.env
       - /mnt/one-touch/comfyui/output:/comfyui-output:ro
     command: python -m backend.scripts.comfyui_drive_sync
     environment:
       - PYTHONPATH=/app
       - TZ=Asia/Seoul
+      - MYASSET_SECRETS_ENV_FILE=/app/runtime/myasset.secrets.env
       - COMFYUI_OUTPUT_DIR=/comfyui-output
       - COMFYUI_GDRIVE_SYNC_STATE_PATH=/app/backend/data/comfyui_gdrive_sync_state.json
       - COMFYUI_GDRIVE_FOLDER_NAME=${COMFYUI_GDRIVE_FOLDER_NAME:-Comfyui 이미지}

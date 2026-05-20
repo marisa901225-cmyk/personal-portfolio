@@ -87,6 +87,7 @@ alarm_process.log
 backend/data/llm_drafts.jsonl
 backend/data/alarm_heartbeat_state.json
 backend/data/google_drive_backup_state.json
+backend/data/comfyui_gdrive_sync_state.json
 backend/data/news_index.faiss
 backend/data/llm_fan_guard_state.json
 backend/data/gpu_heavy_work.lock
