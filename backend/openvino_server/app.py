@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import time
 import threading
 import uuid
@@ -9,8 +10,8 @@ from typing import Any
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-AutoTokenizer = Any  # type: ignore[misc,assignment]
-OVModelForCausalLM = Any  # type: ignore[misc,assignment]
+AutoProcessor = Any  # type: ignore[misc,assignment]
+OVModelForVisualCausalLM = Any  # type: ignore[misc,assignment]
 
 
 MODEL_DIR = os.getenv(
@@ -19,13 +20,42 @@ MODEL_DIR = os.getenv(
 )
 MODEL_ID = os.getenv("OV_MODEL_ID", os.path.basename(MODEL_DIR.rstrip("/")))
 DEVICE = os.getenv("OV_DEVICE", "GPU")
+OV_CONFIG = json.loads(os.getenv("OV_CONFIG", "{}"))
 
 app = FastAPI(title="OpenVINO OpenAI-Compatible Server")
 
-_tokenizer: AutoTokenizer | None = None
-_model: OVModelForCausalLM | None = None
+_processor: AutoProcessor | None = None
+_model: OVModelForVisualCausalLM | None = None
 _load_lock = threading.Lock()
 _generate_lock = threading.Lock()
+
+
+def _patch_transformers_for_gemma4_optimum() -> None:
+    try:
+        import transformers.utils.generic as generic  # type: ignore
+    except Exception:
+        return
+
+    if not hasattr(generic, "_CAN_RECORD_REGISTRY"):
+        generic._CAN_RECORD_REGISTRY = {}
+
+    if hasattr(generic, "OutputRecorder"):
+        return
+
+    class OutputRecorder:
+        def __init__(
+            self,
+            target_class: Any | None = None,
+            index: int = 0,
+            class_name: str | None = None,
+            layer_name: str | None = None,
+        ) -> None:
+            self.target_class = target_class
+            self.index = index
+            self.class_name = class_name
+            self.layer_name = layer_name
+
+    generic.OutputRecorder = OutputRecorder
 
 
 class ChatMessage(BaseModel):
@@ -44,39 +74,46 @@ class ChatCompletionRequest(BaseModel):
     chat_template_kwargs: dict[str, Any] | None = None
 
 
-def _ensure_loaded() -> tuple[AutoTokenizer, OVModelForCausalLM]:
-    global _tokenizer, _model
-    if _tokenizer is not None and _model is not None:
-        return _tokenizer, _model
+def _ensure_loaded() -> tuple[AutoProcessor, OVModelForVisualCausalLM]:
+    global _processor, _model
+    if _processor is not None and _model is not None:
+        return _processor, _model
 
     with _load_lock:
-        if _tokenizer is None or _model is None:
+        if _processor is None or _model is None:
             try:
-                from transformers import AutoTokenizer as _AutoTokenizer  # type: ignore
-                from optimum.intel.openvino import OVModelForCausalLM as _OVModelForCausalLM  # type: ignore
+                _patch_transformers_for_gemma4_optimum()
+                from transformers import AutoProcessor as _AutoProcessor  # type: ignore
+                from optimum.intel.openvino import OVModelForVisualCausalLM as _OVModelForVisualCausalLM  # type: ignore
             except Exception as exc:  # pragma: no cover - runtime env dependent
                 raise RuntimeError(f"OpenVINO dependencies are not available: {exc}")
 
-            globals()["AutoTokenizer"] = _AutoTokenizer
-            globals()["OVModelForCausalLM"] = _OVModelForCausalLM
+            globals()["AutoProcessor"] = _AutoProcessor
+            globals()["OVModelForVisualCausalLM"] = _OVModelForVisualCausalLM
 
-        if _tokenizer is None:
-            _tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR, trust_remote_code=True)
+        if _processor is None:
+            _processor = AutoProcessor.from_pretrained(MODEL_DIR, trust_remote_code=True)
         if _model is None:
-            _model = OVModelForCausalLM.from_pretrained(MODEL_DIR, device=DEVICE)
-    return _tokenizer, _model
+            _model = OVModelForVisualCausalLM.from_pretrained(MODEL_DIR, device=DEVICE, ov_config=OV_CONFIG)
+    return _processor, _model
 
 
 def _messages_to_prompt(
-    tokenizer: AutoTokenizer,
+    processor: AutoProcessor,
     messages: list[ChatMessage],
     template_kwargs: dict[str, Any] | None = None,
 ) -> str:
-    raw = [{"role": m.role, "content": m.content} for m in messages]
-    if hasattr(tokenizer, "apply_chat_template"):
+    raw = [
+        {
+            "role": m.role,
+            "content": [{"type": "text", "text": m.content}],
+        }
+        for m in messages
+    ]
+    if hasattr(processor, "apply_chat_template"):
         kwargs = dict(template_kwargs or {})
         try:
-            return tokenizer.apply_chat_template(
+            return processor.apply_chat_template(
                 raw,
                 tokenize=False,
                 add_generation_prompt=True,
@@ -84,8 +121,8 @@ def _messages_to_prompt(
             )
         except TypeError:
             # 일부 토크나이저는 템플릿 인자를 허용하지 않는다.
-            return tokenizer.apply_chat_template(raw, tokenize=False, add_generation_prompt=True)
-    return "\n".join(f"{m.role}: {m.content}" for m in raw)
+            return processor.apply_chat_template(raw, tokenize=False, add_generation_prompt=True)
+    return "\n".join(f"{m.role}: {m.content}" for m in messages)
 
 
 def _normalize_stop(stop: str | list[str] | None) -> list[str]:
@@ -142,9 +179,9 @@ def chat_completions(req: ChatCompletionRequest) -> dict[str, Any]:
     if req.stream:
         raise HTTPException(status_code=400, detail="stream=True is not supported by this OpenVINO server yet")
 
-    tokenizer, model = _ensure_loaded()
-    prompt = _messages_to_prompt(tokenizer, req.messages, req.chat_template_kwargs)
-    inputs = tokenizer(prompt, return_tensors="pt")
+    processor, model = _ensure_loaded()
+    prompt = _messages_to_prompt(processor, req.messages, req.chat_template_kwargs)
+    inputs = processor(text=prompt, return_tensors="pt")
     in_len = int(inputs["input_ids"].shape[-1])
 
     generate_kwargs: dict[str, Any] = {
@@ -166,7 +203,7 @@ def chat_completions(req: ChatCompletionRequest) -> dict[str, Any]:
 
     out_ids = output[0]
     generated_ids = out_ids[in_len:]
-    text = tokenizer.decode(generated_ids, skip_special_tokens=True)
+    text = processor.decode(generated_ids, skip_special_tokens=True)
     text, hit_stop = _apply_stop_sequences(text, _normalize_stop(req.stop))
     completion_tokens = int(len(generated_ids))
     finish_reason = "length" if completion_tokens >= req.max_tokens else "stop"

@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3-venv \
     python3-dev \
+    git \
     curl \
     ca-certificates \
     libstdc++6 \
@@ -33,7 +34,10 @@ RUN ln -sf /usr/bin/python3 /usr/bin/python && ln -sf /usr/bin/pip3 /usr/bin/pip
 COPY requirements.txt /app/requirements.txt
 RUN pip install --break-system-packages --index-url https://download.pytorch.org/whl/xpu \
         torch==2.6.0+xpu torchvision==0.21.0+xpu torchaudio==2.6.0+xpu \
-    && pip install --break-system-packages -r /app/requirements.txt
+    && pip install --break-system-packages -r /app/requirements.txt \
+    && pip install --break-system-packages --upgrade "transformers==5.5.4" "nncf>=2.19.0" Pillow \
+    && pip install --break-system-packages --no-deps --upgrade \
+        "git+https://github.com/rkazants/optimum-intel.git@support_gemma_4"
 
 COPY app.py /app/app.py
 
