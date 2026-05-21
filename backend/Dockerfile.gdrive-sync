@@ -1,0 +1,18 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+COPY requirements.gdrive-sync.txt .
+RUN pip install --no-cache-dir -r requirements.gdrive-sync.txt
+
+COPY core/env_paths.py ./backend/core/env_paths.py
+COPY services/google_drive_client.py ./backend/services/google_drive_client.py
+COPY scripts/comfyui_drive_sync.py ./backend/scripts/comfyui_drive_sync.py
+
+RUN mkdir -p backend/core backend/services backend/scripts backend/data \
+    && touch backend/__init__.py backend/core/__init__.py backend/services/__init__.py backend/scripts/__init__.py
+
+CMD ["python", "-m", "backend.scripts.comfyui_drive_sync"]

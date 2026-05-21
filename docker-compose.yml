@@ -2,6 +2,14 @@ x-backend-env-files: &backend_env_files
   - ./backend/.env
   - ${MYASSET_SECRETS_ENV_FILE:-/home/dlckdgn/ai-models/myasset.secrets.env}
 
+x-backend-image: &backend_image personal-portfolio-backend:latest
+
+x-backend-build: &backend_build
+  context: ./backend
+  dockerfile: Dockerfile
+
+x-comfyui-gdrive-sync-image: &comfyui_gdrive_sync_image personal-portfolio-comfyui-gdrive-sync:latest
+
 services:
   # Deprecated SYCL backend. Keep commented out unless we explicitly revive it.
   # llama-server:
@@ -167,9 +175,10 @@ services:
       - appnet
 
   comfyui-gdrive-sync:
+    image: *comfyui_gdrive_sync_image
     build:
       context: ./backend
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.gdrive-sync
     container_name: myasset-comfyui-gdrive-sync
     restart: unless-stopped
     volumes:
@@ -224,9 +233,8 @@ services:
   #     - appnet
 
   backend-api:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: *backend_image
+    build: *backend_build
     container_name: myasset-backend-api
     restart: always
     ports:
@@ -268,9 +276,7 @@ services:
       - appnet
 
   alarm-collector:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: *backend_image
     container_name: myasset-alarm-collector
     restart: always
     ports:
@@ -302,9 +308,7 @@ services:
       - appnet
 
   news-scheduler:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: *backend_image
     container_name: myasset-news-scheduler
     restart: always
     volumes:
@@ -343,9 +347,7 @@ services:
     pids_limit: 300
 
   trading-scheduler:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: *backend_image
     container_name: myasset-trading-scheduler
     restart: always
     volumes:
@@ -395,9 +397,7 @@ services:
     pids_limit: 300
 
   pension-rebalancer:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: *backend_image
     container_name: myasset-pension-rebalancer
     restart: unless-stopped
     volumes:
@@ -434,9 +434,7 @@ services:
     pids_limit: 200
 
   esports-monitor:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: *backend_image
     container_name: myasset-esports-monitor
     restart: unless-stopped
     volumes:
@@ -458,9 +456,7 @@ services:
     pids_limit: 200
 
   sync-prices:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: *backend_image
     container_name: myasset-sync-prices
     restart: always
     volumes:
