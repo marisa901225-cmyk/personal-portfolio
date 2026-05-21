@@ -25,6 +25,7 @@ ALLOWED_CHAT_ID = os.getenv("ALARM_TELEGRAM_CHAT_ID") or os.getenv("TELEGRAM_CHA
 JELLYFIN_CONTAINER_NAME = os.getenv("TELEGRAM_JELLYFIN_CONTAINER_NAME", "jellyfin")
 JELLYFIN_COMPOSE_SERVICE = os.getenv("TELEGRAM_JELLYFIN_COMPOSE_SERVICE", "jellyfin")
 JELLYFIN_COMPOSE_PROJECT = os.getenv("TELEGRAM_JELLYFIN_COMPOSE_PROJECT", "my-home-server")
+COMFYUI_CONTAINER_NAME = os.getenv("TELEGRAM_COMFYUI_CONTAINER_NAME", "myasset-comfyui")
 DOCKER_STATUS_PROJECTS = {
     item.strip()
     for item in os.getenv("TELEGRAM_DOCKER_STATUS_PROJECTS", "personal-portfolio").split(",")
@@ -100,6 +101,12 @@ async def _handle_command(text: str, chat_id: str):
         cmd = parts[0] if len(parts) > 0 else ""
         arg = parts[1] if len(parts) > 1 else ""
         cmd = cmd.split("@", maxsplit=1)[0]
+
+    if cmd == "com":
+        subcmd = arg.strip().split(maxsplit=1)[0].lower() if arg.strip() else ""
+        if subcmd in {"on", "off"}:
+            cmd = f"com_{subcmd}"
+            arg = ""
     
     # 지원하는 명령어 리스트
     SUPPORTED_CMDS = [
@@ -112,6 +119,8 @@ async def _handle_command(text: str, chat_id: str):
         "report",
         "docker_status",
         "jellyfin_restart",
+        "com_on",
+        "com_off",
         "haruhi_llm_start",
         "haruhi_llm_stop",
     ]
@@ -121,6 +130,30 @@ async def _handle_command(text: str, chat_id: str):
     # 명령어별 처리
     response_text = ""
     
+    if cmd == "help":
+        help_text = (
+            "🚀 <b>개인 포트폴리오 관리 봇 도움말</b>\n\n"
+            "<b>🛡️ 스팸 필터 관리</b>\n"
+            "• /add [단어] - 스팸 차단 키워드 추가\n"
+            "• /del [단어] - 스팸 차단 키워드 삭제\n"
+            "• /list - 현재 차단된 키워드 목록 확인\n"
+            "• /on - 스팸 필터 기능을 활성화합니다.\n"
+            "• /off - 스팸 필터 기능을 일시 중지합니다.\n\n"
+            "<b>🐳 서버 및 Docker 제어</b>\n"
+            "• /docker_status - 주요 컨테이너의 가동 상태와 포트 정보를 확인합니다.\n"
+            "• /jellyfin_restart - Jellyfin 미디어 서버 컨테이너를 안전하게 재시작합니다.\n"
+            "• /com_on 또는 /com on - ComfyUI 그림서버를 시작합니다.\n"
+            "• /com_off 또는 /com off - ComfyUI 그림서버를 정지합니다.\n"
+            "• /haruhi_llm_start - 하루히 LLM(채팅) 인벤토리 서비스를 시작합니다.\n"
+            "• /haruhi_llm_stop - 하루히 LLM 서비스를 정지하여 자원을 확보합니다.\n\n"
+            "<b>📈 분석 및 리포트</b>\n"
+            "• /report [게임명] - 스팀 실시간 트렌드 및 관련 소식 요약을 생성합니다.\n\n"
+            "<b>💡 기타</b>\n"
+            "• /help - 지금 보고 계신 도움말 메뉴를 출력합니다."
+        )
+        await send_telegram_message(help_text)
+        return
+
     if cmd == "report":
         from ..services.reporting.template import build_telegram_steam_trend_message
         response_text = build_telegram_steam_trend_message(arg)
@@ -134,6 +167,16 @@ async def _handle_command(text: str, chat_id: str):
 
     if cmd == "jellyfin_restart":
         response_text = await _restart_jellyfin_container()
+        await send_telegram_message(response_text)
+        return
+
+    if cmd == "com_on":
+        response_text = await _control_comfyui("start")
+        await send_telegram_message(response_text)
+        return
+
+    if cmd == "com_off":
+        response_text = await _control_comfyui("stop")
         await send_telegram_message(response_text)
         return
 
@@ -263,6 +306,14 @@ async def _control_haruhi_llm(action: str) -> str:
         _write_llm_manual_stop_flag()
 
     return result
+
+
+async def _control_comfyui(action: str) -> str:
+    return await _control_container(
+        action=action,
+        container_name=COMFYUI_CONTAINER_NAME,
+        label="ComfyUI 그림서버",
+    )
 
 
 def _write_llm_manual_stop_flag() -> None:

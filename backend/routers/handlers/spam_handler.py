@@ -109,5 +109,7 @@ def _get_help_text() -> str:
 <b>서버 관리</b>
 <code>/docker_status</code> - Docker 컨테이너 실행/정지 상태와 포트 요약
 <code>/jellyfin_restart</code> - Jellyfin 컨테이너를 Docker API로 재시작
+<code>/com_on</code> 또는 <code>/com on</code> - ComfyUI 그림서버 시작
+<code>/com_off</code> 또는 <code>/com off</code> - ComfyUI 그림서버 정지
 <code>/haruhi_llm_start</code> - 하루히 SYCL LLM 컨테이너 시작
 <code>/haruhi_llm_stop</code> - 하루히 SYCL LLM 컨테이너 정지"""

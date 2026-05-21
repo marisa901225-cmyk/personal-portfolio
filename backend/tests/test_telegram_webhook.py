@@ -25,6 +25,7 @@ class TelegramWebhookAuthTests(unittest.TestCase):
         self._orig_docker_status = telegram_webhook._get_docker_status
         self._orig_restart = telegram_webhook._restart_jellyfin_container
         self._orig_haruhi = telegram_webhook._control_haruhi_llm
+        self._orig_comfyui = telegram_webhook._control_comfyui
         self._orig_control_container = telegram_webhook._control_container
         self._orig_manual_stop_flag = telegram_webhook.LLM_MANUAL_STOP_FLAG_FILE
         self._tmpdir = TemporaryDirectory()
@@ -37,6 +38,7 @@ class TelegramWebhookAuthTests(unittest.TestCase):
         telegram_webhook._get_docker_status = self._orig_docker_status
         telegram_webhook._restart_jellyfin_container = self._orig_restart
         telegram_webhook._control_haruhi_llm = self._orig_haruhi
+        telegram_webhook._control_comfyui = self._orig_comfyui
         telegram_webhook._control_container = self._orig_control_container
         telegram_webhook.LLM_MANUAL_STOP_FLAG_FILE = self._orig_manual_stop_flag
         self._tmpdir.cleanup()
@@ -246,12 +248,68 @@ class TelegramWebhookAuthTests(unittest.TestCase):
         self.assertEqual(len(sent_messages), 1)
         self.assertIn("/docker_status", sent_messages[0])
         self.assertIn("/jellyfin_restart", sent_messages[0])
+        self.assertIn("/com_on", sent_messages[0])
+        self.assertIn("/com_off", sent_messages[0])
+        self.assertIn("/com on", sent_messages[0])
+        self.assertIn("/com off", sent_messages[0])
         self.assertIn("/haruhi_llm_start", sent_messages[0])
         self.assertIn("/haruhi_llm_stop", sent_messages[0])
-        self.assertIn("Docker 컨테이너 실행/정지 상태와 포트 요약", sent_messages[0])
-        self.assertIn("하루히 SYCL LLM 컨테이너 정지", sent_messages[0])
+        self.assertIn("주요 컨테이너의 가동 상태와 포트 정보", sent_messages[0])
+        self.assertIn("ComfyUI 그림서버", sent_messages[0])
+        self.assertIn("하루히 LLM 서비스를 정지", sent_messages[0])
+        self.assertNotIn("night", sent_messages[0].lower())
         self.assertNotIn("/model", sent_messages[0])
         self.assertNotIn("/reset", sent_messages[0])
+
+    def test_comfyui_off_alias_command_sends_result(self):
+        telegram_webhook.WEBHOOK_SECRET = self.valid_secret
+        telegram_webhook.ALLOWED_CHAT_ID = self.valid_chat_id
+        sent_messages: list[str] = []
+
+        async def fake_control(action: str):
+            self.assertEqual(action, "stop")
+            return "✅ ComfyUI 그림서버 정지 명령을 보냈습니다"
+
+        async def fake_send(text: str):
+            sent_messages.append(text)
+            return True
+
+        telegram_webhook._control_comfyui = fake_control
+        telegram_webhook.send_telegram_message = fake_send
+
+        res = self.client.post(
+            "/api/telegram/webhook",
+            headers=self._headers(),
+            json={"message": {"chat": {"id": self.valid_chat_id}, "text": "/com off"}},
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), {"ok": True})
+        self.assertEqual(sent_messages, ["✅ ComfyUI 그림서버 정지 명령을 보냈습니다"])
+
+    def test_comfyui_on_command_sends_result(self):
+        telegram_webhook.WEBHOOK_SECRET = self.valid_secret
+        telegram_webhook.ALLOWED_CHAT_ID = self.valid_chat_id
+        sent_messages: list[str] = []
+
+        async def fake_control(action: str):
+            self.assertEqual(action, "start")
+            return "✅ ComfyUI 그림서버 시작 명령을 보냈습니다"
+
+        async def fake_send(text: str):
+            sent_messages.append(text)
+            return True
+
+        telegram_webhook._control_comfyui = fake_control
+        telegram_webhook.send_telegram_message = fake_send
+
+        res = self.client.post(
+            "/api/telegram/webhook",
+            headers=self._headers(),
+            json={"message": {"chat": {"id": self.valid_chat_id}, "text": "/com_on"}},
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json(), {"ok": True})
+        self.assertEqual(sent_messages, ["✅ ComfyUI 그림서버 시작 명령을 보냈습니다"])
 
     def test_haruhi_llm_stop_command_sends_result(self):
         telegram_webhook.WEBHOOK_SECRET = self.valid_secret

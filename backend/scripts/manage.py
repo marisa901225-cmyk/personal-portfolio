@@ -7,6 +7,13 @@ from datetime import datetime
 from pathlib import Path
 
 from backend.scripts.common import confirm_action, session_scope, setup_logging
+from backend.core.env_paths import get_project_env_files
+from dotenv import load_dotenv
+
+# 전역 환경변수 로드 (비밀값 포함)
+for env_path in get_project_env_files():
+    if env_path.exists():
+        load_dotenv(env_path)
 
 
 def check_alarms(args):
@@ -405,32 +412,32 @@ def run_collector(args):
 def _telegram_bot_commands() -> list[dict[str, str]]:
     """Return the Telegram slash commands shown in the client command menu."""
     return [
-        {"command": "report", "description": "리포트 생성 (예: /report 이번달, /report 스팀)"},
-        {"command": "list", "description": "스팸 필터 규칙 목록 보기"},
-        {"command": "add", "description": "스팸 필터 키워드 추가 (예: /add 키워드)"},
-        {"command": "del", "description": "스팸 필터 규칙 삭제 (예: /del ID)"},
-        {"command": "on", "description": "스팸 필터 규칙 활성화 (예: /on ID)"},
-        {"command": "off", "description": "스팸 필터 규칙 비활성화 (예: /off ID)"},
+        {"command": "help", "description": "도움말 보기"},
         {"command": "docker_status", "description": "Docker 컨테이너 상태 확인"},
-        {"command": "jellyfin_restart", "description": "Jellyfin 컨테이너 재시작"},
+        {"command": "jellyfin_restart", "description": "Jellyfin 재시작"},
+        {"command": "com_on", "description": "ComfyUI 그림서버 시작"},
+        {"command": "com_off", "description": "ComfyUI 그림서버 정지"},
         {"command": "haruhi_llm_start", "description": "하루히 LLM 시작"},
         {"command": "haruhi_llm_stop", "description": "하루히 LLM 정지"},
-        {"command": "help", "description": "도움말 보기"},
+        {"command": "report", "description": "리포트 생성 (예: /report 스팀)"},
+        {"command": "list", "description": "스팸 필터 목록"},
+        {"command": "add", "description": "스팸 필터 추가"},
+        {"command": "del", "description": "스팸 필터 삭제"},
+        {"command": "on", "description": "스팸 필터 활성화"},
+        {"command": "off", "description": "스팸 필터 비활성화"},
     ]
 
 
 def register_telegram(args):
     """Register telegram bot commands."""
     import asyncio
-    from dotenv import load_dotenv
-
-    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
     
     async def _do_register():
         import httpx
-        token = os.getenv("ALARM_TELEGRAM_BOT_TOKEN")
+        # ALARM_TELEGRAM_BOT_TOKEN 또는 TELEGRAM_BOT_TOKEN 사용
+        token = os.getenv("ALARM_TELEGRAM_BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
         if not token:
-            logging.error("ALARM_TELEGRAM_BOT_TOKEN not found in environment")
+            logging.error("Telegram bot token not found in environment (ALARM_TELEGRAM_BOT_TOKEN or TELEGRAM_BOT_TOKEN)")
             return
 
         url = f"https://api.telegram.org/bot{token}/setMyCommands"
