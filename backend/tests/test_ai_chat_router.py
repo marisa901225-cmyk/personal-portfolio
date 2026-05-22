@@ -48,7 +48,7 @@ def test_build_messages_preserves_raw_memo_tokens() -> None:
 
     messages = _build_messages(
         AiChatMessageRequest(
-            memo="LPH-1 메모장 대용:\n* mg -50\n* 1 mg -32\n* 7 Elb",
+            memo="LPH-1 메모장 대용 mg -50 1 mg -32 7 Elb 8",
             instruction="정리해줘",
             mode="memo",
         )
@@ -57,10 +57,11 @@ def test_build_messages_preserves_raw_memo_tokens() -> None:
     system_prompt = messages[0]["content"]
     user_prompt = messages[1]["content"]
     assert "LPH-1 메모장 대용" in system_prompt
+    assert "항목 3개" in system_prompt
     assert "mg: -50" in system_prompt
     assert "1 mg: -32" in system_prompt
-    assert "7 Elb: 확인 필요" in system_prompt
+    assert "7 Elb: 8" in system_prompt
     assert "<reason>" in system_prompt
     assert "mg -50" in user_prompt
     assert "1 mg -32" in user_prompt
-    assert "7 Elb" in user_prompt
+    assert "7 Elb 8" in user_prompt
