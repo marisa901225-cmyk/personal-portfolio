@@ -93,6 +93,7 @@ backend/data/llm_fan_guard_state.json
 backend/data/gpu_heavy_work.lock
 backend/data/llm_paid_fallback_notice_state.json
 backend/data/kis_rate_limit_restore_state.json
+backend/data/kodex_kospi100_exit_alert_state.json
 
 # Local experiment artifacts
 experiments/*/debs/
@@ -115,6 +116,7 @@ AGENTS.md
 .agents/
 .claude/
 .subagents/
+scratch/
 skills-lock.json
 subagent-runs/
 .worker2.last.txt
