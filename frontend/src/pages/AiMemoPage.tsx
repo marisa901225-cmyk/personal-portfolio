@@ -27,8 +27,8 @@ const SAVE_DELAY_MS = 650;
 
 const modeLabels: Record<MemoMode, string> = {
     memo: '정리',
-    ask: '질문',
     rewrite: '다듬기',
+    ask: '질문',
 };
 
 const formatMemoDate = (value: string): string =>
