@@ -3,7 +3,6 @@ import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import {
     LayoutDashboard,
     List,
-    PlusCircle,
     Settings,
     ScrollText,
     ArrowLeftRight,
@@ -33,7 +32,6 @@ const navItems = [
     { to: '/ai-report', icon: Sparkles, label: 'AI 리포트' },
     { to: '/ai-memo', icon: NotebookPen, label: 'AI 메모' },
     { to: '/image-generation', icon: ImagePlus, label: '이미지 생성' },
-    { to: '/add-asset', icon: PlusCircle, label: '자산 추가' },
 ];
 
 export const Layout: React.FC = () => {

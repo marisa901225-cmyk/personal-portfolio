@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { Asset, AssetCategory, TradeType } from '../lib/types';
 import type { CmaConfig } from '@/shared/portfolio';
-import { Search, Filter, Download, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Search, Filter, Download, ArrowUpDown, ArrowUp, ArrowDown, PlusCircle } from 'lucide-react';
 import { AssetEditModal } from './AssetEditModal';
 import { AssetRow } from './AssetRow';
 import { useAssetExport } from '../hooks/useAssetExport';
@@ -154,7 +155,7 @@ export const AssetList: React.FC<AssetListProps> = ({
       <div className="p-6 border-b border-slate-100">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-bold text-slate-800">보유 자산 목록</h2>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <input
               ref={fileInputRef}
               type="file"
@@ -162,6 +163,15 @@ export const AssetList: React.FC<AssetListProps> = ({
               className="hidden"
               onChange={handleRestoreFileChange}
             />
+            <Link
+              to="/add-asset"
+              className="flex items-center space-x-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700"
+              title="자산 추가"
+            >
+              <PlusCircle size={16} />
+              <span className="hidden md:inline">자산 추가</span>
+              <span className="md:hidden">추가</span>
+            </Link>
             <button
               type="button"
               onClick={handleRestoreFromExcelClick}
