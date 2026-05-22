@@ -41,3 +41,26 @@ async def test_create_ai_chat_message_uses_memo_context(monkeypatch: pytest.Monk
     assert fake.called_messages is not None
     assert "해야 할 일: 장보기" in fake.called_messages[1]["content"]
     assert "짧게 정리해줘" in fake.called_messages[1]["content"]
+
+
+def test_build_messages_preserves_raw_memo_tokens() -> None:
+    from backend.routers.ai_chat import _build_messages
+
+    messages = _build_messages(
+        AiChatMessageRequest(
+            memo="LPH-1 메모장 대용:\n* mg -50\n* 1 mg -32\n* 7 Elb",
+            instruction="정리해줘",
+            mode="memo",
+        )
+    )
+
+    system_prompt = messages[0]["content"]
+    user_prompt = messages[1]["content"]
+    assert "LPH-1 메모장 대용" in system_prompt
+    assert "mg: -50" in system_prompt
+    assert "1 mg: -32" in system_prompt
+    assert "7 Elb: 확인 필요" in system_prompt
+    assert "<reason>" in system_prompt
+    assert "mg -50" in user_prompt
+    assert "1 mg -32" in user_prompt
+    assert "7 Elb" in user_prompt
