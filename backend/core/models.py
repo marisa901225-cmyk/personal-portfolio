@@ -78,6 +78,9 @@ class User(Base):
     ai_reports: Mapped[List["AiReport"]] = relationship(
         "AiReport", back_populates="user", cascade="all, delete-orphan"
     )
+    ai_memos: Mapped[List["AiMemo"]] = relationship(
+        "AiMemo", back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Asset(Base):
@@ -397,3 +400,26 @@ class AiReport(Base):
     )
 
     user: Mapped[User] = relationship("User", back_populates="ai_reports")
+
+
+class AiMemo(Base):
+    """AI 메모장 항목"""
+    __tablename__ = "ai_memos"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+
+    title: Mapped[str] = mapped_column(String(200), nullable=False, default="새 메모")
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow,
+        onupdate=utcnow,
+        nullable=False,
+    )
+
+    user: Mapped[User] = relationship("User", back_populates="ai_memos")

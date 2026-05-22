@@ -29,6 +29,7 @@ import type {
     BackendServerGeneratedImagesResponse,
     BackendServerGeneratedImageDataResponse,
     BackendAiChatMessageResponse,
+    BackendAiMemo,
 } from './types';
 import type { CreateHeadersFn, RequestFn } from './core';
 import { fetchPortfolio, restorePortfolio, fetchSnapshots, createSnapshot } from './portfolio';
@@ -82,6 +83,7 @@ import {
     upscaleAnimeImage,
 } from './images';
 import { createAiChatMessage } from './aiChat';
+import { createAiMemo, deleteAiMemo, fetchAiMemos, updateAiMemo } from './aiMemos';
 
 export class ApiClient {
     private readonly baseUrl: string;
@@ -488,6 +490,28 @@ export class ApiClient {
         mode?: 'memo' | 'ask' | 'rewrite';
     }): Promise<BackendAiChatMessageResponse> {
         return createAiChatMessage(this.requestFn, payload);
+    }
+
+    async fetchAiMemos(): Promise<BackendAiMemo[]> {
+        return fetchAiMemos(this.requestFn);
+    }
+
+    async createAiMemo(payload: {
+        title?: string;
+        content?: string;
+    } = {}): Promise<BackendAiMemo> {
+        return createAiMemo(this.requestFn, payload);
+    }
+
+    async updateAiMemo(memoId: number, payload: {
+        title?: string;
+        content?: string;
+    }): Promise<BackendAiMemo> {
+        return updateAiMemo(this.requestFn, memoId, payload);
+    }
+
+    async deleteAiMemo(memoId: number): Promise<void> {
+        return deleteAiMemo(this.requestFn, memoId);
     }
 
     // --- News ---

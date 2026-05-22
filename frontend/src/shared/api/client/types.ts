@@ -31,6 +31,14 @@ export interface BackendAiChatMessageResponse {
     used_paid: boolean;
 }
 
+export interface BackendAiMemo {
+    id: number;
+    title: string;
+    content: string;
+    created_at: string;
+    updated_at: string;
+}
+
 // --- Assets ---
 
 export interface BackendAsset {
