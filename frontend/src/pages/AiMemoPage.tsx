@@ -224,6 +224,7 @@ export const AiMemoPage: React.FC = () => {
 
         setIsLoading(true);
         setError('');
+        setAnswer('');
         try {
             const response = await client.createAiChatMessage({
                 memo,
@@ -245,6 +246,7 @@ export const AiMemoPage: React.FC = () => {
         if (!answer.trim()) return;
         setMemo((prev) => [prev.trim(), answer.trim()].filter(Boolean).join('\n\n'));
         setMemoView('preview');
+        setAnswer('');
     };
 
     const clearMemo = () => setMemo('');
