@@ -7,7 +7,7 @@ import requests
 
 from backend.integrations.kis import rest_rate_limiter
 from backend.integrations.kis.daily_bars_disk_cache import DailyBarsDiskCache
-from backend.integrations.kis.trading_adapter import KISTradingAPI
+from backend.integrations.kis.trading_adapter import KISDirectCredentials, KISTradingAPI
 
 
 class KISTradingAdapterTests(unittest.TestCase):
@@ -245,6 +245,44 @@ class KISTradingAdapterTests(unittest.TestCase):
 
         api._rest_throttle.assert_called_once_with()
         api._session.get.assert_called_once()
+
+    def test_direct_auth_failure_logs_slot_failure(self) -> None:
+        api = object.__new__(KISTradingAPI)
+        api._direct_credentials = KISDirectCredentials(
+            app_key="app",
+            app_secret="secret",
+            account="1234567801",
+            token_slot=2,
+            base_url="https://example.test",
+        )
+        api._direct_access_token = None
+        api._direct_token_expires_at = None
+        api._throttle_rest = Mock()
+
+        response = Mock()
+        response.status_code = 403
+        response.text = "rate limited"
+        response.json.return_value = {
+            "msg_cd": "EGW00133",
+            "msg1": "접근토큰 발급 잠시 후 다시 시도하세요(1분당 1회)",
+        }
+        api._session = Mock()
+        api._session.post.return_value = response
+
+        with patch(
+            "backend.integrations.kis.trading_adapter.read_kis_token_record",
+            return_value=(None, None),
+        ), patch(
+            "backend.integrations.kis.trading_adapter.log_kis_token_issue_failure",
+        ) as log_mock:
+            with self.assertRaisesRegex(RuntimeError, "EGW00133"):
+                api._ensure_direct_auth()
+
+        log_mock.assert_called_once()
+        _, kwargs = log_mock.call_args
+        self.assertEqual(kwargs["slot"], 2)
+        self.assertEqual(kwargs["status_code"], 403)
+        self.assertEqual(kwargs["error_code"], "EGW00133")
 
     def test_get_applies_extra_min_gap_only_for_daily_chart_paths(self) -> None:
         api = object.__new__(KISTradingAPI)

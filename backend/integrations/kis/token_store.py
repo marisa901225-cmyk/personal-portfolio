@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import inspect
 import logging
 import os
+import sys
 from datetime import datetime
 from typing import Optional
 
@@ -12,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from ...core.db import SessionLocal
 from ...core.models import Setting
+from ...core.models_misc import KISTokenIssueFailure
 from ...services.users import get_or_create_single_user
 
 logger = logging.getLogger(__name__)
@@ -26,6 +29,56 @@ def _slot_columns(slot: int) -> tuple[str, str]:
     if int(slot) == 1:
         return "kis_token_encrypted1", "kis_token_expires_at1"
     return "kis_token_encrypted", "kis_token_expires_at"
+
+
+def _caller_file_from_stack() -> str:
+    current_file = os.path.abspath(__file__)
+    skip_names = {
+        "token_store.py",
+        "trading_adapter.py",
+        "secondary_market_context.py",
+        "kis_auth_rest.py",
+    }
+    fallback = ""
+    for frame in inspect.stack()[2:]:
+        filename = os.path.abspath(frame.filename)
+        if filename == current_file:
+            continue
+        if not fallback:
+            fallback = frame.filename
+        if os.path.basename(filename) not in skip_names:
+            return frame.filename
+    return fallback
+
+
+def log_kis_token_issue_failure(
+    *,
+    slot: int,
+    status_code: int | None = None,
+    error_code: str | None = None,
+    error_message: str | None = None,
+    source_file: str | None = None,
+    command: str | None = None,
+) -> None:
+    """Persist only failed KIS token issue attempts for slots 0/1/2."""
+    session = SessionLocal()
+    try:
+        session.add(
+            KISTokenIssueFailure(
+                slot=int(slot),
+                status_code=status_code,
+                error_code=(str(error_code).strip() or None) if error_code is not None else None,
+                error_message=(str(error_message).strip()[:2000] or None) if error_message is not None else None,
+                source_file=(str(source_file or _caller_file_from_stack()).strip()[:500] or None),
+                command=(" ".join(sys.argv) if command is None else str(command)).strip()[:2000] or None,
+            )
+        )
+        session.commit()
+    except Exception as exc:
+        session.rollback()
+        logger.warning("Failed to log KIS token issue failure (slot=%s): %s", slot, exc)
+    finally:
+        session.close()
 
 
 def _load_token_key() -> bytes:

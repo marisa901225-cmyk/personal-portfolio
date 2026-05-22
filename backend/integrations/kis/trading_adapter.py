@@ -25,7 +25,11 @@ import pandas as pd
 import requests
 from backend.integrations.kis.rest_rate_limiter import throttle_rest_min_gap
 from backend.integrations.kis.secondary_market_context import build_secondary_market_context
-from backend.integrations.kis.token_store import read_kis_token_record, save_kis_token
+from backend.integrations.kis.token_store import (
+    log_kis_token_issue_failure,
+    read_kis_token_record,
+    save_kis_token,
+)
 
 from .daily_bars_disk_cache import DEFAULT_DAILY_BARS_DISK_CACHE_PATH, DailyBarsDiskCache
 from .trading_account_mixin import KISAccountTradingMixin
@@ -148,16 +152,17 @@ class KISTradingBase:
         logger.info("[KIS TradingAPI] 어댑터 초기화 완료")
 
     def _headers(self, tr_id: str, tr_cont: str = "") -> dict[str, str]:
-        if self._direct_credentials is not None:
+        direct_credentials = getattr(self, "_direct_credentials", None)
+        if direct_credentials is not None:
             token = self._ensure_direct_auth()
             h = {
                 "content-type": "application/json",
                 "authorization": f"Bearer {token}",
-                "appkey": self._direct_credentials.app_key,
-                "appsecret": self._direct_credentials.app_secret,
+                "appkey": direct_credentials.app_key,
+                "appsecret": direct_credentials.app_secret,
                 "tr_id": tr_id,
                 "custtype": "P",
-                "User-Agent": self._direct_credentials.user_agent,
+                "User-Agent": direct_credentials.user_agent,
             }
             if tr_cont:
                 h["tr_cont"] = tr_cont
@@ -173,16 +178,18 @@ class KISTradingBase:
         return h
 
     def _base_url(self) -> str:
-        if self._direct_credentials is not None:
-            return self._direct_credentials.base_url
+        direct_credentials = getattr(self, "_direct_credentials", None)
+        if direct_credentials is not None:
+            return direct_credentials.base_url
         if self._ka is None:
             raise RuntimeError("KIS adapter is not initialized")
         return self._ka.getTREnv().my_url
 
     def _account(self) -> tuple[str, str]:
-        if self._direct_credentials is not None:
-            acct = self._direct_credentials.account
-            return acct[:8], acct[8:10] if len(acct) >= 10 else (self._direct_credentials.product or "01")
+        direct_credentials = getattr(self, "_direct_credentials", None)
+        if direct_credentials is not None:
+            acct = direct_credentials.account
+            return acct[:8], acct[8:10] if len(acct) >= 10 else (direct_credentials.product or "01")
         if self._ka is None:
             raise RuntimeError("KIS adapter is not initialized")
         acct = self._ka.getTREnv().my_acct
@@ -196,7 +203,7 @@ class KISTradingBase:
         return datetime.now() + timedelta(seconds=_AUTH_EXPIRY_BUFFER_SEC) < self._direct_token_expires_at
 
     def _ensure_direct_auth(self, *, force: bool = False) -> str:
-        credentials = self._direct_credentials
+        credentials = getattr(self, "_direct_credentials", None)
         if credentials is None:
             raise RuntimeError("direct KIS credentials are not configured")
         if not force and self._direct_token_is_valid():
@@ -237,6 +244,13 @@ class KISTradingBase:
             error_message = data.get("msg1") or data.get("error_description")
             if not error_message:
                 error_message = (response.text or "").strip()[:300]
+            if credentials.token_slot is not None:
+                log_kis_token_issue_failure(
+                    slot=int(credentials.token_slot),
+                    status_code=int(response.status_code),
+                    error_code=str(error_code or "") or None,
+                    error_message=str(error_message or "") or None,
+                )
             raise RuntimeError(
                 f"KIS direct auth failed: {response.status_code} {error_code} {error_message}"
             )
@@ -326,7 +340,7 @@ class KISTradingBase:
         return self._copy_cached_value(copied)
 
     def _is_expired_token_response(self, response: requests.Response, data: dict | None = None) -> bool:
-        if self._direct_credentials is not None:
+        if getattr(self, "_direct_credentials", None) is not None:
             payload = data if isinstance(data, dict) else {}
             msg_cd = str(payload.get("msg_cd") or "").strip()
             msg1 = str(payload.get("msg1") or "").strip().lower()
@@ -343,7 +357,7 @@ class KISTradingBase:
         return False
 
     def _force_reauth_current_env(self) -> None:
-        if self._direct_credentials is not None:
+        if getattr(self, "_direct_credentials", None) is not None:
             self._ensure_direct_auth(force=True)
             return
         refresher = getattr(getattr(self, "_ka", None), "force_reauth_current_env", None)
@@ -410,7 +424,7 @@ class KISTradingBase:
         url = f"{self._base_url()}{path}"
         force_refreshed = False
         for attempt in range(1, _KIS_HTTP_GET_MAX_ATTEMPTS + 1):
-            if self._direct_credentials is None:
+            if getattr(self, "_direct_credentials", None) is None:
                 self._core._ensure_auth()
             headers = self._headers(tr_id, tr_cont)
             self._throttle_rest()
@@ -475,10 +489,10 @@ class KISTradingBase:
         force_refreshed = False
 
         while True:
-            if self._direct_credentials is None:
+            if getattr(self, "_direct_credentials", None) is None:
                 self._core._ensure_auth()
             headers = self._headers(tr_id)
-            if self._direct_credentials is None:
+            if getattr(self, "_direct_credentials", None) is None:
                 if self._ka is None:
                     raise RuntimeError("KIS adapter is not initialized")
                 self._ka.set_order_hash_key(headers, body)

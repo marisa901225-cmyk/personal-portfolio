@@ -17,7 +17,11 @@ from backend.integrations.kis.rest_rate_limiter import (
     throttle_rest_min_gap,
     throttle_rest_requests,
 )
-from backend.integrations.kis.token_store import read_kis_token_record, save_kis_token
+from backend.integrations.kis.token_store import (
+    log_kis_token_issue_failure,
+    read_kis_token_record,
+    save_kis_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -167,10 +171,28 @@ class SecondaryMarketContext:
                 headers=self._base_headers(),
                 timeout=(_HTTP_CONNECT_TIMEOUT_SEC, _HTTP_READ_TIMEOUT_SEC),
             )
-            response.raise_for_status()
-            data = response.json()
+            try:
+                data = response.json()
+            except ValueError:
+                data = {}
+            status_code_raw = getattr(response, "status_code", 200)
+            status_code = status_code_raw if isinstance(status_code_raw, int) else 200
+            if status_code >= 400:
+                log_kis_token_issue_failure(
+                    slot=self._TOKEN_SLOT,
+                    status_code=int(status_code),
+                    error_code=_safe_text(data.get("msg_cd") or data.get("error_code")) or None,
+                    error_message=_safe_text(data.get("msg1") or data.get("error_description") or response.text) or None,
+                )
+                response.raise_for_status()
             token = _safe_text(data.get("access_token"))
             if not token:
+                log_kis_token_issue_failure(
+                    slot=self._TOKEN_SLOT,
+                    status_code=int(status_code),
+                    error_code="missing_access_token",
+                    error_message="secondary KIS auth response missing access_token",
+                )
                 raise RuntimeError("secondary KIS auth response missing access_token")
 
             expiry_raw = _safe_text(data.get("access_token_token_expired"))

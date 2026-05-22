@@ -61,6 +61,35 @@ class SecondaryMarketContextTests(unittest.TestCase):
         _, kwargs = save_mock.call_args
         self.assertEqual(kwargs["slot"], 1)
 
+    def test_ensure_auth_failure_logs_slot1_failure(self) -> None:
+        ctx = self._build_context()
+        response = Mock()
+        response.status_code = 403
+        response.text = "rate limited"
+        response.json.return_value = {
+            "msg_cd": "EGW00133",
+            "msg1": "접근토큰 발급 잠시 후 다시 시도하세요(1분당 1회)",
+        }
+        response.raise_for_status.side_effect = RuntimeError("403")
+        ctx._session.post.return_value = response
+
+        with patch(
+            "backend.integrations.kis.secondary_market_context.read_kis_token_record",
+            return_value=(None, None),
+        ), patch(
+            "backend.integrations.kis.secondary_market_context.log_kis_token_issue_failure",
+        ) as log_mock, patch(
+            "backend.integrations.kis.secondary_market_context.throttle_rest_requests",
+        ):
+            with self.assertRaises(RuntimeError):
+                ctx.ensure_auth()
+
+        log_mock.assert_called_once()
+        _, kwargs = log_mock.call_args
+        self.assertEqual(kwargs["slot"], 1)
+        self.assertEqual(kwargs["status_code"], 403)
+        self.assertEqual(kwargs["error_code"], "EGW00133")
+
 
 if __name__ == "__main__":
     unittest.main()

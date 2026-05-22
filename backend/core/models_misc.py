@@ -222,6 +222,25 @@ class SchedulerState(Base):
     )
 
 
+class KISTokenIssueFailure(Base):
+    """KIS access-token issue failure audit log."""
+
+    __tablename__ = "kis_token_issue_failures"
+    __table_args__ = (
+        Index("idx_kis_token_issue_failures_slot_time", "slot", "created_at"),
+        Index("idx_kis_token_issue_failures_source_file", "source_file"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    slot: Mapped[int] = mapped_column(Integer, nullable=False)
+    status_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    error_code: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source_file: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    command: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+
+
 class EconRateState(Base):
     """경제 지표(기준금리) 변경 감지 상태 저장"""
     __tablename__ = "econ_rate_states"

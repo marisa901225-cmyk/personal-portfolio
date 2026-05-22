@@ -29,6 +29,7 @@ from .models_misc import (
     TradingEngineArchive,
     SyncSchedulerLogArchive,
     EsportsMatch,
+    KISTokenIssueFailure,
 )
 from .time_utils import utcnow
 

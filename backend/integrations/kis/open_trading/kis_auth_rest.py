@@ -11,7 +11,11 @@ import requests
 
 import kis_auth_state as state
 from backend.integrations.kis.rest_rate_limiter import throttle_rest_requests
-from backend.integrations.kis.token_store import read_kis_token, save_kis_token
+from backend.integrations.kis.token_store import (
+    log_kis_token_issue_failure,
+    read_kis_token,
+    save_kis_token,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +318,17 @@ def auth(svr="prod", product=None, url=None, force=False):
             else:
                 error_detail = res.text
                 logger.error("[KIS Auth] ❌ 토큰 발급 실패: %s", error_detail)
+                error_payload = _safe_json_dict(res) or {}
+                log_kis_token_issue_failure(
+                    slot=0,
+                    status_code=int(res.status_code),
+                    error_code=str(error_payload.get("msg_cd") or error_payload.get("error_code") or "") or None,
+                    error_message=str(
+                        error_payload.get("msg1")
+                        or error_payload.get("error_description")
+                        or error_detail
+                    ) or None,
+                )
                 
                 # 서킷브레이커 실패 기록 (상세 사유 전달 - 비키 제안 💖)
                 if circuit_enabled:
