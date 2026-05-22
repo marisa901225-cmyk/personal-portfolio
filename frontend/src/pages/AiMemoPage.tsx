@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Bot, Clipboard, Eraser, FilePenLine, Send, Sparkles } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { ApiClient } from '@/shared/api/client';
 import { useSettings } from '@hooks/useSettings';
 
@@ -150,8 +152,45 @@ export const AiMemoPage: React.FC = () => {
                             <Clipboard size={17} />
                         </button>
                     </div>
-                    <div className="min-h-64 whitespace-pre-wrap p-4 text-sm leading-6 text-slate-800">
-                        {answer || <span className="text-slate-400">AI 응답이 여기에 표시됩니다.</span>}
+                    <div className="min-h-64 p-4 text-sm leading-6 text-slate-800">
+                        {answer ? (
+                            <ReactMarkdown
+                                remarkPlugins={[remarkGfm]}
+                                components={{
+                                    table: ({ children }) => (
+                                        <div className="my-2 overflow-x-auto rounded-xl border border-slate-200">
+                                            <table className="w-full border-collapse text-left text-sm">
+                                                {children}
+                                            </table>
+                                        </div>
+                                    ),
+                                    th: ({ children }) => (
+                                        <th className="border-b border-slate-200 bg-slate-50 px-3 py-2 font-semibold text-slate-700">
+                                            {children}
+                                        </th>
+                                    ),
+                                    td: ({ children }) => (
+                                        <td className="border-b border-slate-100 px-3 py-2 align-top text-slate-800 last:text-right">
+                                            {children}
+                                        </td>
+                                    ),
+                                    p: ({ children }) => (
+                                        <p className="mb-2 last:mb-0">
+                                            {children}
+                                        </p>
+                                    ),
+                                    ul: ({ children }) => (
+                                        <ul className="mb-2 list-disc space-y-1 pl-5">
+                                            {children}
+                                        </ul>
+                                    ),
+                                }}
+                            >
+                                {answer}
+                            </ReactMarkdown>
+                        ) : (
+                            <span className="text-slate-400">AI 응답이 여기에 표시됩니다.</span>
+                        )}
                     </div>
                 </section>
             </aside>
