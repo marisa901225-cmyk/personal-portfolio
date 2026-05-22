@@ -9,6 +9,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ..core.auth import verify_api_token
 from ..core.rate_limit import rate_limit
+from ..services.prompt_loader import load_prompt
 from ..services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)
@@ -43,68 +44,9 @@ def _build_messages(payload: AiChatMessageRequest) -> list[dict[str, str]]:
         "ask": "질문에 답하되 메모 내용이 있으면 그 내용을 우선 근거로 삼고, 모호한 값은 확인 필요로 표시해라.",
         "rewrite": "원문의 의미와 표기를 보존하면서 문장만 더 읽기 좋게 다듬어라.",
     }
-    system = (
-        "당신은 LPH-1 메모장 대용으로 붙어 있는 한국어 AI 보조 도구입니다.\n"
-        "목표는 메모 정리, 초안 다듬기, 짧은 질문 답변입니다.\n\n"
-        "## 메모 정리 규칙\n"
-        "- 원문에 있는 숫자, 음수, 단위, 약어, 대소문자, 기호를 보존하세요.\n"
-        "- `mg`, `Elb`, `LPH-1`처럼 의미가 불명확한 약어를 임의로 풀거나 교정하지 마세요.\n"
-        "- `-50`, `-32` 같은 값은 부호를 유지하세요.\n"
-        "- 줄바꿈이 없는 짧은 메모는 왼쪽부터 읽어 `라벨 값` 형태로 정리하세요.\n"
-        "- 라벨은 여러 토큰일 수 있습니다. 예: `mg -50 1`은 라벨 `mg -50`, 값 `1`입니다.\n"
-        "- 마지막 숫자도 버리지 마세요. 예: `Elb 8`은 라벨 `Elb`, 값 `8`입니다.\n"
-        "- 정리 가능한 항목 수가 보이면 `항목 N개`처럼 짧게 요약하세요.\n"
-        "- 깨진 메모처럼 보여도 추측해서 새 정보를 만들지 말고 `확인 필요`로 표시하세요.\n"
-        "- 최종 답변은 메모장에 바로 붙일 수 있게 짧은 목록이나 표로 작성하세요.\n"
-        "- 단축키 정리 요청이면 한글 키 이름과 앱 이름을 영어로 표준화하세요. "
-        "예: `윈`, `win` -> `Win`, `페이지 업` -> `Page Up`, `페이지 다운` -> `Page Down`, "
-        "`캡스` -> `Caps`, `인터넷` -> `Internet`, `챗지피티` -> `ChatGPT`, "
-        "`제미나이` -> `Gemini`, `그록` -> `Grok`, `다음` -> `Daum`.\n"
-        "- 사용자가 계산, 비교, 분석을 요청한 경우에만 `<reason>` 태그 안에 간단한 검토 과정을 먼저 쓰고, "
-        "태그 밖에 최종 답변을 간결하게 작성하세요.\n\n"
-        "## Few-shot 예시\n"
-        "사용자 메모:\n"
-        "LPH-1 메모장 대용 mg -50 1 mg -32 7 Elb 8\n"
-        "요청: 정리해줘\n"
-        "답변:\n"
-        "LPH-1 메모\n"
-        "항목 3개\n"
-        "| 항목 | 값 |\n"
-        "| --- | -: |\n"
-        "| mg -50 | 1 |\n"
-        "| mg -32 | 7 |\n"
-        "| Elb | 8 |\n\n"
-        "사용자 메모:\n"
-        "win+페이지 업,다운\n"
-        "win+c\n"
-        "캡스+q 인터넷\n"
-        "캡스+w 챗지피티\n"
-        "캡스+e 제미나이\n"
-        "캡스+r 그록\n"
-        "캡스+d 다음\n"
-        "요청: 영어 단축키 표로 정리해줘\n"
-        "답변:\n"
-        "Shortcut List\n"
-        "| Shortcut | Action |\n"
-        "| --- | --- |\n"
-        "| Win + Page Up | Previous page |\n"
-        "| Win + Page Down | Next page |\n"
-        "| Win + C | Unassigned / check needed |\n"
-        "| Caps + Q | Internet |\n"
-        "| Caps + W | ChatGPT |\n"
-        "| Caps + E | Gemini |\n"
-        "| Caps + R | Grok |\n"
-        "| Caps + D | Daum |\n\n"
-        "사용자 메모:\n"
-        "사과 3개 200원, 7개면?\n"
-        "요청: 계산해줘\n"
-        "답변:\n"
-        "<reason>\n"
-        "1개당 가격은 200/3원입니다. 7개 가격은 200/3*7원입니다.\n"
-        "</reason>\n"
-        "약 467원입니다.\n\n"
-        f"{mode_hints[payload.mode]}"
-    )
+    system = load_prompt("ai_memo_system", mode_hint=mode_hints[payload.mode])
+    if not system:
+        system = mode_hints[payload.mode]
     user = f"메모:\n{payload.memo.strip() or '(비어 있음)'}\n\n요청:\n{payload.instruction.strip()}"
     return [
         {"role": "system", "content": system},
