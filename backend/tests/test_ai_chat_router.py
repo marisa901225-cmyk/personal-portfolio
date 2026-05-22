@@ -65,3 +65,23 @@ def test_build_messages_preserves_raw_memo_tokens() -> None:
     assert "mg -50" in user_prompt
     assert "1 mg -32" in user_prompt
     assert "7 Elb 8" in user_prompt
+
+
+def test_build_messages_includes_shortcut_translation_example() -> None:
+    from backend.routers.ai_chat import _build_messages
+
+    messages = _build_messages(
+        AiChatMessageRequest(
+            memo="win+페이지 업,다운\n캡스+w 챗지피티",
+            instruction="영어 단축키 표로 정리해줘",
+            mode="memo",
+        )
+    )
+
+    system_prompt = messages[0]["content"]
+    user_prompt = messages[1]["content"]
+    assert "| Win + Page Up | Previous page |" in system_prompt
+    assert "| Win + Page Down | Next page |" in system_prompt
+    assert "| Caps + W | ChatGPT |" in system_prompt
+    assert "페이지 업" in user_prompt
+    assert "캡스+w 챗지피티" in user_prompt
