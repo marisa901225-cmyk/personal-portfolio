@@ -53,6 +53,7 @@ export const Layout: React.FC = () => {
         title: '',
         message: '',
     });
+    const [isSidebarExpanded, setIsSidebarExpanded] = useState(false);
 
     const prevTradeCountRef = useRef(tradeHistory.length);
 
@@ -119,21 +120,23 @@ export const Layout: React.FC = () => {
             className={`min-h-screen flex flex-col md:flex-row ${!settings.bgEnabled ? 'bg-slate-50' : ''}`}
             style={bgStyle}
         >
-            {/* Sidebar (Desktop): compact rail, expands on hover/focus */}
+            {/* Sidebar (Desktop): compact rail, expands only while the pointer is on it. */}
             <aside
-                className={`group fixed left-0 top-0 z-40 hidden h-screen w-14 flex-col overflow-hidden border-r transition-[width] duration-200 ease-out hover:w-64 focus-within:w-64 md:flex ${settings.bgEnabled
+                onMouseEnter={() => setIsSidebarExpanded(true)}
+                onMouseLeave={() => setIsSidebarExpanded(false)}
+                className={`fixed left-0 top-0 z-40 hidden h-screen ${isSidebarExpanded ? 'w-64' : 'w-14'} flex-col overflow-hidden border-r transition-[width] duration-200 ease-out md:flex ${settings.bgEnabled
                     ? 'bg-white/80 backdrop-blur-md border-white/20'
                     : 'bg-white border-slate-200'
                     }`}
                 style={settings.bgEnabled ? { backdropFilter: `blur(${settings.bgBlur ?? 8}px)` } : {}}
             >
-                <div className={`h-[96px] overflow-hidden p-3 transition-all duration-200 group-hover:p-6 group-focus-within:p-6 ${settings.bgEnabled ? 'border-b border-white/20' : 'border-b border-slate-100'}`}>
-                    <div className="w-52 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+                <div className={`h-[96px] overflow-hidden ${isSidebarExpanded ? 'p-6' : 'p-3'} transition-all duration-200 ${settings.bgEnabled ? 'border-b border-white/20' : 'border-b border-slate-100'}`}>
+                    <div className={`w-52 transition-opacity duration-150 ${isSidebarExpanded ? 'opacity-100' : 'opacity-0'}`}>
                         <InvestmentQuote />
                     </div>
                 </div>
 
-                <nav className="flex-1 space-y-2 p-2 group-hover:p-4 group-focus-within:p-4">
+                <nav className={`flex-1 space-y-2 ${isSidebarExpanded ? 'p-4' : 'p-2'} transition-all duration-200`}>
                     {navItems.map(({ to, icon: Icon, label }) => (
                         <NavLink
                             key={to}
@@ -147,14 +150,14 @@ export const Layout: React.FC = () => {
                             title={label}
                         >
                             <Icon size={20} className="shrink-0" />
-                            <span className="whitespace-nowrap font-medium opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+                            <span className={`whitespace-nowrap font-medium transition-opacity duration-150 ${isSidebarExpanded ? 'opacity-100' : 'opacity-0'}`}>
                                 {label}
                             </span>
                         </NavLink>
                     ))}
                 </nav>
 
-                <div className="border-t border-slate-100 p-2 group-hover:p-4 group-focus-within:p-4">
+                <div className={`border-t border-slate-100 ${isSidebarExpanded ? 'p-4' : 'p-2'} transition-all duration-200`}>
                     <NavLink
                         to="/settings"
                         className={({ isActive }) =>
@@ -166,7 +169,7 @@ export const Layout: React.FC = () => {
                         title="설정"
                     >
                         <Settings size={20} className="shrink-0" />
-                        <span className="whitespace-nowrap font-medium opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+                        <span className={`whitespace-nowrap font-medium transition-opacity duration-150 ${isSidebarExpanded ? 'opacity-100' : 'opacity-0'}`}>
                             설정
                         </span>
                     </NavLink>
