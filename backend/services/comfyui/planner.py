@@ -11,7 +11,15 @@ import requests
 from ...core.config import settings
 from ...core.schemas import ComfyUIImageGenerationRequest
 from ..prompt_loader import load_prompt
-from .constants import DEFAULT_CFG, DEFAULT_NEGATIVE_PROMPT, DEFAULT_STEPS, LOCAL_IMAGE_PLANNER_RETRIES
+from .constants import (
+    DEFAULT_CFG,
+    DEFAULT_NEGATIVE_PROMPT,
+    DEFAULT_REALISTIC_CFG,
+    DEFAULT_STEPS,
+    LOCAL_IMAGE_PLANNER_RETRIES,
+    MAX_CFG,
+    MIN_CFG,
+)
 from .errors import ImageGenerationError
 from .types import ToolSpec
 
@@ -73,12 +81,12 @@ def _tool_spec_from_arguments(arguments: dict[str, Any], request: ComfyUIImageGe
     negative_prompt = str(arguments.get("negative_prompt") or DEFAULT_NEGATIVE_PROMPT).strip() or DEFAULT_NEGATIVE_PROMPT
     width = int(arguments.get("width") or request.width)
     height = int(arguments.get("height") or request.height)
+    default_cfg = DEFAULT_REALISTIC_CFG if request.model_type == "realistic" else DEFAULT_CFG
     if request.model_type == "realistic":
         steps = int(request.steps or 8)
-        cfg = 1.0
     else:
         steps = int(arguments.get("steps") or request.steps or DEFAULT_STEPS)
-        cfg = float(arguments.get("cfg") or DEFAULT_CFG)
+    cfg = float(request.cfg if request.cfg is not None else default_cfg)
     seed = int(arguments.get("seed") or request.seed or random.randint(1, 2_147_483_647))
     if seed < 1:
         seed = random.randint(1, 2_147_483_647)
@@ -86,7 +94,7 @@ def _tool_spec_from_arguments(arguments: dict[str, Any], request: ComfyUIImageGe
     width = min(max(width, 256), 1536)
     height = min(max(height, 256), 1536)
     steps = min(max(steps, 8), 60)
-    cfg = min(max(cfg, 1.0), 12.0)
+    cfg = min(max(cfg, MIN_CFG), MAX_CFG)
 
     return ToolSpec(
         prompt=tool_prompt,
@@ -112,7 +120,7 @@ def direct_realistic_tool_spec(request: ComfyUIImageGenerationRequest) -> ToolSp
         width=min(max(int(request.width), 256), 1536),
         height=min(max(int(request.height), 256), 1536),
         steps=min(max(int(request.steps or 8), 8), 12),
-        cfg=1.0,
+        cfg=float(request.cfg if request.cfg is not None else DEFAULT_REALISTIC_CFG),
         seed=seed,
     )
 
@@ -208,7 +216,8 @@ def _build_image_planner_payload(
                     f"Model mode: {request.model_type}\n"
                     f"Preferred width: {request.width}\n"
                     f"Preferred height: {request.height}\n"
-                    f"Preferred steps: {request.steps or (8 if request.model_type == 'realistic' else DEFAULT_STEPS)}"
+                    f"Preferred steps: {request.steps or (8 if request.model_type == 'realistic' else DEFAULT_STEPS)}\n"
+                    f"Preferred cfg: {request.cfg if request.cfg is not None else (DEFAULT_REALISTIC_CFG if request.model_type == 'realistic' else DEFAULT_CFG)}"
                 ),
             },
         ],

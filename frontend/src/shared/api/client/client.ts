@@ -28,6 +28,7 @@ import type {
     BackendAnimeImageUpscaleResponse,
     BackendServerGeneratedImagesResponse,
     BackendServerGeneratedImageDataResponse,
+    BackendAiChatMessageResponse,
 } from './types';
 import type { CreateHeadersFn, RequestFn } from './core';
 import { fetchPortfolio, restorePortfolio, fetchSnapshots, createSnapshot } from './portfolio';
@@ -80,6 +81,7 @@ import {
     planComfyUIImagePrompt,
     upscaleAnimeImage,
 } from './images';
+import { createAiChatMessage } from './aiChat';
 
 export class ApiClient {
     private readonly baseUrl: string;
@@ -437,6 +439,7 @@ export class ApiClient {
         height?: number;
         seed?: number;
         steps?: number;
+        cfg?: number;
         output_width?: number;
         output_height?: number;
         upscale_model?: string;
@@ -451,6 +454,7 @@ export class ApiClient {
         height?: number;
         seed?: number;
         steps?: number;
+        cfg?: number;
     }): Promise<BackendComfyUIImagePromptPlanResponse> {
         return planComfyUIImagePrompt(this.requestFn, payload);
     }
@@ -472,6 +476,18 @@ export class ApiClient {
 
     async fetchServerGeneratedImageData(path: string): Promise<BackendServerGeneratedImageDataResponse> {
         return fetchServerGeneratedImageData(this.requestFn, path);
+    }
+
+    // --- AI Chat ---
+
+    async createAiChatMessage(payload: {
+        memo: string;
+        instruction: string;
+        max_tokens?: number;
+        temperature?: number;
+        mode?: 'memo' | 'ask' | 'rewrite';
+    }): Promise<BackendAiChatMessageResponse> {
+        return createAiChatMessage(this.requestFn, payload);
     }
 
     // --- News ---

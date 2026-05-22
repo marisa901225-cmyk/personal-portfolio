@@ -25,6 +25,12 @@ export interface BackendSettings {
     benchmark_return?: number | null;
 }
 
+export interface BackendAiChatMessageResponse {
+    answer: string;
+    route?: string | null;
+    used_paid: boolean;
+}
+
 // --- Assets ---
 
 export interface BackendAsset {

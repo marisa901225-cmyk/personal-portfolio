@@ -12,6 +12,7 @@ import {
     ExchangePage,
     ExpensesPage,
     AiReportPage,
+    AiMemoPage,
     ImageGenerationPage,
     AddAssetPage,
     SettingsPage,
@@ -205,6 +206,7 @@ const App: React.FC = () => {
                     <Route path="exchange" element={<ExchangePage />} />
                     <Route path="expenses" element={<ExpensesPage />} />
                     <Route path="ai-report" element={<AiReportPage />} />
+                    <Route path="ai-memo" element={<AiMemoPage />} />
                     <Route path="image-generation" element={<ImageGenerationPage />} />
                     <Route path="add-asset" element={<AddAssetPage />} />
                     <Route path="settings" element={<SettingsPage />} />

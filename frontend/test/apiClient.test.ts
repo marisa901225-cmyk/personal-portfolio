@@ -98,6 +98,41 @@ describe('ApiClient', () => {
     expect(options).toMatchObject({ method: 'DELETE' });
   });
 
+  it('createAiChatMessage posts memo assistant payload', async () => {
+    const client = new ApiClient(baseUrl, token);
+    const mockResponse = {
+      answer: '정리됨',
+      route: 'remote',
+      used_paid: false,
+    };
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => mockResponse,
+    } as Response);
+
+    const result = await client.createAiChatMessage({
+      memo: '오늘 할 일',
+      instruction: '체크리스트로 정리',
+      mode: 'memo',
+      max_tokens: 1536,
+      temperature: 0.4,
+    });
+
+    expect(result).toEqual(mockResponse);
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe(`${baseUrl}/api/ai-chat/messages`);
+    expect(options).toMatchObject({ method: 'POST' });
+    expect((options as RequestInit).body).toBe(JSON.stringify({
+      memo: '오늘 할 일',
+      instruction: '체크리스트로 정리',
+      mode: 'memo',
+      max_tokens: 1536,
+      temperature: 0.4,
+    }));
+  });
+
   it('generateComfyUIImage posts generation payload', async () => {
     const client = new ApiClient(baseUrl, token);
     const mockResponse: BackendComfyUIImageGenerationResponse = {
@@ -134,6 +169,7 @@ describe('ApiClient', () => {
       negative_prompt_override: 'blurry',
       width: 1024,
       height: 1024,
+      cfg: 2.5,
       output_width: 3840,
       output_height: 2160,
       upscale_model: 'RealESRGAN_x4plus.pth',
@@ -150,6 +186,7 @@ describe('ApiClient', () => {
       negative_prompt_override: 'blurry',
       width: 1024,
       height: 1024,
+      cfg: 2.5,
       output_width: 3840,
       output_height: 2160,
       upscale_model: 'RealESRGAN_x4plus.pth',

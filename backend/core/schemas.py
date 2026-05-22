@@ -451,6 +451,7 @@ class ComfyUIImageGenerationRequest(BaseModel):
     height: int = Field(default=1024, ge=256, le=1536)
     seed: Optional[int] = Field(default=None, ge=0)
     steps: Optional[int] = Field(default=None, ge=8, le=60)
+    cfg: Optional[float] = Field(default=None, ge=0.0, le=10.0)
     output_width: Optional[int] = Field(default=None, ge=256, le=4096)
     output_height: Optional[int] = Field(default=None, ge=256, le=4096)
     upscale_model: Optional[str] = Field(default=None, min_length=1)

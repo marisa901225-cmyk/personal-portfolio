@@ -18,6 +18,7 @@ export const generateComfyUIImage = (
         height?: number;
         seed?: number;
         steps?: number;
+        cfg?: number;
         output_width?: number;
         output_height?: number;
         upscale_model?: string;
@@ -37,6 +38,7 @@ export const planComfyUIImagePrompt = (
         height?: number;
         seed?: number;
         steps?: number;
+        cfg?: number;
     },
 ): Promise<BackendComfyUIImagePromptPlanResponse> =>
     request<BackendComfyUIImagePromptPlanResponse>('/api/images/plan-prompt', {

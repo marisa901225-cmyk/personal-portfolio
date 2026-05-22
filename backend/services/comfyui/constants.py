@@ -1,6 +1,9 @@
 DEFAULT_NEGATIVE_PROMPT = "low quality, blurry, distorted, bad anatomy, watermark, text, logo"
 DEFAULT_STEPS = 20
 DEFAULT_CFG = 4.0
+DEFAULT_REALISTIC_CFG = 1.0
+MIN_CFG = 0.0
+MAX_CFG = 10.0
 DEFAULT_SAMPLER = "euler"
 DEFAULT_SCHEDULER = "simple"
 DEFAULT_UNET_NAME = "UltraReal_anima.safetensors"
