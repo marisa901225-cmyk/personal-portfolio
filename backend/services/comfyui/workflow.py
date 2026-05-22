@@ -9,6 +9,10 @@ import requests
 
 from ...core.config import settings
 from .constants import (
+    ANIMA_HIGHRES_AESTHETIC_LORA_NAME,
+    ANIMA_HIGHRES_AESTHETIC_LORA_STRENGTH,
+    ANIMA_TURBO_LORA_NAME,
+    ANIMA_TURBO_LORA_STRENGTH,
     DEFAULT_4K_FILENAME_PREFIX,
     DEFAULT_CLIENT_ID,
     DEFAULT_CLIP_NAME,
@@ -67,16 +71,16 @@ def build_workflow(
         },
         "5": {
             "class_type": "CLIPTextEncode",
-            "inputs": {"clip": ["2", 0], "text": tool_spec.prompt},
+            "inputs": {"clip": ["14", 1], "text": tool_spec.prompt},
         },
         "6": {
             "class_type": "CLIPTextEncode",
-            "inputs": {"clip": ["2", 0], "text": tool_spec.negative_prompt},
+            "inputs": {"clip": ["14", 1], "text": tool_spec.negative_prompt},
         },
         "7": {
             "class_type": "KSampler",
             "inputs": {
-                "model": ["1", 0],
+                "model": ["14", 0],
                 "positive": ["5", 0],
                 "negative": ["6", 0],
                 "latent_image": ["4", 0],
@@ -95,6 +99,26 @@ def build_workflow(
         "9": {
             "class_type": "SaveImage",
             "inputs": {"images": save_image_input, "filename_prefix": filename_prefix},
+        },
+        "13": {
+            "class_type": "LoraLoader",
+            "inputs": {
+                "model": ["1", 0],
+                "clip": ["2", 0],
+                "lora_name": ANIMA_TURBO_LORA_NAME,
+                "strength_model": ANIMA_TURBO_LORA_STRENGTH,
+                "strength_clip": ANIMA_TURBO_LORA_STRENGTH,
+            },
+        },
+        "14": {
+            "class_type": "LoraLoader",
+            "inputs": {
+                "model": ["13", 0],
+                "clip": ["13", 1],
+                "lora_name": ANIMA_HIGHRES_AESTHETIC_LORA_NAME,
+                "strength_model": ANIMA_HIGHRES_AESTHETIC_LORA_STRENGTH,
+                "strength_clip": ANIMA_HIGHRES_AESTHETIC_LORA_STRENGTH,
+            },
         },
     }
     if output_width is not None and output_height is not None:

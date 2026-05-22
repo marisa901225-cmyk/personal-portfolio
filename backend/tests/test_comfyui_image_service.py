@@ -395,6 +395,44 @@ def test_build_workflow_routes_4k_output_through_upscale_model() -> None:
     assert workflow["9"]["inputs"]["images"] == ["12", 0]
 
 
+def test_build_workflow_uses_anima_loras_for_anime_mode() -> None:
+    workflow = build_workflow(
+        ToolSpec(
+            prompt="anime character under neon rain",
+            negative_prompt="blurry",
+            width=1024,
+            height=1024,
+            steps=10,
+            cfg=1.0,
+            seed=123,
+        ),
+    )
+
+    assert workflow["13"] == {
+        "class_type": "LoraLoader",
+        "inputs": {
+            "model": ["1", 0],
+            "clip": ["2", 0],
+            "lora_name": "anima-turbo-lora-v0.1.safetensors",
+            "strength_model": 1.0,
+            "strength_clip": 1.0,
+        },
+    }
+    assert workflow["14"] == {
+        "class_type": "LoraLoader",
+        "inputs": {
+            "model": ["13", 0],
+            "clip": ["13", 1],
+            "lora_name": "anima-highres-aesthetic-boost.safetensors",
+            "strength_model": 1.0,
+            "strength_clip": 1.0,
+        },
+    }
+    assert workflow["5"]["inputs"]["clip"] == ["14", 1]
+    assert workflow["6"]["inputs"]["clip"] == ["14", 1]
+    assert workflow["7"]["inputs"]["model"] == ["14", 0]
+
+
 def test_vram_guard_releases_only_for_explicit_realistic_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(vram_guard_module.settings, "comfyui_release_llm_vram_mode", "auto")
 
