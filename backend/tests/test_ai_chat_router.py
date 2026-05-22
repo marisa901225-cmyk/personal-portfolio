@@ -80,8 +80,9 @@ def test_build_messages_includes_shortcut_translation_example() -> None:
 
     system_prompt = messages[0]["content"]
     user_prompt = messages[1]["content"]
-    assert "| Win + Page Up | Previous page |" in system_prompt
-    assert "| Win + Page Down | Next page |" in system_prompt
+    assert "| Win + Page Up | 이전 페이지 |" in system_prompt
+    assert "| Win + Page Down | 다음 페이지 |" in system_prompt
+    assert "| Win + C | 확인 필요 |" in system_prompt
     assert "| Caps + W | ChatGPT |" in system_prompt
     assert "페이지 업" in user_prompt
     assert "캡스+w 챗지피티" in user_prompt
