@@ -119,54 +119,62 @@ export const Layout: React.FC = () => {
             className={`min-h-screen flex flex-col md:flex-row ${!settings.bgEnabled ? 'bg-slate-50' : ''}`}
             style={bgStyle}
         >
-            {/* Sidebar (Desktop) */}
+            {/* Sidebar (Desktop): compact rail, expands on hover/focus */}
             <aside
-                className={`hidden md:flex flex-col w-64 border-r h-screen sticky top-0 ${settings.bgEnabled
+                className={`group fixed left-0 top-0 z-40 hidden h-screen w-14 flex-col overflow-hidden border-r transition-[width] duration-200 ease-out hover:w-64 focus-within:w-64 md:flex ${settings.bgEnabled
                     ? 'bg-white/80 backdrop-blur-md border-white/20'
                     : 'bg-white border-slate-200'
                     }`}
                 style={settings.bgEnabled ? { backdropFilter: `blur(${settings.bgBlur ?? 8}px)` } : {}}
             >
-                <div className={`p-6 ${settings.bgEnabled ? 'border-b border-white/20' : 'border-b border-slate-100'}`}>
-                    <InvestmentQuote />
+                <div className={`h-[96px] overflow-hidden p-3 transition-all duration-200 group-hover:p-6 group-focus-within:p-6 ${settings.bgEnabled ? 'border-b border-white/20' : 'border-b border-slate-100'}`}>
+                    <div className="w-52 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+                        <InvestmentQuote />
+                    </div>
                 </div>
 
-                <nav className="flex-1 p-4 space-y-2">
+                <nav className="flex-1 space-y-2 p-2 group-hover:p-4 group-focus-within:p-4">
                     {navItems.map(({ to, icon: Icon, label }) => (
                         <NavLink
                             key={to}
                             to={to}
                             className={({ isActive }) =>
-                                `flex items-center space-x-3 px-4 py-3 rounded-xl transition-all w-full ${isActive
+                                `flex w-full items-center gap-3 rounded-xl px-3 py-3 transition-all ${isActive
                                     ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200'
                                     : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
                                 }`
                             }
+                            title={label}
                         >
-                            <Icon size={20} />
-                            <span className="font-medium">{label}</span>
+                            <Icon size={20} className="shrink-0" />
+                            <span className="whitespace-nowrap font-medium opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+                                {label}
+                            </span>
                         </NavLink>
                     ))}
                 </nav>
 
-                <div className="p-4 border-t border-slate-100">
+                <div className="border-t border-slate-100 p-2 group-hover:p-4 group-focus-within:p-4">
                     <NavLink
                         to="/settings"
                         className={({ isActive }) =>
-                            `flex items-center space-x-3 px-4 py-3 w-full rounded-xl transition-colors ${isActive
+                            `flex w-full items-center gap-3 rounded-xl px-3 py-3 transition-colors ${isActive
                                 ? 'bg-slate-100 text-slate-900'
                                 : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
                             }`
                         }
+                        title="설정"
                     >
-                        <Settings size={20} />
-                        <span className="font-medium">설정</span>
+                        <Settings size={20} className="shrink-0" />
+                        <span className="whitespace-nowrap font-medium opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+                            설정
+                        </span>
                     </NavLink>
                 </div>
             </aside>
 
             {/* Main Content */}
-            <main className="flex-1 p-4 md:p-8 max-w-6xl mx-auto w-full">
+            <main className="w-full flex-1 p-4 md:max-w-none md:pl-20 md:pr-6 md:py-8 xl:pr-8">
                 {/* 전역 에러 배너 */}
                 {appError && (
                     <div
