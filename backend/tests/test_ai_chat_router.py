@@ -58,9 +58,9 @@ def test_build_messages_preserves_raw_memo_tokens() -> None:
     user_prompt = messages[1]["content"]
     assert "LPH-1 메모장 대용" in system_prompt
     assert "항목 3개" in system_prompt
-    assert "mg: -50" in system_prompt
-    assert "1 mg: -32" in system_prompt
-    assert "7 Elb: 8" in system_prompt
+    assert "| mg -50 | 1 |" in system_prompt
+    assert "| mg -32 | 7 |" in system_prompt
+    assert "| Elb | 8 |" in system_prompt
     assert "<reason>" in system_prompt
     assert "mg -50" in user_prompt
     assert "1 mg -32" in user_prompt
