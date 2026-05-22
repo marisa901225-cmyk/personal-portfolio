@@ -250,8 +250,8 @@ export const AiMemoPage: React.FC = () => {
     const clearMemo = () => setMemo('');
 
     return (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)]">
-            <section className="grid min-h-[620px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:grid-cols-[240px_minmax(0,1fr)]">
+        <div className="grid items-start gap-4 md:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] 2xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)]">
+            <section className="grid min-h-[420px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:min-h-[calc(100dvh-180px)] lg:grid-cols-[240px_minmax(0,1fr)]">
                 <div className="border-b border-slate-100 bg-slate-50 lg:border-b-0 lg:border-r">
                     <div className="flex items-center justify-between border-b border-slate-100 px-3 py-3">
                         <div className="flex items-center gap-2">
@@ -268,7 +268,7 @@ export const AiMemoPage: React.FC = () => {
                             <Plus size={17} />
                         </button>
                     </div>
-                    <div className="max-h-56 overflow-y-auto p-2 lg:max-h-[560px]">
+                    <div className="max-h-44 overflow-y-auto p-2 md:max-h-56 lg:max-h-[calc(100dvh-240px)]">
                         {isLoadingMemos ? (
                             <div className="flex items-center gap-2 px-3 py-4 text-xs text-slate-500">
                                 <Loader2 size={14} className="animate-spin" />
@@ -295,7 +295,7 @@ export const AiMemoPage: React.FC = () => {
                     </div>
                 </div>
 
-                <div className="flex min-h-[620px] flex-col">
+                <div className="flex min-h-[420px] flex-col md:min-h-[calc(100dvh-180px)]">
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
                         <input
                             value={title}
@@ -346,18 +346,18 @@ export const AiMemoPage: React.FC = () => {
                         <textarea
                             value={memo}
                             onChange={(event) => setMemo(event.target.value)}
-                            className="min-h-[560px] flex-1 resize-y border-0 bg-white p-4 text-sm leading-6 text-slate-800 outline-none placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-indigo-500"
+                            className="min-h-[320px] flex-1 resize-y border-0 bg-white p-4 text-sm leading-6 text-slate-800 outline-none placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-indigo-500 md:min-h-[calc(100dvh-260px)]"
                             placeholder="생각, 할 일, 초안, 링크, 정리할 문장을 적어두세요."
                         />
                     ) : (
-                        <div className="min-h-[560px] flex-1 overflow-y-auto p-4 text-sm leading-6 text-slate-800">
+                        <div className="min-h-[320px] flex-1 overflow-y-auto p-4 text-sm leading-6 text-slate-800 md:min-h-[calc(100dvh-260px)]">
                             <MarkdownBlock content={memo} emptyText="미리볼 마크다운 메모가 없습니다." />
                         </div>
                     )}
                 </div>
             </section>
 
-            <aside className="space-y-4">
+            <aside className="order-first space-y-4 md:order-none md:sticky md:top-4">
                 <form onSubmit={handleSubmit} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                     <div className="mb-4 flex items-center gap-2">
                         <Bot size={18} className="text-indigo-600" />
