@@ -24,7 +24,8 @@ def image_to_image_with_comfyui(request: ComfyUIImageToImageRequest) -> ComfyUII
 
     planning_request = ComfyUIImageGenerationRequest(
         request=request.request,
-        model_type="anime",
+        model_type=request.model_type,
+        prompt_override=request.request if request.model_type == "realistic" else None,
         width=request.width,
         height=request.height,
         seed=request.seed,
@@ -40,8 +41,9 @@ def image_to_image_with_comfyui(request: ComfyUIImageToImageRequest) -> ComfyUII
                 tool_spec,
                 input_name=input_name,
                 denoise=request.denoise,
+                model_type=request.model_type,
             )
-            with release_local_llm_for_comfyui("anime"):
+            with release_local_llm_for_comfyui(request.model_type):
                 prompt_id = submit_prompt(workflow)
                 history = wait_for_completion(prompt_id)
                 image_entry = extract_image_entry(history)
@@ -55,7 +57,7 @@ def image_to_image_with_comfyui(request: ComfyUIImageToImageRequest) -> ComfyUII
     logger.info("Generated ComfyUI img2img: prompt_id=%s file=%s", prompt_id, image_entry["filename"])
     return ComfyUIImageToImageResponse(
         request=request.request,
-        model_type="anime",
+        model_type=request.model_type,
         llm_model=llm_model,
         tool_name=tool_name,
         tool_prompt=tool_spec.prompt,

@@ -153,7 +153,15 @@ def build_image_to_image_workflow(
     *,
     input_name: str,
     denoise: float,
+    model_type: str = "anime",
 ) -> dict[str, Any]:
+    if model_type == "realistic":
+        return build_z_image_turbo_image_to_image_workflow(
+            tool_spec,
+            input_name=input_name,
+            denoise=denoise,
+        )
+
     return {
         "1": {
             "class_type": "UNETLoader",
@@ -235,6 +243,81 @@ def build_image_to_image_workflow(
         "16": {
             "class_type": "VAEEncode",
             "inputs": {"pixels": ["15", 0], "vae": ["3", 0]},
+        },
+    }
+
+
+def build_z_image_turbo_image_to_image_workflow(
+    tool_spec: ToolSpec,
+    *,
+    input_name: str,
+    denoise: float,
+) -> dict[str, Any]:
+    return {
+        "1": {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": settings.comfyui_z_image_unet_name, "weight_dtype": "fp8_e4m3fn"},
+        },
+        "2": {
+            "class_type": "CLIPLoader",
+            "inputs": {"clip_name": settings.comfyui_z_image_clip_name, "type": "lumina2", "device": "default"},
+        },
+        "3": {
+            "class_type": "VAELoader",
+            "inputs": {"vae_name": settings.comfyui_z_image_vae_name},
+        },
+        "4": {
+            "class_type": "LoadImage",
+            "inputs": {"image": input_name},
+        },
+        "5": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"clip": ["2", 0], "text": tool_spec.prompt},
+        },
+        "6": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"clip": ["2", 0], "text": ""},
+        },
+        "7": {
+            "class_type": "ModelSamplingAuraFlow",
+            "inputs": {"model": ["1", 0], "shift": 3.1},
+        },
+        "8": {
+            "class_type": "KSampler",
+            "inputs": {
+                "model": ["7", 0],
+                "positive": ["5", 0],
+                "negative": ["6", 0],
+                "latent_image": ["12", 0],
+                "seed": tool_spec.seed,
+                "steps": tool_spec.steps,
+                "cfg": tool_spec.cfg,
+                "sampler_name": "euler",
+                "scheduler": "simple",
+                "denoise": denoise,
+            },
+        },
+        "9": {
+            "class_type": "VAEDecode",
+            "inputs": {"samples": ["8", 0], "vae": ["3", 0]},
+        },
+        "10": {
+            "class_type": "SaveImage",
+            "inputs": {"images": ["9", 0], "filename_prefix": REALISTIC_FILENAME_PREFIX},
+        },
+        "11": {
+            "class_type": "ImageScale",
+            "inputs": {
+                "image": ["4", 0],
+                "upscale_method": "lanczos",
+                "width": tool_spec.width,
+                "height": tool_spec.height,
+                "crop": "disabled",
+            },
+        },
+        "12": {
+            "class_type": "VAEEncode",
+            "inputs": {"pixels": ["11", 0], "vae": ["3", 0]},
         },
     }
 

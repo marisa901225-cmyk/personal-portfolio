@@ -52,6 +52,7 @@ export const imageToImageComfyUI = (
     payload: {
         request: string;
         image_data_url: string;
+        model_type?: 'anime' | 'realistic';
         width?: number;
         height?: number;
         seed?: number;

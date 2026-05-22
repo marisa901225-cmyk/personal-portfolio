@@ -492,6 +492,68 @@ def test_image_to_image_uses_uploaded_source_and_lora_workflow(monkeypatch: pyte
     assert result.denoise == 0.42
 
 
+def test_image_to_image_supports_realistic_workflow(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    source_path = tmp_path / "source.png"
+    Image.new("RGB", (4, 4), "white").save(source_path)
+    output_path = tmp_path / "output.png"
+    Image.new("RGB", (512, 512), "gray").save(output_path)
+    output_data_url = f"data:image/png;base64,{base64.b64encode(output_path.read_bytes()).decode('ascii')}"
+    submitted: dict[str, dict] = {}
+
+    monkeypatch.setattr(image_to_image_module, "_upload_comfyui_input", lambda _bytes, _ext: "source.png")
+    monkeypatch.setattr(
+        image_to_image_module,
+        "plan_image_generation",
+        lambda request: (
+            "z-image-turbo-direct",
+            "direct_prompt",
+            ToolSpec(
+                prompt=request.request,
+                negative_prompt="",
+                width=512,
+                height=512,
+                steps=8,
+                cfg=1.0,
+                seed=88,
+            ),
+        ),
+    )
+
+    def fake_submit_prompt(workflow: dict) -> str:
+        submitted["workflow"] = workflow
+        return "prompt-2"
+
+    monkeypatch.setattr(image_to_image_module, "submit_prompt", fake_submit_prompt)
+    monkeypatch.setattr(image_to_image_module, "wait_for_completion", lambda _prompt_id: {"outputs": {}})
+    monkeypatch.setattr(image_to_image_module, "extract_image_entry", lambda _history: {"filename": "ai_comfyui_realistic_00001_.png", "subfolder": "", "type": "output"})
+    monkeypatch.setattr(image_to_image_module, "fetch_image_data_url", lambda _entry: output_data_url)
+    monkeypatch.setattr("backend.services.comfyui.workflow.settings.comfyui_z_image_unet_name", "z-image-turbo-fp8-e4m3fn.safetensors")
+    monkeypatch.setattr("backend.services.comfyui.workflow.settings.comfyui_z_image_clip_name", "qwen3-4b-fp8-scaled.safetensors")
+    monkeypatch.setattr("backend.services.comfyui.workflow.settings.comfyui_z_image_vae_name", "ae.safetensors")
+
+    result = image_to_image_with_comfyui(
+        ComfyUIImageToImageRequest(
+            request="make this a realistic portrait",
+            image_data_url=f"data:image/png;base64,{base64.b64encode(source_path.read_bytes()).decode('ascii')}",
+            model_type="realistic",
+            width=512,
+            height=512,
+            denoise=0.35,
+        )
+    )
+
+    workflow = submitted["workflow"]
+    assert workflow["1"]["inputs"]["unet_name"] == "z-image-turbo-fp8-e4m3fn.safetensors"
+    assert workflow["2"]["inputs"]["type"] == "lumina2"
+    assert workflow["7"]["class_type"] == "ModelSamplingAuraFlow"
+    assert workflow["8"]["inputs"]["model"] == ["7", 0]
+    assert workflow["8"]["inputs"]["latent_image"] == ["12", 0]
+    assert workflow["8"]["inputs"]["denoise"] == 0.35
+    assert "13" not in workflow
+    assert result.model_type == "realistic"
+    assert result.filename == "ai_comfyui_realistic_00001_.png"
+
+
 def test_vram_guard_releases_only_for_explicit_realistic_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(vram_guard_module.settings, "comfyui_release_llm_vram_mode", "auto")
 

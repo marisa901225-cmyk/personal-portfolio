@@ -443,9 +443,10 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
       const response = await client.imageToImageComfyUI({
         request: requestText.trim(),
         image_data_url: imageDataUrl,
+        model_type: imageModelType,
         width: dimensions.width,
         height: dimensions.height,
-        steps,
+        steps: imageModelType === 'realistic' ? Math.min(steps, 12) : steps,
         seed: seed.trim() ? Number(seed.trim()) : undefined,
         denoise: imageToImageDenoise,
       });
@@ -749,6 +750,42 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
             ) : mode === 'img2img' ? (
               <div className="space-y-5">
                 <div>
+                  <div className="mb-2 text-sm font-semibold text-slate-800">변환 모델</div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImageModelType('anime');
+                        setSteps((value) => (value <= 12 ? 10 : value));
+                      }}
+                      className={`rounded-2xl border px-4 py-3 text-left transition ${
+                        imageModelType === 'anime'
+                          ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="text-sm font-semibold">애니 LoRA</div>
+                      <div className="mt-1 text-xs text-slate-500">Anima Turbo + Highres LoRA</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImageModelType('realistic');
+                        setSteps(8);
+                      }}
+                      className={`rounded-2xl border px-4 py-3 text-left transition ${
+                        imageModelType === 'realistic'
+                          ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="text-sm font-semibold">실사 Turbo</div>
+                      <div className="mt-1 text-xs text-slate-500">Z-Image Turbo img2img</div>
+                    </button>
+                  </div>
+                </div>
+
+                <div>
                   <label className="mb-2 block text-sm font-semibold text-slate-800" htmlFor="img2img-request">
                     변환 요청
                   </label>
@@ -757,7 +794,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                     value={requestText}
                     onChange={(event) => setRequestText(event.target.value)}
                     rows={4}
-                    placeholder="예: 원본 구도는 유지하고 애니풍 네온 일러스트로 바꿔줘."
+                    placeholder={imageModelType === 'realistic' ? '예: keep the pose and lighting, make it a realistic cinematic portrait.' : '예: 원본 구도는 유지하고 애니풍 네온 일러스트로 바꿔줘.'}
                     className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 outline-none transition focus:border-indigo-400 focus:bg-white"
                   />
                 </div>
@@ -874,9 +911,12 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
                         id="img2img-steps"
                         type="number"
                         min={8}
-                        max={60}
+                        max={imageModelType === 'realistic' ? 12 : 60}
                         value={steps}
-                        onChange={(event) => setSteps(Math.min(Math.max(Number(event.target.value) || 10, 8), 60))}
+                        onChange={(event) => {
+                          const maxSteps = imageModelType === 'realistic' ? 12 : 60;
+                          setSteps(Math.min(Math.max(Number(event.target.value) || 10, 8), maxSteps));
+                        }}
                         className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"
                       />
                     </label>

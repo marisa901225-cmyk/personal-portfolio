@@ -481,6 +481,7 @@ class ComfyUIImageGenerationResponse(BaseModel):
 class ComfyUIImageToImageRequest(BaseModel):
     request: str = Field(..., min_length=3, description="입력 이미지를 바탕으로 바꿀 자연어 요청")
     image_data_url: str = Field(..., min_length=32, description="기준 이미지 data URL")
+    model_type: Literal["anime", "realistic"] = "anime"
     width: int = Field(default=1024, ge=256, le=1536)
     height: int = Field(default=1024, ge=256, le=1536)
     seed: Optional[int] = Field(default=None, ge=0)
