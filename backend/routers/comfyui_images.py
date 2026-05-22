@@ -12,6 +12,8 @@ from ..core.schemas import (
     ComfyUIImageGenerationRequest,
     ComfyUIImageGenerationResponse,
     ComfyUIImagePromptPlanResponse,
+    ComfyUIImageToImageRequest,
+    ComfyUIImageToImageResponse,
     ServerGeneratedImageDataResponse,
     ServerGeneratedImagesResponse,
 )
@@ -21,6 +23,7 @@ from ..services.comfyui_image_service import (
     ImageUpscaleError,
     generate_image_with_e4b,
     list_server_generated_images,
+    image_to_image_with_comfyui,
     plan_image_prompt_with_openrouter,
     upscale_anime_image,
 )
@@ -59,6 +62,18 @@ def generate_comfyui_image(
         return generate_image_with_e4b(payload)
     except ImageGenerationError as exc:
         logger.exception("ComfyUI image generation failed")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/image-to-image", response_model=ComfyUIImageToImageResponse)
+def image_to_image(
+    payload: ComfyUIImageToImageRequest,
+    _rate_limit: None = Depends(rate_limit(limit=6, window_sec=60, key_prefix="comfyui_img2img")),
+) -> ComfyUIImageToImageResponse:
+    try:
+        return image_to_image_with_comfyui(payload)
+    except ImageGenerationError as exc:
+        logger.exception("ComfyUI image-to-image failed")
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 

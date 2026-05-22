@@ -25,6 +25,7 @@ import type {
     BackendAssetCreatePayload,
     BackendComfyUIImageGenerationResponse,
     BackendComfyUIImagePromptPlanResponse,
+    BackendComfyUIImageToImageResponse,
     BackendAnimeImageUpscaleResponse,
     BackendServerGeneratedImagesResponse,
     BackendServerGeneratedImageDataResponse,
@@ -79,6 +80,7 @@ import {
     fetchServerGeneratedImageData,
     fetchServerGeneratedImages,
     generateComfyUIImage,
+    imageToImageComfyUI,
     planComfyUIImagePrompt,
     upscaleAnimeImage,
 } from './images';
@@ -459,6 +461,19 @@ export class ApiClient {
         cfg?: number;
     }): Promise<BackendComfyUIImagePromptPlanResponse> {
         return planComfyUIImagePrompt(this.requestFn, payload);
+    }
+
+    async imageToImageComfyUI(payload: {
+        request: string;
+        image_data_url: string;
+        width?: number;
+        height?: number;
+        seed?: number;
+        steps?: number;
+        cfg?: number;
+        denoise?: number;
+    }): Promise<BackendComfyUIImageToImageResponse> {
+        return imageToImageComfyUI(this.requestFn, payload);
     }
 
     async upscaleAnimeImage(payload: {

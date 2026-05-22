@@ -478,6 +478,21 @@ class ComfyUIImageGenerationResponse(BaseModel):
     image_data_url: str
 
 
+class ComfyUIImageToImageRequest(BaseModel):
+    request: str = Field(..., min_length=3, description="입력 이미지를 바탕으로 바꿀 자연어 요청")
+    image_data_url: str = Field(..., min_length=32, description="기준 이미지 data URL")
+    width: int = Field(default=1024, ge=256, le=1536)
+    height: int = Field(default=1024, ge=256, le=1536)
+    seed: Optional[int] = Field(default=None, ge=0)
+    steps: Optional[int] = Field(default=None, ge=8, le=60)
+    cfg: Optional[float] = Field(default=None, ge=0.0, le=10.0)
+    denoise: float = Field(default=0.45, ge=0.1, le=0.95)
+
+
+class ComfyUIImageToImageResponse(ComfyUIImageGenerationResponse):
+    denoise: float
+
+
 class ComfyUIImagePromptPlanResponse(BaseModel):
     model: str
     prompt: str

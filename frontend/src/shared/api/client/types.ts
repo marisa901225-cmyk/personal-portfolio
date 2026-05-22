@@ -370,6 +370,10 @@ export interface BackendComfyUIImagePromptPlanResponse {
     seed: number;
 }
 
+export interface BackendComfyUIImageToImageResponse extends BackendComfyUIImageGenerationResponse {
+    denoise: number;
+}
+
 export interface BackendAnimeImageUpscaleResponse {
     model: string;
     scale: number;

@@ -7,17 +7,19 @@ import os
 import pytest
 from PIL import Image
 
-from backend.core.schemas import AnimeImageUpscaleRequest, ComfyUIImageGenerationRequest
+from backend.core.schemas import AnimeImageUpscaleRequest, ComfyUIImageGenerationRequest, ComfyUIImageToImageRequest
 from backend.services.comfyui_image_service import (
     ImageGenerationError,
     generate_image_with_e4b,
     get_server_generated_image_data_url,
+    image_to_image_with_comfyui,
     list_server_generated_images,
     upscale_anime_image,
 )
 from backend.services.comfyui.types import ToolSpec
 from backend.services.comfyui.planner import _build_image_planner_payload, _llm_base_url_candidates
 import backend.services.comfyui.generation as generation_module
+import backend.services.comfyui.image_to_image as image_to_image_module
 import backend.services.comfyui.vram_guard as vram_guard_module
 from backend.services.comfyui.workflow import build_workflow
 import backend.services.comfyui.upscale as upscale_module
@@ -431,6 +433,63 @@ def test_build_workflow_uses_anima_loras_for_anime_mode() -> None:
     assert workflow["5"]["inputs"]["clip"] == ["14", 1]
     assert workflow["6"]["inputs"]["clip"] == ["14", 1]
     assert workflow["7"]["inputs"]["model"] == ["14", 0]
+
+
+def test_image_to_image_uses_uploaded_source_and_lora_workflow(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    source_path = tmp_path / "source.png"
+    Image.new("RGB", (4, 4), "white").save(source_path)
+    output_path = tmp_path / "output.png"
+    Image.new("RGB", (512, 512), "purple").save(output_path)
+    output_data_url = f"data:image/png;base64,{base64.b64encode(output_path.read_bytes()).decode('ascii')}"
+    submitted: dict[str, dict] = {}
+
+    monkeypatch.setattr(image_to_image_module, "_upload_comfyui_input", lambda _bytes, _ext: "source.png")
+    monkeypatch.setattr(
+        image_to_image_module,
+        "plan_image_generation",
+        lambda _request: (
+            "planner-model",
+            "generate_comfyui_image",
+            ToolSpec(
+                prompt="turn into a neon anime portrait",
+                negative_prompt="blurry",
+                width=512,
+                height=512,
+                steps=10,
+                cfg=1.0,
+                seed=77,
+            ),
+        ),
+    )
+    def fake_submit_prompt(workflow: dict) -> str:
+        submitted["workflow"] = workflow
+        return "prompt-1"
+
+    monkeypatch.setattr(image_to_image_module, "submit_prompt", fake_submit_prompt)
+    monkeypatch.setattr(image_to_image_module, "wait_for_completion", lambda _prompt_id: {"outputs": {}})
+    monkeypatch.setattr(image_to_image_module, "extract_image_entry", lambda _history: {"filename": "ai_comfyui_img2img_00001_.png", "subfolder": "", "type": "output"})
+    monkeypatch.setattr(image_to_image_module, "fetch_image_data_url", lambda _entry: output_data_url)
+
+    result = image_to_image_with_comfyui(
+        ComfyUIImageToImageRequest(
+            request="애니풍으로 바꿔줘",
+            image_data_url=f"data:image/png;base64,{base64.b64encode(source_path.read_bytes()).decode('ascii')}",
+            width=512,
+            height=512,
+            denoise=0.42,
+        )
+    )
+
+    workflow = submitted["workflow"]
+    assert workflow["4"] == {"class_type": "LoadImage", "inputs": {"image": "source.png"}}
+    assert workflow["7"]["inputs"]["latent_image"] == ["16", 0]
+    assert workflow["7"]["inputs"]["denoise"] == 0.42
+    assert workflow["13"]["inputs"]["lora_name"] == "anima-turbo-lora-v0.1.safetensors"
+    assert workflow["14"]["inputs"]["lora_name"] == "anima-highres-aesthetic-boost.safetensors"
+    assert workflow["15"]["inputs"]["width"] == 512
+    assert workflow["16"]["class_type"] == "VAEEncode"
+    assert result.filename == "ai_comfyui_img2img_00001_.png"
+    assert result.denoise == 0.42
 
 
 def test_vram_guard_releases_only_for_explicit_realistic_mode(monkeypatch: pytest.MonkeyPatch) -> None:

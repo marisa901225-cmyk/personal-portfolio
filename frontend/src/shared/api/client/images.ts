@@ -3,6 +3,7 @@ import type {
     BackendAnimeImageUpscaleResponse,
     BackendComfyUIImageGenerationResponse,
     BackendComfyUIImagePromptPlanResponse,
+    BackendComfyUIImageToImageResponse,
     BackendServerGeneratedImageDataResponse,
     BackendServerGeneratedImagesResponse,
 } from './types';
@@ -42,6 +43,24 @@ export const planComfyUIImagePrompt = (
     },
 ): Promise<BackendComfyUIImagePromptPlanResponse> =>
     request<BackendComfyUIImagePromptPlanResponse>('/api/images/plan-prompt', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+    });
+
+export const imageToImageComfyUI = (
+    request: RequestFn,
+    payload: {
+        request: string;
+        image_data_url: string;
+        width?: number;
+        height?: number;
+        seed?: number;
+        steps?: number;
+        cfg?: number;
+        denoise?: number;
+    },
+): Promise<BackendComfyUIImageToImageResponse> =>
+    request<BackendComfyUIImageToImageResponse>('/api/images/image-to-image', {
         method: 'POST',
         body: JSON.stringify(payload),
     });

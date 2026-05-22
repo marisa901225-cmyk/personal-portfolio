@@ -1,5 +1,5 @@
 import React, { startTransition, useEffect, useMemo, useState } from 'react';
-import { ImagePlus, Loader2, Maximize2, MessageCircle, RefreshCcw, Send, Sparkles, Upload } from 'lucide-react';
+import { ImagePlus, Loader2, Maximize2, MessageCircle, RefreshCcw, Send, Sparkles, Upload, Wand2 } from 'lucide-react';
 import {
   ApiClient,
   type BackendAnimeImageUpscaleResponse,
@@ -17,7 +17,7 @@ interface ImageGenerationDashboardProps {
 type CanvasPreset = 'square' | 'classicPortrait' | 'classicLandscape' | 'storyPortrait' | 'cinemaLandscape' | 'phonePortrait' | 'phoneLandscape' | 'wide' | 'custom';
 type GenerationOutputPreset = 'native' | 'uhd4k';
 type UpscaleResolutionPreset = 'native4x' | 'fullhd' | 'square2k' | 'uhd4k' | 'custom';
-type StudioMode = 'generate' | 'upscale';
+type StudioMode = 'generate' | 'img2img' | 'upscale';
 type ImageModelType = 'anime' | 'realistic';
 type RevisionMessage = {
   role: 'user' | 'assistant';
@@ -79,6 +79,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
   const [upscaleCustomWidth, setUpscaleCustomWidth] = useState(2048);
   const [upscaleCustomHeight, setUpscaleCustomHeight] = useState(2048);
   const [steps, setSteps] = useState(20);
+  const [imageToImageDenoise, setImageToImageDenoise] = useState(0.45);
   const [seed, setSeed] = useState('');
   const [upscaleSourceDataUrl, setUpscaleSourceDataUrl] = useState('');
   const [upscaleSourceName, setUpscaleSourceName] = useState('');
@@ -185,7 +186,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
   };
 
   useEffect(() => {
-    if (mode === 'upscale' && isReady) {
+    if ((mode === 'upscale' || mode === 'img2img') && isReady) {
       void loadServerImages();
     }
   }, [mode, isReady]);
@@ -205,7 +206,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
         setSelectedServerImagePath('');
         setUpscaleResult(null);
         setError(null);
-        setMode('upscale');
+        setMode((currentMode) => (currentMode === 'img2img' ? 'img2img' : 'upscale'));
       });
     };
     reader.onerror = () => setError('이미지 파일을 읽지 못했습니다.');
@@ -238,7 +239,7 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
       setSelectedServerImagePath(image.relative_path);
       setUpscaleResult(null);
       setError(null);
-      setMode('upscale');
+      setMode((currentMode) => (currentMode === 'img2img' ? 'img2img' : 'upscale'));
     });
   };
 
@@ -414,6 +415,58 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
     }
   };
 
+  const handleImageToImage = async () => {
+    if (!serverUrl?.trim()) {
+      setError('먼저 서버 URL을 설정해주세요.');
+      return;
+    }
+    if (!apiToken && !cookieAuth) {
+      setError('네이버 로그인 또는 API 비밀번호가 필요합니다.');
+      return;
+    }
+    if (!requestText.trim()) {
+      setError('바꿀 방향을 먼저 적어주세요.');
+      return;
+    }
+
+    const imageDataUrl = upscaleSourceDataUrl || result?.image_data_url;
+    if (!imageDataUrl) {
+      setError('기준 이미지를 먼저 선택해주세요.');
+      return;
+    }
+
+    setIsPending(true);
+    setError(null);
+
+    try {
+      const client = new ApiClient(serverUrl, apiToken);
+      const response = await client.imageToImageComfyUI({
+        request: requestText.trim(),
+        image_data_url: imageDataUrl,
+        width: dimensions.width,
+        height: dimensions.height,
+        steps,
+        seed: seed.trim() ? Number(seed.trim()) : undefined,
+        denoise: imageToImageDenoise,
+      });
+      startTransition(() => {
+        setResult(response);
+        setUpscaleResult(null);
+      });
+    } catch (err) {
+      alertError('ComfyUI image-to-image failed', err, {
+        default: '이미지 투 이미지 생성에 실패했습니다. 잠시 후 다시 시도해주세요.',
+        unauthorized: '인증이 만료되었거나 올바르지 않습니다. 다시 로그인하거나 API 비밀번호를 확인해주세요.',
+        network: '백엔드 또는 ComfyUI 서버에 연결할 수 없습니다.',
+      });
+      if (err instanceof Error) {
+        setError(err.message);
+      }
+    } finally {
+      setIsPending(false);
+    }
+  };
+
   return (
     <section className="space-y-6">
       <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
@@ -435,13 +488,20 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
 
         <div className="grid gap-6 px-6 py-6 lg:grid-cols-[1.1fr_0.9fr]">
           <div className="space-y-5">
-            <div className="inline-grid grid-cols-2 rounded-2xl border border-slate-200 bg-slate-100 p-1 text-sm font-semibold text-slate-600">
+            <div className="inline-grid grid-cols-3 rounded-2xl border border-slate-200 bg-slate-100 p-1 text-sm font-semibold text-slate-600">
               <button
                 type="button"
                 onClick={() => setMode('generate')}
                 className={`rounded-xl px-4 py-2 transition ${mode === 'generate' ? 'bg-white text-indigo-700 shadow-sm' : 'hover:text-slate-900'}`}
               >
                 생성
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('img2img')}
+                className={`rounded-xl px-4 py-2 transition ${mode === 'img2img' ? 'bg-white text-indigo-700 shadow-sm' : 'hover:text-slate-900'}`}
+              >
+                이미지 변환
               </button>
               <button
                 type="button"
@@ -686,6 +746,178 @@ export const ImageGenerationDashboard: React.FC<ImageGenerationDashboardProps> =
               )}
             </div>
               </>
+            ) : mode === 'img2img' ? (
+              <div className="space-y-5">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-slate-800" htmlFor="img2img-request">
+                    변환 요청
+                  </label>
+                  <textarea
+                    id="img2img-request"
+                    value={requestText}
+                    onChange={(event) => setRequestText(event.target.value)}
+                    rows={4}
+                    placeholder="예: 원본 구도는 유지하고 애니풍 네온 일러스트로 바꿔줘."
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700 outline-none transition focus:border-indigo-400 focus:bg-white"
+                  />
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-slate-800">기준 이미지</h3>
+                      <p className="mt-1 text-xs text-slate-500">최근 생성 이미지에서 고르거나 새 파일을 업로드합니다.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void loadServerImages()}
+                      disabled={!isReady || isLoadingServerImages}
+                      className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-indigo-300 hover:text-indigo-700 disabled:cursor-not-allowed disabled:text-slate-400"
+                    >
+                      <RefreshCcw size={14} className={isLoadingServerImages ? 'animate-spin' : ''} />
+                      새로고침
+                    </button>
+                  </div>
+                  {isLoadingServerImages ? (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
+                      서버 이미지를 불러오는 중...
+                    </div>
+                  ) : serverImages.length > 0 ? (
+                    <div className="grid max-h-60 grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3">
+                      {serverImages.map((image) => (
+                        <button
+                          key={image.relative_path}
+                          type="button"
+                          onClick={() => void handleSelectServerImage(image)}
+                          className={`overflow-hidden rounded-2xl border bg-white text-left transition ${
+                            selectedServerImagePath === image.relative_path
+                              ? 'border-indigo-500 ring-2 ring-indigo-100'
+                              : 'border-slate-200 hover:border-indigo-300'
+                          }`}
+                        >
+                          <img
+                            src={image.thumbnail_data_url || image.image_data_url || ''}
+                            alt={image.filename}
+                            className="aspect-square w-full bg-slate-950 object-contain"
+                            loading="lazy"
+                          />
+                          <div className="space-y-1 px-2.5 py-2">
+                            <div className="truncate text-xs font-semibold text-slate-700">{image.filename}</div>
+                            <div className="text-[11px] text-slate-400">{formatServerImageTime(image.modified_at)}</div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-6 text-center text-sm text-slate-500">
+                      아직 표시할 서버 생성 이미지가 없습니다.
+                    </div>
+                  )}
+                </div>
+
+                <label className="flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center transition hover:border-indigo-300 hover:bg-white" htmlFor="img2img-source">
+                  <Upload className="mb-3 text-indigo-500" size={28} />
+                  <span className="text-sm font-semibold text-slate-800">
+                    {upscaleSourceName || (result ? '현재 생성 결과 사용 가능' : '기준 이미지 선택')}
+                  </span>
+                  <span className="mt-1 text-xs text-slate-500">PNG, JPG, WEBP</span>
+                  <input
+                    id="img2img-source"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="sr-only"
+                    onChange={(event) => handleUpscaleSourceChange(event.target.files?.[0])}
+                  />
+                </label>
+
+                <div className="grid gap-4 sm:grid-cols-[1.3fr_0.7fr]">
+                  <div>
+                    <div className="mb-2 text-sm font-semibold text-slate-800">출력 비율 / 해상도</div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {(Object.entries(CANVAS_PRESETS) as Array<[CanvasPreset, { label: string; width: number; height: number }]>).map(([key, value]) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setPreset(key)}
+                          className={`rounded-2xl border px-3 py-3 text-sm font-medium transition ${
+                            preset === key
+                              ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                              : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
+                          }`}
+                        >
+                          <div>{value.label}</div>
+                          <div className="mt-1 text-[11px] text-slate-400">
+                            {key === 'custom' ? `${dimensions.width} × ${dimensions.height}` : `${value.width} × ${value.height}`}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                    <label className="block text-sm font-semibold text-slate-800" htmlFor="img2img-denoise">
+                      변화 강도
+                      <input
+                        id="img2img-denoise"
+                        type="range"
+                        min={0.1}
+                        max={0.95}
+                        step={0.05}
+                        value={imageToImageDenoise}
+                        onChange={(event) => setImageToImageDenoise(Number(event.target.value))}
+                        className="mt-3 w-full accent-indigo-600"
+                      />
+                      <span className="mt-1 block text-xs text-slate-500">{imageToImageDenoise.toFixed(2)}</span>
+                    </label>
+                    <label className="block text-sm font-semibold text-slate-800" htmlFor="img2img-steps">
+                      스텝
+                      <input
+                        id="img2img-steps"
+                        type="number"
+                        min={8}
+                        max={60}
+                        value={steps}
+                        onChange={(event) => setSteps(Math.min(Math.max(Number(event.target.value) || 10, 8), 60))}
+                        className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    {error}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleImageToImage}
+                    disabled={!isReady || isPending || (!upscaleSourceDataUrl && !result)}
+                    className={`inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold transition ${
+                      !isReady || isPending || (!upscaleSourceDataUrl && !result)
+                        ? 'cursor-not-allowed bg-slate-100 text-slate-400'
+                        : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                    }`}
+                  >
+                    {isPending ? <Loader2 size={18} className="animate-spin" /> : <Wand2 size={18} />}
+                    {isPending ? '변환 중...' : '이미지 변환'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUpscaleSourceDataUrl('');
+                      setUpscaleSourceName('');
+                      setSelectedServerImagePath('');
+                      setError(null);
+                    }}
+                    className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+                  >
+                    <RefreshCcw size={16} />
+                    기준 비우기
+                  </button>
+                </div>
+              </div>
             ) : (
               <div className="space-y-5">
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">

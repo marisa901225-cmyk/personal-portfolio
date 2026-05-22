@@ -17,6 +17,7 @@ from .constants import (
     DEFAULT_CLIENT_ID,
     DEFAULT_CLIP_NAME,
     DEFAULT_FILENAME_PREFIX,
+    DEFAULT_IMG2IMG_FILENAME_PREFIX,
     DEFAULT_SAMPLER,
     DEFAULT_SCHEDULER,
     DEFAULT_TIMEOUT_SEC,
@@ -145,6 +146,97 @@ def build_workflow(
             "filename_prefix": DEFAULT_4K_FILENAME_PREFIX,
         }
     return workflow
+
+
+def build_image_to_image_workflow(
+    tool_spec: ToolSpec,
+    *,
+    input_name: str,
+    denoise: float,
+) -> dict[str, Any]:
+    return {
+        "1": {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": DEFAULT_UNET_NAME, "weight_dtype": "default"},
+        },
+        "2": {
+            "class_type": "CLIPLoader",
+            "inputs": {"clip_name": DEFAULT_CLIP_NAME, "type": "qwen_image", "device": "default"},
+        },
+        "3": {
+            "class_type": "VAELoader",
+            "inputs": {"vae_name": DEFAULT_VAE_NAME},
+        },
+        "4": {
+            "class_type": "LoadImage",
+            "inputs": {"image": input_name},
+        },
+        "5": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"clip": ["14", 1], "text": tool_spec.prompt},
+        },
+        "6": {
+            "class_type": "CLIPTextEncode",
+            "inputs": {"clip": ["14", 1], "text": tool_spec.negative_prompt},
+        },
+        "7": {
+            "class_type": "KSampler",
+            "inputs": {
+                "model": ["14", 0],
+                "positive": ["5", 0],
+                "negative": ["6", 0],
+                "latent_image": ["16", 0],
+                "seed": tool_spec.seed,
+                "steps": tool_spec.steps,
+                "cfg": tool_spec.cfg,
+                "sampler_name": DEFAULT_SAMPLER,
+                "scheduler": DEFAULT_SCHEDULER,
+                "denoise": denoise,
+            },
+        },
+        "8": {
+            "class_type": "VAEDecode",
+            "inputs": {"samples": ["7", 0], "vae": ["3", 0]},
+        },
+        "9": {
+            "class_type": "SaveImage",
+            "inputs": {"images": ["8", 0], "filename_prefix": DEFAULT_IMG2IMG_FILENAME_PREFIX},
+        },
+        "13": {
+            "class_type": "LoraLoader",
+            "inputs": {
+                "model": ["1", 0],
+                "clip": ["2", 0],
+                "lora_name": ANIMA_TURBO_LORA_NAME,
+                "strength_model": ANIMA_TURBO_LORA_STRENGTH,
+                "strength_clip": ANIMA_TURBO_LORA_STRENGTH,
+            },
+        },
+        "14": {
+            "class_type": "LoraLoader",
+            "inputs": {
+                "model": ["13", 0],
+                "clip": ["13", 1],
+                "lora_name": ANIMA_HIGHRES_AESTHETIC_LORA_NAME,
+                "strength_model": ANIMA_HIGHRES_AESTHETIC_LORA_STRENGTH,
+                "strength_clip": ANIMA_HIGHRES_AESTHETIC_LORA_STRENGTH,
+            },
+        },
+        "15": {
+            "class_type": "ImageScale",
+            "inputs": {
+                "image": ["4", 0],
+                "upscale_method": "lanczos",
+                "width": tool_spec.width,
+                "height": tool_spec.height,
+                "crop": "disabled",
+            },
+        },
+        "16": {
+            "class_type": "VAEEncode",
+            "inputs": {"pixels": ["15", 0], "vae": ["3", 0]},
+        },
+    }
 
 
 def build_z_image_turbo_workflow(
