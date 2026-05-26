@@ -122,6 +122,20 @@ subagent-runs/
 .worker2.last.txt
 프롬프트
 
+# Repo-tracked Codex automation assets
+!.agents/
+.agents/*
+!.agents/README.md
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/portfolio-ci-fix/
+!.agents/skills/portfolio-ci-fix/SKILL.md
+!.agents/skills/portfolio-pr-review/
+!.agents/skills/portfolio-pr-review/SKILL.md
+!.agents/skills/portfolio-test-triage/
+!.agents/skills/portfolio-test-triage/SKILL.md
+!.agents/subagent-prompts.md
+
 # Local translation workspace
 translations/
 .env*.local
