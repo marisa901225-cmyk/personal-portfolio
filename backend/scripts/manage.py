@@ -102,6 +102,29 @@ def sync_prices(args):
             print(f"Failed to send notification: {e}")
 
 
+def _copy_backup_to_external_drive(archive_path: Path, external_backup_path: Path | None) -> bool:
+    """Copy the backup archive to the external drive when configured."""
+    if not external_backup_path:
+        print("⚠️ EXTERNAL_BACKUP_PATH not set in env. Skipping physical backup...")
+        return False
+
+    try:
+        import shutil
+
+        # Try the real copy first so autofs-backed mounts can resolve on access.
+        dest_file = external_backup_path / archive_path.name
+        shutil.copy2(archive_path, dest_file)
+        print(f"✅ External HDD backup success: {dest_file}💖")
+        return True
+    except FileNotFoundError:
+        logging.error("External HDD backup path unavailable: %s", external_backup_path)
+        print(f"⚠️ External HDD path {external_backup_path} not found. Skipping physical backup...")
+        return False
+    except Exception as e:
+        logging.error(f"External HDD backup failed: {e}")
+        return False
+
+
 def backup_db(args):
     """Backup SQLite database, compress, and notify."""
     try:
@@ -231,22 +254,7 @@ def backup_db(args):
     # 외장하드 백업 추가
     ext_path_str = os.getenv("EXTERNAL_BACKUP_PATH")
     external_backup_path = Path(ext_path_str) if ext_path_str else None
-    e_success = False
-    
-    if external_backup_path and external_backup_path.exists():
-        try:
-            import shutil
-            dest_file = external_backup_path / archive_path.name
-            shutil.copy2(archive_path, dest_file)
-            print(f"✅ External HDD backup success: {dest_file}💖")
-            e_success = True
-        except Exception as e:
-            logging.error(f"External HDD backup failed: {e}")
-    else:
-        if not external_backup_path:
-            print("⚠️ EXTERNAL_BACKUP_PATH not set in env. Skipping physical backup...")
-        else:
-            print(f"⚠️ External HDD path {external_backup_path} not found. Skipping physical backup...")
+    e_success = _copy_backup_to_external_drive(archive_path, external_backup_path)
 
     # 텔레그램 메시지 생성 (구글 드라이브 + 외장하드 성공 여부 포함)
     file_size_mb = archive_path.stat().st_size / 1024 / 1024

@@ -99,3 +99,25 @@ def test_backup_rate_limit_blocks_upload(tmp_path, monkeypatch, mock_google_driv
                 
     # 3) 검증: upload_file이 한 번도 호출되지 않아야 함
     assert mock_google_drive_service.upload_file.call_count == 0
+
+
+def test_copy_backup_to_external_drive_success(tmp_path):
+    archive_path = tmp_path / "portfolio_2026-05-26.db.zip"
+    archive_path.write_bytes(b"zip-bytes")
+    external_dir = tmp_path / "external"
+    external_dir.mkdir()
+
+    result = manage._copy_backup_to_external_drive(archive_path, external_dir)
+
+    assert result is True
+    assert (external_dir / archive_path.name).read_bytes() == b"zip-bytes"
+
+
+def test_copy_backup_to_external_drive_missing_path(tmp_path):
+    archive_path = tmp_path / "portfolio_2026-05-26.db.zip"
+    archive_path.write_bytes(b"zip-bytes")
+    missing_dir = tmp_path / "missing"
+
+    result = manage._copy_backup_to_external_drive(archive_path, missing_dir)
+
+    assert result is False
