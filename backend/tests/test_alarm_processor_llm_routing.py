@@ -1,9 +1,16 @@
 import os
 import unittest
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend.services.alarm import processor
+from backend.services.alarm.alarm_summary_service import (
+    ALARM_SUMMARY_DEFAULT_MAX_TOKENS,
+    _AlarmSummaryDeps,
+    _generate_alarm_summary_async,
+)
+from backend.services.alarm.filters import is_review_spam, is_whitelisted
 from backend.services.llm.service import LLMService as CoreLLMService
 
 
@@ -324,6 +331,177 @@ class TestAlarmProcessorLlmRouting(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[app:문피아]", spam_input)
         self.assertIn("[pkg:com.munpia.app]", spam_input)
         self.assertIn("흰토끼노데", spam_input)
+
+    async def test_random_payload_title_is_used_in_header(self):
+        db = MagicMock()
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+
+        with (
+            patch.object(processor, "check_upcoming_matches", new=AsyncMock()),
+            patch.object(processor, "_get_nb_pipeline", return_value=None),
+            patch("backend.services.users.get_or_create_single_user", return_value=MagicMock(id=1)),
+            patch.object(
+                processor,
+                "generate_random_message_payload",
+                new=AsyncMock(return_value={"title": "폴라로이드 핫픽스", "body": "본문 테스트"}),
+            ),
+            patch.object(processor, "summarize_with_llm", new=AsyncMock()) as mock_summary,
+            patch.object(processor, "send_telegram_message", new=AsyncMock()) as mock_send,
+        ):
+            await processor.process_pending_alarms(db)
+
+        mock_summary.assert_not_awaited()
+        mock_send.assert_awaited_once()
+        sent_text = mock_send.await_args.args[0]
+        self.assertIn("[폴라로이드 핫픽스]", sent_text)
+        self.assertIn("본문 테스트", sent_text)
+
+    async def test_expense_only_batch_does_not_trigger_random_topic(self):
+        alarm = SimpleNamespace(
+            id=1,
+            raw_text="우리카드 승인 12,000원 테스트상점",
+            masked_text=None,
+            sender="우리카드",
+            app_name="카드앱",
+            package="com.card.app",
+            app_title="결제 알림",
+            conversation=None,
+            status="pending",
+            classification=None,
+            received_at=datetime.now(timezone.utc),
+        )
+
+        db = MagicMock()
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [alarm]
+
+        fake_user = SimpleNamespace(id=123)
+        fake_card_info = {
+            "date": datetime.now(timezone.utc),
+            "amount": -12000,
+            "merchant": "테스트상점",
+            "method": "카드",
+        }
+
+        with (
+            patch.object(processor, "check_upcoming_matches", new=AsyncMock()),
+            patch.object(processor, "_get_nb_pipeline", return_value=None),
+            patch("backend.services.users.get_or_create_single_user", return_value=fake_user),
+            patch.object(processor, "should_ignore", return_value=False),
+            patch.object(processor, "is_whitelisted", return_value=True),
+            patch.object(processor, "parse_card_approval", return_value=fake_card_info),
+            patch.object(processor, "summarize_with_llm", new=AsyncMock(return_value="랜덤메시지")) as mock_summary,
+            patch.object(processor, "generate_random_message_payload", new=AsyncMock(return_value=None)) as mock_random,
+            patch.object(processor, "send_telegram_message", new=AsyncMock()) as mock_send,
+        ):
+            await processor.process_pending_alarms(db)
+
+        mock_summary.assert_not_awaited()
+        mock_random.assert_awaited_once()
+        mock_send.assert_not_awaited()
+
+
+class TestAlarmProcessorMailBatch(unittest.TestCase):
+    def test_collapse_mail_batch_notifications_keeps_latest_per_app(self) -> None:
+        items = [
+            {"app_name": "Gmail", "sender": "새 메일 2개", "db_obj": SimpleNamespace(id=1)},
+            {"app_name": "Gmail", "sender": "새 메일 3개", "db_obj": SimpleNamespace(id=2)},
+            {"app_name": "카카오톡", "sender": "철수", "db_obj": SimpleNamespace(id=3)},
+            {"app_name": "Gmail", "sender": "새 메일 5개", "db_obj": SimpleNamespace(id=4)},
+        ]
+
+        kept, dropped = processor._collapse_mail_batch_notifications(items)
+
+        self.assertEqual([int(i["db_obj"].id) for i in kept], [3, 4])
+        self.assertEqual([int(i["db_obj"].id) for i in dropped], [1, 2])
+
+
+class AlarmFilterTests(unittest.TestCase):
+    def test_aliexpress_coin_promo_is_not_delivery_whitelisted(self):
+        text = "[AliExpress] ₩ 303 상당 코인 20개가 기다리고 있어요!"
+
+        self.assertFalse(is_whitelisted(text))
+        self.assertTrue(is_review_spam(text))
+
+    def test_aliexpress_delivery_notice_stays_whitelisted(self):
+        text = "[AliExpress] 주문 상품이 배송 중입니다"
+
+        self.assertTrue(is_whitelisted(text))
+        self.assertFalse(is_review_spam(text))
+
+
+class AlarmSummaryServiceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_stop_tokens_do_not_include_ellipsis(self):
+        deps = _AlarmSummaryDeps(
+            build_stop_tokens=MagicMock(return_value=["Okay", "let me", "\n\n\n", "aaaa", "----"]),
+            resolve_llm_options=MagicMock(
+                return_value=MagicMock(
+                    max_tokens=512,
+                    temperature=0.05,
+                    enable_thinking=False,
+                    extra_kwargs={},
+                )
+            ),
+            generate_with_main_llm_async=AsyncMock(return_value="- 치지직에서 [민트초코용...님 라이브 시작!]"),
+            dump_llm_draft=MagicMock(),
+            sanitize_llm_output=MagicMock(side_effect=lambda items, text: text),
+            postprocess_llm_text=MagicMock(side_effect=lambda text: text),
+            get_korean_ratio=MagicMock(return_value=1.0),
+        )
+
+        items = [
+            {
+                "app_name": "치지직",
+                "app_title": "민트초코용...님 라이브 시작!",
+                "conversation": "",
+                "text": "민트초코용...님이 방송을 시작했습니다",
+            }
+        ]
+
+        result = await _generate_alarm_summary_async(
+            items,
+            "prompt",
+            deps=deps,
+        )
+
+        self.assertEqual(result, "- 치지직에서 [민트초코용...님 라이브 시작!]")
+        deps.build_stop_tokens.assert_called_once_with(extra=["\n\n\n", "aaaa", "----"])
+        deps.resolve_llm_options.assert_called_once_with(
+            {},
+            default_max_tokens=ALARM_SUMMARY_DEFAULT_MAX_TOKENS,
+            default_temperature=0.05,
+        )
+        stop_tokens = deps.generate_with_main_llm_async.await_args.kwargs["stop"]
+        self.assertNotIn("...", stop_tokens)
+
+    async def test_default_output_budget_is_roomy_for_paid_chat_completion(self):
+        deps = _AlarmSummaryDeps(
+            build_stop_tokens=MagicMock(return_value=["\n\n\n", "aaaa", "----"]),
+            resolve_llm_options=MagicMock(
+                return_value=MagicMock(
+                    max_tokens=ALARM_SUMMARY_DEFAULT_MAX_TOKENS,
+                    temperature=0.05,
+                    enable_thinking=False,
+                    extra_kwargs={},
+                )
+            ),
+            generate_with_main_llm_async=AsyncMock(return_value="- 문피아에서 새 회차 등록"),
+            dump_llm_draft=MagicMock(),
+            sanitize_llm_output=MagicMock(side_effect=lambda items, text: text),
+            postprocess_llm_text=MagicMock(side_effect=lambda text: text),
+            get_korean_ratio=MagicMock(return_value=1.0),
+        )
+
+        result = await _generate_alarm_summary_async(
+            [{"app_name": "문피아", "app_title": "업데이트", "conversation": "", "text": "새 회차 등록"}],
+            "prompt",
+            deps=deps,
+        )
+
+        self.assertEqual(result, "- 문피아에서 새 회차 등록")
+        self.assertEqual(
+            deps.generate_with_main_llm_async.await_args.kwargs["max_tokens"],
+            ALARM_SUMMARY_DEFAULT_MAX_TOKENS,
+        )
 
 
 if __name__ == "__main__":

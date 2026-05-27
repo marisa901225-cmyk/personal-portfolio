@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from unittest.mock import patch
 
 import pandas as pd
 from sqlalchemy import create_engine
@@ -45,6 +46,24 @@ class _SpyNotifier:
 
     def close(self, timeout_sec: float = 2.0) -> None:
         del timeout_sec
+
+
+def test_trade_journal_summary_uses_full_file_counts_across_restarts(tmp_path) -> None:
+    journal1 = TradeJournal(output_dir=str(tmp_path), asof_date="20260415")
+    journal1.log("RUN_START", asof_date="20260415")
+    journal1.log("SCAN_DONE", asof_date="20260415")
+    journal1.log("PASS", asof_date="20260415", reason="NO_CANDIDATE")
+    journal1.log("ENTRY_FILL", asof_date="20260415", code="005880")
+    journal1.log("NEWS_SENTIMENT", asof_date="20260415", market_score=0.3)
+
+    journal2 = TradeJournal(output_dir=str(tmp_path), asof_date="20260415")
+    journal2.log("RUN_START", asof_date="20260415")
+    journal2.log("SCAN_DONE", asof_date="20260415")
+    journal2.log("PASS", asof_date="20260415", reason="ENTRY_WINDOW_CLOSED")
+    journal2.log("DAY_CANDIDATE_FILTERED", asof_date="20260415", code="005930", reason="RETRACE")
+    journal2.log("RUN_END", asof_date="20260415")
+
+    assert journal2.summary() == "스캔: 2회 | 단타 후보 제외: 1회 | 진입 체결: 1회 | 뉴스 심리: 1회 | 패스: 2회"
 
 
 def test_archive_trading_engine_weekly_moves_files_to_db_and_cleans_up(tmp_path) -> None:
@@ -219,7 +238,18 @@ def test_finalize_day_prefers_account_realized_pnl_summary(tmp_path) -> None:
     bot.state.realized_pnl_today = 0.0
     bot.journal = TradeJournal(output_dir=cfg.output_dir, asof_date="20260422")
 
-    summary_text = bot.finalize_day()
+    class _DisabledRemoteSettings:
+        def is_remote_configured(self) -> bool:
+            return False
+
+    class _DisabledRemoteLLM:
+        settings = _DisabledRemoteSettings()
+
+    with patch(
+        "backend.services.trading_engine.bot_runtime_support.LLMService.get_instance",
+        return_value=_DisabledRemoteLLM(),
+    ):
+        summary_text = bot.finalize_day()
 
     assert summary_text is not None
     assert "실현손익: 12,345원" in summary_text

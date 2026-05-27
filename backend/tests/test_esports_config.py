@@ -1,5 +1,6 @@
 from backend.core.esports_config import (
     infer_league_tag_from_name,
+    is_league_in_active_window,
     is_valid_competitive_match,
     lol_league_tagger,
 )
@@ -63,3 +64,11 @@ def test_is_valid_competitive_match_rejects_game_changers_even_with_parent_vct_n
         },
         "valorant",
     )
+
+
+def test_lpl_window_crosses_midnight_correctly() -> None:
+    # LPL은 14:30 ~ 익일 01:00 윈도우를 사용한다.
+    assert is_league_in_active_window("LPL", "league-of-legends", 0, 23 * 60)
+    assert is_league_in_active_window("LPL", "league-of-legends", 1, 30)
+    assert not is_league_in_active_window("LPL", "league-of-legends", 1, 60)
+    assert not is_league_in_active_window("LPL", "league-of-legends", 0, 14 * 60)
