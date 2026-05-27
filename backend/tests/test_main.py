@@ -41,6 +41,11 @@ class MainHealthTests(unittest.TestCase):
         payload = response.json()
         self.assertIn("target_index_allocations", payload)
 
+    def test_expenses_endpoints_are_closed(self) -> None:
+        client = TestClient(app)
+        response = client.get("/api/expenses", headers=self.headers)
+        self.assertEqual(response.status_code, 404)
+
     def test_trade_create_succeeds(self) -> None:
         client = TestClient(app)
         asset_response = client.post(

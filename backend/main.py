@@ -35,8 +35,6 @@ from .routers.settings import router as settings_router
 from .routers.snapshots import router as snapshots_router
 from .routers.trades import router as trades_router
 from .routers.cashflows import router as cashflows_router
-from .routers.expenses import router as expenses_router
-from .routers.expense_upload import router as expense_upload_router
 from .routers.market_data import router as market_data_router
 from .routers.spam_rules import router as spam_rules_router
 from .routers.news import router as news_router
@@ -145,8 +143,6 @@ app.include_router(exchanges_router)
 app.include_router(settings_router)
 app.include_router(snapshots_router)
 app.include_router(cashflows_router)
-app.include_router(expenses_router)
-app.include_router(expense_upload_router)
 app.include_router(market_data_router)
 app.include_router(spam_rules_router)
 app.include_router(news_router)
@@ -337,10 +333,8 @@ async def root() -> str:
             </div>
 
             <div class="card">
-              <h2>💸 Expenses & Cashflows</h2>
+              <h2>💸 Cashflows</h2>
               <ul>
-                <li><code>GET /api/expenses</code> - 지출 내역 관리 및 분류</li>
-                <li><code>POST /api/expenses/upload</code> - 지출 내역 엑셀 업로드</li>
                 <li><code>GET /api/cashflows</code> - 연도별 입출금 현황</li>
               </ul>
             </div>
