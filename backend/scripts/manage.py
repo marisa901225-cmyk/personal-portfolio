@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import calendar
 import json
 import logging
 import os
@@ -128,20 +129,25 @@ def _copy_backup_to_external_drive(archive_path: Path, external_backup_path: Pat
 
 def _cleanup_external_backups_keep_latest_monthly(
     external_backup_path: Path | None,
-    current_month: str | None = None,
+    now: datetime | None = None,
 ) -> int:
-    """Once per month, keep only the latest portfolio backup archive on the external drive."""
+    """On the last day of each month, keep only the latest external backup archive."""
     if not external_backup_path:
         return 0
 
     try:
-        current_month = current_month or datetime.now().strftime("%Y-%m")
+        now = now or datetime.now()
+        month_end_day = calendar.monthrange(now.year, now.month)[1]
+        if now.day != month_end_day:
+            return 0
+
+        current_month = now.strftime("%Y-%m")
         state_file = external_backup_path / ".portfolio_backup_cleanup_state.json"
         if state_file.exists():
             try:
                 with open(state_file, "r") as f:
                     state = json.load(f)
-                if state.get("last_cleanup_month") == current_month:
+                if state.get("last_month_end_cleanup_month") == current_month:
                     return 0
             except Exception as e:
                 logging.error(f"Failed to read external backup cleanup state: {e}")
@@ -163,7 +169,7 @@ def _cleanup_external_backups_keep_latest_monthly(
             print(f"External HDD backup cleanup finished. Deleted {deleted} old file(s).")
         try:
             with open(state_file, "w") as f:
-                json.dump({"last_cleanup_month": current_month}, f)
+                json.dump({"last_month_end_cleanup_month": current_month}, f)
         except Exception as e:
             logging.error(f"Failed to save external backup cleanup state: {e}")
         return deleted
