@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, Link } from 'react-router-dom';
 import { Lock, Server, KeyRound } from 'lucide-react';
 import { useSettings } from '../../hooks/SettingsContext';
 import { Layout } from './Layout';
+import { ApiClient } from '@/shared/api/client';
 
 // 실제 페이지 컴포넌트들
 import {
@@ -24,6 +25,8 @@ const App: React.FC = () => {
     const [authInput, setAuthInput] = useState('');
     const [isNaverLoggingIn, setIsNaverLoggingIn] = useState(false);
     const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+    const [isApiKeyChecking, setIsApiKeyChecking] = useState(false);
+    const [authError, setAuthError] = useState<string | null>(null);
 
     // 현재 경로가 /auth/callback 인지 확인
     const isCallbackPage = window.location.pathname === '/auth/callback';
@@ -33,12 +36,31 @@ const App: React.FC = () => {
         !settings.apiToken && !settings.cookieAuth && !isCallbackPage
     );
 
-    const handleAuthSubmit = (e: React.FormEvent) => {
+    const handleAuthSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!authInput.trim()) return;
-        setSettings(prev => ({ ...prev, apiToken: authInput.trim() }));
-        setShowAuthModal(false);
-        setAuthInput('');
+        const nextToken = authInput.trim();
+        if (!nextToken || isApiKeyChecking) return;
+        if (!settings.serverUrl) {
+            setAuthError('서버 URL을 먼저 설정해주세요.');
+            return;
+        }
+
+        setIsApiKeyChecking(true);
+        setAuthError(null);
+        try {
+            await new ApiClient(settings.serverUrl, nextToken).fetchSettings();
+            setSettings(prev => ({ ...prev, apiToken: nextToken }));
+            setShowAuthModal(false);
+            setAuthInput('');
+        } catch (error) {
+            console.error('API token validation failed:', error);
+            setSettings(prev => ({ ...prev, apiToken: undefined, cookieAuth: false }));
+            setShowAuthModal(true);
+            setShowApiKeyInput(true);
+            setAuthError('API 비밀번호가 올바르지 않습니다. 다시 입력해주세요.');
+        } finally {
+            setIsApiKeyChecking(false);
+        }
     };
 
     const handleNaverLogin = async () => {
@@ -143,17 +165,27 @@ const App: React.FC = () => {
                                                 <input
                                                     type="password"
                                                     autoFocus
+                                                    disabled={isApiKeyChecking}
                                                     className="w-full bg-slate-50 border-2 border-slate-100 rounded-2xl py-3.5 pl-11 pr-5 text-base font-medium transition-all focus:border-indigo-500 focus:bg-white focus:outline-none"
                                                     placeholder="API_TOKEN 입력"
                                                     value={authInput}
-                                                    onChange={(e) => setAuthInput(e.target.value)}
+                                                    onChange={(e) => {
+                                                        setAuthInput(e.target.value);
+                                                        setAuthError(null);
+                                                    }}
                                                 />
                                             </div>
+                                            {authError && (
+                                                <p className="text-sm font-semibold text-rose-600">
+                                                    {authError}
+                                                </p>
+                                            )}
                                             <button
                                                 type="submit"
-                                                className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3.5 rounded-2xl shadow-xl shadow-slate-100 transition-all active:scale-[0.98]"
+                                                disabled={isApiKeyChecking}
+                                                className="w-full bg-slate-800 hover:bg-slate-900 disabled:bg-slate-400 text-white font-bold py-3.5 rounded-2xl shadow-xl shadow-slate-100 transition-all active:scale-[0.98]"
                                             >
-                                                비밀번호로 입장
+                                                {isApiKeyChecking ? '확인 중...' : '비밀번호로 입장'}
                                             </button>
                                         </form>
                                     )}
