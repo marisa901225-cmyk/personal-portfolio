@@ -125,6 +125,36 @@ def _copy_backup_to_external_drive(archive_path: Path, external_backup_path: Pat
         return False
 
 
+def _cleanup_external_backups_keep_latest(external_backup_path: Path | None) -> int:
+    """Keep only the latest portfolio backup archive on the external drive."""
+    if not external_backup_path:
+        return 0
+
+    try:
+        files = [
+            path
+            for path in external_backup_path.glob("portfolio_*.db.zip")
+            if path.is_file()
+        ]
+        files.sort(key=lambda path: (path.stat().st_mtime, path.name), reverse=True)
+
+        deleted = 0
+        for old_backup in files[1:]:
+            old_backup.unlink()
+            deleted += 1
+            logging.info("Deleted old external backup: %s", old_backup.name)
+
+        if deleted:
+            print(f"External HDD backup cleanup finished. Deleted {deleted} old file(s).")
+        return deleted
+    except FileNotFoundError:
+        logging.error("External HDD backup path unavailable during cleanup: %s", external_backup_path)
+        return 0
+    except Exception as e:
+        logging.error(f"External HDD backup cleanup failed: {e}")
+        return 0
+
+
 def _send_backup_status_to_telegram(message: str) -> bool:
     """Send only the backup status message to Telegram, not the archive file."""
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -279,6 +309,8 @@ def backup_db(args):
     ext_path_str = os.getenv("EXTERNAL_BACKUP_PATH")
     external_backup_path = Path(ext_path_str) if ext_path_str else None
     e_success = _copy_backup_to_external_drive(archive_path, external_backup_path)
+    if e_success:
+        _cleanup_external_backups_keep_latest(external_backup_path)
 
     # 텔레그램 메시지 생성 (구글 드라이브 + 외장하드 성공 여부 포함)
     file_size_mb = archive_path.stat().st_size / 1024 / 1024

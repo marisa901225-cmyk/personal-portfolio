@@ -1,5 +1,6 @@
 import pytest
 import json
+import os
 from pathlib import Path
 from datetime import datetime
 from unittest.mock import patch, MagicMock
@@ -121,6 +122,36 @@ def test_copy_backup_to_external_drive_missing_path(tmp_path):
     result = manage._copy_backup_to_external_drive(archive_path, missing_dir)
 
     assert result is False
+
+
+def test_cleanup_external_backups_keep_latest(tmp_path):
+    old_backup = tmp_path / "portfolio_2026-04-01.db.zip"
+    mid_backup = tmp_path / "portfolio_2026-04-15.db.zip"
+    latest_backup = tmp_path / "portfolio_2026-05-01.db.zip"
+    unrelated_file = tmp_path / "notes.txt"
+
+    for path in [old_backup, mid_backup, latest_backup, unrelated_file]:
+        path.write_bytes(b"backup")
+
+    os.utime(old_backup, (100, 100))
+    os.utime(mid_backup, (200, 200))
+    os.utime(latest_backup, (300, 300))
+
+    deleted = manage._cleanup_external_backups_keep_latest(tmp_path)
+
+    assert deleted == 2
+    assert not old_backup.exists()
+    assert not mid_backup.exists()
+    assert latest_backup.exists()
+    assert unrelated_file.exists()
+
+
+def test_cleanup_external_backups_missing_path(tmp_path):
+    missing_dir = tmp_path / "missing"
+
+    deleted = manage._cleanup_external_backups_keep_latest(missing_dir)
+
+    assert deleted == 0
 
 
 def test_send_backup_status_to_telegram_sends_message_only(monkeypatch):
