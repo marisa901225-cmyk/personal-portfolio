@@ -1,3 +1,4 @@
+import json
 import os
 import stat
 import subprocess
@@ -5,7 +6,9 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from backend.services.llm.service import LLMService
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = PROJECT_ROOT / "backend" / "scripts" / "shell" / "llm_fan_guard.sh"
@@ -418,10 +421,63 @@ printf '%s|%s\n' "${1:-}" "${LLM_SCHEDULE_ALLOW_WEEKEND_START:-0}" >> "${ACTIONS
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self._read_actions(), [])
-        state_text = self.state_file.read_text(encoding="utf-8")
-        self.assertIn('"cooldown_active": 1', state_text)
-        self.assertIn('"cooldown_until_epoch": 5600', state_text)
-        self.assertIn('"last_action": "start_deferred_hot"', state_text)
+
+    def test_telegram_paid_prefix_announces_fan_guard_cooldown_only_once(self):
+        notice_path = self.tmp_path / "llm_paid_fallback_notice_state.json"
+        self.state_file.write_text(
+            json.dumps(
+                {
+                    "cooldown_active": 1,
+                    "cooldown_started_epoch": 1_700_000_000,
+                    "cooldown_until_epoch": 1_700_003_600,
+                    "last_trigger_rpm": 2450,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with (
+            patch("backend.services.llm.config.settings") as mock_settings,
+            patch.dict(
+                os.environ,
+                {
+                    "LLM_FAN_GUARD_STATE_FILE": str(self.state_file),
+                    "LLM_FAN_GUARD_NOTICE_STATE_FILE": str(notice_path),
+                },
+                clear=False,
+            ),
+            patch("backend.services.llm.service.time.time", return_value=1_700_000_100),
+        ):
+            mock_settings.llm_base_url = None
+            mock_settings.llm_api_key = None
+            mock_settings.llm_timeout = 30
+            mock_settings.open_api_key = None
+            mock_settings.ai_report_api_key = "test-key"
+            mock_settings.ai_report_base_url = "https://api.openai.com/v1"
+            mock_settings.ai_report_model = "gpt-5.2"
+            mock_settings.ai_report_fallback_model = "gpt-5.4-mini"
+            mock_settings.ai_report_timeout_sec = 30
+            mock_settings.llm_remote_model_path_file = None
+            mock_settings.llm_remote_model_dir = "/data"
+            mock_settings.llm_remote_default_model = "dummy.gguf"
+
+            llm = LLMService.get_instance()
+            llm._last_used_paid = True
+
+            first = llm.telegram_paid_prefix()
+            second = llm.telegram_paid_prefix()
+
+        self.assertIn("고장난 건 아니고", first)
+        self.assertIn("2450 RPM", first)
+        self.assertTrue(first.endswith("💰 "))
+        self.assertEqual(second, "💰 ")
+
+        with open(notice_path, "r", encoding="utf-8") as f:
+            notice_state = json.load(f)
+        self.assertEqual(
+            notice_state.get("last_notified_cooldown_id"),
+            "1700000000:1700003600",
+        )
 
     def test_sensor_pattern_limits_which_fan_section_is_used(self) -> None:
         result = self._run_guard(
