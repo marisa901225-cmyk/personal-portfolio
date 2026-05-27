@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -125,12 +126,26 @@ def _copy_backup_to_external_drive(archive_path: Path, external_backup_path: Pat
         return False
 
 
-def _cleanup_external_backups_keep_latest(external_backup_path: Path | None) -> int:
-    """Keep only the latest portfolio backup archive on the external drive."""
+def _cleanup_external_backups_keep_latest_monthly(
+    external_backup_path: Path | None,
+    current_month: str | None = None,
+) -> int:
+    """Once per month, keep only the latest portfolio backup archive on the external drive."""
     if not external_backup_path:
         return 0
 
     try:
+        current_month = current_month or datetime.now().strftime("%Y-%m")
+        state_file = external_backup_path / ".portfolio_backup_cleanup_state.json"
+        if state_file.exists():
+            try:
+                with open(state_file, "r") as f:
+                    state = json.load(f)
+                if state.get("last_cleanup_month") == current_month:
+                    return 0
+            except Exception as e:
+                logging.error(f"Failed to read external backup cleanup state: {e}")
+
         files = [
             path
             for path in external_backup_path.glob("portfolio_*.db.zip")
@@ -146,6 +161,11 @@ def _cleanup_external_backups_keep_latest(external_backup_path: Path | None) -> 
 
         if deleted:
             print(f"External HDD backup cleanup finished. Deleted {deleted} old file(s).")
+        try:
+            with open(state_file, "w") as f:
+                json.dump({"last_cleanup_month": current_month}, f)
+        except Exception as e:
+            logging.error(f"Failed to save external backup cleanup state: {e}")
         return deleted
     except FileNotFoundError:
         logging.error("External HDD backup path unavailable during cleanup: %s", external_backup_path)
@@ -310,7 +330,7 @@ def backup_db(args):
     external_backup_path = Path(ext_path_str) if ext_path_str else None
     e_success = _copy_backup_to_external_drive(archive_path, external_backup_path)
     if e_success:
-        _cleanup_external_backups_keep_latest(external_backup_path)
+        _cleanup_external_backups_keep_latest_monthly(external_backup_path)
 
     # 텔레그램 메시지 생성 (구글 드라이브 + 외장하드 성공 여부 포함)
     file_size_mb = archive_path.stat().st_size / 1024 / 1024

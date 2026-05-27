@@ -124,7 +124,7 @@ def test_copy_backup_to_external_drive_missing_path(tmp_path):
     assert result is False
 
 
-def test_cleanup_external_backups_keep_latest(tmp_path):
+def test_cleanup_external_backups_keep_latest_monthly(tmp_path):
     old_backup = tmp_path / "portfolio_2026-04-01.db.zip"
     mid_backup = tmp_path / "portfolio_2026-04-15.db.zip"
     latest_backup = tmp_path / "portfolio_2026-05-01.db.zip"
@@ -137,19 +137,38 @@ def test_cleanup_external_backups_keep_latest(tmp_path):
     os.utime(mid_backup, (200, 200))
     os.utime(latest_backup, (300, 300))
 
-    deleted = manage._cleanup_external_backups_keep_latest(tmp_path)
+    deleted = manage._cleanup_external_backups_keep_latest_monthly(tmp_path, "2026-05")
 
     assert deleted == 2
     assert not old_backup.exists()
     assert not mid_backup.exists()
     assert latest_backup.exists()
     assert unrelated_file.exists()
+    assert json.loads((tmp_path / ".portfolio_backup_cleanup_state.json").read_text()) == {
+        "last_cleanup_month": "2026-05"
+    }
+
+
+def test_cleanup_external_backups_keep_latest_monthly_skips_same_month(tmp_path):
+    old_backup = tmp_path / "portfolio_2026-04-01.db.zip"
+    latest_backup = tmp_path / "portfolio_2026-05-01.db.zip"
+    old_backup.write_bytes(b"old")
+    latest_backup.write_bytes(b"latest")
+    (tmp_path / ".portfolio_backup_cleanup_state.json").write_text(
+        json.dumps({"last_cleanup_month": "2026-05"})
+    )
+
+    deleted = manage._cleanup_external_backups_keep_latest_monthly(tmp_path, "2026-05")
+
+    assert deleted == 0
+    assert old_backup.exists()
+    assert latest_backup.exists()
 
 
 def test_cleanup_external_backups_missing_path(tmp_path):
     missing_dir = tmp_path / "missing"
 
-    deleted = manage._cleanup_external_backups_keep_latest(missing_dir)
+    deleted = manage._cleanup_external_backups_keep_latest_monthly(missing_dir)
 
     assert deleted == 0
 
