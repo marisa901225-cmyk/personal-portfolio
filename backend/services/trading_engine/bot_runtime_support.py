@@ -10,7 +10,7 @@ from .config import TradeEngineConfig
 from ..llm.service import LLMService
 from ..prompt_loader import load_prompt
 from .journal import TradeJournal
-from .notification_text import reason_label
+from .notification_text import exit_reason_label, reason_label
 from .run_context import CachedTradingAPI, TradingRunMetrics
 from .stock_master import load_stock_master_map
 from .strategy import Candidates
@@ -564,7 +564,7 @@ def _format_finalize_exit_row(*, row: dict[str, object], name: str) -> str | Non
     qty_text = f" {qty}주" if qty > 0 else ""
     price_text = f" {float(price):,.0f}원" if price is not None else ""
     pnl_text = f" {float(pnl_pct):+.2f}%" if pnl_pct is not None else ""
-    reason_text = reason_label(reason) if reason else "청산"
+    reason_text = exit_reason_label(reason, pnl_pct=pnl_pct) if reason else "청산"
     return f"{name}{qty_text} {reason_text}{price_text}{pnl_text}".strip()
 
 

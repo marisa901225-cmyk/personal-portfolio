@@ -403,6 +403,38 @@ def test_finalize_trade_activity_summary_names_entries_and_exits(tmp_path, monke
     assert finalize_state_sync_summary(journal=journal, logger=__import__("logging").getLogger(__name__)) == "3건"
 
 
+def test_finalize_trade_activity_summary_shows_lock_loss_as_stop_loss(tmp_path, monkeypatch) -> None:
+    class _Info:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    monkeypatch.setattr(
+        "backend.services.trading_engine.bot_runtime_support.load_stock_master_map",
+        lambda **kwargs: {  # type: ignore[no-untyped-def]
+            "001740": _Info("SK네트웍스"),
+        },
+    )
+
+    journal = TradeJournal(output_dir=str(tmp_path), asof_date="20260527")
+    journal.log(
+        "EXIT_FILL",
+        asof_date="20260527",
+        code="001740",
+        qty=1,
+        avg_price=116427,
+        pnl_pct=-2.03,
+        reason="LOCK",
+    )
+
+    summary = finalize_trade_activity_summary(
+        journal=journal,
+        config=TradeEngineConfig(),
+        logger=__import__("logging").getLogger(__name__),
+    )
+
+    assert summary == "청산: SK네트웍스 1주 손절 116,427원 -2.03%"
+
+
 def test_bot_reconcile_records_state_sync_without_telegram(tmp_path) -> None:
     class _API:
         def positions(self) -> list[dict[str, object]]:

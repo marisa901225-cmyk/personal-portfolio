@@ -180,7 +180,7 @@ def test_reconcile_state_drop_links_pending_exit_fill_from_daily_ccld() -> None:
         "[상태동기화][정리] 319400 로컬수량=8 브로커수량=0 기준=브로커계좌조회 "
         "마지막가=35400 로컬평단=35800 마지막가기준손익=-1.12% "
         "체결수량=8 체결가=35400 체결손익=-1.12% "
-        "주문사유=수익보전 이탈(마지막가 기준 평단 하회) 주문번호=0008965100"
+        "주문사유=손절 주문번호=0008965100"
     ]
 
 def test_reconcile_state_adds_broker_only_position_using_day_journal_hint(tmp_path) -> None:

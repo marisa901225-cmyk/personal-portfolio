@@ -96,6 +96,13 @@ def reason_label(value: str | None) -> str:
     return _REASON_LABELS.get(raw.upper(), raw)
 
 
+def exit_reason_label(value: str | None, *, pnl_pct: float | None = None) -> str:
+    normalized = str(value or "").strip().upper()
+    if normalized == "LOCK" and pnl_pct is not None and float(pnl_pct) <= 0:
+        return reason_label("SL")
+    return reason_label(value)
+
+
 def format_pass_message(reason: str, trade_date: str) -> str:
     return f"[보류] {reason_label(reason)} {trade_date}"
 
@@ -159,7 +166,7 @@ def format_exit_message(
     pnl_pct: float,
 ) -> str:
     return (
-        f"[청산][{strategy_label(strategy)}][{reason_label(reason)}] {code} "
+        f"[청산][{strategy_label(strategy)}][{exit_reason_label(reason, pnl_pct=pnl_pct)}] {code} "
         f"수량={qty} 평균가={avg_price:.0f} 손익={pnl_pct:+.2f}%"
     )
 
@@ -235,9 +242,8 @@ def format_state_sync_drop_message(
         if exit_fill_pnl_pct is not None:
             parts.append(f"체결손익={float(exit_fill_pnl_pct):+.2f}%")
     if exit_reason:
-        reason_text = reason_label(exit_reason)
-        if str(exit_reason).strip().upper() == "LOCK" and last_price_pnl_pct is not None and last_price_pnl_pct <= 0:
-            reason_text = f"{reason_text}(마지막가 기준 평단 하회)"
+        display_pnl_pct = exit_fill_pnl_pct if exit_fill_pnl_pct is not None else last_price_pnl_pct
+        reason_text = exit_reason_label(exit_reason, pnl_pct=display_pnl_pct)
         parts.append(f"주문사유={reason_text}")
     if exit_order_id:
         parts.append(f"주문번호={exit_order_id}")
