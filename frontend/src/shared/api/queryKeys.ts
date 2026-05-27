@@ -22,11 +22,6 @@ export const queryKeys = {
     // Cashflows
     cashflows: ['cashflows'] as const,
 
-    // Expenses
-    expenses: (params?: { year?: number; month?: number; category?: string }) =>
-        ['expenses', params] as const,
-    expenseCategories: ['expenses', 'categories'] as const,
-
     // FX Transactions
     fxTransactions: (params?: { kind?: string; startDate?: string; endDate?: string }) =>
         ['fxTransactions', params] as const,

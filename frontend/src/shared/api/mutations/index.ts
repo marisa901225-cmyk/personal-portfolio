@@ -6,5 +6,4 @@
 
 export * from './useAssetMutations';
 export * from './useTradeMutations';
-export * from './useExpenseMutations';
 export * from './useSnapshotMutations';

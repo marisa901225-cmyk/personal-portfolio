@@ -8,7 +8,6 @@ export { DashboardPage } from './DashboardPage';
 export { AssetsPage } from './AssetsPage';
 export { TradesPage } from './TradesPage';
 export { ExchangePage } from './ExchangePage';
-export { ExpensesPage } from './ExpensesPage';
 export { AiReportPage } from './AiReportPage';
 export { AiMemoPage } from './AiMemoPage';
 export { ImageGenerationPage } from './ImageGenerationPage';

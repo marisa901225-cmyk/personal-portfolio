@@ -6,7 +6,6 @@
 
 export * from './usePortfolioQuery';
 export * from './useTradesQuery';
-export * from './useExpensesQuery';
 export * from './useSnapshotsQuery';
 export * from './useCashflowsQuery';
 export * from './useFxRateQuery';

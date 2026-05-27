@@ -244,56 +244,6 @@ export interface BackendYearlyCashflow {
     updated_at: string;
 }
 
-// --- Expenses ---
-
-export interface BackendExpense {
-    id: number;
-    user_id: number;
-    date: string;
-    amount: number;
-    category: string;
-    merchant?: string | null;
-    method?: string | null;
-    is_fixed: boolean;
-    memo?: string | null;
-    review_reason?: string | null;
-    review_suggested_category?: string | null;
-    created_at: string;
-    updated_at: string;
-    deleted_at?: string | null;
-}
-
-export interface BackendExpenseUploadResult {
-    success: boolean;
-    total_rows: number;
-    added: number;
-    skipped: number;
-    skip_breakdown?: Record<string, number>;
-    filename: string;
-}
-
-export interface BackendExpenseSummaryCategoryBreakdownItem {
-    category: string;
-    amount: number;
-}
-
-export interface BackendExpenseSummaryMethodBreakdownItem {
-    method: string;
-    amount: number;
-}
-
-export interface BackendExpenseSummaryResponse {
-    period: { year: number | null; month: number | null };
-    total_expense: number;
-    total_income: number;
-    net: number;
-    fixed_expense: number;
-    fixed_ratio: number;
-    category_breakdown: BackendExpenseSummaryCategoryBreakdownItem[];
-    method_breakdown: BackendExpenseSummaryMethodBreakdownItem[];
-    transaction_count: number;
-}
-
 // --- Ticker Search ---
 
 export interface BackendTickerInfo {

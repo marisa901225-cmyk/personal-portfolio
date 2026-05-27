@@ -15,9 +15,6 @@ import type {
     BackendFxTransaction,
     BackendYearlyCashflow,
     BackendAiReportTextResponse,
-    BackendExpense,
-    BackendExpenseUploadResult,
-    BackendExpenseSummaryResponse,
     BackendReportResponse,
     BackendSavedAiReport,
     BackendNewsSearchResponse,
@@ -66,16 +63,6 @@ import {
     saveReport,
     deleteReport,
 } from './reports';
-import {
-    fetchCategories,
-    triggerLearning,
-    fetchExpenses,
-    fetchExpenseSummary,
-    deleteExpense,
-    restoreExpense,
-    updateExpense,
-    uploadExpenseFile,
-} from './expenses';
 import {
     fetchServerGeneratedImageData,
     fetchServerGeneratedImages,
@@ -365,48 +352,6 @@ export class ApiClient {
     ): Promise<void> {
         const createHeaders: CreateHeadersFn = (withJson = false) => this.createHeaders(withJson);
         return fetchAiReportTextStream(this.baseUrl, createHeaders, params, handlers);
-    }
-
-    // --- Expenses ---
-
-    async fetchCategories(): Promise<string[]> {
-        return fetchCategories(this.requestFn);
-    }
-
-    async triggerLearning(): Promise<{ added: number; updated: number }> {
-        return triggerLearning(this.requestFn);
-    }
-
-    async fetchExpenses(params?: {
-        year?: number;
-        month?: number;
-        category?: string;
-        includeDeleted?: boolean;
-    }, options: { signal?: AbortSignal } = {}): Promise<BackendExpense[]> {
-        return fetchExpenses(this.requestFn, params, options);
-    }
-
-    async fetchExpenseSummary(params?: {
-        year?: number;
-        month?: number;
-    }, options: { signal?: AbortSignal } = {}): Promise<BackendExpenseSummaryResponse> {
-        return fetchExpenseSummary(this.requestFn, params, options);
-    }
-
-    async deleteExpense(expenseId: number): Promise<{ status: string; deleted_at?: string | null }> {
-        return deleteExpense(this.requestFn, expenseId);
-    }
-
-    async restoreExpense(expenseId: number): Promise<BackendExpense> {
-        return restoreExpense(this.requestFn, expenseId);
-    }
-
-    async updateExpense(expenseId: number, payload: Partial<BackendExpense>): Promise<BackendExpense> {
-        return updateExpense(this.requestFn, expenseId, payload);
-    }
-
-    async uploadExpenseFile(file: File): Promise<BackendExpenseUploadResult> {
-        return uploadExpenseFile(this.requestFn, file);
     }
 
     // --- Saved AI Reports ---
