@@ -1,16 +1,12 @@
-# backend/tests/test_llm_service.py
-import json
 import os
-import tempfile
 import unittest
-from contextlib import contextmanager
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from backend.services.llm.service import LLMService
 from backend.services.llm.config import Settings
 from backend.services.llm.backends.remote import RemoteLlamaBackend
 from backend.services.llm.backends.paid import OpenAIPaidBackend
+from backend.tests.llm_test_helpers import patched_llm_settings
 
 
 class TestLLMService(unittest.TestCase):
@@ -25,14 +21,10 @@ class TestLLMService(unittest.TestCase):
         self.assertEqual(settings.data_dir_abs, os.path.join(expected_backend_dir, "data"))
 
     def test_generate_chat_uses_paid_when_remote_not_configured(self):
-        # We need to mock the global settings used by LLMService
-        with patch("backend.services.llm.config.settings") as mock_settings:
-            mock_settings.llm_base_url = None
-            mock_settings.ai_report_api_key = "test-key"
-            mock_settings.ai_report_base_url = "https://api.openai.com/v1"
-            mock_settings.ai_report_model = "gpt-5.2"
-            mock_settings.ai_report_fallback_model = "gpt-5.4-mini"
-
+        with patched_llm_settings(
+            ai_report_model="gpt-5.2",
+            ai_report_fallback_model="gpt-5.4-mini",
+        ):
             with patch.object(RemoteLlamaBackend, "chat", side_effect=AssertionError("remote should not be used")):
                 with patch.object(OpenAIPaidBackend, "chat", return_value="paid-ok") as paid_chat:
                     llm = LLMService.get_instance()
@@ -56,10 +48,7 @@ class TestLLMService(unittest.TestCase):
                     self.assertEqual(called_kwargs.get("response_format"), response_format)
 
     def test_generate_chat_prefers_remote_when_configured(self):
-        with patch("backend.services.llm.config.settings") as mock_settings:
-            mock_settings.llm_base_url = "http://localhost:8080"
-            mock_settings.ai_report_api_key = "test-key"
-
+        with patched_llm_settings(llm_base_url="http://localhost:8080"):
             with patch.object(RemoteLlamaBackend, "chat", return_value="remote-ok") as remote_chat:
                 with patch.object(OpenAIPaidBackend, "chat", side_effect=AssertionError("paid should not be used")):
                     llm = LLMService.get_instance()
@@ -125,10 +114,7 @@ class TestLLMService(unittest.TestCase):
             self.assertNotIn("top_k", called_kwargs)
 
     def test_generate_chat_skips_paid_when_fallback_disabled(self):
-        with patch("backend.services.llm.config.settings") as mock_settings:
-            mock_settings.llm_base_url = "http://localhost:8080"
-            mock_settings.ai_report_api_key = "test-key"
-
+        with patched_llm_settings(llm_base_url="http://localhost:8080"):
             with patch.object(RemoteLlamaBackend, "chat", return_value=""):
                 with patch.object(OpenAIPaidBackend, "chat", side_effect=AssertionError("paid should not be used")):
                     llm = LLMService.get_instance()
@@ -140,10 +126,7 @@ class TestLLMService(unittest.TestCase):
                     self.assertEqual(llm.last_route(), "remote_failed_paid_disabled")
 
     def test_generate_chat_sets_route_remote_failed_no_paid(self):
-        with patch("backend.services.llm.config.settings") as mock_settings:
-            mock_settings.llm_base_url = "http://localhost:8080"
-            mock_settings.ai_report_api_key = None
-
+        with patched_llm_settings(llm_base_url="http://localhost:8080", ai_report_api_key=None):
             with patch.object(RemoteLlamaBackend, "chat", return_value=""):
                 llm = LLMService.get_instance()
                 out = llm.generate_chat([{"role": "user", "content": "hi"}])
@@ -151,10 +134,7 @@ class TestLLMService(unittest.TestCase):
                 self.assertEqual(llm.last_route(), "remote_failed_no_paid")
 
     def test_generate_chat_sets_route_paid_failed_when_paid_attempt_fails(self):
-        with patch("backend.services.llm.config.settings") as mock_settings:
-            mock_settings.llm_base_url = "http://localhost:8080"
-            mock_settings.ai_report_api_key = "test-key"
-
+        with patched_llm_settings(llm_base_url="http://localhost:8080"):
             with patch.object(RemoteLlamaBackend, "chat", return_value=""):
                 with patch.object(OpenAIPaidBackend, "chat", return_value=""):
                     llm = LLMService.get_instance()
@@ -163,596 +143,26 @@ class TestLLMService(unittest.TestCase):
                     self.assertEqual(llm.last_route(), "paid_failed")
 
     def test_no_backend_configured_returns_empty_and_sets_error(self):
-        with patch("backend.services.llm.config.settings") as mock_settings:
-            mock_settings.llm_base_url = None
-            mock_settings.ai_report_api_key = None
-            
+        with patched_llm_settings(ai_report_api_key=None):
             llm = LLMService.get_instance()
             out = llm.generate_chat([{"role": "user", "content": "hi"}])
             self.assertEqual(out, "")
             self.assertIn("No LLM backend configured", llm.get_last_error())
             self.assertEqual(llm.last_route(), "no_backend")
 
-    def test_paid_backend_falls_back_to_responses_when_chat_completions_not_supported(self):
-        class _Resp:
-            def __init__(self, status_code: int, json_data=None, text: str = ""):
-                self.status_code = status_code
-                self._json_data = json_data
-                self.text = text
-
-            def json(self):
-                if isinstance(self._json_data, Exception):
-                    raise self._json_data
-                return self._json_data
-
-        error_resp = _Resp(
-            400,
-            json_data={
-                "error": {
-                    "message": "This model does not support the v1/chat/completions endpoint. Use /responses instead."
-                }
-            },
-        )
-        ok_resp = _Resp(200, json_data={"output_text": "responses-ok"})
-
-        with patch("backend.services.llm.config.settings") as mock_settings:
-            mock_settings.llm_base_url = None
-            mock_settings.llm_api_key = None
-            mock_settings.llm_timeout = 30
-            mock_settings.open_api_key = None
-            mock_settings.ai_report_api_key = "test-key"
-            mock_settings.ai_report_base_url = "https://api.openai.com/v1"
-            mock_settings.ai_report_model = "gpt-5.2"
-            mock_settings.ai_report_fallback_model = "gpt-5.4-mini"
-            mock_settings.ai_report_timeout_sec = 30
-
-            backend = OpenAIPaidBackend(Settings())
-            backend._post = unittest.mock.Mock(side_effect=[error_resp, ok_resp])
-
-            out = backend.chat(
-                [{"role": "user", "content": "hi"}],
-                model="gpt-5.2",
-                stop=["STOP"],
-                seed=123,
-            )
-            self.assertEqual(out, "responses-ok")
-            self.assertIsNone(backend.get_last_error())
-
-            # stop/seed가 Chat Completions에는 전달되고, Responses에는 stop이 빠지는지 확인
-            first_payload = backend._post.call_args_list[0].kwargs["payload"]
-            second_payload = backend._post.call_args_list[1].kwargs["payload"]
-            self.assertEqual(first_payload.get("stop"), ["STOP"])
-            self.assertEqual(first_payload.get("seed"), 123)
-            self.assertEqual(second_payload.get("seed"), 123)
-            self.assertIsNone(second_payload.get("stop"))
-
-    def test_paid_backend_falls_back_to_responses_when_chat_content_empty(self):
-        class _Resp:
-            def __init__(self, status_code: int, json_data=None, text: str = ""):
-                self.status_code = status_code
-                self._json_data = json_data
-                self.text = text
-
-            def json(self):
-                if isinstance(self._json_data, Exception):
-                    raise self._json_data
-                return self._json_data
-
-        chat_ok_but_empty = _Resp(
-            200,
-            json_data={
-                "service_tier": "default",
-                "choices": [
-                    {
-                        "finish_reason": "length",
-                        "message": {"content": ""},
-                    }
-                ],
-                "usage": {
-                    "completion_tokens_details": {
-                        "reasoning_tokens": 512
-                    }
-                },
-            },
-        )
-        responses_ok = _Resp(
-            200,
-            json_data={
-                "output": [
-                    {
-                        "type": "message",
-                        "content": [
-                            {"type": "output_text", "text": "responses-from-empty-chat"}
-                        ],
-                    }
-                ]
-            },
-        )
-
-        with patch("backend.services.llm.config.settings") as mock_settings:
-            mock_settings.llm_base_url = None
-            mock_settings.llm_api_key = None
-            mock_settings.llm_timeout = 30
-            mock_settings.open_api_key = None
-            mock_settings.ai_report_api_key = "test-key"
-            mock_settings.ai_report_base_url = "https://api.openai.com/v1"
-            mock_settings.ai_report_model = "gpt-5.4-mini"
-            mock_settings.ai_report_fallback_model = "gpt-5.4-mini"
-            mock_settings.ai_report_timeout_sec = 30
-
-            backend = OpenAIPaidBackend(Settings())
-            backend._post = unittest.mock.Mock(side_effect=[chat_ok_but_empty, responses_ok])
-
-            out = backend.chat(
-                [{"role": "user", "content": "hi"}],
-                model="gpt-5.4-mini",
-            )
-            self.assertEqual(out, "responses-from-empty-chat")
-            self.assertIsNone(backend.get_last_error())
-
-            second_payload = backend._post.call_args_list[1].kwargs["payload"]
-            self.assertEqual(second_payload.get("reasoning"), {"effort": "medium"})
-
-    def test_paid_backend_clamps_responses_max_output_tokens_minimum(self):
-        class _Resp:
-            def __init__(self, status_code: int, json_data=None, text: str = ""):
-                self.status_code = status_code
-                self._json_data = json_data
-                self.text = text
-
-            def json(self):
-                if isinstance(self._json_data, Exception):
-                    raise self._json_data
-                return self._json_data
-
-        chat_ok_but_empty = _Resp(
-            200,
-            json_data={"choices": [{"message": {"content": ""}}]},
-        )
-        responses_ok = _Resp(200, json_data={"output_text": "ok"})
-
-        with patch("backend.services.llm.config.settings") as mock_settings:
-            mock_settings.llm_base_url = None
-            mock_settings.llm_api_key = None
-            mock_settings.llm_timeout = 30
-            mock_settings.open_api_key = None
-            mock_settings.ai_report_api_key = "test-key"
-            mock_settings.ai_report_base_url = "https://api.openai.com/v1"
-            mock_settings.ai_report_model = "gpt-5.4-mini"
-            mock_settings.ai_report_fallback_model = "gpt-5.4-mini"
-            mock_settings.ai_report_timeout_sec = 30
-
-            backend = OpenAIPaidBackend(Settings())
-            backend._post = unittest.mock.Mock(side_effect=[chat_ok_but_empty, responses_ok])
-
-            out = backend.chat(
-                [{"role": "user", "content": "hi"}],
-                model="gpt-5.4-mini",
-                max_tokens=12,
-            )
-
-            self.assertEqual(out, "ok")
-            second_payload = backend._post.call_args_list[1].kwargs["payload"]
-            self.assertEqual(second_payload.get("max_output_tokens"), 16)
-
-    def test_paid_backend_retries_responses_when_reasoning_exhausts_output_tokens(self):
-        class _Resp:
-            def __init__(self, status_code: int, json_data=None, text: str = ""):
-                self.status_code = status_code
-                self._json_data = json_data
-                self.text = text
-
-            def json(self):
-                if isinstance(self._json_data, Exception):
-                    raise self._json_data
-                return self._json_data
-
-        chat_ok_but_empty = _Resp(
-            200,
-            json_data={"choices": [{"message": {"content": ""}}]},
-        )
-        responses_incomplete = _Resp(
-            200,
-            json_data={
-                "status": "incomplete",
-                "incomplete_details": {"reason": "max_output_tokens"},
-                "output": [{"type": "reasoning"}],
-                "usage": {"output_tokens": 700, "output_tokens_details": {"reasoning_tokens": 700}},
-            },
-        )
-        responses_ok = _Resp(200, json_data={"output_text": "retry-ok"})
-
-        with patch("backend.services.llm.config.settings") as mock_settings:
-            mock_settings.llm_base_url = None
-            mock_settings.llm_api_key = None
-            mock_settings.llm_timeout = 30
-            mock_settings.open_api_key = None
-            mock_settings.ai_report_api_key = "test-key"
-            mock_settings.ai_report_base_url = "https://api.openai.com/v1"
-            mock_settings.ai_report_model = "gpt-5.4-mini"
-            mock_settings.ai_report_fallback_model = "gpt-5.4-mini"
-            mock_settings.ai_report_timeout_sec = 30
-
-            backend = OpenAIPaidBackend(Settings())
-            backend._post = unittest.mock.Mock(side_effect=[chat_ok_but_empty, responses_incomplete, responses_ok])
-
-            out = backend.chat(
-                [{"role": "user", "content": "hi"}],
-                model="gpt-5.4-mini",
-                max_tokens=700,
-            )
-
-            self.assertEqual(out, "retry-ok")
-            second_payload = backend._post.call_args_list[1].kwargs["payload"]
-            third_payload = backend._post.call_args_list[2].kwargs["payload"]
-            self.assertEqual(second_payload.get("max_output_tokens"), 2048)
-            self.assertEqual(third_payload.get("max_output_tokens"), 2048)
-
-    def test_paid_backend_responses_respects_reasoning_effort_override(self):
-        class _Resp:
-            def __init__(self, status_code: int, json_data=None, text: str = ""):
-                self.status_code = status_code
-                self._json_data = json_data
-                self.text = text
-
-            def json(self):
-                if isinstance(self._json_data, Exception):
-                    raise self._json_data
-                return self._json_data
-
-        chat_ok_but_empty = _Resp(
-            200,
-            json_data={"choices": [{"message": {"content": ""}}]},
-        )
-        responses_ok = _Resp(
-            200,
-            json_data={
-                "output": [
-                    {
-                        "type": "message",
-                        "content": [{"type": "output_text", "text": "title-ok"}],
-                    }
-                ]
-            },
-        )
-
-        with patch("backend.services.llm.config.settings") as mock_settings:
-            mock_settings.llm_base_url = None
-            mock_settings.llm_api_key = None
-            mock_settings.llm_timeout = 30
-            mock_settings.open_api_key = None
-            mock_settings.ai_report_api_key = "test-key"
-            mock_settings.ai_report_base_url = "https://api.openai.com/v1"
-            mock_settings.ai_report_model = "gpt-5.4-mini"
-            mock_settings.ai_report_fallback_model = "gpt-5.4-mini"
-            mock_settings.ai_report_timeout_sec = 30
-
-            backend = OpenAIPaidBackend(Settings())
-            backend._post = unittest.mock.Mock(side_effect=[chat_ok_but_empty, responses_ok])
-
-            out = backend.chat(
-                [{"role": "user", "content": "hi"}],
-                model="gpt-5.4-mini",
-                reasoning_effort="none",
-            )
-
-            self.assertEqual(out, "title-ok")
-            second_payload = backend._post.call_args_list[1].kwargs["payload"]
-            self.assertEqual(second_payload.get("reasoning"), {"effort": "none"})
-
-    def test_paid_backend_chat_includes_gpt5_reasoning_effort_override(self):
-        class _Resp:
-            status_code = 200
-
-            def json(self):
-                return {"choices": [{"message": {"content": "ok"}}]}
-
-        with patch("backend.services.llm.config.settings") as mock_settings:
-            mock_settings.llm_base_url = None
-            mock_settings.llm_api_key = None
-            mock_settings.llm_timeout = 30
-            mock_settings.open_api_key = None
-            mock_settings.ai_report_api_key = "test-key"
-            mock_settings.ai_report_base_url = "https://api.openai.com/v1"
-            mock_settings.ai_report_model = "gpt-5.4-mini"
-            mock_settings.ai_report_fallback_model = "gpt-5.4-mini"
-            mock_settings.ai_report_timeout_sec = 30
-
-            backend = OpenAIPaidBackend(Settings())
-            backend._post = unittest.mock.Mock(return_value=_Resp())
-
-            out = backend.chat(
-                [{"role": "user", "content": "hi"}],
-                model="gpt-5.4-mini",
-                reasoning_effort="none",
-            )
-
-            self.assertEqual(out, "ok")
-            first_payload = backend._post.call_args_list[0].kwargs["payload"]
-            self.assertEqual(first_payload.get("reasoning_effort"), "none")
-
-    def test_paid_backend_responses_preserves_multimodal_content(self):
-        class _Resp:
-            def __init__(self, status_code: int, json_data=None, text: str = ""):
-                self.status_code = status_code
-                self._json_data = json_data
-                self.text = text
-
-            def json(self):
-                if isinstance(self._json_data, Exception):
-                    raise self._json_data
-                return self._json_data
-
-        error_resp = _Resp(
-            400,
-            json_data={
-                "error": {
-                    "message": "This model does not support the v1/chat/completions endpoint. Use /responses instead."
-                }
-            },
-        )
-        ok_resp = _Resp(200, json_data={"output_text": "vision-ok"})
-
-        with patch("backend.services.llm.config.settings") as mock_settings:
-            mock_settings.llm_base_url = None
-            mock_settings.llm_api_key = None
-            mock_settings.llm_timeout = 30
-            mock_settings.open_api_key = None
-            mock_settings.ai_report_api_key = "test-key"
-            mock_settings.ai_report_base_url = "https://api.openai.com/v1"
-            mock_settings.ai_report_model = "gpt-5.4"
-            mock_settings.ai_report_fallback_model = "gpt-5.4-mini"
-            mock_settings.ai_report_timeout_sec = 30
-
-            backend = OpenAIPaidBackend(Settings())
-            backend._post = unittest.mock.Mock(side_effect=[error_resp, ok_resp])
-
-            out = backend.chat(
-                [
-                    {"role": "system", "content": "chart-review-system"},
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": "review this chart"},
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": "data:image/png;base64,AAAA"},
-                            },
-                        ],
-                    },
-                ],
-                model="gpt-5.4",
-            )
-
-            self.assertEqual(out, "vision-ok")
-            second_payload = backend._post.call_args_list[1].kwargs["payload"]
-            self.assertEqual(
-                second_payload["input"][1]["content"],
-                [
-                    {"type": "input_text", "text": "review this chart"},
-                    {"type": "input_image", "image_url": "data:image/png;base64,AAAA"},
-                ],
-            )
-
-    def test_paid_backend_prepends_gpt5_paid_system_prompt(self):
-        class _Resp:
-            def __init__(self, status_code: int, json_data=None, text: str = ""):
-                self.status_code = status_code
-                self._json_data = json_data
-                self.text = text
-
-            def json(self):
-                if isinstance(self._json_data, Exception):
-                    raise self._json_data
-                return self._json_data
-
-        response = _Resp(
-            200,
-            json_data={"choices": [{"message": {"content": "ok"}}]},
-        )
-
-        with patch("backend.services.llm.config.settings") as mock_settings:
-            mock_settings.llm_base_url = None
-            mock_settings.llm_api_key = None
-            mock_settings.llm_timeout = 30
-            mock_settings.open_api_key = None
-            mock_settings.ai_report_api_key = "test-key"
-            mock_settings.ai_report_base_url = "https://api.openai.com/v1"
-            mock_settings.ai_report_model = "gpt-5.4-mini"
-            mock_settings.ai_report_fallback_model = "gpt-5.4-mini"
-            mock_settings.ai_report_timeout_sec = 30
-
-            backend = OpenAIPaidBackend(Settings())
-            backend._post = unittest.mock.Mock(return_value=response)
-
-            out = backend.chat(
-                [{"role": "system", "content": "main-system"}, {"role": "user", "content": "hi"}],
-                model="gpt-5.4-mini",
-                paid_system_prompt="paid-system",
-            )
-
-            self.assertEqual(out, "ok")
-            payload = backend._post.call_args.kwargs["payload"]
-            self.assertEqual(payload["messages"][0], {"role": "system", "content": "paid-system"})
-            self.assertEqual(payload["messages"][1], {"role": "user", "content": "hi"})
-            self.assertEqual(len(payload["messages"]), 2)
-
-    def test_paid_backend_dedupes_repeated_gpt5_paid_system_prompt_lines(self):
-        class _Resp:
-            def __init__(self, status_code: int, json_data=None, text: str = ""):
-                self.status_code = status_code
-                self._json_data = json_data
-                self.text = text
-
-            def json(self):
-                if isinstance(self._json_data, Exception):
-                    raise self._json_data
-                return self._json_data
-
-        response = _Resp(
-            200,
-            json_data={"choices": [{"message": {"content": "ok"}}]},
-        )
-
-        with patch("backend.services.llm.config.settings") as mock_settings:
-            mock_settings.llm_base_url = None
-            mock_settings.llm_api_key = None
-            mock_settings.llm_timeout = 30
-            mock_settings.open_api_key = None
-            mock_settings.ai_report_api_key = "test-key"
-            mock_settings.ai_report_base_url = "https://api.openai.com/v1"
-            mock_settings.ai_report_model = "gpt-5.4-mini"
-            mock_settings.ai_report_fallback_model = "gpt-5.4-mini"
-            mock_settings.ai_report_timeout_sec = 30
-
-            backend = OpenAIPaidBackend(Settings())
-            backend._post = unittest.mock.Mock(return_value=response)
-
-            out = backend.chat(
-                [
-                    {
-                        "role": "system",
-                        "content": "main-system\nMaximum 120 words.",
-                    },
-                    {"role": "user", "content": "hi"},
-                ],
-                model="gpt-5.4-mini",
-                paid_system_prompt="Maximum 120 words.\nUse concise Korean.",
-            )
-
-            self.assertEqual(out, "ok")
-            payload = backend._post.call_args.kwargs["payload"]
-            self.assertEqual(
-                payload["messages"][0],
-                {"role": "system", "content": "Maximum 120 words.\nUse concise Korean."},
-            )
-            self.assertEqual(payload["messages"][1], {"role": "user", "content": "hi"})
-            self.assertEqual(len(payload["messages"]), 2)
-
-    def test_remote_backend_caches_model_ids_per_base_url(self):
-        settings = SimpleNamespace(
-            llm_base_url="http://default-server:8080",
-            llm_api_key=None,
-            llm_timeout=30,
-        )
-        backend = RemoteLlamaBackend(settings)
-
-        try:
-            with patch.object(
-                backend,
-                "_request_json_with_retries",
-                side_effect=[
-                    {"data": [{"id": "openvino-model"}]},
-                    {"data": [{"id": "vulkan-model"}]},
-                ],
-            ) as mock_request:
-                first = backend._get_model_id("http://openvino-server:8082")
-                second = backend._get_model_id("http://llama-server-vulkan-huihui:8083")
-                cached = backend._get_model_id("http://openvino-server:8082")
-
-            self.assertEqual(first, "openvino-model")
-            self.assertEqual(second, "vulkan-model")
-            self.assertEqual(cached, "openvino-model")
-            self.assertEqual(mock_request.call_count, 2)
-            self.assertEqual(
-                mock_request.call_args_list[0].args,
-                ("GET", "http://openvino-server:8082/v1/models"),
-            )
-            self.assertEqual(
-                mock_request.call_args_list[1].args,
-                ("GET", "http://llama-server-vulkan-huihui:8083/v1/models"),
-            )
-        finally:
-            backend.close()
-
-    def test_remote_backend_consumes_context_tokens_from_timings(self):
-        settings = SimpleNamespace(
-            llm_base_url="http://default-server:8080",
-            llm_api_key=None,
-            llm_timeout=30,
-        )
-        backend = RemoteLlamaBackend(settings)
-
-        try:
-            with patch.object(backend, "_get_model_id", return_value="gemma-test"):
-                with patch.object(
-                    backend,
-                    "_request_json_with_retries",
-                    return_value={
-                        "choices": [{"message": {"content": "ok"}}],
-                        "usage": {"prompt_tokens": 120, "completion_tokens": 30, "total_tokens": 150},
-                        "timings": {"cache_n": 900, "prompt_n": 120, "predicted_n": 30},
-                    },
-                ):
-                    out = backend.chat([{"role": "user", "content": "hi"}])
-
-            self.assertEqual(out, "ok")
-            self.assertEqual(
-                backend.consume_last_token_metrics(),
-                {
-                    "prompt_tokens": 120,
-                    "completion_tokens": 30,
-                    "total_tokens": 150,
-                    "context_tokens": 1050,
-                },
-            )
-            self.assertIsNone(backend.consume_last_token_metrics())
-        finally:
-            backend.close()
-
-    def test_remote_backend_chat_uses_gpu_work_lock(self):
-        settings = SimpleNamespace(
-            llm_base_url="http://default-server:8080",
-            llm_api_key=None,
-            llm_timeout=30,
-        )
-        backend = RemoteLlamaBackend(settings)
-        labels: list[str] = []
-
-        @contextmanager
-        def recording_lock(label: str):
-            labels.append(label)
-            yield
-
-        try:
-            with (
-                patch.object(backend, "_get_model_id", return_value="gemma-test"),
-                patch(
-                    "backend.services.llm.backends.remote.gpu_heavy_work_lock",
-                    side_effect=recording_lock,
-                ),
-                patch.object(
-                    backend,
-                    "_request_json_with_retries",
-                    return_value={"choices": [{"message": {"content": "ok"}}]},
-                ),
-            ):
-                out = backend.chat([{"role": "user", "content": "hi"}])
-
-            self.assertEqual(out, "ok")
-            self.assertEqual(labels, ["remote_llm_chat"])
-        finally:
-            backend.close()
-
     def test_llm_service_reset_context_uses_remote_backend(self):
-        with patch("backend.services.llm.config.settings") as mock_settings:
-            mock_settings.llm_base_url = "http://localhost:8080"
-            mock_settings.llm_api_key = None
-            mock_settings.llm_timeout = 30
-            mock_settings.open_api_key = None
-            mock_settings.ai_report_api_key = None
-            mock_settings.ai_report_base_url = None
-            mock_settings.ai_report_model = None
-            mock_settings.ai_report_fallback_model = None
-            mock_settings.ai_report_timeout_sec = 30
-            mock_settings.llm_remote_model_path_file = None
-            mock_settings.llm_remote_model_dir = "/data"
-            mock_settings.llm_remote_default_model = "dummy.gguf"
-
+        with patched_llm_settings(
+            llm_base_url="http://localhost:8080",
+            ai_report_api_key=None,
+            ai_report_base_url=None,
+            ai_report_model=None,
+            ai_report_fallback_model=None,
+        ):
             with patch.object(RemoteLlamaBackend, "reset_context", return_value=True) as reset_mock:
                 llm = LLMService.get_instance()
                 self.assertTrue(llm.reset_context())
                 reset_mock.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()
