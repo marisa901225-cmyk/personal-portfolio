@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
+import pandas as pd
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -173,6 +174,30 @@ def test_finalize_day_no_longer_creates_backup_zip(tmp_path) -> None:
     assert summary_text.startswith("[마감] 20260418")
     assert notifier.files == []
     assert list((tmp_path / "output").glob("*.zip")) == []
+
+
+def test_finalize_day_skips_holiday(tmp_path) -> None:
+    class _HolidayAPI:
+        def daily_bars(self, code: str, end: str, lookback: int) -> pd.DataFrame:
+            del code, lookback
+            if end == "20260525":
+                return pd.DataFrame([{"date": "20260523", "close": 100, "volume": 1}])
+            return pd.DataFrame()
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+    )
+    notifier = _SpyNotifier()
+    bot = HybridTradingBot(_HolidayAPI(), config=cfg, notifier=notifier)  # type: ignore[arg-type]
+    bot.state.trade_date = "20260525"
+    bot.journal = TradeJournal(output_dir=cfg.output_dir, asof_date="20260525")
+
+    summary_text = bot.finalize_day()
+
+    assert summary_text is None
+    assert notifier.texts == []
 
 
 def test_finalize_day_prefers_account_realized_pnl_summary(tmp_path) -> None:

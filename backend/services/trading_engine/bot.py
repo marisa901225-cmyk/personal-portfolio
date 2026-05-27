@@ -101,6 +101,13 @@ class HybridTradingBot(
             return None
 
         today = self.state.trade_date
+        try:
+            if not is_trading_day(self.api, today, config=self.config):
+                logger.info("skip finalize_day on non-trading day: %s", today)
+                return None
+        except Exception:
+            logger.warning("finalize_day trading day check failed; proceeding", exc_info=True)
+
         realized_pnl = finalize_realized_pnl(self, logger=logger)
 
         self._journal(
