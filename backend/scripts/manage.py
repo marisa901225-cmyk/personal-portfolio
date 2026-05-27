@@ -125,6 +125,30 @@ def _copy_backup_to_external_drive(archive_path: Path, external_backup_path: Pat
         return False
 
 
+def _send_backup_status_to_telegram(message: str) -> bool:
+    """Send only the backup status message to Telegram, not the archive file."""
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not bot_token or not chat_id:
+        return False
+
+    try:
+        import requests
+
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        response = requests.post(
+            url,
+            data={"chat_id": chat_id, "text": message},
+            timeout=10,
+        )
+        response.raise_for_status()
+        print("Telegram backup status message sent.")
+        return True
+    except Exception as e:
+        logging.error(f"Telegram backup notification failed: {e}")
+        return False
+
+
 def backup_db(args):
     """Backup SQLite database, compress, and notify."""
     try:
@@ -260,28 +284,9 @@ def backup_db(args):
     file_size_mb = archive_path.stat().st_size / 1024 / 1024
     msg = generate_backup_message(file_size_mb, backup_time_str, drive_success=g_success, external_success=e_success)
 
-    # 텔레그램 전송
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    chat_id = os.getenv("TELEGRAM_CHAT_ID")
-    if bot_token and chat_id:
-        try:
-            parts = BackupService.split_file(archive_path)
-            import requests
-            for idx, part in enumerate(parts):
-                caption = msg if idx == 0 else f"(Part {idx+1})"
-                url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
-                with open(part, "rb") as f:
-                    requests.post(
-                        url,
-                        data={"chat_id": chat_id, "caption": caption},
-                        files={"document": f},
-                        timeout=60,
-                    )
-                if part != archive_path:
-                    part.unlink()
-            print("Telegram backup notification sent.")
-        except Exception as e:
-            logging.error(f"Telegram backup failed: {e}")
+    # 텔레그램에는 파일을 올리지 않고 완료 상태만 전송합니다.
+    # 백업 파일은 Google Drive/외장하드 경로를 정본으로 유지해 분할 파일명을 만들지 않습니다.
+    _send_backup_status_to_telegram(msg)
 
     # Google Drive 관련 중복 코드는 위에서 처리함
 

@@ -121,3 +121,33 @@ def test_copy_backup_to_external_drive_missing_path(tmp_path):
     result = manage._copy_backup_to_external_drive(archive_path, missing_dir)
 
     assert result is False
+
+
+def test_send_backup_status_to_telegram_sends_message_only(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "token")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "chat")
+
+    response = MagicMock()
+    response.raise_for_status.return_value = None
+
+    with patch("requests.post", return_value=response) as mock_post:
+        result = manage._send_backup_status_to_telegram("backup done")
+
+    assert result is True
+    mock_post.assert_called_once()
+    url = mock_post.call_args.args[0]
+    kwargs = mock_post.call_args.kwargs
+    assert url == "https://api.telegram.org/bottoken/sendMessage"
+    assert kwargs["data"] == {"chat_id": "chat", "text": "backup done"}
+    assert "files" not in kwargs
+
+
+def test_send_backup_status_to_telegram_skips_without_config(monkeypatch):
+    monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+
+    with patch("requests.post") as mock_post:
+        result = manage._send_backup_status_to_telegram("backup done")
+
+    assert result is False
+    mock_post.assert_not_called()
