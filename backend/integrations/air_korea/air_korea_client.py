@@ -1,7 +1,9 @@
 import logging
-import httpx
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
+
+import httpx
+
 from backend.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -47,18 +49,12 @@ class AirKoreaClient:
                     if not items:
                         return None
                     
-                    # 해당 지역(districtName)의 경보 중 해제되지 않은 것 우선
+                    # 해당 지역(districtName)의 경보 중 해제되지 않은 것만 반환
                     # items는 보통 최신순으로 정렬되어 있음
                     for item in items:
                         if item.get("districtName") == district_name:
-                            # clearDate가 없거나 현재 시각보다 미래면 아직 발령 중으로 간주
                             if not item.get("clearDate"):
                                 return item
-                    
-                    # 발령 중인 게 없으면 해당 지역의 가장 최신 데이터 반환
-                    for item in items:
-                        if item.get("districtName") == district_name:
-                            return item
                             
                 else:
                     logger.error(f"AirKorea API HTTP error: {response.status_code}")
