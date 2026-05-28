@@ -3,8 +3,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
+from backend.integrations.air_korea import air_korea_client as air_korea_module
 from backend.services.news.weather_message import generate_weather_message_with_llm
 
 
@@ -43,6 +46,33 @@ class _FakeLLM:
 
     def get_last_error(self):
         return None
+
+
+class _FakeAirKoreaResponse:
+    status_code = 200
+    text = ""
+
+    def __init__(self, items: list[dict[str, str]]) -> None:
+        self._items = items
+
+    def json(self) -> dict:
+        return {"response": {"body": {"items": self._items}}}
+
+
+class _FakeAirKoreaAsyncClient:
+    def __init__(self, response: _FakeAirKoreaResponse, calls: list[dict]) -> None:
+        self._response = response
+        self._calls = calls
+
+    async def __aenter__(self) -> "_FakeAirKoreaAsyncClient":
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    async def get(self, url: str, *, params: dict, timeout: float) -> _FakeAirKoreaResponse:
+        self._calls.append({"url": url, "params": params, "timeout": timeout})
+        return self._response
 
 
 class WeatherMessageRoutingTests(unittest.IsolatedAsyncioTestCase):
@@ -157,3 +187,61 @@ class WeatherMessageRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("긴 브리핑 문장입니다", message)
         self.assertGreater(len(message), 3500)
         self.assertNotIn("이하 생략", message)
+
+
+@pytest.mark.asyncio
+async def test_air_korea_ignores_cleared_recent_alarm(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict] = []
+    response = _FakeAirKoreaResponse(
+        [
+            {
+                "districtName": "서울",
+                "itemCode": "PM10",
+                "issueGbn": "주의보",
+                "issueDate": "2026-04-20",
+                "issueTime": "21:00",
+                "issueVal": "191",
+                "clearDate": "2026-04-21",
+                "clearTime": "15:00",
+                "clearVal": "92",
+            }
+        ]
+    )
+
+    monkeypatch.setattr(air_korea_module.settings, "kma_service_key", "test-key")
+    monkeypatch.setattr(
+        air_korea_module.httpx,
+        "AsyncClient",
+        lambda: _FakeAirKoreaAsyncClient(response, calls),
+    )
+
+    result = await air_korea_module.air_korea_client.get_latest_active_alarm(district_name="서울")
+
+    assert result is None
+    assert calls
+
+
+@pytest.mark.asyncio
+async def test_air_korea_returns_uncleared_alarm(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict] = []
+    active_alarm = {
+        "districtName": "서울",
+        "itemCode": "PM25",
+        "issueGbn": "주의보",
+        "issueDate": "2026-05-28",
+        "issueTime": "09:00",
+        "issueVal": "80",
+        "clearDate": "",
+    }
+    response = _FakeAirKoreaResponse([active_alarm])
+
+    monkeypatch.setattr(air_korea_module.settings, "kma_service_key", "test-key")
+    monkeypatch.setattr(
+        air_korea_module.httpx,
+        "AsyncClient",
+        lambda: _FakeAirKoreaAsyncClient(response, calls),
+    )
+
+    result = await air_korea_module.air_korea_client.get_latest_active_alarm(district_name="서울")
+
+    assert result == active_alarm
