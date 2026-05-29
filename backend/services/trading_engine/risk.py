@@ -26,6 +26,7 @@ def can_enter(
     now: datetime,
     config: TradeEngineConfig,
     is_trading_day_value: bool = True,
+    available_cash_krw: float | None = None,
 ) -> tuple[bool, str]:
     normalized_entry_type = str(entry_type or "").strip().upper()
     if normalized_entry_type not in {"S", "T"}:
@@ -55,9 +56,17 @@ def can_enter(
         if _count_reserved_positions(state, "S") >= config.max_swing_positions:
             return False, "MAX_SWING_POSITIONS"
     else:
-        if state.day_entries_today >= _effective_max_day_entries_per_day(state, config):
+        if state.day_entries_today >= _effective_max_day_entries_per_day(
+            state,
+            config,
+            available_cash_krw=available_cash_krw,
+        ):
             return False, "MAX_DAY_ENTRIES_DAY"
-        if _count_reserved_positions(state, "T") >= _effective_max_day_positions(state, config):
+        if _count_reserved_positions(state, "T") >= _effective_max_day_positions(
+            state,
+            config,
+            available_cash_krw=available_cash_krw,
+        ):
             return False, "MAX_DAY_POSITIONS"
         if _should_block_day_afternoon_entry(state=state, now=now, cfg=config):
             return False, "DAY_AFTERNOON_LOSS_LIMIT"
@@ -152,6 +161,8 @@ def should_exit_position(
 def _effective_max_day_entries_per_day(
     state: TradeState,
     cfg: TradeEngineConfig,
+    *,
+    available_cash_krw: float | None = None,
 ) -> int:
     base_limit = max(0, int(cfg.max_day_entries_per_day))
     if not bool(getattr(cfg, "day_conditional_extra_entries_enabled", True)):
@@ -164,7 +175,12 @@ def _effective_max_day_entries_per_day(
     if not _conditional_extra_performance_allows(state=state, cfg=cfg):
         return base_limit
 
-    return base_limit + _conditional_extra_entries_supported_by_budget(state=state, cfg=cfg, extra_entries=extra_entries)
+    return base_limit + _conditional_extra_entries_supported_by_budget(
+        state=state,
+        cfg=cfg,
+        extra_entries=extra_entries,
+        available_cash_krw=available_cash_krw,
+    )
 
 
 def _conditional_extra_entries_supported_by_budget(
@@ -172,15 +188,23 @@ def _conditional_extra_entries_supported_by_budget(
     state: TradeState,
     cfg: TradeEngineConfig,
     extra_entries: int,
+    available_cash_krw: float | None = None,
 ) -> int:
+    extra_slot_floor = _day_extra_slot_budget_floor(cfg)
+    if extra_slot_floor <= 0:
+        return extra_entries
+
+    if available_cash_krw is not None:
+        cash_available = max(0.0, float(available_cash_krw))
+        if cash_available < extra_slot_floor:
+            return 0
+        return max(0, min(extra_entries, int(cash_available // extra_slot_floor)))
+
     unused_swing_budget = _unused_swing_budget_for_day(state=state, cfg=cfg)
     if unused_swing_budget <= 0:
         return 0
 
     total_day_budget = max(0.0, float(cfg.initial_capital) * float(cfg.day_cash_ratio)) + unused_swing_budget
-    extra_slot_floor = _day_extra_slot_budget_floor(cfg)
-    if extra_slot_floor <= 0:
-        return extra_entries
     if unused_swing_budget < extra_slot_floor:
         return 0
 
@@ -188,7 +212,12 @@ def _conditional_extra_entries_supported_by_budget(
     return max(0, min(1, extra_entries, affordable_slots - 1))
 
 
-def _effective_max_day_positions(state: TradeState, cfg: TradeEngineConfig) -> int:
+def _effective_max_day_positions(
+    state: TradeState,
+    cfg: TradeEngineConfig,
+    *,
+    available_cash_krw: float | None = None,
+) -> int:
     configured_limit = max(0, int(getattr(cfg, "max_day_positions", 0) or 0))
     if configured_limit <= 1:
         return configured_limit
@@ -200,6 +229,7 @@ def _effective_max_day_positions(state: TradeState, cfg: TradeEngineConfig) -> i
         state=state,
         cfg=cfg,
         extra_entries=max(0, int(getattr(cfg, "day_conditional_extra_entries", 0) or 0)),
+        available_cash_krw=available_cash_krw,
     )
     return max(1, min(configured_limit, budget_supported_slots))
 

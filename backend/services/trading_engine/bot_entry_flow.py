@@ -301,6 +301,7 @@ class BotEntryFlowMixin:
             now=now,
             config=self.config,
             is_trading_day_value=True,
+            available_cash_krw=self._available_cash_for_day_extra_slot(),
         )
         if not ok:
             self._pass(reason, regime)
@@ -329,6 +330,7 @@ class BotEntryFlowMixin:
             now=now,
             config=self.config,
             is_trading_day_value=True,
+            available_cash_krw=self._available_cash_for_day_extra_slot(),
         )
         if not ok:
             self._pass(reason, regime)
@@ -346,6 +348,7 @@ class BotEntryFlowMixin:
                     now=now,
                     config=self.config,
                     is_trading_day_value=True,
+                    available_cash_krw=self._available_cash_for_day_extra_slot(),
                 )
                 if not ok:
                     entry_block_reason = reason
@@ -490,6 +493,15 @@ class BotEntryFlowMixin:
         if not bool(getattr(self.config, "day_conditional_extra_entries_enabled", False)):
             return 0
         return max(0, int(getattr(self.config, "day_conditional_extra_min_order_amount_krw", 0) or 0))
+
+    def _available_cash_for_day_extra_slot(self) -> float | None:
+        if not bool(getattr(self.config, "day_conditional_extra_entries_enabled", False)):
+            return None
+        try:
+            return max(0.0, float(self.api.cash_available()))
+        except Exception:
+            logger.warning("day extra slot cash snapshot failed; falling back to state budget", exc_info=True)
+            return None
 
     def _count_reserved_day_positions(self) -> int:
         reserved_codes = {
