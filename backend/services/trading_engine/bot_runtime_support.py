@@ -31,22 +31,18 @@ def entry_sizing_fields(result: object) -> dict[str, object]:
 
 
 def strategy_budget_cash_cap(bot, *, cash_ratio: float, position_type: str | None = None) -> float | None:
-    base_cap = max(0.0, float(bot.config.initial_capital) * float(cash_ratio))
     normalized_position_type = str(position_type or "").strip().upper()
-    profit_buffer = (
-        principal_buffer_from_account(bot, logger=logging.getLogger(__name__))
-        if bot.config.use_realized_profit_buffer
-        else 0.0
-    )
+    if normalized_position_type == "S":
+        account_budget_total = account_budget_total_from_account(bot, logger=logging.getLogger(__name__))
+        base_cap = max(0.0, account_budget_total * float(cash_ratio))
+    else:
+        base_cap = max(0.0, float(bot.config.initial_capital) * float(cash_ratio))
     unused_swing_budget = 0.0
     budget_cap = base_cap
     if normalized_position_type == "S":
-        budget_cap += profit_buffer
+        budget_cap = max(0.0, base_cap - deployed_swing_cost_from_state(bot))
     elif normalized_position_type == "T":
-        unused_swing_budget = unused_swing_budget_for_day(
-            bot,
-            profit_buffer=profit_buffer,
-        )
+        unused_swing_budget = unused_swing_budget_for_day(bot)
         budget_cap += unused_swing_budget
 
     return _cap_day_entry_budget(
@@ -141,17 +137,27 @@ def _day_extra_slot_budget_floor(config: TradeEngineConfig) -> float:
     return max(base_day_budget, min_order_amount)
 
 
-def unused_swing_budget_for_day(bot, *, profit_buffer: float = 0.0) -> float:
+def unused_swing_budget_for_day(bot) -> float:
     if not bool(getattr(bot.config, "day_reuse_unused_swing_cash_enabled", True)):
         return 0.0
 
+    account_budget_total = account_budget_total_from_account(bot, logger=logging.getLogger(__name__))
     swing_budget_cap = max(
         0.0,
-        float(bot.config.initial_capital) * float(bot.config.swing_cash_ratio) + max(0.0, float(profit_buffer)),
+        account_budget_total * float(bot.config.swing_cash_ratio),
     )
     if swing_budget_cap <= 0:
         return 0.0
 
+    deployed_swing_cost = deployed_swing_cost_from_state(bot)
+    if deployed_swing_cost <= 0:
+        return 0.0
+
+    unused_swing_budget = max(0.0, swing_budget_cap - deployed_swing_cost)
+    return unused_swing_budget
+
+
+def deployed_swing_cost_from_state(bot) -> float:
     deployed_swing_cost = 0.0
     for position in bot.state.open_positions.values():
         if getattr(position, "type", "") != "S":
@@ -161,12 +167,32 @@ def unused_swing_budget_for_day(bot, *, profit_buffer: float = 0.0) -> float:
         if qty <= 0 or entry_price <= 0:
             continue
         deployed_swing_cost += float(qty) * float(entry_price)
+    return deployed_swing_cost
 
-    if deployed_swing_cost <= 0:
-        return 0.0
 
-    unused_swing_budget = max(0.0, swing_budget_cap - deployed_swing_cost)
-    return unused_swing_budget
+def account_budget_total_from_account(bot, *, logger: logging.Logger) -> float:
+    if not bool(getattr(bot.config, "use_realized_profit_buffer", True)):
+        return max(0.0, float(bot.config.initial_capital))
+    try:
+        cash_available = max(0.0, float(bot.api.cash_available()))
+        positions = bot.api.positions() or []
+        eval_value_total = 0.0
+        for item in positions:
+            qty = parse_numeric(item.get("qty") or item.get("hldg_qty"))
+            current_price = parse_numeric(
+                item.get("current_price")
+                or item.get("prpr")
+                or item.get("now_pric")
+                or item.get("avg_price")
+                or item.get("pchs_avg_pric")
+            )
+            if qty is None or current_price is None or qty <= 0 or current_price <= 0:
+                continue
+            eval_value_total += float(qty) * float(current_price)
+        return max(0.0, cash_available + eval_value_total)
+    except Exception:
+        logger.warning("account budget total snapshot failed; using configured initial capital", exc_info=True)
+        return max(0.0, float(bot.config.initial_capital))
 
 
 def principal_buffer_from_account(bot, *, logger: logging.Logger) -> float:

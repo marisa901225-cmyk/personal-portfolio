@@ -5,6 +5,48 @@ from backend.services.trading_engine.day_stop_review import (
     DayStopReviewResult,
 )
 
+def test_swing_budget_uses_account_total_ratio(tmp_path) -> None:
+    api = FakeAPI()
+    api._cash_available = 1_200_000
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        initial_capital=1_000_000,
+        swing_cash_ratio=0.80,
+        use_realized_profit_buffer=True,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+
+    assert bot._strategy_budget_cash_cap(cash_ratio=cfg.swing_cash_ratio, position_type="S") == 960_000
+
+
+def test_swing_budget_subtracts_deployed_swing_cost_from_account_ratio(tmp_path) -> None:
+    api = FakeAPI()
+    api._cash_available = 547_000
+    api._positions = [{"code": "005930", "qty": 2, "avg_price": 326_500.0, "current_price": 326_500}]
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        initial_capital=1_000_000,
+        swing_cash_ratio=0.80,
+        use_realized_profit_buffer=True,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.open_positions["005930"] = PositionState(
+        type="S",
+        entry_time="2026-04-10T09:05:00",
+        entry_price=326_500.0,
+        qty=2,
+        highest_price=326_500.0,
+        entry_date="20260410",
+        bars_held=0,
+    )
+
+    assert bot._strategy_budget_cash_cap(cash_ratio=cfg.swing_cash_ratio, position_type="S") == 307_000
+
+
 def test_day_entry_uses_strategy_cap_not_remaining_cash(tmp_path) -> None:
     asof = "20260410"
     api = FakeAPI()
@@ -172,9 +214,9 @@ def test_day_entry_uses_profit_buffer_only_after_swing_budget_leaves_room(tmp_pa
         )
 
     assert api.order_calls == [
-        {"side": "BUY", "code": "005930", "qty": 6, "order_type": "limit", "price": 50_100}
+        {"side": "BUY", "code": "005930", "qty": 5, "order_type": "limit", "price": 50_100}
     ]
-    assert bot.state.open_positions["005930"].qty == 6
+    assert bot.state.open_positions["005930"].qty == 5
 
 
 def test_day_entry_uses_account_basis_buffer_without_unrealized_gain(tmp_path) -> None:
