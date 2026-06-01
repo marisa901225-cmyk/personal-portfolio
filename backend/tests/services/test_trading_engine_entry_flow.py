@@ -307,8 +307,8 @@ def test_swing_can_retry_in_second_window_after_morning_no_pick(tmp_path) -> Non
                 "side": "BUY",
                 "code": "005930",
                 "qty": 8,
-                "order_type": "best",
-                "price": None,
+                "order_type": "limit",
+                "price": 100_100,
             }
         ]
 

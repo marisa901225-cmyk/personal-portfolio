@@ -81,7 +81,7 @@ def test_bot_skips_swing_time_excluded_symbol_on_next_swing_entry(tmp_path) -> N
 
     assert out["status"] == "OK"
     assert api.order_calls == [
-        {"side": "BUY", "code": "000660", "qty": 16, "order_type": "best", "price": None}
+        {"side": "BUY", "code": "000660", "qty": 16, "order_type": "limit", "price": 50_100}
     ]
     assert "011930" not in bot.state.open_positions
     assert "000660" in bot.state.open_positions
@@ -154,7 +154,7 @@ def test_bot_allows_swing_entry_for_day_stoploss_excluded_symbol(tmp_path) -> No
 
     assert out["status"] == "OK"
     assert api.order_calls == [
-        {"side": "BUY", "code": "011930", "qty": 16, "order_type": "best", "price": None}
+        {"side": "BUY", "code": "011930", "qty": 16, "order_type": "limit", "price": 50_100}
     ]
     assert "011930" in bot.state.open_positions
     assert bot.state.open_positions["011930"].type == "S"

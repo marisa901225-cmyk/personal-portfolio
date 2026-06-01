@@ -189,7 +189,7 @@ def test_swing_hold_skips_rebuy_when_same_symbol_is_already_profitable(tmp_path)
 def test_swing_entry_falls_back_to_next_candidate_when_top_pick_is_too_expensive(tmp_path) -> None:
     class BuyableAPI(FakeAPI):
         def buy_order_capacity(self, code: str, order_type: str, price: int | None) -> dict:
-            assert order_type == "best"
+            assert order_type == "limit"
             assert price is not None
             if code == "EXPENSIVE":
                 return {
@@ -244,7 +244,7 @@ def test_swing_entry_falls_back_to_next_candidate_when_top_pick_is_too_expensive
         )
 
     assert api.order_calls == [
-        {"side": "BUY", "code": "CHEAP", "qty": 10, "order_type": "best", "price": None}
+        {"side": "BUY", "code": "CHEAP", "qty": 9, "order_type": "limit", "price": 20_050}
     ]
     assert "CHEAP" in bot.state.open_positions
     assert "EXPENSIVE" not in bot.state.open_positions
@@ -296,7 +296,7 @@ def test_swing_entry_sweeps_same_sector_peer_when_top_and_second_pick_fail_budge
         )
 
     assert api.order_calls == [
-        {"side": "BUY", "code": "DEFPEER", "qty": 5, "order_type": "best", "price": None}
+        {"side": "BUY", "code": "DEFPEER", "qty": 5, "order_type": "limit", "price": 40_050}
     ]
     assert "DEFPEER" in bot.state.open_positions
     assert "LIGTOP" not in bot.state.open_positions

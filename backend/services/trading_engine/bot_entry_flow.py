@@ -60,6 +60,17 @@ def _resolve_day_entry_order(
     )
 
 
+def _resolve_swing_entry_order(
+    *,
+    quote: Quote | None,
+    configured_order_type: str,
+) -> tuple[str, int | None]:
+    return _resolve_day_entry_order_helper(
+        quote=quote,
+        configured_order_type=configured_order_type,
+    )
+
+
 def _swing_retry_codes_with_sector_peers(
     *,
     ranked_codes: list[str],
@@ -183,6 +194,11 @@ class BotEntryFlowMixin:
         result = None
         code = ""
         for ranked_code in ranked_codes:
+            quote = quotes.get(ranked_code) if isinstance(quotes, dict) else None
+            order_type, price = _resolve_swing_entry_order(
+                quote=quote,
+                configured_order_type=self.config.swing_entry_order_type,
+            )
             attempt = enter_position(
                 self.api,
                 self.state,
@@ -195,7 +211,8 @@ class BotEntryFlowMixin:
                 ),
                 asof_date=self.state.trade_date,
                 now=now,
-                order_type=self.config.swing_entry_order_type,
+                order_type=order_type,
+                price=price,
                 on_order_accepted=lambda order: self._record_pending_entry_order(
                     order,
                     strategy_type="S",
