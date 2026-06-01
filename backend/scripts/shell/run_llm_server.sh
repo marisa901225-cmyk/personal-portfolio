@@ -56,7 +56,11 @@ resolve_mmproj_path() {
         echo "/data/mmproj-gemma-4-E2B-it-Q8_0.gguf"
         return
     fi
-    echo "$MMPROJ_PATH"
+    if [[ "$model_name" == *"gemma"* ]]; then
+        echo "$MMPROJ_PATH"
+        return
+    fi
+    echo ""
 }
 
 # 모델 이름에 따라 chat template 옵션 결정
