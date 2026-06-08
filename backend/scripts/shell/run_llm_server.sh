@@ -16,6 +16,7 @@ EXTRA_ARGS=${LLM_EXTRA_ARGS:-}
 CACHE_TYPE_K=${LLM_CACHE_TYPE_K:-}
 CACHE_TYPE_V=${LLM_CACHE_TYPE_V:-}
 FLASH_ATTN=${LLM_FLASH_ATTN:-off}
+ENABLE_MMPROJ=${LLM_ENABLE_MMPROJ:-auto}
 MMPROJ_PATH=${LLM_MMPROJ_PATH:-}
 MEDIA_PATH=${LLM_MEDIA_PATH:-}
 
@@ -48,6 +49,11 @@ resolve_mmproj_path() {
     local model_name
     model_name=$(basename "$model_path" | tr '[:upper:]' '[:lower:]')
 
+    if [[ "$ENABLE_MMPROJ" == "0" ]] || [[ "$ENABLE_MMPROJ" == "false" ]] || [[ "$ENABLE_MMPROJ" == "off" ]] || [[ "$ENABLE_MMPROJ" == "no" ]]; then
+        echo ""
+        return
+    fi
+
     if [[ "$model_name" == *"e4b"* ]] && [ -f "/data/gemma-4-E4B.mmproj-Q8_0.gguf" ]; then
         echo "/data/gemma-4-E4B.mmproj-Q8_0.gguf"
         return
@@ -64,6 +70,9 @@ resolve_mmproj_path() {
         if [ -n "$MMPROJ_PATH" ] && [ -f "$MMPROJ_PATH" ]; then
             echo "$MMPROJ_PATH"
         else
+            if [ -n "$MMPROJ_PATH" ]; then
+                echo "Skipping missing mmproj: $MMPROJ_PATH" >&2
+            fi
             echo ""
         fi
         return
@@ -152,8 +161,12 @@ while true; do
         MMPROJ_ARGS="--mmproj $RESOLVED_MMPROJ_PATH"
     fi
     MEDIA_ARGS=""
-    if [ -n "$MEDIA_PATH" ]; then
+    if [ -n "$MEDIA_PATH" ] && [ -n "$MMPROJ_ARGS" ] && [ -e "$MEDIA_PATH" ]; then
         MEDIA_ARGS="--media-path $MEDIA_PATH"
+    elif [ -n "$MEDIA_PATH" ] && [ -z "$MMPROJ_ARGS" ]; then
+        echo "Skipping media path because no mmproj is loaded: $MEDIA_PATH"
+    elif [ -n "$MEDIA_PATH" ]; then
+        echo "Skipping missing media path: $MEDIA_PATH"
     fi
     echo "Starting llama-server with model: $MODEL_PATH"
     echo "Using template args: $TEMPLATE_ARGS"
@@ -166,6 +179,8 @@ while true; do
     fi
     if [ -n "$MMPROJ_ARGS" ]; then
         echo "Using mmproj args: $MMPROJ_ARGS"
+    else
+        echo "No mmproj loaded; starting text-only server"
     fi
     if [ -n "$MEDIA_ARGS" ]; then
         echo "Using media args: $MEDIA_ARGS"
