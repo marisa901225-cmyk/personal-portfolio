@@ -64,6 +64,7 @@ backend/storage/market_sentiment/
 backend/storage/pension_rebalance/
 backend/storage/charts/
 backend/storage/llm_compare_local/
+homeassistant/
 
 # Tokens & Sensitive Data
 token*.json
