@@ -56,8 +56,16 @@ resolve_mmproj_path() {
         echo "/data/mmproj-gemma-4-E2B-it-Q8_0.gguf"
         return
     fi
+    if [[ "$model_name" == *"12b"* ]] && [ -f "/data/mmproj-gemma-4-12b-it-qat-q4_0.gguf" ]; then
+        echo "/data/mmproj-gemma-4-12b-it-qat-q4_0.gguf"
+        return
+    fi
     if [[ "$model_name" == *"gemma"* ]]; then
-        echo "$MMPROJ_PATH"
+        if [ -n "$MMPROJ_PATH" ] && [ -f "$MMPROJ_PATH" ]; then
+            echo "$MMPROJ_PATH"
+        else
+            echo ""
+        fi
         return
     fi
     echo ""

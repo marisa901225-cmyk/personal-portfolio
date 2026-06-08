@@ -25,7 +25,7 @@ from backend.services.prompt_loader import load_prompt
 class Case:
     name: str
     description: str
-    prompt: str
+    messages: list[dict[str, str]]
     max_tokens: int
     max_score: int
     scorer: Callable[[str], tuple[int, list[str]]]
@@ -234,6 +234,40 @@ def _build_cases() -> list[Case]:
                 issues.append(issue)
         return score, issues
 
+    def random_topic_scorer(text: str) -> tuple[int, list[str]]:
+        score = 0
+        issues: list[str] = []
+        lines = _nonempty_lines(text)
+        body = re.sub(r"^\s*제목\s*:\s*.+?\n+\s*본문\s*:\s*", "", text or "", flags=re.S)
+        body_compact_len = len(body.replace(" ", "").replace("\n", ""))
+        checks = [
+            ("has_title", bool(re.search(r"^\s*제목\s*:", text or "", re.M))),
+            ("has_body", bool(re.search(r"^\s*본문\s*:", text or "", re.M))),
+            ("contains_keywords", all(keyword in text for keyword in ("자판기", "번개", "라면"))),
+            ("body_length", 110 <= body_compact_len <= 340),
+            ("no_reason_tag", "<reason" not in text.lower() and "</reason" not in text.lower()),
+            ("no_english_meta", not _has_english_meta(text)),
+            ("not_too_many_lines", 2 <= len(lines) <= 7),
+        ]
+        for issue, ok in checks:
+            if ok:
+                score += 1
+            else:
+                issues.append(issue)
+        return score, issues
+
+    random_system_prompt = load_prompt("random_topic_full_system") or load_prompt("random_topic_system")
+    random_user_prompt = load_prompt(
+        "random_topic_user",
+        category="언어유희/드립",
+        format="뉴스속보형으로 시작해라",
+        opener="마치 긴급 속보처럼 첫 문장을 열어라",
+        twist="마지막에는 알고 보니 생활용품의 사소한 착각이었다는 식으로 허무하게 꺾어라",
+        must_keywords="자판기, 번개, 라면, 회의실",
+        avoid_keywords="세계멸망, 우주전쟁, 초대형 음모",
+        voice="장난기 많은 20대 친구",
+        voice_rule="말투는 가볍고 빠르지만, 문장은 너무 길게 늘이지 않는다. 친한 친구에게 톡 보내듯 쓰되 설명문처럼 정리하지 않는다.",
+    )
     weather_prompt = load_prompt(
         "weather_message",
         persona="약사의 혼잣말의 마오마오",
@@ -262,13 +296,18 @@ def _build_cases() -> list[Case]:
         Case(
             name="microfiction_three_sentence",
             description="3문장 마이크로픽션, 황당한 설정과 반전",
-            prompt=(
-                "한국어로만 써. 정확히 3문장으로 끝내.\n"
-                "장르는 생활밀착형 SF 코미디.\n"
-                "반드시 'VHS', 'NPC', '라면', '편의점'을 모두 넣어.\n"
-                "상황은 하나만 밀고 가고, 마지막 문장은 허무한 반전으로 끝내.\n"
-                "헤더나 설명 없이 본문만 출력해."
-            ),
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "한국어로만 써. 정확히 3문장으로 끝내.\n"
+                        "장르는 생활밀착형 SF 코미디.\n"
+                        "반드시 'VHS', 'NPC', '라면', '편의점'을 모두 넣어.\n"
+                        "상황은 하나만 밀고 가고, 마지막 문장은 허무한 반전으로 끝내.\n"
+                        "헤더나 설명 없이 본문만 출력해."
+                    ),
+                }
+            ],
             max_tokens=220,
             max_score=9,
             scorer=microfiction_scorer,
@@ -276,13 +315,18 @@ def _build_cases() -> list[Case]:
         Case(
             name="worldbuilding_json",
             description="설정놀이용 세계관 카드 JSON",
-            prompt=(
-                "다음 조건으로 세계관 카드를 만들어. 출력은 JSON 객체만 써.\n"
-                "키는 title, core_rule, faction_a, faction_b, taboo, daily_object, story_hook 만 사용.\n"
-                "세계관 조건: 비가 오면 사람들의 하루 기억 중 하나가 영수증에 인쇄되는 도시.\n"
-                "너무 거창한 종말론 말고, 일상과 권력 다툼이 같이 보이게 해.\n"
-                "story_hook은 1문장, 나머지는 짧은 구절로."
-            ),
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "다음 조건으로 세계관 카드를 만들어. 출력은 JSON 객체만 써.\n"
+                        "키는 title, core_rule, faction_a, faction_b, taboo, daily_object, story_hook 만 사용.\n"
+                        "세계관 조건: 비가 오면 사람들의 하루 기억 중 하나가 영수증에 인쇄되는 도시.\n"
+                        "너무 거창한 종말론 말고, 일상과 권력 다툼이 같이 보이게 해.\n"
+                        "story_hook은 1문장, 나머지는 짧은 구절로."
+                    ),
+                }
+            ],
             max_tokens=240,
             max_score=9,
             scorer=setting_json_scorer,
@@ -290,13 +334,18 @@ def _build_cases() -> list[Case]:
         Case(
             name="dialogue_subtext_scene",
             description="8줄 대사 장면, 서브텍스트와 설정 반영",
-            prompt=(
-                "한국어 대화 장면만 써. 정확히 8줄, A:와 B:가 번갈아 말해.\n"
-                "무대 지문 금지, 설명문 금지.\n"
-                "장면: 옥상 자동판매기 앞에서 헤어진 동업자가 다시 만난다.\n"
-                "반드시 '우산', '빚', '고백'을 모두 넣어.\n"
-                "겉으로는 날씨 얘기 같지만 속으로는 서로 다른 거래를 제안하는 분위기로."
-            ),
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "한국어 대화 장면만 써. 정확히 8줄, A:와 B:가 번갈아 말해.\n"
+                        "무대 지문 금지, 설명문 금지.\n"
+                        "장면: 옥상 자동판매기 앞에서 헤어진 동업자가 다시 만난다.\n"
+                        "반드시 '우산', '빚', '고백'을 모두 넣어.\n"
+                        "겉으로는 날씨 얘기 같지만 속으로는 서로 다른 거래를 제안하는 분위기로."
+                    ),
+                }
+            ],
             max_tokens=220,
             max_score=10,
             scorer=dialogue_scorer,
@@ -304,32 +353,48 @@ def _build_cases() -> list[Case]:
         Case(
             name="setting_catchphrases",
             description="설정놀이용 짧은 후킹 문구 5개",
-            prompt=(
-                "한국어로만 써.\n"
-                "가상의 설정: 꿈을 기록하는 관측소에서 수면세를 걷는 도시.\n"
-                "이 설정을 바탕으로 짧은 후킹 문구 5개를 만들어.\n"
-                "각 줄은 '- '로 시작하고, 36자 이하여야 하며, 서로 다른 어조로 써.\n"
-                "반드시 '관측소', '수면세', '야근'을 전체 출력 안에 포함해."
-            ),
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "한국어로만 써.\n"
+                        "가상의 설정: 꿈을 기록하는 관측소에서 수면세를 걷는 도시.\n"
+                        "이 설정을 바탕으로 짧은 후킹 문구 5개를 만들어.\n"
+                        "각 줄은 '- '로 시작하고, 36자 이하여야 하며, 서로 다른 어조로 써.\n"
+                        "반드시 '관측소', '수면세', '야근'을 전체 출력 안에 포함해."
+                    ),
+                }
+            ],
             max_tokens=180,
             max_score=10,
             scorer=catchphrase_scorer,
         ),
         Case(
+            name="random_topic_service",
+            description="random_topic_full_system + random_topic_user 실서비스 랜덤메시지",
+            messages=[
+                {"role": "system", "content": random_system_prompt},
+                {"role": "user", "content": random_user_prompt},
+            ],
+            max_tokens=700,
+            max_score=7,
+            scorer=random_topic_scorer,
+        ),
+        Case(
             name="weather_persona_roleplay",
             description="weather_message 프롬프트 기반 장문 페르소나 몰입",
-            prompt=weather_prompt,
-            max_tokens=900,
+            messages=[{"role": "user", "content": weather_prompt}],
+            max_tokens=3000,
             max_score=7,
             scorer=weather_persona_scorer,
         ),
     ]
 
 
-def _call_case(base_url: str, model_id: str, prompt: str, max_tokens: int) -> dict[str, Any]:
+def _call_case(base_url: str, model_id: str, messages: list[dict[str, str]], max_tokens: int) -> dict[str, Any]:
     payload = {
         "model": model_id,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": messages,
         "max_tokens": max_tokens,
         "temperature": 0.9,
         "top_p": 0.95,
@@ -360,6 +425,12 @@ def main() -> int:
     repeats = int(os.environ.get("BENCH_REPEATS", "3"))
     model_id = requests.get(f"{base_url.rstrip('/')}/v1/models", timeout=30).json()["data"][0]["id"]
     cases = _build_cases()
+    selected_cases = {case.strip() for case in os.environ.get("BENCH_CASES", "").split(",") if case.strip()}
+    if selected_cases:
+        cases = [case for case in cases if case.name in selected_cases]
+        missing_cases = selected_cases - {case.name for case in cases}
+        if missing_cases:
+            raise SystemExit(f"Unknown BENCH_CASES: {', '.join(sorted(missing_cases))}")
 
     results: dict[str, Any] = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -380,9 +451,9 @@ def main() -> int:
 
     for case in cases:
         for _ in range(max(warmups, 0)):
-            _call_case(base_url, model_id, case.prompt, case.max_tokens)
+            _call_case(base_url, model_id, case.messages, case.max_tokens)
 
-        runs = [_call_case(base_url, model_id, case.prompt, case.max_tokens) for _ in range(max(repeats, 1))]
+        runs = [_call_case(base_url, model_id, case.messages, case.max_tokens) for _ in range(max(repeats, 1))]
         scores: list[int] = []
         for run in runs:
             score, issues = case.scorer(run["content"])

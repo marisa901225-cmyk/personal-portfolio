@@ -50,6 +50,7 @@ META_PATTERNS = (
 )
 DEFAULT_WARMUPS = 1
 DEFAULT_REPEATS = 3
+DEFAULT_TOKEN_SCALE = 1.0
 
 
 @dataclass(frozen=True)
@@ -172,6 +173,32 @@ def _build_cases() -> list[Case]:
             expected_shape="plain",
         ),
     ]
+
+
+def _apply_token_budget(
+    cases: list[Case],
+    *,
+    token_scale: float,
+    min_max_tokens: int | None,
+) -> list[Case]:
+    scaled_cases: list[Case] = []
+    normalized_scale = max(token_scale, 0.1)
+    for case in cases:
+        scaled_tokens = int(round(case.max_tokens * normalized_scale))
+        if min_max_tokens is not None:
+            scaled_tokens = max(scaled_tokens, min_max_tokens)
+        scaled_cases.append(
+            Case(
+                name=case.name,
+                description=case.description,
+                messages=case.messages,
+                max_tokens=max(scaled_tokens, 1),
+                temperature=case.temperature,
+                top_p=case.top_p,
+                expected_shape=case.expected_shape,
+            )
+        )
+    return scaled_cases
 
 
 def _get_model_id(base_url: str) -> str:
@@ -332,6 +359,23 @@ def _build_parser() -> ArgumentParser:
     parser.add_argument("right_label", nargs="?", default=DEFAULT_RIGHT_LABEL)
     parser.add_argument("--warmups", type=int, default=DEFAULT_WARMUPS)
     parser.add_argument("--repeats", type=int, default=DEFAULT_REPEATS)
+    parser.add_argument(
+        "--single",
+        action="store_true",
+        help="Benchmark only the left endpoint.",
+    )
+    parser.add_argument(
+        "--token-scale",
+        type=float,
+        default=DEFAULT_TOKEN_SCALE,
+        help="Multiply each case max_tokens by this value.",
+    )
+    parser.add_argument(
+        "--min-max-tokens",
+        type=int,
+        default=None,
+        help="Ensure every case uses at least this max_tokens value.",
+    )
     return parser
 
 
@@ -367,11 +411,14 @@ def main() -> int:
     left_label = args.left_label
     right_label = args.right_label
 
-    cases = _build_cases()
-    services = [
-        {"label": left_label, "base_url": left_base},
-        {"label": right_label, "base_url": right_base},
-    ]
+    cases = _apply_token_budget(
+        _build_cases(),
+        token_scale=args.token_scale,
+        min_max_tokens=args.min_max_tokens,
+    )
+    services = [{"label": left_label, "base_url": left_base}]
+    if not args.single:
+        services.append({"label": right_label, "base_url": right_base})
 
     results: dict[str, Any] = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -380,6 +427,8 @@ def main() -> int:
             "measured_runs_per_case": max(args.repeats, 1),
             "temperature": 0.0,
             "top_p": 1.0,
+            "token_scale": max(args.token_scale, 0.1),
+            "min_max_tokens": args.min_max_tokens,
             "notes": [
                 "same prompts/cases for both services",
                 "deterministic decoding for lower run-to-run variance",
@@ -403,6 +452,7 @@ def main() -> int:
             "name": case.name,
             "description": case.description,
             "expected_shape": case.expected_shape,
+            "max_tokens": case.max_tokens,
             "results": {},
         }
         print(f"\n=== {case.name} | {case.description} ===")
