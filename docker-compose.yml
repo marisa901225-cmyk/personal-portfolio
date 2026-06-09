@@ -217,6 +217,20 @@ services:
     environment:
       - TZ=Asia/Seoul
 
+  homeassistant-cli:
+    build:
+      context: ./docker/homeassistant-cli
+      dockerfile: Dockerfile
+    container_name: homeassistant-cli
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - TZ=Asia/Seoul
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - homeassistant
+
   # openvino-server:
   #   build:
   #     context: ./backend/openvino_server
