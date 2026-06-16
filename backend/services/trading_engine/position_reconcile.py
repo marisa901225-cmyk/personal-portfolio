@@ -14,7 +14,13 @@ from .notification_text import (
     format_state_sync_update_message,
     format_unknown_broker_position_message,
 )
-from .state import PositionState, TradeState
+from .state import (
+    PositionState,
+    TradeState,
+    mark_day_stoploss_today,
+    mark_swing_time_excluded,
+    record_day_stoploss_failure,
+)
 from .types import BrokerPosition
 from .utils import parse_numeric
 
@@ -83,6 +89,15 @@ def reconcile_state_with_broker_positions(
             fill_avg_price = parse_numeric(drop_meta.get("exit_fill_avg_price"))
             if fill_avg_price is not None and pos.entry_price > 0:
                 drop_meta["exit_fill_pnl_pct"] = (float(fill_avg_price) / float(pos.entry_price) - 1.0) * 100.0
+                apply_reconciled_exit_fill_to_state(
+                    state=state,
+                    position=pos,
+                    code=code,
+                    reason=str(drop_meta.get("exit_reason") or ""),
+                    fill_qty=drop_meta.get("exit_fill_qty"),
+                    fill_avg_price=fill_avg_price,
+                    config=cfg,
+                )
         if logger is not None:
             logger.warning(
                 "state reconcile dropped stale position code=%s type=%s qty=%s broker_qty=0 last_price=%s",
@@ -243,6 +258,48 @@ def collect_drop_meta(
         "exit_reason": None,
         "exit_order_id": None,
     }
+
+
+def apply_reconciled_exit_fill_to_state(
+    *,
+    state: TradeState,
+    position: PositionState,
+    code: str,
+    reason: str,
+    fill_qty: object,
+    fill_avg_price: object,
+    config: TradeEngineConfig,
+) -> None:
+    qty = int(parse_numeric(fill_qty) or 0)
+    avg_price = parse_numeric(fill_avg_price)
+    if qty <= 0 or avg_price is None or avg_price <= 0:
+        return
+
+    pnl = (float(avg_price) - float(position.entry_price)) * qty
+    state.realized_pnl_today += pnl
+    state.realized_pnl_total += pnl
+    if pnl < 0:
+        state.consecutive_losses_today += 1
+    else:
+        state.consecutive_losses_today = 0
+
+    normalized_reason = str(reason or "").strip().upper()
+    if position.type == "T":
+        if pnl > 0:
+            state.day_wins_today += 1
+        elif pnl < 0:
+            state.day_losses_today += 1
+
+        if normalized_reason == "SL":
+            exclude_after_losses = max(1, int(config.day_stoploss_exclude_after_losses))
+            record_day_stoploss_failure(
+                state,
+                code=code,
+                exclude_after_losses=exclude_after_losses,
+            )
+            mark_day_stoploss_today(state, code=code)
+    elif position.type == "S" and normalized_reason == "TIME":
+        mark_swing_time_excluded(state, code=code)
 
 
 def collect_exit_fill_meta(

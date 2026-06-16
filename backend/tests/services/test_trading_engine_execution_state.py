@@ -176,12 +176,66 @@ def test_reconcile_state_drop_links_pending_exit_fill_from_daily_ccld() -> None:
     assert journal_rows[0][1]["exit_fill_qty"] == 8
     assert journal_rows[0][1]["exit_fill_avg_price"] == 35_400.0
     assert round(journal_rows[0][1]["exit_fill_pnl_pct"], 4) == -1.1173
+    assert state.day_losses_today == 1
+    assert state.consecutive_losses_today == 1
+    assert state.realized_pnl_today == -3_200.0
+    assert state.realized_pnl_total == -3_200.0
     assert notifications == [
         "[상태동기화][정리] 319400 로컬수량=8 브로커수량=0 기준=브로커계좌조회 "
         "마지막가=35400 로컬평단=35800 마지막가기준손익=-1.12% "
         "체결수량=8 체결가=35400 체결손익=-1.12% "
         "주문사유=손절 주문번호=0008965100"
     ]
+
+def test_reconcile_state_drop_counts_stoploss_fill_for_day_reentry_block() -> None:
+    from backend.services.trading_engine.position_helpers import reconcile_state_with_broker_positions
+
+    class FillLookupAPI(FakeAPI):
+        def daily_order_fills(self, **kwargs) -> list[dict]:
+            assert kwargs["code"] == "047040"
+            assert kwargs["order_id"] == "0023221400"
+            return [
+                {
+                    "order_id": "0023221400",
+                    "code": "047040",
+                    "filled_qty": 8,
+                    "avg_price": 26_550.0,
+                }
+            ]
+
+    api = FillLookupAPI()
+    api._positions = []
+    api._quotes["047040"] = {"price": 26_600, "change_pct": 18.0}
+    state = new_state("20260616")
+    state.open_positions["047040"] = PositionState(
+        type="T",
+        entry_time="2026-06-16T13:04:04",
+        entry_price=27_200.0,
+        qty=8,
+        highest_price=27_500.0,
+        entry_date="20260616",
+    )
+    state.pending_exit_orders["047040"] = {
+        "strategy_type": "T",
+        "reason": "SL",
+        "order_id": "0023221400",
+        "qty": 8,
+        "order_time": "133151",
+    }
+
+    reconcile_state_with_broker_positions(
+        api,
+        state,
+        trade_date="20260616",
+        journal=lambda event, **fields: None,
+        notify_text=lambda text: None,
+        now=datetime(2026, 6, 16, 13, 32, 0),
+    )
+
+    assert state.day_losses_today == 1
+    assert state.consecutive_losses_today == 1
+    assert state.realized_pnl_today == -5_200.0
+    assert get_day_stoploss_codes_today(state) == {"047040"}
 
 def test_reconcile_state_adds_broker_only_position_using_day_journal_hint(tmp_path) -> None:
     from backend.services.trading_engine.position_helpers import reconcile_state_with_broker_positions
