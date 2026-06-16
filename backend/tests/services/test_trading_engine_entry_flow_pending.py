@@ -58,6 +58,7 @@ def test_day_entry_marks_pending_on_accepted_order_without_open_order_and_stops_
         )
 
     assert bot.state.pending_entry_orders == {"005935": "T"}
+    assert bot.state.day_entry_windows_used_today == {0}
     assert api.order_calls == [
         {"side": "BUY", "code": "005935", "qty": 1, "order_type": "limit", "price": 158_300}
     ]

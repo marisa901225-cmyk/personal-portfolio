@@ -413,6 +413,7 @@ class BotEntryFlowMixin:
                 on_order_accepted=lambda order: self._record_pending_entry_order(
                     order,
                     strategy_type="T",
+                    now=now,
                 ),
             )
             if attempt:
@@ -582,8 +583,18 @@ class BotEntryFlowMixin:
             logger=logger,
         )
 
-    def _record_pending_entry_order(self, order: dict, *, strategy_type: str) -> None:
+    def _record_pending_entry_order(
+        self,
+        order: dict,
+        *,
+        strategy_type: str,
+        now: datetime | None = None,
+    ) -> None:
         _record_pending_entry_order_helper(self, order, strategy_type=strategy_type)
+        if strategy_type == "T" and now is not None:
+            window_index = current_entry_window_index(now, self.config)
+            if window_index is not None:
+                self.state.day_entry_windows_used_today.add(window_index)
 
     def _sync_broker_filled_position(
         self,
