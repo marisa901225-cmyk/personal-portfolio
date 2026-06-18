@@ -55,6 +55,7 @@ class TradeEngineConfig:
     swing_stop_llm_review_reasoning_effort: str = "low"
     swing_stop_llm_hard_stop_pct: float = -0.08
     swing_stop_llm_hold_confidence_min: float = 0.55
+    swing_trail_llm_review_enabled: bool = True
     swing_take_profit_pct: float = 0.05
     swing_trail_start: float = 0.05
     swing_trail_gap: float = -0.02

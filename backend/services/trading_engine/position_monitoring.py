@@ -68,6 +68,7 @@ def monitor_positions(bot, *, now: datetime, logger) -> None:
                         quote_price=price,
                         pnl_pct=pnl_pct,
                         trend_meta=swing_trend_meta,
+                        trigger_reason=reason or "SL",
                     )
                     if review is not None and review.decision == "EXIT":
                         exit_now = True
@@ -75,6 +76,22 @@ def monitor_positions(bot, *, now: datetime, logger) -> None:
                     else:
                         continue
                 else:
+                    continue
+            if (
+                exit_now
+                and pos.type == "S"
+                and reason == "TRAIL"
+            ):
+                review = bot._review_swing_stop_decision(
+                    code=code,
+                    pos=pos,
+                    quote_price=price,
+                    pnl_pct=pnl_pct,
+                    trend_meta=swing_trend_meta,
+                    trigger_reason="TRAIL",
+                )
+                if review is not None and review.decision == "HOLD":
+                    pos.highest_price = float(price)
                     continue
             if (
                 exit_now
@@ -88,6 +105,7 @@ def monitor_positions(bot, *, now: datetime, logger) -> None:
                     quote_price=price,
                     pnl_pct=pnl_pct,
                     trend_meta=swing_trend_meta,
+                    trigger_reason=reason,
                 )
                 if review is not None:
                     if review.decision == "HOLD":

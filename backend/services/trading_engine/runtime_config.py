@@ -566,6 +566,10 @@ def _apply_swing_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_SWING_TRAIL_GAP",
         cfg.swing_trail_gap,
     )
+    cfg.swing_trail_llm_review_enabled = _env_bool(
+        "TRADING_ENGINE_SWING_TRAIL_LLM_REVIEW_ENABLED",
+        cfg.swing_trail_llm_review_enabled,
+    )
     cfg.swing_source_model_strict_bonus = _env_float(
         "TRADING_ENGINE_SWING_SOURCE_MODEL_STRICT_BONUS",
         cfg.swing_source_model_strict_bonus,

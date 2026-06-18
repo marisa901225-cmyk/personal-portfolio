@@ -123,6 +123,7 @@ class BotPositionManagementMixin:
         quote_price: float,
         pnl_pct: float,
         trend_meta: dict[str, object],
+        trigger_reason: str = "SL",
     ):
         return _review_swing_stop_decision_helper(
             self,
@@ -131,6 +132,7 @@ class BotPositionManagementMixin:
             quote_price=quote_price,
             pnl_pct=pnl_pct,
             trend_meta=trend_meta,
+            trigger_reason=trigger_reason,
             logger=logger,
             review_swing_stop_with_llm_fn=review_swing_stop_with_llm,
         )

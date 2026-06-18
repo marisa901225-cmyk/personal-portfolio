@@ -454,6 +454,94 @@ def test_monitor_positions_swing_stop_can_hold_after_llm_review(tmp_path) -> Non
     assert code in bot.state.open_positions
     assert f"{code}:2026-04-24T09:12:00" in bot.state.swing_stop_llm_reviewed_positions
 
+def test_monitor_positions_swing_trail_can_hold_after_llm_review(tmp_path) -> None:
+    code = "333333"
+    asof = "20260424"
+    now = datetime(2026, 4, 24, 10, 0)
+
+    api = FakeAPI()
+    api._quotes[code] = {"price": 110.0, "change_pct": 2.0}
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        swing_trail_llm_review_enabled=True,
+        swing_trail_start=0.05,
+        swing_trail_gap=-0.02,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.open_positions[code] = PositionState(
+        type="S",
+        entry_time="2026-04-24T09:12:00",
+        entry_price=100.0,
+        qty=10,
+        highest_price=113.0,
+        entry_date=asof,
+    )
+
+    review = SwingStopReviewResult(
+        decision="HOLD",
+        confidence=0.82,
+        reason="고점 대비 눌림이나 스윙 추세 유지",
+        route="paid",
+        raw_response={},
+    )
+    with patch(
+        "backend.services.trading_engine.bot_position_management.review_swing_stop_with_llm",
+        return_value=review,
+    ) as mocked_review:
+        bot.monitor_positions(now=now)
+
+    mocked_review.assert_called_once()
+    assert api.order_calls == []
+    assert code in bot.state.open_positions
+    assert bot.state.open_positions[code].highest_price == 110.0
+    assert f"{code}:2026-04-24T09:12:00" in bot.state.swing_stop_llm_reviewed_positions
+
+def test_monitor_positions_swing_trail_exits_when_llm_rejects_hold(tmp_path) -> None:
+    code = "444444"
+    asof = "20260424"
+    now = datetime(2026, 4, 24, 10, 0)
+
+    api = FakeAPI()
+    api._quotes[code] = {"price": 110.0, "change_pct": 2.0}
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        swing_trail_llm_review_enabled=True,
+        swing_trail_start=0.05,
+        swing_trail_gap=-0.02,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.open_positions[code] = PositionState(
+        type="S",
+        entry_time="2026-04-24T09:12:00",
+        entry_price=100.0,
+        qty=10,
+        highest_price=113.0,
+        entry_date=asof,
+    )
+
+    review = SwingStopReviewResult(
+        decision="EXIT",
+        confidence=0.76,
+        reason="트레일 이탈 후 회복 근거 부족",
+        route="paid",
+        raw_response={},
+    )
+    with patch(
+        "backend.services.trading_engine.bot_position_management.review_swing_stop_with_llm",
+        return_value=review,
+    ) as mocked_review:
+        bot.monitor_positions(now=now)
+
+    mocked_review.assert_called_once()
+    assert any(call["side"] == "SELL" and call["code"] == code for call in api.order_calls)
+    assert code not in bot.state.open_positions
+
 def test_monitor_positions_carries_last_day_position_once_when_llm_approves(tmp_path) -> None:
     class IntradayAPI(FakeAPI):
         def __init__(self) -> None:

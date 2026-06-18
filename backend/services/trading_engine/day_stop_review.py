@@ -134,11 +134,18 @@ def is_swing_stop_review_candidate(
     position: PositionState,
     pnl_pct: float,
     already_reviewed: bool,
+    trigger_reason: str = "SL",
 ) -> bool:
-    if not bool(getattr(config, "swing_stop_llm_review_enabled", False)):
+    reason = str(trigger_reason or "").strip().upper()
+    if reason == "TRAIL":
+        if not bool(getattr(config, "swing_trail_llm_review_enabled", False)):
+            return False
+    elif not bool(getattr(config, "swing_stop_llm_review_enabled", False)):
         return False
     if already_reviewed or position.type != "S":
         return False
+    if reason == "TRAIL":
+        return pnl_pct > 0
     if pnl_pct > float(getattr(config, "swing_stop_loss_pct", -0.03)):
         return False
     hard_stop_pct = float(getattr(config, "swing_stop_llm_hard_stop_pct", -0.08))
@@ -316,6 +323,7 @@ def review_swing_stop_with_llm(
     pnl_pct: float,
     trend_meta: dict[str, object],
     config: TradeEngineConfig,
+    trigger_reason: str = "SL",
 ) -> SwingStopReviewResult | None:
     """Ask the configured LLM whether a swing stop threshold should exit now."""
     llm = LLMService.get_instance()
@@ -329,6 +337,7 @@ def review_swing_stop_with_llm(
         pnl_pct=pnl_pct,
         trend_meta=trend_meta,
         config=config,
+        trigger_reason=trigger_reason,
     )
 
     try:
@@ -489,17 +498,25 @@ def _build_swing_stop_messages(
     pnl_pct: float,
     trend_meta: dict[str, object],
     config: TradeEngineConfig,
+    trigger_reason: str = "SL",
 ) -> list[dict[str, str]]:
+    reason = str(trigger_reason or "").strip().upper()
+    highest_price = float(position.highest_price or position.entry_price)
+    drawdown_from_high_pct = ((float(quote_price) / highest_price) - 1.0) * 100.0 if highest_price > 0 else 0.0
     payload = {
         "code": code,
         "strategy": position.type,
+        "trigger_reason": reason,
         "entry_time": position.entry_time,
         "entry_price": round(float(position.entry_price), 4),
-        "highest_price": round(float(position.highest_price or position.entry_price), 4),
+        "highest_price": round(highest_price, 4),
         "current_price": round(float(quote_price), 4),
         "current_pnl_pct": round(float(pnl_pct) * 100.0, 4),
+        "drawdown_from_high_pct": round(drawdown_from_high_pct, 4),
         "stop_loss_pct": round(float(config.swing_stop_loss_pct) * 100.0, 4),
         "hard_stop_pct": round(float(config.swing_stop_llm_hard_stop_pct) * 100.0, 4),
+        "trail_start_pct": round(float(config.swing_trail_start) * 100.0, 4),
+        "trail_gap_pct": round(float(config.swing_trail_gap) * 100.0, 4),
         "trend": {
             key: trend_meta.get(key)
             for key in (

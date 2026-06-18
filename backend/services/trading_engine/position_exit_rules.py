@@ -141,6 +141,7 @@ def review_swing_stop_decision(
     quote_price: float,
     pnl_pct: float,
     trend_meta: dict[str, object],
+    trigger_reason: str = "SL",
     logger,
     review_swing_stop_with_llm_fn=review_swing_stop_with_llm,
 ):
@@ -151,6 +152,7 @@ def review_swing_stop_decision(
         position=pos,
         pnl_pct=pnl_pct,
         already_reviewed=already_reviewed,
+        trigger_reason=trigger_reason,
     ):
         return None
 
@@ -163,6 +165,7 @@ def review_swing_stop_decision(
             pnl_pct=pnl_pct,
             trend_meta=trend_meta,
             config=bot.config,
+            trigger_reason=trigger_reason,
         )
     except Exception:
         logger.warning("swing stop LLM review helper failed code=%s", code, exc_info=True)
@@ -173,6 +176,7 @@ def review_swing_stop_decision(
         review=review,
         pnl_pct=pnl_pct,
         trend_meta=trend_meta,
+        trigger_reason=trigger_reason,
     )
     return review
 
@@ -334,6 +338,7 @@ def journal_swing_stop_llm_review(
     review,
     pnl_pct: float,
     trend_meta: dict[str, object],
+    trigger_reason: str = "SL",
 ) -> None:
     decision = review.decision if review is not None else "UNAVAILABLE"
     bot._journal(
@@ -344,6 +349,7 @@ def journal_swing_stop_llm_review(
         confidence=round(float(review.confidence), 4) if review is not None else 0.0,
         route=review.route if review is not None else "unavailable",
         review_reason=review.reason if review is not None else "LLM_UNAVAILABLE_OR_INVALID",
+        trigger_reason=str(trigger_reason or "").strip().upper(),
         pnl_pct=round(float(pnl_pct) * 100.0, 4),
         trend_broken=bool(trend_meta.get("trend_broken", False)),
         trend_reason=str(trend_meta.get("reason") or ""),
