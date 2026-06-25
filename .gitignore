@@ -86,6 +86,7 @@ alarm_collector.log
 alarm_process.log
 
 backend/data/llm_drafts.jsonl
+backend/data/llm_drafts.jsonl.*
 backend/data/alarm_heartbeat_state.json
 backend/data/google_drive_backup_state.json
 backend/data/comfyui_gdrive_sync_state.json
@@ -106,6 +107,7 @@ backend/data/random_topic_state.json
 backend/data/random_topic_llm_session_state.json
 backend/data/recent_categories.json
 backend/data/llm_model_path_*.txt
+.codex.empty-file.bak
 backend/igt-gpu-tools/
 backend/scripts/shell/switch_vulkan_model.sh
 scripts/schedule_sleep_reboot.sh
