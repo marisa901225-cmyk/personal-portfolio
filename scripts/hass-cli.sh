@@ -22,7 +22,15 @@ if [ -z "${HASS_TOKEN:-}" ]; then
   exit 2
 fi
 
-exec docker compose exec \
+if docker compose version >/dev/null 2>&1; then
+  exec docker compose exec \
+    -e HASS_SERVER="${HASS_SERVER:-http://127.0.0.1:8123}" \
+    -e HASS_TOKEN="$HASS_TOKEN" \
+    homeassistant-cli \
+    hass-cli "$@"
+fi
+
+exec docker exec \
   -e HASS_SERVER="${HASS_SERVER:-http://127.0.0.1:8123}" \
   -e HASS_TOKEN="$HASS_TOKEN" \
   homeassistant-cli \
