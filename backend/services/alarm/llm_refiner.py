@@ -6,6 +6,7 @@ import os
 import re
 import json
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional
 
 from .sanitizer import clean_exaone_tokens
@@ -87,14 +88,15 @@ def dump_llm_draft(tag: str, draft: str):
         return
 
     try:
-        from pathlib import Path
         p = Path(LLM_DRAFT_LOG_PATH).resolve()
         p.parent.mkdir(parents=True, exist_ok=True)
+        _cleanup_oversized_llm_draft_logs(
+            p,
+            max_bytes=LLM_DRAFT_LOG_MAX_MB * 1024 * 1024,
+        )
 
         if p.exists() and p.stat().st_size / (1024 * 1024) >= LLM_DRAFT_LOG_MAX_MB:
-            rotated = p.with_suffix(p.suffix + ".1")
-            if rotated.exists(): rotated.unlink()
-            p.rename(rotated)
+            p.unlink()
 
         record = {
             "ts": datetime.now().isoformat(timespec="seconds"),
@@ -110,6 +112,47 @@ def dump_llm_draft(tag: str, draft: str):
             pass
     except Exception as e:
         logger.warning(f"Failed to dump llm draft: {e}")
+
+
+def _cleanup_oversized_llm_draft_logs(
+    log_path: Path,
+    *,
+    max_bytes: int,
+) -> int:
+    if max_bytes <= 0:
+        return 0
+
+    candidates = [
+        path
+        for path in [log_path, *log_path.parent.glob(f"{log_path.name}.*")]
+        if path.is_file()
+    ]
+    total_size = sum(path.stat().st_size for path in candidates)
+    if total_size < max_bytes:
+        return 0
+
+    deleted = 0
+    rotated_logs = sorted(
+        (path for path in candidates if path != log_path),
+        key=lambda path: path.stat().st_mtime,
+    )
+    for candidate in rotated_logs:
+        try:
+            total_size -= candidate.stat().st_size
+            candidate.unlink()
+            deleted += 1
+            if total_size < max_bytes:
+                return deleted
+        except Exception as exc:
+            logger.warning("Failed to cleanup old llm draft log %s: %s", candidate, exc)
+
+    if total_size >= max_bytes and log_path.exists():
+        try:
+            log_path.unlink()
+            deleted += 1
+        except Exception as exc:
+            logger.warning("Failed to cleanup current llm draft log %s: %s", log_path, exc)
+    return deleted
 
 
 def clean_meta_headers(text: str) -> str:
