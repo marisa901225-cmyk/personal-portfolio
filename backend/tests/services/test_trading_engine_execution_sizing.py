@@ -47,6 +47,40 @@ def test_swing_budget_subtracts_deployed_swing_cost_from_account_ratio(tmp_path)
     assert bot._strategy_budget_cash_cap(cash_ratio=cfg.swing_cash_ratio, position_type="S") == 307_000
 
 
+def test_day_budget_uses_account_total_ratio_above_initial_capital(tmp_path) -> None:
+    api = FakeAPI()
+    api._cash_available = 1_400_000
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        initial_capital=1_000_000,
+        day_cash_ratio=0.20,
+        day_entry_budget_cap_krw=300_000,
+        use_realized_profit_buffer=True,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+
+    assert bot._strategy_budget_cash_cap(cash_ratio=cfg.day_cash_ratio, position_type="T") == 280_000
+
+
+def test_day_budget_keeps_per_entry_cap_when_account_ratio_exceeds_cap(tmp_path) -> None:
+    api = FakeAPI()
+    api._cash_available = 2_000_000
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        initial_capital=1_000_000,
+        day_cash_ratio=0.20,
+        day_entry_budget_cap_krw=300_000,
+        use_realized_profit_buffer=True,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+
+    assert bot._strategy_budget_cash_cap(cash_ratio=cfg.day_cash_ratio, position_type="T") == 300_000
+
+
 def test_day_entry_uses_strategy_cap_not_remaining_cash(tmp_path) -> None:
     asof = "20260410"
     api = FakeAPI()
@@ -156,7 +190,7 @@ def test_day_entry_does_not_take_profit_buffer_before_swing_uses_it(tmp_path) ->
     ]
     assert bot.state.open_positions["005930"].qty == 4
 
-def test_day_entry_uses_profit_buffer_only_after_swing_budget_leaves_room(tmp_path) -> None:
+def test_day_entry_scales_account_ratio_when_swing_budget_leaves_room(tmp_path) -> None:
     asof = "20260410"
     api = FakeAPI()
     api._cash_available = 300_000
@@ -214,9 +248,9 @@ def test_day_entry_uses_profit_buffer_only_after_swing_budget_leaves_room(tmp_pa
         )
 
     assert api.order_calls == [
-        {"side": "BUY", "code": "005930", "qty": 5, "order_type": "limit", "price": 50_100}
+        {"side": "BUY", "code": "005930", "qty": 6, "order_type": "limit", "price": 50_100}
     ]
-    assert bot.state.open_positions["005930"].qty == 5
+    assert bot.state.open_positions["005930"].qty == 6
 
 
 def test_day_entry_uses_account_basis_buffer_without_unrealized_gain(tmp_path) -> None:

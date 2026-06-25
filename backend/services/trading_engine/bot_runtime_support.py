@@ -35,6 +35,10 @@ def strategy_budget_cash_cap(bot, *, cash_ratio: float, position_type: str | Non
     if normalized_position_type == "S":
         account_budget_total = account_budget_total_from_account(bot, logger=logging.getLogger(__name__))
         base_cap = max(0.0, account_budget_total * float(cash_ratio))
+    elif normalized_position_type == "T":
+        account_budget_total = account_budget_total_from_account(bot, logger=logging.getLogger(__name__))
+        day_budget_basis = max(float(bot.config.initial_capital), account_budget_total)
+        base_cap = max(0.0, day_budget_basis * float(cash_ratio))
     else:
         base_cap = max(0.0, float(bot.config.initial_capital) * float(cash_ratio))
     unused_swing_budget = 0.0
