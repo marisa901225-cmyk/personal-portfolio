@@ -394,6 +394,38 @@ def test_day_afternoon_entry_blocks_after_two_stoploss_sized_losses() -> None:
     assert reason_afternoon_allowed == "OK"
 
 
+def test_daily_max_loss_blocks_day_entry_but_allows_swing_entry() -> None:
+    cfg = TradeEngineConfig(
+        initial_capital=1_000_000,
+        daily_max_loss_pct=-0.02,
+        max_swing_positions=1,
+    )
+    state = new_state("20260630")
+    state.realized_pnl_today = -36_000.0
+
+    ok_day, reason_day = can_enter(
+        "T",
+        state,
+        regime="RISK_ON",
+        candidates_count=1,
+        now=datetime(2026, 6, 30, 13, 10),
+        config=cfg,
+    )
+    ok_swing, reason_swing = can_enter(
+        "S",
+        state,
+        regime="RISK_ON",
+        candidates_count=1,
+        now=datetime(2026, 6, 30, 13, 10),
+        config=cfg,
+    )
+
+    assert ok_day is False
+    assert reason_day == "DAILY_MAX_LOSS"
+    assert ok_swing is True
+    assert reason_swing == "OK"
+
+
 def test_day_entry_limit_expands_by_one_slot_when_intraday_win_rate_is_healthy() -> None:
     cfg = TradeEngineConfig(
         max_day_entries_per_day=4,

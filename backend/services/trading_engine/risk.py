@@ -38,9 +38,6 @@ def can_enter(
     if candidates_count <= 0:
         return False, "NO_CANDIDATE"
 
-    daily_loss_limit = config.initial_capital * config.daily_max_loss_pct
-    if state.realized_pnl_today <= daily_loss_limit:
-        return False, "DAILY_MAX_LOSS"
     if state.consecutive_losses_today >= config.max_consecutive_losses:
         return False, "MAX_CONSECUTIVE_LOSSES"
 
@@ -56,6 +53,9 @@ def can_enter(
         if _count_reserved_positions(state, "S") >= config.max_swing_positions:
             return False, "MAX_SWING_POSITIONS"
     else:
+        daily_loss_limit = config.initial_capital * config.daily_max_loss_pct
+        if state.realized_pnl_today <= daily_loss_limit:
+            return False, "DAILY_MAX_LOSS"
         if state.day_entries_today >= _effective_max_day_entries_per_day(
             state,
             config,
