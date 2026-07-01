@@ -226,6 +226,35 @@ def test_get_regime_ignores_stale_local_panic_when_kis_quote_is_positive() -> No
     assert regime == "RISK_ON"
     assert panic_date is None
 
+def test_get_regime_releases_kospi_only_risk_off_when_kosdaq_quote_is_positive() -> None:
+    asof = "20260511"
+    api = FakeAPI()
+    kospi_closes = [float(100 + idx) for idx in range(77)] + [166.0, 168.0, 170.0]
+    kosdaq_closes = [float(100 + idx) for idx in range(80)]
+    api._bars[("069500", asof)] = _make_bars_from_closes(asof, kospi_closes)
+    api._bars[("229200", asof)] = _make_bars_from_closes(asof, kosdaq_closes)
+    api._quotes["069500"] = {"price": 170.0, "change_pct": 0.0}
+    api._quotes["229200"] = {"price": 180.0, "change_pct": 1.25}
+
+    regime, panic_date = get_regime(api, asof, use_confirmation=True)
+
+    assert regime == "RISK_ON"
+    assert panic_date is None
+
+def test_get_regime_requires_both_markets_for_confirmed_dual_risk_off() -> None:
+    asof = "20260511"
+    api = FakeAPI()
+    panic_closes = [float(100 + idx) for idx in range(77)] + [166.0, 168.0, 170.0]
+    api._bars[("069500", asof)] = _make_bars_from_closes(asof, panic_closes)
+    api._bars[("229200", asof)] = _make_bars_from_closes(asof, panic_closes)
+    api._quotes["069500"] = {"price": 170.0, "change_pct": 0.0}
+    api._quotes["229200"] = {"price": 170.0, "change_pct": 0.0}
+
+    regime, panic_date = get_regime(api, asof, use_confirmation=True)
+
+    assert regime == "RISK_OFF"
+    assert panic_date == "20260509"
+
 def test_get_regime_keeps_local_panic_cooldown_when_kis_quote_is_not_positive() -> None:
     asof = "20260511"
     api = FakeAPI()

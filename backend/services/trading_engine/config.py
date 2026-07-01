@@ -267,7 +267,7 @@ class TradeEngineConfig:
     # Regime / calendar
     market_proxy_code: str = "069500"
     kosdaq_proxy_code: str = "229200"
-    use_kosdaq_confirmation: bool = False
+    use_kosdaq_confirmation: bool = True
     regime_vol_threshold: float = 0.05
     use_intraday_circuit_breaker: bool = True
     intraday_cb_day_change_pct: float = -3.0

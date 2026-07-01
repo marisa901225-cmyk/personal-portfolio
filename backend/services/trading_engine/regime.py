@@ -112,6 +112,10 @@ def _is_live_risk_on(api: TradingAPI, code: str, *, threshold_pct: float = 0.0) 
     return live_change_pct is not None and live_change_pct > threshold_pct
 
 
+def _pick_panic_date(*dates: str | None) -> str | None:
+    return max([d for d in dates if d is not None], default=None)
+
+
 def detect_intraday_circuit_breaker(
     api: TradingAPI,
     *,
@@ -239,19 +243,19 @@ def get_regime(
 
     # 3. Confirmation 로직
     confirm_regime, confirm_panic_date = _single_regime(api, asof, confirmation_code, vol_threshold)
-    detected_panic_date = max(
-        [d for d in (primary_panic_date, confirm_panic_date) if d is not None],
-        default=None,
-    )
+    detected_panic_date = _pick_panic_date(primary_panic_date, confirm_panic_date)
 
     if _is_live_risk_on(api, confirmation_code):
-        if primary_regime != "RISK_OFF":
-            return "RISK_ON", None
+        return "RISK_ON", None
     
-    if primary_regime == "RISK_OFF" or confirm_regime == "RISK_OFF":
+    if primary_regime == "RISK_OFF" and confirm_regime == "RISK_OFF":
         return "RISK_OFF", detected_panic_date
     if primary_regime == "RISK_ON" and confirm_regime == "RISK_ON":
         return "RISK_ON", detected_panic_date
+    if primary_regime == "RISK_ON" or confirm_regime == "RISK_ON":
+        return "RISK_ON", None
+    if primary_regime == "RISK_OFF" or confirm_regime == "RISK_OFF":
+        return "RISK_OFF", detected_panic_date
         
     return "NEUTRAL", detected_panic_date
 
