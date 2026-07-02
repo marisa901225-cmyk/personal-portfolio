@@ -39,7 +39,7 @@ class TradeEngineConfig:
 
     # Risk-off cash parking
     risk_off_parking_enabled: bool = True
-    risk_off_parking_code: str = "440650"
+    risk_off_parking_code: str = "0048J0"
     risk_off_parking_cash_ratio: float = 0.95
     risk_off_parking_order_type: str = "best"
 
