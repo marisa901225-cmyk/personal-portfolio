@@ -157,6 +157,23 @@ def test_cash_sweep_parks_cash_when_sp500_cannot_be_bought() -> None:
     assert plan.orders[0].bucket == "parking"
 
 
+def test_cash_sweep_parks_one_share_when_cash_is_below_old_minimum() -> None:
+    plan = build_pension_cash_sweep_plan(
+        holdings=[],
+        cash=20_000,
+        assets=ASSETS_WITH_PARKING,
+        prices={"360200": 100_000, "440650": 15_000},
+        min_order_amount=15_000,
+        parking_code="440650",
+    )
+
+    assert len(plan.orders) == 1
+    assert plan.orders[0].side == "BUY"
+    assert plan.orders[0].code == "440650"
+    assert plan.orders[0].qty == 1
+    assert plan.orders[0].bucket == "parking"
+
+
 def test_cash_sweep_sells_parking_before_sp500_when_combined_cash_is_enough() -> None:
     plan = build_pension_cash_sweep_plan(
         holdings=[PensionHolding("440650", "파킹 ETF", 5, 10_000, 50_000)],
@@ -172,6 +189,19 @@ def test_cash_sweep_sells_parking_before_sp500_when_combined_cash_is_enough() ->
     assert plan.orders[0].bucket == "parking"
     assert plan.orders[1].side == "BUY"
     assert plan.orders[1].code == "360200"
+
+
+def test_cash_sweep_keeps_parking_when_exit_still_cannot_buy_sp500() -> None:
+    plan = build_pension_cash_sweep_plan(
+        holdings=[PensionHolding("440650", "파킹 ETF", 1, 15_000, 15_000)],
+        cash=6_000,
+        assets=ASSETS_WITH_PARKING,
+        prices={"360200": 100_000, "440650": 15_000},
+        min_order_amount=15_000,
+        parking_code="440650",
+    )
+
+    assert plan.orders == []
 
 
 def test_lump_sum_cash_can_be_distributed_without_selling_existing_holdings() -> None:

@@ -496,7 +496,13 @@ def build_pension_cash_sweep_plan(
     orders: list[PensionOrderPlan] = []
 
     parking_holding = next((holding for holding in holdings if holding.code == parking_code), None)
-    if parking_holding and sp500_code and sp500_price > 0 and estimated_cash < sp500_price:
+    if (
+        parking_holding
+        and sp500_code
+        and sp500_price > 0
+        and estimated_cash < sp500_price
+        and estimated_cash + parking_holding.value >= sp500_price
+    ):
         sell_target = max(min_order_amount, sp500_price - estimated_cash)
         sell_qty = min(parking_holding.qty, floor((sell_target + parking_holding.price - 1) / parking_holding.price))
         if sell_qty > 0 and sell_qty * parking_holding.price >= min_order_amount:
