@@ -61,7 +61,7 @@ def enter_position(
     now: datetime,
     order_type: str = "MKT",
     price: int | None = None,
-    budget_cash_cap: float | None = None,
+    strategy_budget_cash_cap: float | None = None,
     min_order_amount_krw: int = 0,
     on_order_accepted: Callable[[OrderPayload], None] | None = None,
 ) -> FillResult | None:
@@ -130,9 +130,9 @@ def enter_position(
         fallback_price=float(price_now),
     )
     budget_cash = resolve_buy_budget_cash(
-        cash=sizing.cash,
-        cash_ratio=cash_ratio,
-        budget_cash_cap=budget_cash_cap,
+        available_cash=sizing.cash,
+        fallback_cash_ratio=cash_ratio,
+        strategy_budget_cash_cap=strategy_budget_cash_cap,
     )
     qty = calc_buy_qty(budget_cash=budget_cash, price_now=sizing.price_now)
     min_order_amount = max(0, int(min_order_amount_krw or 0))
@@ -210,9 +210,9 @@ def enter_position(
                 fallback_price=float(attempted_price or price_now),
             )
             refreshed_budget_cash = resolve_buy_budget_cash(
-                cash=refreshed_sizing.cash,
-                cash_ratio=cash_ratio,
-                budget_cash_cap=budget_cash_cap,
+                available_cash=refreshed_sizing.cash,
+                fallback_cash_ratio=cash_ratio,
+                strategy_budget_cash_cap=strategy_budget_cash_cap,
             )
             next_qty = calc_buy_qty(
                 budget_cash=refreshed_budget_cash,
@@ -279,9 +279,9 @@ def enter_position(
                 fallback_price=float(next_price),
             )
             refreshed_budget_cash = resolve_buy_budget_cash(
-                cash=refreshed_sizing.cash,
-                cash_ratio=cash_ratio,
-                budget_cash_cap=budget_cash_cap,
+                available_cash=refreshed_sizing.cash,
+                fallback_cash_ratio=cash_ratio,
+                strategy_budget_cash_cap=strategy_budget_cash_cap,
             )
             next_qty = calc_buy_qty(
                 budget_cash=refreshed_budget_cash,

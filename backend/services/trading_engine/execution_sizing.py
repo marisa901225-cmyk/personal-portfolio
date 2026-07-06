@@ -86,14 +86,15 @@ def resolve_sell_sizing(
 
 def resolve_buy_budget_cash(
     *,
-    cash: float,
-    cash_ratio: float,
-    budget_cash_cap: float | None = None,
+    available_cash: float,
+    fallback_cash_ratio: float,
+    strategy_budget_cash_cap: float | None = None,
 ) -> float:
-    ratio_budget = max(0.0, cash * cash_ratio)
-    if budget_cash_cap is None or budget_cash_cap <= 0:
-        return ratio_budget
-    return max(0.0, min(cash, float(budget_cash_cap)))
+    """Use strategy cap as an already-sized budget; ratio is only the no-cap fallback."""
+    cash = max(0.0, float(available_cash))
+    if strategy_budget_cash_cap is not None and strategy_budget_cash_cap > 0:
+        return max(0.0, min(cash, float(strategy_budget_cash_cap)))
+    return max(0.0, cash * float(fallback_cash_ratio))
 
 
 def calc_buy_qty(

@@ -765,6 +765,54 @@ def test_enter_position_returns_sizing_metadata() -> None:
     }
 
 
+def test_enter_position_uses_strategy_cap_without_reapplying_cash_ratio() -> None:
+    class BuyableAPI(FakeAPI):
+        def buy_order_capacity(self, code: str, order_type: str, price: int | None) -> dict:
+            assert code == "005930"
+            assert order_type == "best"
+            assert price == 100_000
+            return {
+                "ord_psbl_cash": 1_000_000,
+                "nrcvb_buy_amt": 1_000_000,
+                "nrcvb_buy_qty": 10,
+                "max_buy_qty": 10,
+                "psbl_qty_calc_unpr": 100_000,
+            }
+
+    api = BuyableAPI()
+    api._cash_available = 1_000_000
+    api._quotes["005930"] = {"price": 100_000, "change_pct": 1.0}
+    state = new_state("20260706")
+
+    from backend.services.trading_engine.execution import enter_position
+
+    result = enter_position(
+        api,
+        state,
+        position_type="S",
+        code="005930",
+        cash_ratio=0.8,
+        strategy_budget_cash_cap=900_000,
+        asof_date="20260706",
+        now=datetime(2026, 7, 6, 9, 10),
+        order_type="best",
+    )
+
+    assert result is not None
+    assert result.qty == 9
+    assert result.sizing == {
+        "cash_available_snapshot": 1_000_000,
+        "sizing_cash": 1_000_000,
+        "quote_price": 100_000.0,
+        "sizing_price": 100_000.0,
+        "budget_cash": 900_000,
+        "max_qty": 10,
+        "requested_qty": 9,
+        "cash_ratio": 0.8,
+        "order_type": "best",
+    }
+
+
 def test_enter_position_skips_order_below_minimum_amount() -> None:
     class BuyableAPI(FakeAPI):
         def buy_order_capacity(self, code: str, order_type: str, price: int | None) -> dict:
@@ -792,7 +840,7 @@ def test_enter_position_skips_order_below_minimum_amount() -> None:
         position_type="T",
         code="034220",
         cash_ratio=1.0,
-        budget_cash_cap=300_000,
+        strategy_budget_cash_cap=300_000,
         min_order_amount_krw=100_000,
         asof_date="20260408",
         now=datetime(2026, 4, 8, 9, 10),
@@ -844,7 +892,7 @@ def test_enter_position_best_order_uses_quote_price_before_retrying_down() -> No
         position_type="T",
         code="050890",
         cash_ratio=1.0,
-        budget_cash_cap=200_000,
+        strategy_budget_cash_cap=200_000,
         asof_date="20260415",
         now=datetime(2026, 4, 15, 9, 8),
         order_type="best",
@@ -906,7 +954,7 @@ def test_enter_position_does_not_initially_cap_order_by_broker_max_qty() -> None
         position_type="T",
         code="018880",
         cash_ratio=0.20,
-        budget_cash_cap=214_728,
+        strategy_budget_cash_cap=214_728,
         asof_date="20260421",
         now=datetime(2026, 4, 21, 9, 16),
         order_type="best",
@@ -987,7 +1035,7 @@ def test_enter_position_limit_order_retries_with_higher_price_after_rejection() 
         position_type="T",
         code="005930",
         cash_ratio=0.2,
-        budget_cash_cap=200_000,
+        strategy_budget_cash_cap=200_000,
         asof_date="20260415",
         now=datetime(2026, 4, 15, 9, 8),
         order_type="limit",
@@ -1027,7 +1075,7 @@ def test_enter_position_normalizes_invalid_limit_price_to_valid_tick() -> None:
         position_type="T",
         code="027360",
         cash_ratio=0.2,
-        budget_cash_cap=250_000,
+        strategy_budget_cash_cap=250_000,
         asof_date="20260415",
         now=datetime(2026, 4, 15, 13, 2),
         order_type="limit",
@@ -1074,7 +1122,7 @@ def test_enter_position_recalculates_limit_price_from_fresh_quote_before_order()
         position_type="T",
         code="010170",
         cash_ratio=0.2,
-        budget_cash_cap=330_000,
+        strategy_budget_cash_cap=330_000,
         asof_date="20260507",
         now=datetime(2026, 5, 7, 9, 7),
         order_type="limit",
@@ -1113,7 +1161,7 @@ def test_enter_position_fills_missing_limit_price_from_quote() -> None:
         position_type="T",
         code="100790",
         cash_ratio=0.2,
-        budget_cash_cap=250_000,
+        strategy_budget_cash_cap=250_000,
         asof_date="20260423",
         now=datetime(2026, 4, 23, 13, 4),
         order_type="limit",

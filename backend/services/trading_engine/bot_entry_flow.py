@@ -205,7 +205,7 @@ class BotEntryFlowMixin:
                 position_type="S",
                 code=ranked_code,
                 cash_ratio=self.config.swing_cash_ratio,
-                budget_cash_cap=self._strategy_budget_cash_cap(
+                strategy_budget_cash_cap=self._strategy_budget_cash_cap(
                     cash_ratio=self.config.swing_cash_ratio,
                     position_type="S",
                 ),
@@ -401,7 +401,7 @@ class BotEntryFlowMixin:
                 position_type="T",
                 code=ranked_code,
                 cash_ratio=self.config.day_cash_ratio,
-                budget_cash_cap=self._strategy_budget_cash_cap(
+                strategy_budget_cash_cap=self._strategy_budget_cash_cap(
                     cash_ratio=self.config.day_cash_ratio,
                     position_type="T",
                 ),
