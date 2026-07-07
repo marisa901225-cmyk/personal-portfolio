@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 _TOKEN_NONCE_SIZE = 12
 _TOKEN_TAG_SIZE = 16
+_DEFAULT_REFRESH_WINDOW_HOURS = 1
+_DEFAULT_HARD_EXPIRY_BUFFER_HOURS = 0.083
 
 
 def _slot_columns(slot: int) -> tuple[str, str]:
@@ -202,9 +204,11 @@ def read_kis_token_record(
     from datetime import timedelta
     from sqlalchemy.exc import OperationalError
     
-    # 리프레시 윈도우 설정
-    REFRESH_WINDOW_HOURS = 2
-    HARD_EXPIRY_BUFFER_HOURS = 0.5
+    try:
+        from .kis_circuit_breaker import HARD_EXPIRY_BUFFER_HOURS, REFRESH_WINDOW_HOURS
+    except Exception:
+        REFRESH_WINDOW_HOURS = _DEFAULT_REFRESH_WINDOW_HOURS
+        HARD_EXPIRY_BUFFER_HOURS = _DEFAULT_HARD_EXPIRY_BUFFER_HOURS
 
     max_retries = 10
     retry_delay = 0.2  # seconds (짧게 여러 번 시도)

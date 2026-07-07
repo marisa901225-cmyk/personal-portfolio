@@ -263,6 +263,13 @@ class KISTradingBase:
                 self._direct_token_expires_at = None
         if credentials.token_slot is not None:
             save_kis_token(token, self._direct_token_expires_at, slot=credentials.token_slot)
+            logger.info(
+                "[KIS Token][slot=%s] direct auth refreshed (expires_at=%s)",
+                credentials.token_slot,
+                self._direct_token_expires_at.isoformat(sep=" ", timespec="seconds")
+                if self._direct_token_expires_at
+                else "unknown",
+            )
             if int(credentials.token_slot) == 2:
                 unexpected_cmdline = _slot2_unexpected_context()
                 if unexpected_cmdline:
