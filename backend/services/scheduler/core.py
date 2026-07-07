@@ -272,6 +272,22 @@ async def job_check_rate_changes():
         logger.error(f"Rate change check job failed: {e}", exc_info=True)
 
 
+async def job_cleanup_old_spam_data():
+    """
+    오래된 스팸 격리 데이터를 주 1회 정리한다.
+
+    스팸 규칙(spam_rules)은 운영 설정이므로 삭제하지 않고,
+    격리 보관 테이블(spam_news, spam_alarms)만 기존 보관 정책에 따라 정리한다.
+    """
+    from backend.services.maintenance import cleanup_old_spam_data
+
+    with SessionLocal() as db:
+        async with monitor_job_async("cleanup_old_spam_data", db):
+            logger.info("Starting weekly spam data cleanup job...")
+            await cleanup_old_spam_data(db)
+            logger.info("Weekly spam data cleanup job completed.")
+
+
 async def job_trading_engine_cycle():
     """
     하이브리드 트레이딩 엔진 주기 실행.
@@ -495,6 +511,14 @@ def start_scheduler():
                 job_collect_kr_option_snapshot,
                 CronTrigger(day_of_week="mon-fri", hour=15, minute=50),
                 id="collect_kr_option_snapshot",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            scheduler.add_job(
+                job_cleanup_old_spam_data,
+                CronTrigger(day_of_week="sun", hour=4, minute=30),
+                id="cleanup_old_spam_data",
                 replace_existing=True,
                 max_instances=1,
             )

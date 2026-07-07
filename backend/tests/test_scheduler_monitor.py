@@ -183,9 +183,18 @@ class TestSchedulerRoleSplit(unittest.TestCase):
         registered_ids = [call.kwargs["id"] for call in fake_scheduler.add_job.call_args_list]
         self.assertIn("collect_game_news", registered_ids)
         self.assertIn("morning_briefing", registered_ids)
+        self.assertIn("cleanup_old_spam_data", registered_ids)
         self.assertNotIn("trading_engine_cycle_preopen", registered_ids)
         self.assertNotIn("trading_engine_cycle_intraday_morning", registered_ids)
         self.assertNotIn("trading_engine_finalize", registered_ids)
+
+        cleanup_call = next(
+            call for call in fake_scheduler.add_job.call_args_list if call.kwargs["id"] == "cleanup_old_spam_data"
+        )
+        cleanup_trigger = cleanup_call.args[1]
+        self.assertEqual(str(cleanup_trigger.fields[4]), "sun")
+        self.assertEqual(str(cleanup_trigger.fields[5]), "4")
+        self.assertEqual(str(cleanup_trigger.fields[6]), "30")
         fake_scheduler.start.assert_called_once()
 
     def test_start_scheduler_trading_role_skips_news_jobs(self):
@@ -206,6 +215,7 @@ class TestSchedulerRoleSplit(unittest.TestCase):
         registered_ids = [call.kwargs["id"] for call in fake_scheduler.add_job.call_args_list]
         self.assertNotIn("collect_game_news", registered_ids)
         self.assertNotIn("morning_briefing", registered_ids)
+        self.assertNotIn("cleanup_old_spam_data", registered_ids)
         self.assertIn("trading_engine_cycle_preopen", registered_ids)
         self.assertIn("trading_engine_cycle_intraday_morning", registered_ids)
         self.assertIn("trading_engine_cycle_intraday_midday", registered_ids)
