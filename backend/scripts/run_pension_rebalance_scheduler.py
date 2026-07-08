@@ -315,13 +315,13 @@ async def main() -> None:
         hour,
         minute,
         _env_bool("PENSION_REBALANCE_EXECUTE", False),
-        _env_bool("PENSION_REBALANCE_RUN_ON_START", True),
+        _env_bool("PENSION_REBALANCE_RUN_ON_START", False),
         cash_sweep_hour,
         cash_sweep_minute,
         _env_bool("PENSION_CASH_SWEEP_EXECUTE", _env_bool("PENSION_REBALANCE_EXECUTE", False)),
     )
 
-    if _env_bool("PENSION_REBALANCE_RUN_ON_START", True):
+    if _env_bool("PENSION_REBALANCE_RUN_ON_START", False):
         await _run_rebalance_async("startup", force=_env_bool("PENSION_REBALANCE_FORCE_START", False))
     if _env_bool("PENSION_CASH_SWEEP_RUN_ON_START", False):
         await _run_cash_sweep_async("startup")

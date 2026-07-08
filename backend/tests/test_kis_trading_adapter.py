@@ -9,7 +9,11 @@ import requests
 
 from backend.integrations.kis import rest_rate_limiter
 from backend.integrations.kis.daily_bars_disk_cache import DailyBarsDiskCache
-from backend.integrations.kis.trading_adapter import KISDirectCredentials, KISTradingAPI
+from backend.integrations.kis.trading_adapter import (
+    KISDirectCredentials,
+    KISTradingAPI,
+    _slot2_unexpected_context,
+)
 
 
 class KISTradingAdapterTests(unittest.TestCase):
@@ -317,6 +321,12 @@ class KISTradingAdapterTests(unittest.TestCase):
         self.assertEqual(read_mock.call_count, 2)
         api._session.post.assert_not_called()
         api._throttle_rest.assert_not_called()
+
+    def test_slot2_expected_context_accepts_script_path(self) -> None:
+        argv = ["/app/backend/scripts/rebalance_kis_pension_account.py", "--cash-sweep"]
+
+        with patch("backend.integrations.kis.trading_adapter.sys.argv", argv):
+            self.assertIsNone(_slot2_unexpected_context())
 
     def test_get_applies_extra_min_gap_only_for_daily_chart_paths(self) -> None:
         api = object.__new__(KISTradingAPI)

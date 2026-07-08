@@ -91,6 +91,9 @@ _SLOT2_EXPECTED_CALLERS: tuple[str, ...] = (
     "backend.scripts.run_pension_rebalance_scheduler",
     "backend.scripts.rebalance_kis_pension_account",
     "backend.scripts.check_kis_pension_account",
+    "run_pension_rebalance_scheduler.py",
+    "rebalance_kis_pension_account.py",
+    "check_kis_pension_account.py",
 )
 
 
