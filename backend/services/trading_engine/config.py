@@ -31,6 +31,7 @@ class TradeEngineConfig:
     swing_cash_ratio: float = 0.80
     day_cash_ratio: float = 0.20
     day_entry_budget_cap_krw: int = 300_000
+    entry_budget_overrun_tolerance_pct: float = 0.01
     use_realized_profit_buffer: bool = True
     day_reuse_unused_swing_cash_enabled: bool = True
     day_reuse_unused_swing_cash_min_krw: int = 100_000

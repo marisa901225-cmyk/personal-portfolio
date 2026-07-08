@@ -4,6 +4,8 @@ from backend.services.trading_engine.day_stop_review import (
     DayOvernightCarryReviewResult,
     DayStopReviewResult,
 )
+from backend.services.trading_engine.execution_sizing import calc_buy_qty
+
 
 def test_swing_budget_uses_account_total_ratio(tmp_path) -> None:
     api = FakeAPI()
@@ -810,6 +812,79 @@ def test_enter_position_uses_strategy_cap_without_reapplying_cash_ratio() -> Non
         "requested_qty": 9,
         "cash_ratio": 0.8,
         "order_type": "best",
+    }
+
+
+def test_calc_buy_qty_allows_one_share_when_just_over_budget() -> None:
+    assert calc_buy_qty(
+        budget_cash=1_042_612,
+        price_now=175_400,
+        available_cash=1_295_213,
+        max_qty=7,
+        budget_overrun_tolerance_pct=0.01,
+    ) == 6
+
+
+def test_calc_buy_qty_keeps_floor_when_next_share_exceeds_tolerance() -> None:
+    assert calc_buy_qty(
+        budget_cash=300_000,
+        price_now=161_700,
+        available_cash=418_218,
+        max_qty=2,
+        budget_overrun_tolerance_pct=0.01,
+    ) == 1
+
+
+def test_enter_position_uses_small_budget_overrun_tolerance_for_lot_rounding() -> None:
+    class BuyableAPI(FakeAPI):
+        def buy_order_capacity(self, code: str, order_type: str, price: int | None) -> dict:
+            assert code == "105560"
+            assert order_type == "limit"
+            assert price == 175_400
+            return {
+                "ord_psbl_cash": 1_075_799,
+                "nrcvb_buy_amt": 1_295_213,
+                "nrcvb_buy_qty": 7,
+                "max_buy_qty": 7,
+                "psbl_qty_calc_unpr": 175_400,
+            }
+
+    api = BuyableAPI()
+    api._cash_available = 1_303_265
+    api._quotes["105560"] = {"price": 175_300, "change_pct": 1.0}
+    state = new_state("20260708")
+
+    from backend.services.trading_engine.execution import enter_position
+
+    result = enter_position(
+        api,
+        state,
+        position_type="S",
+        code="105560",
+        cash_ratio=0.8,
+        strategy_budget_cash_cap=1_042_612,
+        budget_overrun_tolerance_pct=0.01,
+        asof_date="20260708",
+        now=datetime(2026, 7, 8, 9, 57),
+        order_type="limit",
+        price=175_400,
+    )
+
+    assert result is not None
+    assert result.qty == 6
+    assert api.order_calls == [
+        {"side": "BUY", "code": "105560", "qty": 6, "order_type": "limit", "price": 175_400}
+    ]
+    assert result.sizing == {
+        "cash_available_snapshot": 1_303_265,
+        "sizing_cash": 1_295_213,
+        "quote_price": 175_300.0,
+        "sizing_price": 175_400.0,
+        "budget_cash": 1_042_612,
+        "max_qty": 7,
+        "requested_qty": 6,
+        "cash_ratio": 0.8,
+        "order_type": "limit",
     }
 
 

@@ -156,6 +156,7 @@ def manage_risk_off_parking(
         position_type="P",
         code=parking_code,
         cash_ratio=config.risk_off_parking_cash_ratio,
+        budget_overrun_tolerance_pct=config.entry_budget_overrun_tolerance_pct,
         asof_date=trade_date,
         now=now,
         order_type=config.risk_off_parking_order_type,

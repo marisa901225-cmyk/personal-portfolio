@@ -73,6 +73,7 @@ def test_runtime_config_applies_frequently_tuned_scoring_and_global_signal_overr
             "TRADING_ENGINE_GLOBAL_MARKET_SIGNAL_EXCHANGES": "nas,nys",
             "TRADING_ENGINE_GLOBAL_MARKET_SIGNAL_MIN_VOLUME": "750000",
             "TRADING_ENGINE_DAY_ENTRY_BUDGET_CAP_KRW": "280000",
+            "TRADING_ENGINE_ENTRY_BUDGET_OVERRUN_TOLERANCE_PCT": "0.005",
             "TRADING_ENGINE_DAY_CONDITIONAL_EXTRA_MIN_ORDER_AMOUNT_KRW": "150000",
             "TRADING_ENGINE_DAY_REUSE_UNUSED_SWING_CASH_MIN_KRW": "120000",
             "TRADING_ENGINE_DAY_OVERNIGHT_CARRY_MAX_CALENDAR_GAP_DAYS": "4",
@@ -89,6 +90,7 @@ def test_runtime_config_applies_frequently_tuned_scoring_and_global_signal_overr
     assert cfg.global_market_signal_exchanges == ("NAS", "NYS")
     assert cfg.global_market_signal_min_volume == 750_000
     assert cfg.day_entry_budget_cap_krw == 280_000
+    assert cfg.entry_budget_overrun_tolerance_pct == 0.005
     assert cfg.day_conditional_extra_min_order_amount_krw == 150_000
     assert cfg.day_reuse_unused_swing_cash_min_krw == 120_000
     assert cfg.day_overnight_carry_max_calendar_gap_days == 4

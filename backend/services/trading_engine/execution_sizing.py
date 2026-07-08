@@ -101,6 +101,9 @@ def calc_buy_qty(
     *,
     budget_cash: float,
     price_now: float,
+    available_cash: float | None = None,
+    max_qty: int | None = None,
+    budget_overrun_tolerance_pct: float = 0.0,
     extra_buffer_ratio: float = 0.0,
     extra_buffer_krw: int = 0,
 ) -> int:
@@ -110,6 +113,21 @@ def calc_buy_qty(
     )
     usable_budget = max(0.0, budget_cash - buffer_cash)
     qty = int(usable_budget // price_now)
+    next_qty = qty + 1
+    next_cost = float(next_qty) * float(price_now)
+    max_budget_with_tolerance = float(budget_cash) * (
+        1.0 + max(0.0, float(budget_overrun_tolerance_pct))
+    )
+    max_spend = min(
+        float(available_cash) if available_cash is not None else max_budget_with_tolerance,
+        max_budget_with_tolerance,
+    )
+    if (
+        qty >= 1
+        and next_cost <= max_spend
+        and (max_qty is None or next_qty <= int(max_qty))
+    ):
+        return next_qty
     if qty < 1 and budget_cash >= price_now:
         return int(budget_cash // price_now)
     return qty

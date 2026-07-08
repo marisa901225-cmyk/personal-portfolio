@@ -88,6 +88,10 @@ def _apply_general_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_DAY_ENTRY_BUDGET_CAP_KRW",
         cfg.day_entry_budget_cap_krw,
     )
+    cfg.entry_budget_overrun_tolerance_pct = _env_float(
+        "TRADING_ENGINE_ENTRY_BUDGET_OVERRUN_TOLERANCE_PCT",
+        cfg.entry_budget_overrun_tolerance_pct,
+    )
     cfg.day_reuse_unused_swing_cash_enabled = _env_bool(
         "TRADING_ENGINE_DAY_REUSE_UNUSED_SWING_CASH_ENABLED",
         cfg.day_reuse_unused_swing_cash_enabled,

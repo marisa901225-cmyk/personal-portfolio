@@ -62,6 +62,7 @@ def enter_position(
     order_type: str = "MKT",
     price: int | None = None,
     strategy_budget_cash_cap: float | None = None,
+    budget_overrun_tolerance_pct: float = 0.0,
     min_order_amount_krw: int = 0,
     on_order_accepted: Callable[[OrderPayload], None] | None = None,
 ) -> FillResult | None:
@@ -134,7 +135,13 @@ def enter_position(
         fallback_cash_ratio=cash_ratio,
         strategy_budget_cash_cap=strategy_budget_cash_cap,
     )
-    qty = calc_buy_qty(budget_cash=budget_cash, price_now=sizing.price_now)
+    qty = calc_buy_qty(
+        budget_cash=budget_cash,
+        price_now=sizing.price_now,
+        available_cash=sizing.cash,
+        max_qty=sizing.max_qty,
+        budget_overrun_tolerance_pct=budget_overrun_tolerance_pct,
+    )
     min_order_amount = max(0, int(min_order_amount_krw or 0))
     if qty < 1:
         return None
@@ -217,6 +224,9 @@ def enter_position(
             next_qty = calc_buy_qty(
                 budget_cash=refreshed_budget_cash,
                 price_now=refreshed_sizing.price_now,
+                available_cash=refreshed_sizing.cash,
+                max_qty=refreshed_sizing.max_qty,
+                budget_overrun_tolerance_pct=budget_overrun_tolerance_pct,
                 extra_buffer_ratio=_BUY_BUFFER_RATIO * (cash_retry_count + 1),
                 extra_buffer_krw=_BUY_BUFFER_KRW * (cash_retry_count + 1),
             )
@@ -286,6 +296,9 @@ def enter_position(
             next_qty = calc_buy_qty(
                 budget_cash=refreshed_budget_cash,
                 price_now=refreshed_sizing.price_now,
+                available_cash=refreshed_sizing.cash,
+                max_qty=refreshed_sizing.max_qty,
+                budget_overrun_tolerance_pct=budget_overrun_tolerance_pct,
             )
             if refreshed_sizing.max_qty is not None:
                 next_qty = min(next_qty, refreshed_sizing.max_qty)
