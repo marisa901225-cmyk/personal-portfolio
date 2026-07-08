@@ -17,6 +17,7 @@ import logging
 import os
 import sys
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -26,6 +27,7 @@ import requests
 from backend.integrations.kis.rest_rate_limiter import throttle_rest_min_gap
 from backend.integrations.kis.secondary_market_context import build_secondary_market_context
 from backend.integrations.kis.token_store import (
+    kis_token_issue_lock,
     log_kis_token_issue_failure,
     read_kis_token_record,
     save_kis_token,
@@ -202,6 +204,27 @@ class KISTradingBase:
             return True
         return datetime.now() + timedelta(seconds=_AUTH_EXPIRY_BUFFER_SEC) < self._direct_token_expires_at
 
+    def _reuse_direct_token_from_db(self, *, force: bool = False) -> str | None:
+        credentials = getattr(self, "_direct_credentials", None)
+        if credentials is None or credentials.token_slot is None:
+            return None
+
+        previous_token = self._direct_access_token
+        cached_token, cached_expires_at = read_kis_token_record(slot=credentials.token_slot)
+        if not cached_token:
+            return None
+
+        self._direct_access_token = cached_token
+        self._direct_token_expires_at = cached_expires_at
+        if self._direct_token_is_valid() and (not force or cached_token != previous_token):
+            logger.debug(
+                "[KIS TradingAPI] direct token reused from DB slot=%s expires_at=%s",
+                credentials.token_slot,
+                cached_expires_at,
+            )
+            return cached_token
+        return None
+
     def _ensure_direct_auth(self, *, force: bool = False) -> str:
         credentials = getattr(self, "_direct_credentials", None)
         if credentials is None:
@@ -209,31 +232,29 @@ class KISTradingBase:
         if not force and self._direct_token_is_valid():
             return str(self._direct_access_token)
 
-        if not force and credentials.token_slot is not None:
-            cached_token, cached_expires_at = read_kis_token_record(slot=credentials.token_slot)
+        if not force:
+            cached_token = self._reuse_direct_token_from_db(force=False)
             if cached_token:
-                self._direct_access_token = cached_token
-                self._direct_token_expires_at = cached_expires_at
-                if self._direct_token_is_valid():
-                    logger.debug(
-                        "[KIS TradingAPI] direct token reused from DB slot=%s expires_at=%s",
-                        credentials.token_slot,
-                        cached_expires_at,
-                    )
-                    return cached_token
+                return cached_token
 
-        payload = {
-            "grant_type": "client_credentials",
-            "appkey": credentials.app_key,
-            "appsecret": credentials.app_secret,
-        }
-        self._throttle_rest()
-        response = self._session.post(
-            f"{credentials.base_url}/oauth2/tokenP",
-            headers={"content-type": "application/json"},
-            data=json.dumps(payload),
-            timeout=(_KIS_HTTP_CONNECT_TIMEOUT_SEC, _KIS_HTTP_READ_TIMEOUT_SEC),
-        )
+        issue_lock = kis_token_issue_lock() if credentials.token_slot is not None else nullcontext()
+        with issue_lock:
+            cached_token = self._reuse_direct_token_from_db(force=force)
+            if cached_token:
+                return cached_token
+
+            payload = {
+                "grant_type": "client_credentials",
+                "appkey": credentials.app_key,
+                "appsecret": credentials.app_secret,
+            }
+            self._throttle_rest()
+            response = self._session.post(
+                f"{credentials.base_url}/oauth2/tokenP",
+                headers={"content-type": "application/json"},
+                data=json.dumps(payload),
+                timeout=(_KIS_HTTP_CONNECT_TIMEOUT_SEC, _KIS_HTTP_READ_TIMEOUT_SEC),
+            )
         try:
             data = response.json()
         except ValueError:

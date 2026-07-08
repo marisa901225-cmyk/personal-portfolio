@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
 import inspect
 import logging
 import os
 import sys
+import threading
 from datetime import datetime
 from typing import Optional
 
@@ -23,6 +25,12 @@ _TOKEN_NONCE_SIZE = 12
 _TOKEN_TAG_SIZE = 16
 _DEFAULT_REFRESH_WINDOW_HOURS = 1
 _DEFAULT_HARD_EXPIRY_BUFFER_HOURS = 0.083
+_token_issue_process_lock = threading.Lock()
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows fallback
+    fcntl = None
 
 
 def _slot_columns(slot: int) -> tuple[str, str]:
@@ -139,8 +147,27 @@ def _get_or_create_setting(db: Session) -> Setting:
     return setting
 
 
+@contextmanager
+def kis_token_issue_lock():
+    """Serialize KIS access-token issue calls across local processes."""
+    with _token_issue_process_lock:
+        if fcntl is None:
+            yield
+            return
+
+        from .config_paths import get_kis_token_lock_path
+
+        lock_path = get_kis_token_lock_path()
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "a+", encoding="utf-8") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
 import asyncio
-import threading
 
 # 비동기 갱신 작업 추적 (Stampede 방지용)
 _background_refresh_lock = threading.Lock()

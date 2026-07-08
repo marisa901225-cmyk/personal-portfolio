@@ -1,4 +1,6 @@
 import unittest
+from contextlib import nullcontext
+from datetime import datetime, timedelta
 from unittest.mock import Mock, patch
 
 from backend.integrations.kis.secondary_market_context import (
@@ -53,6 +55,9 @@ class SecondaryMarketContextTests(unittest.TestCase):
             "backend.integrations.kis.secondary_market_context.save_kis_token",
         ) as save_mock, patch(
             "backend.integrations.kis.secondary_market_context.throttle_rest_requests",
+        ), patch(
+            "backend.integrations.kis.secondary_market_context.kis_token_issue_lock",
+            return_value=nullcontext(),
         ):
             token = ctx.ensure_auth()
 
@@ -60,6 +65,26 @@ class SecondaryMarketContextTests(unittest.TestCase):
         save_mock.assert_called_once()
         _, kwargs = save_mock.call_args
         self.assertEqual(kwargs["slot"], 1)
+
+    def test_ensure_auth_rechecks_db_inside_issue_lock(self) -> None:
+        ctx = self._build_context()
+        expires_at = datetime.now() + timedelta(hours=1)
+
+        with patch(
+            "backend.integrations.kis.secondary_market_context.read_kis_token_record",
+            side_effect=[(None, None), ("cached-token", expires_at)],
+        ) as read_mock, patch(
+            "backend.integrations.kis.secondary_market_context.kis_token_issue_lock",
+            return_value=nullcontext(),
+        ), patch(
+            "backend.integrations.kis.secondary_market_context.throttle_rest_requests",
+        ) as throttle_mock:
+            token = ctx.ensure_auth()
+
+        self.assertEqual(token, "cached-token")
+        self.assertEqual(read_mock.call_count, 2)
+        ctx._session.post.assert_not_called()
+        throttle_mock.assert_not_called()
 
     def test_ensure_auth_failure_logs_slot1_failure(self) -> None:
         ctx = self._build_context()
@@ -80,6 +105,9 @@ class SecondaryMarketContextTests(unittest.TestCase):
             "backend.integrations.kis.secondary_market_context.log_kis_token_issue_failure",
         ) as log_mock, patch(
             "backend.integrations.kis.secondary_market_context.throttle_rest_requests",
+        ), patch(
+            "backend.integrations.kis.secondary_market_context.kis_token_issue_lock",
+            return_value=nullcontext(),
         ):
             with self.assertRaises(RuntimeError):
                 ctx.ensure_auth()

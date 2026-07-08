@@ -1,4 +1,6 @@
 import unittest
+from contextlib import nullcontext
+from datetime import datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
@@ -274,7 +276,10 @@ class KISTradingAdapterTests(unittest.TestCase):
             return_value=(None, None),
         ), patch(
             "backend.integrations.kis.trading_adapter.log_kis_token_issue_failure",
-        ) as log_mock:
+        ) as log_mock, patch(
+            "backend.integrations.kis.trading_adapter.kis_token_issue_lock",
+            return_value=nullcontext(),
+        ):
             with self.assertRaisesRegex(RuntimeError, "EGW00133"):
                 api._ensure_direct_auth()
 
@@ -283,6 +288,35 @@ class KISTradingAdapterTests(unittest.TestCase):
         self.assertEqual(kwargs["slot"], 2)
         self.assertEqual(kwargs["status_code"], 403)
         self.assertEqual(kwargs["error_code"], "EGW00133")
+
+    def test_direct_auth_rechecks_db_inside_issue_lock(self) -> None:
+        api = object.__new__(KISTradingAPI)
+        api._direct_credentials = KISDirectCredentials(
+            app_key="app",
+            app_secret="secret",
+            account="1234567801",
+            token_slot=2,
+            base_url="https://example.test",
+        )
+        api._direct_access_token = None
+        api._direct_token_expires_at = None
+        api._throttle_rest = Mock()
+        api._session = Mock()
+
+        expires_at = datetime.now() + timedelta(hours=1)
+        with patch(
+            "backend.integrations.kis.trading_adapter.read_kis_token_record",
+            side_effect=[(None, None), ("cached-token", expires_at)],
+        ) as read_mock, patch(
+            "backend.integrations.kis.trading_adapter.kis_token_issue_lock",
+            return_value=nullcontext(),
+        ):
+            token = api._ensure_direct_auth()
+
+        self.assertEqual(token, "cached-token")
+        self.assertEqual(read_mock.call_count, 2)
+        api._session.post.assert_not_called()
+        api._throttle_rest.assert_not_called()
 
     def test_get_applies_extra_min_gap_only_for_daily_chart_paths(self) -> None:
         api = object.__new__(KISTradingAPI)

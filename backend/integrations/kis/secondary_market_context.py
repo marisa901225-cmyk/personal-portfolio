@@ -18,6 +18,7 @@ from backend.integrations.kis.rest_rate_limiter import (
     throttle_rest_requests,
 )
 from backend.integrations.kis.token_store import (
+    kis_token_issue_lock,
     log_kis_token_issue_failure,
     read_kis_token_record,
     save_kis_token,
@@ -138,39 +139,53 @@ class SecondaryMarketContext:
             return True
         return datetime.now() + timedelta(seconds=_AUTH_EXPIRY_BUFFER_SEC) < self._access_token_expires_at
 
+    def _reuse_token_from_db(self, *, force: bool = False) -> str | None:
+        previous_token = self._access_token
+        cached_token, cached_expires_at = read_kis_token_record(slot=self._TOKEN_SLOT)
+        if not cached_token:
+            return None
+
+        self._access_token = cached_token
+        self._access_token_expires_at = cached_expires_at
+        if self._token_is_valid() and (not force or cached_token != previous_token):
+            logger.info(
+                "secondary KIS market-data token reused from DB (expires_at=%s)",
+                cached_expires_at.isoformat(sep=" ", timespec="seconds")
+                if cached_expires_at
+                else "unknown",
+            )
+            return cached_token
+        return None
+
     def ensure_auth(self, *, force: bool = False) -> str:
         with self._auth_lock:
             if not force and self._token_is_valid():
                 return str(self._access_token)
 
             if not force:
-                cached_token, cached_expires_at = read_kis_token_record(slot=self._TOKEN_SLOT)
+                cached_token = self._reuse_token_from_db(force=False)
                 if cached_token:
-                    self._access_token = cached_token
-                    self._access_token_expires_at = cached_expires_at
-                    if self._token_is_valid():
-                        logger.info(
-                            "secondary KIS market-data token reused from DB (expires_at=%s)",
-                            cached_expires_at.isoformat(sep=" ", timespec="seconds")
-                            if cached_expires_at
-                            else "unknown",
-                        )
-                        return cached_token
+                    return cached_token
 
-            payload = {
-                "grant_type": "client_credentials",
-                "appkey": self._credentials.app_key,
-                "appsecret": self._credentials.app_secret,
-            }
-            url = f"{self._credentials.base_url}/oauth2/tokenP"
+            with kis_token_issue_lock():
+                cached_token = self._reuse_token_from_db(force=force)
+                if cached_token:
+                    return cached_token
 
-            throttle_rest_requests(config_dir=self._config_dir)
-            response = self._session.post(
-                url,
-                data=json.dumps(payload),
-                headers=self._base_headers(),
-                timeout=(_HTTP_CONNECT_TIMEOUT_SEC, _HTTP_READ_TIMEOUT_SEC),
-            )
+                payload = {
+                    "grant_type": "client_credentials",
+                    "appkey": self._credentials.app_key,
+                    "appsecret": self._credentials.app_secret,
+                }
+                url = f"{self._credentials.base_url}/oauth2/tokenP"
+
+                throttle_rest_requests(config_dir=self._config_dir)
+                response = self._session.post(
+                    url,
+                    data=json.dumps(payload),
+                    headers=self._base_headers(),
+                    timeout=(_HTTP_CONNECT_TIMEOUT_SEC, _HTTP_READ_TIMEOUT_SEC),
+                )
             try:
                 data = response.json()
             except ValueError:
