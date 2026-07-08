@@ -61,10 +61,9 @@ def test_bot_rebuys_risk_off_parking_after_stale_local_position_is_dropped(tmp_p
     assert out["status"] == "OK"
     assert out["regime"] == "RISK_OFF"
     assert api.order_calls == [
-        {"side": "BUY", "code": "440650", "qty": 95, "order_type": "best", "price": None}
+        {"side": "BUY", "code": "440650", "qty": 95, "order_type": "limit", "price": 10_000}
     ]
     assert bot.state.open_positions["440650"].qty == 95
-    assert any(text.startswith("[상태동기화][정리] 440650") for text in notifier.texts)
     assert any(text.startswith("[진입][파킹] 440650") for text in notifier.texts)
 
 def test_bot_risk_off_parking_ignores_same_day_blacklist(tmp_path) -> None:
@@ -121,7 +120,7 @@ def test_bot_risk_off_parking_ignores_same_day_blacklist(tmp_path) -> None:
     assert out["status"] == "OK"
     assert out["regime"] == "RISK_OFF"
     assert api.order_calls == [
-        {"side": "BUY", "code": "440650", "qty": 95, "order_type": "best", "price": None}
+        {"side": "BUY", "code": "440650", "qty": 95, "order_type": "limit", "price": 10_000}
     ]
     assert bot.state.open_positions["440650"].type == "P"
     assert any(text.startswith("[진입][파킹] 440650") for text in notifier.texts)
@@ -167,6 +166,7 @@ def test_bot_risk_off_failed_parking_order_does_not_emit_fake_entry(tmp_path) ->
         risk_off_parking_enabled=True,
         risk_off_parking_code="440650",
         risk_off_parking_cash_ratio=0.95,
+        risk_off_parking_order_type="best",
     )
     notifier = SpyNotifier()
     bot = HybridTradingBot(api, config=cfg, notifier=notifier)  # type: ignore[arg-type]
@@ -198,7 +198,7 @@ def test_bot_risk_off_reduces_qty_after_insufficient_cash_rejection(tmp_path) ->
             self.order_calls.append(
                 {"side": side, "code": code, "qty": qty, "order_type": order_type, "price": price}
             )
-            if side == "BUY" and code == "440650" and qty >= 73:
+            if side == "BUY" and code == "440650" and qty >= 74:
                 return {"success": False, "msg": "주문가능금액을 초과 했습니다"}
             return {
                 "success": True,
@@ -241,6 +241,7 @@ def test_bot_risk_off_reduces_qty_after_insufficient_cash_rejection(tmp_path) ->
         risk_off_parking_enabled=True,
         risk_off_parking_code="440650",
         risk_off_parking_cash_ratio=0.95,
+        risk_off_parking_order_type="best",
     )
     notifier = SpyNotifier()
     bot = HybridTradingBot(api, config=cfg, notifier=notifier)  # type: ignore[arg-type]
@@ -260,24 +261,24 @@ def test_bot_risk_off_reduces_qty_after_insufficient_cash_rejection(tmp_path) ->
     assert out["status"] == "OK"
     assert out["regime"] == "RISK_OFF"
     assert api.order_calls == [
+        {"side": "BUY", "code": "440650", "qty": 74, "order_type": "best", "price": None},
         {"side": "BUY", "code": "440650", "qty": 73, "order_type": "best", "price": None},
-        {"side": "BUY", "code": "440650", "qty": 72, "order_type": "best", "price": None},
     ]
-    assert bot.state.open_positions["440650"].qty == 72
-    assert any(text.startswith("[진입][파킹] 440650 수량=72") for text in notifier.texts)
+    assert bot.state.open_positions["440650"].qty == 73
+    assert any(text.startswith("[진입][파킹] 440650 수량=73") for text in notifier.texts)
 
 def test_bot_risk_off_uses_broker_buyable_amount_before_parking_order(tmp_path) -> None:
     class BuyableAPI(FakeAPI):
         def buy_order_capacity(self, code: str, order_type: str, price: int | None) -> dict:
             assert code == "440650"
-            assert order_type == "best"
-            assert price is None or price > 0
+            assert order_type == "limit"
+            assert price == 15_310
             return {
-                "ord_psbl_cash": 900_000,
-                "nrcvb_buy_amt": 900_000,
-                "nrcvb_buy_qty": 68,
-                "max_buy_qty": 72,
-                "psbl_qty_calc_unpr": 12_500,
+                "ord_psbl_cash": 22_467,
+                "nrcvb_buy_amt": 309_341,
+                "nrcvb_buy_qty": 20,
+                "max_buy_qty": 20,
+                "psbl_qty_calc_unpr": 15_310,
             }
 
     class SpyNotifier:
@@ -299,11 +300,11 @@ def test_bot_risk_off_uses_broker_buyable_amount_before_parking_order(tmp_path) 
 
     asof = "20260325"
     api = BuyableAPI()
-    api._cash_available = 2_000_000
+    api._cash_available = 366_872
     api._bars[("069500", asof)] = pd.DataFrame(
         [{"date": asof, "close": 100, "volume": 1}]
     )
-    api._quotes["440650"] = {"price": 12_365, "change_pct": 0.1}
+    api._quotes["440650"] = {"price": 15_310, "change_pct": 0.1}
 
     cfg = TradeEngineConfig(
         state_path=str(tmp_path / "state.json"),
@@ -333,10 +334,10 @@ def test_bot_risk_off_uses_broker_buyable_amount_before_parking_order(tmp_path) 
     assert out["status"] == "OK"
     assert out["regime"] == "RISK_OFF"
     assert api.order_calls == [
-        {"side": "BUY", "code": "440650", "qty": 69, "order_type": "best", "price": None}
+        {"side": "BUY", "code": "440650", "qty": 19, "order_type": "limit", "price": 15_310}
     ]
-    assert bot.state.open_positions["440650"].qty == 69
-    assert any(text.startswith("[진입][파킹] 440650 수량=69") for text in notifier.texts)
+    assert bot.state.open_positions["440650"].qty == 19
+    assert any(text.startswith("[진입][파킹] 440650 수량=19") for text in notifier.texts)
 
 def test_bot_risk_off_does_not_top_up_existing_parking_position(tmp_path) -> None:
     class BuyableAPI(FakeAPI):

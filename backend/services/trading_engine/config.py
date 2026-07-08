@@ -42,7 +42,7 @@ class TradeEngineConfig:
     risk_off_parking_enabled: bool = True
     risk_off_parking_code: str = "0048J0"
     risk_off_parking_cash_ratio: float = 0.95
-    risk_off_parking_order_type: str = "best"
+    risk_off_parking_order_type: str = "limit"
 
     # Swing exits
     swing_stop_loss_pct: float = -0.03

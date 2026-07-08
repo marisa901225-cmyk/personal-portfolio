@@ -380,7 +380,7 @@ def test_bot_risk_off_parks_cash_in_bond_etf(tmp_path) -> None:
     assert out["status"] == "OK"
     assert out["regime"] == "RISK_OFF"
     assert api.order_calls == [
-        {"side": "BUY", "code": "440650", "qty": 95, "order_type": "best", "price": None}
+        {"side": "BUY", "code": "440650", "qty": 95, "order_type": "limit", "price": 10_000}
     ]
     assert bot.state.pass_reasons_today.get("RISK_OFF") == 1
     assert "440650" in bot.state.open_positions
