@@ -500,7 +500,7 @@ services:
       - PYTHONPATH=/app
       - BACKEND_URL=http://backend-api:8000
       - LLM_BASE_URL=http://llama-server-sycl-huihui:8084
-      - AI_REPORT_MODEL=gpt-5.1
+      - AI_REPORT_MODEL=gpt-5.6-sol
       - AI_REPORT_TIMEOUT_SEC=900
       - LLM_REMOTE_DEFAULT_MODEL=supergemma4-Q8_0.gguf
       - TZ=Asia/Seoul
