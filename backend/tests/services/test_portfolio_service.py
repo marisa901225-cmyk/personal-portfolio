@@ -160,6 +160,27 @@ class TestXIRRIntegration:
         
         assert hasattr(result, "xirr_rate")
 
+    def test_xirr_excludes_soft_deleted_assets_from_terminal_value(self):
+        active_asset = MockAsset(
+            id=1,
+            amount=1,
+            current_price=1_100_000,
+            purchase_price=1_000_000,
+        )
+        deleted_asset = MockAsset(
+            id=2,
+            amount=1,
+            current_price=900_000,
+            purchase_price=900_000,
+            deleted_at=datetime.now(),
+        )
+        cashflows = [MockCashflow(date(2024, 1, 1), -1_000_000, "초기 입금")]
+
+        active_result = calculate_summary([active_asset], cashflows)
+        result_with_deleted = calculate_summary([active_asset, deleted_asset], cashflows)
+
+        assert result_with_deleted.xirr_rate == pytest.approx(active_result.xirr_rate)
+
 
 class TestCurrencyMixedAssets:
     """다중 통화 자산 테스트"""

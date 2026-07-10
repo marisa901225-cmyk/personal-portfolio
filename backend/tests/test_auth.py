@@ -25,7 +25,18 @@ class AuthTests(unittest.TestCase):
         auth.API_TOKEN = self._prev_token
 
     @staticmethod
-    def _request(host: str) -> Request:
+    def _request(
+        host: str,
+        *,
+        client_host: str = "1.2.3.4",
+        forwarded_host: str | None = None,
+        forwarded_for: str | None = None,
+    ) -> Request:
+        headers = [(b"host", host.encode("utf-8"))]
+        if forwarded_host:
+            headers.append((b"x-forwarded-host", forwarded_host.encode("utf-8")))
+        if forwarded_for:
+            headers.append((b"x-forwarded-for", forwarded_for.encode("utf-8")))
         return Request(
             {
                 "type": "http",
@@ -35,8 +46,8 @@ class AuthTests(unittest.TestCase):
                 "path": "/api/health",
                 "raw_path": b"/api/health",
                 "query_string": b"",
-                "headers": [(b"host", host.encode("utf-8"))],
-                "client": ("1.2.3.4", 12345),
+                "headers": headers,
+                "client": (client_host, 12345),
                 "server": ("testserver", 443),
             }
         )
@@ -57,7 +68,12 @@ class AuthTests(unittest.TestCase):
     def test_tailnet_request_accepts_api_key_only(self) -> None:
         auth.API_TOKEN = "secret"
 
-        asyncio.run(auth.verify_api_token(self._request("marisa-server.tail5c2348.ts.net"), "secret"))
+        asyncio.run(
+            auth.verify_api_token(
+                self._request("marisa-server.tail5c2348.ts.net", client_host="100.99.67.34"),
+                "secret",
+            )
+        )
 
     def test_tailnet_request_accepts_jwt_only(self) -> None:
         auth.API_TOKEN = "secret"
@@ -65,7 +81,7 @@ class AuthTests(unittest.TestCase):
         with patch("backend.core.auth.jwt.decode", return_value={"sub": "user-1"}):
             asyncio.run(
                 auth.verify_api_token(
-                    self._request("marisa-server.tail5c2348.ts.net"),
+                    self._request("marisa-server.tail5c2348.ts.net", client_host="100.99.67.34"),
                     None,
                     authorization="Bearer jwt-token",
                 )
@@ -78,25 +94,54 @@ class AuthTests(unittest.TestCase):
             asyncio.run(auth.verify_api_token(self._request("public.example.com"), "secret"))
 
         self.assertEqual(context.exception.status_code, 401)
-        self.assertIn("JWT and API Key required", str(context.exception.detail))
+        self.assertIn("JWT required", str(context.exception.detail))
 
-    def test_non_tailnet_request_rejects_jwt_only(self) -> None:
+    def test_non_tailnet_request_accepts_jwt_only(self) -> None:
         auth.API_TOKEN = "secret"
 
         with patch("backend.core.auth.jwt.decode", return_value={"sub": "user-1"}):
-            with self.assertRaises(HTTPException) as context:
-                asyncio.run(
-                    auth.verify_api_token(
-                        self._request("public.example.com"),
-                        None,
-                        authorization="Bearer jwt-token",
-                    )
+            asyncio.run(
+                auth.verify_api_token(
+                    self._request("public.example.com"),
+                    None,
+                    authorization="Bearer jwt-token",
                 )
+            )
+
+    def test_forwarded_host_cannot_enable_api_key_only_auth(self) -> None:
+        auth.API_TOKEN = "secret"
+
+        with self.assertRaises(HTTPException) as context:
+            asyncio.run(
+                auth.verify_api_token(
+                    self._request(
+                        "public.example.com",
+                        forwarded_host="marisa-server.tail5c2348.ts.net",
+                    ),
+                    "secret",
+                )
+            )
 
         self.assertEqual(context.exception.status_code, 401)
-        self.assertIn("JWT and API Key required", str(context.exception.detail))
 
-    def test_non_tailnet_request_requires_both_jwt_and_api_key(self) -> None:
+    def test_loopback_proxy_uses_forwarded_client_ip(self) -> None:
+        auth.API_TOKEN = "secret"
+
+        with self.assertRaises(HTTPException) as context:
+            asyncio.run(
+                auth.verify_api_token(
+                    self._request(
+                        "marisa-server.tail5c2348.ts.net",
+                        client_host="127.0.0.1",
+                        forwarded_for="203.0.113.10",
+                    ),
+                    "secret",
+                )
+            )
+
+        self.assertEqual(context.exception.status_code, 401)
+
+    def test_non_tailnet_request_accepts_jwt_with_api_key(self) -> None:
         auth.API_TOKEN = "secret"
 
         with patch("backend.core.auth.jwt.decode", return_value={"sub": "user-1"}):

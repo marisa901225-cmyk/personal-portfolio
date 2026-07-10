@@ -99,7 +99,8 @@ def calculate_summary(assets: List[Asset], external_cashflows: List[ExternalCash
         
         investable_total_value = sum(
             a.amount * a.current_price
-            for a in assets if a.category != "부동산"
+            for a in assets
+            if a.deleted_at is None and a.category != "부동산"
         )
         
         txs = []

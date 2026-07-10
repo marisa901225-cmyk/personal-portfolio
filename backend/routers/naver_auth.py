@@ -98,12 +98,10 @@ async def naver_callback(
     """
     # 1. State 검증
     if state not in _state_store:
-        import logging
-        logger = logging.getLogger("fastapi")
-        logger.warning(f"Naver Auth: State '{state}' not found in in-memory store. This can happen after server restart. Proceeding anyway for UX.")
-    else:
-        # State 사용 후 삭제 (일회성)
-        del _state_store[state]
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+
+    # State 사용 후 삭제 (일회성)
+    del _state_store[state]
     
     # 2. 네이버 Access Token 교환
     async with httpx.AsyncClient() as client:
