@@ -239,7 +239,15 @@ def _ensure_weather_snapshot_prefix(
         if marker
     )
 
-    if has_temp_near_front and has_weather_context_near_front:
+    has_pop_near_front = not pop or pop == "N/A" or any(
+        re.search(pattern, lead_text)
+        for pattern in (
+            rf"강수확률[^0-9]{{0,10}}{re.escape(str(pop))}",
+            rf"{re.escape(str(pop))}\s*%",
+        )
+    )
+
+    if has_temp_near_front and has_weather_context_near_front and has_pop_near_front:
         return normalized
 
     return f"{prefix}\n\n{normalized}"

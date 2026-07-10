@@ -10,7 +10,7 @@
 당신은 현재 시각 {formatted_datetime}에 '마린'에게 오늘 하루를 위한 브리핑을 해주고 있습니다. 당신의 언어는 반드시 **한국어**여야 하지만, 캐릭터 특유의 어투와 종결어미, 감탄사는 반드시 유지해야 합니다.
 
 # [DATA TO PROCESS]
-- 날씨: 기온 {temp}°C (최고 {today_max_temp}°C), {ultra_short_data}
+- 날씨: 기온 {temp}°C (최고 {today_max_temp}°C), 강수확률 {pop}%, {ultra_short_data}
 - 경제: {economic_data}
 - 파생/옵션(일간): {futures_options_data}
 - 파생/옵션(주간): {weekly_derivatives_briefing}

@@ -393,6 +393,32 @@ class SteamBriefingContextTests(unittest.TestCase):
 
         self.assertEqual(enriched, original)
 
+    def test_weather_snapshot_prefix_is_added_when_pop_value_is_missing_near_front(self):
+        original = (
+            "오늘 서울 날씨는 구름많음이고 기온은 12°C야. 낮 최고기온은 20°C야. "
+            "강수확률 자료는 따로 없어서 정확히 말하기 어려워."
+        )
+
+        enriched = _ensure_weather_snapshot_prefix(
+            text=original,
+            temp="12",
+            weather_status="구름많음 ☁️",
+            pop="30",
+            max_temp="20",
+        )
+
+        self.assertTrue(
+            enriched.startswith(
+                _build_weather_snapshot_prefix(
+                    temp="12",
+                    weather_status="구름많음 ☁️",
+                    pop="30",
+                    max_temp="20",
+                )
+            )
+        )
+        self.assertIn(original, enriched)
+
     def test_weather_snapshot_prefix_is_added_when_weather_details_are_only_later(self):
         original = (
             "파생 쪽은 아직 조심스럽게 봐야 해. 옵션 시장에서도 확인 심리가 강해 보여.\n\n"
