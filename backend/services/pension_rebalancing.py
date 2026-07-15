@@ -17,6 +17,7 @@ class PensionAsset:
     bucket: Bucket
     name: str = ""
     buyable: bool = True
+    trend_exit: bool = False
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,7 @@ class QuarterlyMarketSignal:
     kospi_return_pct: float
     nasdaq_return_pct: float
     selected_momentum_code: str
+    momentum_trend_exit_codes: tuple[str, ...] = ()
     current_price: int = 0
     moving_average_10m: float = 0.0
     drawdown_from_recent_high_pct: float = 0.0
@@ -317,6 +319,8 @@ def build_pension_rebalance_plan(
     parking_code: str | None = None,
     parking_cash_trigger_amount: int | None = None,
     gradual_equity_restore_step: float | None = None,
+    trend_exit_step_pct: float = 1.0 / 3.0,
+    reserved_cash_amount: int = 0,
 ) -> PensionRebalancePlan:
     current_values = bucket_values(holdings, assets)
     total_value = max(0, int(cash)) + sum(max(0, h.value) for h in holdings)
@@ -330,6 +334,7 @@ def build_pension_rebalance_plan(
         return PensionRebalancePlan(regime, 0, int(cash), target_weights, current_values, [], int(cash))
 
     bucket_by_code = {asset.code: asset.bucket for asset in assets}
+    trend_exit_codes = {asset.code for asset in assets if asset.trend_exit}
     code_by_bucket: dict[Bucket, str] = {}
     for asset in assets:
         if asset.buyable:
@@ -337,6 +342,7 @@ def build_pension_rebalance_plan(
 
     orders: list[PensionOrderPlan] = []
     estimated_cash = max(0, int(cash))
+    reserved_cash = min(estimated_cash, max(0, int(reserved_cash_amount)))
     parking_code = str(parking_code or "").strip()
     parking_cash_trigger = min_order_amount if parking_cash_trigger_amount is None else max(
         0,
@@ -349,6 +355,25 @@ def build_pension_rebalance_plan(
             bucket = bucket_by_code.get(holding.code, "other")
             if bucket == "parking":
                 parking_holdings.append(holding)
+                continue
+            if holding.code in trend_exit_codes and holding.qty > 0 and holding.price > 0:
+                exit_fraction = max(0.0, min(1.0, float(trend_exit_step_pct)))
+                qty = min(holding.qty, max(1, ceil(holding.qty * exit_fraction)))
+                amount = qty * holding.price
+                orders.append(
+                    PensionOrderPlan(
+                        side="SELL",
+                        code=holding.code,
+                        bucket=bucket,
+                        qty=qty,
+                        price=holding.price,
+                        amount=amount,
+                        reason="momentum weekly trend exit",
+                    )
+                )
+                current_values[bucket] = max(0, current_values.get(bucket, 0) - amount)
+                estimated_cash += amount
+                reserved_cash += amount
                 continue
             target_value = int(total_value * target_weights.get(bucket, 0.0))
             overweight = current_values.get(bucket, 0) - target_value
@@ -384,7 +409,8 @@ def build_pension_rebalance_plan(
         if gap >= min_order_amount:
             buy_gaps.append((gap, bucket))
 
-    funding_shortfall = max(0, sum(gap for gap, _ in buy_gaps) - estimated_cash)
+    spendable_cash = max(0, estimated_cash - reserved_cash)
+    funding_shortfall = max(0, sum(gap for gap, _ in buy_gaps) - spendable_cash)
     if funding_shortfall >= parking_cash_trigger:
         for holding in parking_holdings:
             if holding.code != parking_code or holding.qty <= 0 or holding.price <= 0:
@@ -415,7 +441,8 @@ def build_pension_rebalance_plan(
         price = int(prices.get(code) or 0)
         if price <= 0:
             continue
-        budget = min(gap, estimated_cash)
+        spendable_cash = max(0, estimated_cash - reserved_cash)
+        budget = min(gap, spendable_cash)
         qty = floor(budget / price)
         if qty <= 0:
             continue
@@ -443,9 +470,9 @@ def build_pension_rebalance_plan(
         and leftover_code
         and leftover_code not in sold_codes
         and leftover_price > 0
-        and estimated_cash >= max(min_order_amount, leftover_price)
+        and max(0, estimated_cash - reserved_cash) >= max(min_order_amount, leftover_price)
     ):
-        qty = floor(estimated_cash / leftover_price)
+        qty = floor(max(0, estimated_cash - reserved_cash) / leftover_price)
         if qty > 0:
             amount = qty * leftover_price
             orders.append(
@@ -465,10 +492,10 @@ def build_pension_rebalance_plan(
     if (
         parking_code
         and parking_price > 0
-        and estimated_cash >= parking_price
-        and (leftover_price <= 0 or estimated_cash < leftover_price)
+        and max(0, estimated_cash - reserved_cash) >= parking_price
+        and (leftover_price <= 0 or max(0, estimated_cash - reserved_cash) < leftover_price)
     ):
-        qty = floor(estimated_cash / parking_price)
+        qty = floor(max(0, estimated_cash - reserved_cash) / parking_price)
         if qty > 0:
             amount = qty * parking_price
             orders.append(

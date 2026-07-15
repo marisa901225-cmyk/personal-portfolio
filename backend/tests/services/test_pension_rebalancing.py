@@ -101,6 +101,75 @@ def test_falling_market_reduces_momentum_etf_and_adds_us_bond() -> None:
     assert any(order.side == "BUY" and order.bucket == "bond" for order in plan.orders)
 
 
+def test_broken_momentum_trend_sells_one_third_and_keeps_proceeds_as_cash() -> None:
+    plan = build_pension_rebalance_plan(
+        holdings=[
+            PensionHolding("360200", "ACE 미국S&P500", 40, 10_000, 400_000),
+            PensionHolding("237350", "KODEX 코스피100", 60, 10_000, 600_000),
+        ],
+        cash=0,
+        assets=[
+            PensionAsset("360200", "sp500", "ACE 미국S&P500"),
+            PensionAsset("237350", "momentum", "KODEX 코스피100", buyable=False, trend_exit=True),
+            PensionAsset("241180", "momentum", "TIGER 일본니케이225"),
+        ],
+        prices={"360200": 10_000, "237350": 10_000, "241180": 10_000},
+        regime="rising",
+        min_order_amount=10_000,
+        trend_exit_step_pct=1.0 / 3.0,
+        deploy_leftover_to=None,
+    )
+
+    assert [(order.side, order.code, order.qty) for order in plan.orders] == [("SELL", "237350", 20)]
+    assert plan.estimated_cash_after_orders == 200_000
+
+
+def test_reserved_trend_exit_cash_is_not_reinvested_after_sell_fill() -> None:
+    plan = build_pension_rebalance_plan(
+        holdings=[
+            PensionHolding("360200", "ACE 미국S&P500", 40, 10_000, 400_000),
+            PensionHolding("237350", "KODEX 코스피100", 40, 10_000, 400_000),
+        ],
+        cash=200_000,
+        assets=[
+            PensionAsset("360200", "sp500", "ACE 미국S&P500"),
+            PensionAsset("237350", "momentum", "KODEX 코스피100", buyable=False, trend_exit=True),
+            PensionAsset("241180", "momentum", "TIGER 일본니케이225"),
+        ],
+        prices={"360200": 10_000, "237350": 10_000, "241180": 10_000},
+        regime="rising",
+        min_order_amount=10_000,
+        allow_sells=False,
+        reserved_cash_amount=200_000,
+        deploy_leftover_to=None,
+    )
+
+    assert plan.orders == []
+    assert plan.estimated_cash_after_orders == 200_000
+
+
+def test_recovered_momentum_trend_automatically_rebuys_target_gap() -> None:
+    plan = build_pension_rebalance_plan(
+        holdings=[
+            PensionHolding("360200", "ACE 미국S&P500", 40, 10_000, 400_000),
+            PensionHolding("237350", "KODEX 코스피100", 40, 10_000, 400_000),
+        ],
+        cash=200_000,
+        assets=[
+            PensionAsset("360200", "sp500", "ACE 미국S&P500"),
+            PensionAsset("237350", "momentum", "KODEX 코스피100", buyable=True, trend_exit=False),
+        ],
+        prices={"360200": 10_000, "237350": 10_000},
+        regime="rising",
+        min_order_amount=10_000,
+        allow_sells=False,
+        deploy_leftover_to=None,
+    )
+
+    assert [(order.side, order.code, order.qty) for order in plan.orders] == [("BUY", "237350", 20)]
+    assert plan.estimated_cash_after_orders == 0
+
+
 def test_leftover_cash_is_deployed_to_sp500() -> None:
     plan = build_pension_rebalance_plan(
         holdings=[],

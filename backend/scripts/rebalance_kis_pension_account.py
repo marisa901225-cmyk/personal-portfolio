@@ -11,8 +11,13 @@ from typing import Any
 
 from backend.integrations.kis.trading_adapter import KISDirectCredentials, create_trading_api
 from backend.services.pension_momentum import (
+    PensionIndexCandidate,
+    PensionMomentumCandidate,
     analyze_pension_momentum_candidate,
+    pension_index_family,
+    requires_momentum_trend_exit,
     review_pension_momentum_candidates,
+    select_liquid_pension_index_candidates,
 )
 from backend.services.pension_rebalancing import (
     DEFAULT_MOMENTUM_OUTPERFORMANCE_THRESHOLD_PCT,
@@ -34,6 +39,8 @@ from backend.services.trading_engine.execution_support import (
     next_buy_retry_price,
     normalize_buy_limit_price,
 )
+from backend.services.trading_engine.stock_master import load_stock_master_map
+from backend.services.trading_engine.utils import compute_avg_value
 
 
 DEFAULT_RUNTIME_ENV = Path("/app/runtime/myasset.secrets.env")
@@ -157,6 +164,19 @@ class PensionKISClient:
     def monthly_prices(self, code: str, *, start_date: str, end_date: str) -> list[tuple[str, int]]:
         return self.api.chart_prices(code, start_date=start_date, end_date=end_date, period_div_code="M")
 
+    def weekly_prices(self, code: str, *, start_date: str, end_date: str) -> list[tuple[str, int]]:
+        return self.api.chart_prices(code, start_date=start_date, end_date=end_date, period_div_code="W")
+
+    def daily_history(self, code: str, *, end_date: str, lookback: int) -> tuple[list[tuple[str, int]], float]:
+        bars = self.api.daily_bars(code=code, end=end_date, lookback=lookback)
+        avg_value_20d, _ = compute_avg_value(bars, window=20)
+        prices = [
+            (str(row.get("date") or ""), _to_int(row.get("close")))
+            for row in bars.to_dict(orient="records")
+            if _to_int(row.get("close")) > 0
+        ]
+        return prices, float(avg_value_20d or 0.0)
+
     def place_order(self, *, side: str, code: str, qty: int, price: int) -> dict[str, Any]:
         result = self.api.place_order(side=side, code=code, qty=qty, order_type="limit", price=price)
         return {
@@ -177,7 +197,12 @@ class PensionKISClient:
         return self.api.daily_order_fills(start_date=today, end_date=today, code=code, order_id=order_id, side=side)
 
 
-def _assets_from_env(env: dict[str, str], *, selected_momentum_code: str | None = None) -> list[PensionAsset]:
+def _assets_from_env(
+    env: dict[str, str],
+    *,
+    selected_momentum_code: str | None = None,
+    momentum_trend_exit_codes: tuple[str, ...] = (),
+) -> list[PensionAsset]:
     sp500 = str(env.get("PENSION_REBALANCE_SP500_CODE") or "360200").strip()
     kospi = str(env.get("PENSION_REBALANCE_KOSPI_CODE") or "237350").strip()
     nasdaq = str(
@@ -200,14 +225,26 @@ def _assets_from_env(env: dict[str, str], *, selected_momentum_code: str | None 
         momentum_codes = [(selected_momentum_code, True), (kospi, False), (nasdaq, False)]
     else:
         momentum_codes = [(kospi, False), (nasdaq, False)]
+    trend_exit_codes = {str(code).strip() for code in momentum_trend_exit_codes if str(code).strip()}
     assets = [
         PensionAsset(sp500, "sp500", "S&P500"),
     ]
     seen = {sp500}
     for code, buyable in momentum_codes:
         if code and code not in seen:
-            assets.append(PensionAsset(code, "momentum", "Momentum ETF", buyable=buyable))
+            assets.append(
+                PensionAsset(
+                    code,
+                    "momentum",
+                    "Momentum ETF",
+                    buyable=buyable,
+                    trend_exit=code in trend_exit_codes,
+                )
+            )
             seen.add(code)
+    for code in sorted(trend_exit_codes - seen):
+        assets.append(PensionAsset(code, "momentum", "Momentum ETF", buyable=False, trend_exit=True))
+        seen.add(code)
     if bond:
         assets.append(PensionAsset(bond, "bond", "US Short Bond"))
         seen.add(bond)
@@ -231,6 +268,139 @@ def _quarterly_return(client: PensionKISClient, code: str, *, today: date) -> fl
 
 def _trend_start(today: date) -> str:
     return (today - timedelta(days=540)).strftime("%Y%m%d")
+
+
+def _analyze_pension_momentum_universe(
+    client: PensionKISClient,
+    env: dict[str, str],
+    *,
+    kospi_code: str,
+    nasdaq_code: str,
+    end_date: str,
+) -> list[PensionMomentumCandidate]:
+    config = TradeEngineConfig()
+    universe_by_code: dict[str, tuple[str, str]] = {}
+    try:
+        master_map = load_stock_master_map(
+            kospi_master_path=config.industry_kospi_master_path,
+            kosdaq_master_path=config.industry_kosdaq_master_path,
+        )
+    except Exception as exc:
+        print("pension_momentum_master_error", {"error": type(exc).__name__})
+        master_map = {}
+
+    for info in master_map.values():
+        code = str(info.code or "").strip()
+        if not info.is_etf or not code or code.upper().startswith("Q"):
+            continue
+        family = pension_index_family(info.name)
+        if not family:
+            continue
+        if family == "korea_kospi" and code != kospi_code:
+            continue
+        universe_by_code[code] = (str(info.name or "").strip(), family)
+
+    seed_specs = (
+        (kospi_code, "237350", "KODEX 코스피100", "korea_kospi"),
+        (nasdaq_code, "426030", "TIME 미국나스닥100액티브", "us_nasdaq100"),
+    )
+    for code, default_code, default_name, expected_family in seed_specs:
+        if code in universe_by_code:
+            continue
+        info = master_map.get(code)
+        if info is not None:
+            actual_name = str(info.name or "").strip()
+            actual_family = pension_index_family(actual_name)
+            if info.is_etf and actual_family == expected_family:
+                universe_by_code[code] = (actual_name, actual_family)
+            else:
+                print(
+                    "pension_momentum_seed_rejected",
+                    {"code": code, "name": actual_name, "family": actual_family},
+                )
+        elif code == default_code:
+            universe_by_code[code] = (default_name, expected_family)
+        else:
+            print("pension_momentum_seed_rejected", {"code": code, "reason": "UNKNOWN_CUSTOM_CODE"})
+
+    histories: dict[str, list[tuple[str, int]]] = {}
+    liquid_candidates: list[PensionIndexCandidate] = []
+    for code, (name, family) in sorted(universe_by_code.items()):
+        try:
+            daily_prices, avg_value_20d = client.daily_history(code, end_date=end_date, lookback=180)
+        except Exception as exc:
+            print(
+                "pension_momentum_history_error",
+                {"code": code, "family": family, "error": type(exc).__name__},
+            )
+            continue
+        histories[code] = daily_prices
+        liquid_candidates.append(PensionIndexCandidate(code, name, family, avg_value_20d))
+
+    raw_min_avg_value = str(env.get("PENSION_REBALANCE_MOMENTUM_MIN_AVG_VALUE_20D") or "").strip()
+    try:
+        configured_min_avg_value = float(raw_min_avg_value) if raw_min_avg_value else 1_000_000_000.0
+    except ValueError:
+        configured_min_avg_value = 1_000_000_000.0
+    min_avg_value_20d = max(0.0, configured_min_avg_value)
+    selected = select_liquid_pension_index_candidates(
+        liquid_candidates,
+        min_avg_value_20d=min_avg_value_20d,
+        preferred_codes={kospi_code, nasdaq_code},
+    )
+    family_leaders = select_liquid_pension_index_candidates(
+        liquid_candidates,
+        min_avg_value_20d=0.0,
+        preferred_codes={kospi_code, nasdaq_code},
+    )
+    print(
+        "pension_momentum_universe",
+        {
+            "scanned": len(liquid_candidates),
+            "min_avg_value_20d": int(min_avg_value_20d),
+            "selected": [
+                {
+                    "code": candidate.code,
+                    "name": candidate.name,
+                    "family": candidate.family,
+                    "avg_value_20d": int(candidate.avg_value_20d),
+                }
+                for candidate in selected
+            ],
+            "below_liquidity": [
+                {
+                    "code": candidate.code,
+                    "name": candidate.name,
+                    "family": candidate.family,
+                    "avg_value_20d": int(candidate.avg_value_20d),
+                }
+                for candidate in family_leaders
+                if candidate.avg_value_20d < min_avg_value_20d
+            ],
+        },
+    )
+    analyzed: list[PensionMomentumCandidate] = []
+    weekly_start = (datetime.strptime(end_date, "%Y%m%d").date() - timedelta(days=540)).strftime("%Y%m%d")
+    for candidate in selected:
+        try:
+            weekly_prices = client.weekly_prices(candidate.code, start_date=weekly_start, end_date=end_date)
+        except Exception as exc:
+            print(
+                "pension_momentum_weekly_error",
+                {"code": candidate.code, "family": candidate.family, "error": type(exc).__name__},
+            )
+            continue
+        analyzed.append(
+            analyze_pension_momentum_candidate(
+                code=candidate.code,
+                name=candidate.name,
+                daily_prices=histories[candidate.code],
+                weekly_prices=weekly_prices,
+                family=candidate.family,
+                avg_value_20d=candidate.avg_value_20d,
+            )
+        )
+    return analyzed
 
 
 def _resolve_quarterly_signal(
@@ -277,24 +447,22 @@ def _resolve_quarterly_signal(
     elif configured:
         signal = replace(signal, regime=normalize_regime(configured))
 
-    momentum_candidates = [
-        analyze_pension_momentum_candidate(
-            code=kospi_code,
-            name="KODEX 코스피100",
-            daily_prices=client.daily_prices(kospi_code, start_date=trend_start, end_date=trend_end),
-        ),
-        analyze_pension_momentum_candidate(
-            code=nasdaq_code,
-            name="TIME 미국나스닥100액티브",
-            daily_prices=client.daily_prices(nasdaq_code, start_date=trend_start, end_date=trend_end),
-        ),
-    ]
+    momentum_candidates = _analyze_pension_momentum_universe(
+        client,
+        env,
+        kospi_code=kospi_code,
+        nasdaq_code=nasdaq_code,
+        end_date=trend_end,
+    )
     print(
         "pension_momentum_analysis",
         json.dumps(
             [
                 {
                     "code": candidate.code,
+                    "name": candidate.name,
+                    "family": candidate.family,
+                    "avg_value_20d": int(candidate.avg_value_20d),
                     "score": candidate.score,
                     "eligible": candidate.eligible,
                     "weekly_ma10": round(candidate.weekly_ma10, 2),
@@ -309,10 +477,17 @@ def _resolve_quarterly_signal(
             ensure_ascii=False,
         ),
     )
+    trend_exit_codes = tuple(
+        sorted(candidate.code for candidate in momentum_candidates if requires_momentum_trend_exit(candidate))
+    )
 
     review_enabled = str(env.get("PENSION_REBALANCE_MOMENTUM_AI_REVIEW_ENABLED") or "1").strip().lower()
     if review_enabled not in {"1", "true", "t", "yes", "y", "on"}:
-        return replace(signal, selected_momentum_code="")
+        return replace(
+            signal,
+            selected_momentum_code="",
+            momentum_trend_exit_codes=trend_exit_codes,
+        )
 
     review = review_pension_momentum_candidates(
         momentum_candidates,
@@ -328,7 +503,11 @@ def _resolve_quarterly_signal(
             "route": review.route,
         },
     )
-    return replace(signal, selected_momentum_code=review.selected_code)
+    return replace(
+        signal,
+        selected_momentum_code=review.selected_code,
+        momentum_trend_exit_codes=trend_exit_codes,
+    )
 
 
 def _parking_code_from_env(env: dict[str, str]) -> str:
@@ -525,12 +704,18 @@ def main() -> int:
     env = {**_load_env_file(DEFAULT_RUNTIME_ENV), **os.environ}
     client = PensionKISClient(env)
     signal = _resolve_quarterly_signal(client, env, args.regime)
-    assets = _assets_from_env(env, selected_momentum_code=signal.selected_momentum_code)
+    assets = _assets_from_env(
+        env,
+        selected_momentum_code=signal.selected_momentum_code,
+        momentum_trend_exit_codes=signal.momentum_trend_exit_codes,
+    )
     holdings, cash = client.balance()
 
     prices = _refresh_prices(client, holdings, assets)
 
     restore_step = max(0.0, min(0.5, _env_float("PENSION_REBALANCE_EQUITY_RESTORE_STEP_PCT", 0.20)))
+    trend_exit_split_count = max(1, _env_int("PENSION_REBALANCE_TREND_EXIT_SPLIT_COUNT", 3))
+    trend_exit_step_pct = 1.0 / trend_exit_split_count
     plan = build_pension_rebalance_plan(
         holdings=holdings,
         cash=cash,
@@ -542,6 +727,7 @@ def main() -> int:
         deploy_leftover_to=None,
         parking_code=_parking_code_from_env(env),
         gradual_equity_restore_step=restore_step,
+        trend_exit_step_pct=trend_exit_step_pct,
     )
 
     if args.if_drift:
@@ -557,9 +743,16 @@ def main() -> int:
         )
         print("drift_threshold_pct", drift_threshold_pct)
         print("max_target_weight_drift_pct", drift_pct)
-        if drift_pct < drift_threshold_pct:
+        trend_exit_orders = [
+            order
+            for order in plan.orders
+            if order.side == "SELL" and order.code in set(signal.momentum_trend_exit_codes)
+        ]
+        if drift_pct < drift_threshold_pct and not trend_exit_orders:
             print("drift_action", "SKIP")
             return 0
+        if trend_exit_orders:
+            print("trend_exit_action", "PARTIAL_SELL")
         print("drift_action", "REBALANCE")
 
     orderable_cash = cash
@@ -576,8 +769,12 @@ def main() -> int:
             deploy_leftover_to=None,
             parking_code=_parking_code_from_env(env),
             gradual_equity_restore_step=restore_step,
+            trend_exit_step_pct=trend_exit_step_pct,
         )
         sell_orders = [order for order in plan.orders if order.side == "SELL"]
+        trend_exit_proceeds = sum(
+            order.amount for order in sell_orders if order.code in set(signal.momentum_trend_exit_codes)
+        )
         if sell_orders:
             sell_results: list[dict[str, Any]] = []
             for order in sell_orders:
@@ -605,6 +802,8 @@ def main() -> int:
                 deploy_leftover_to=None,
                 parking_code=_parking_code_from_env(env),
                 gradual_equity_restore_step=restore_step,
+                trend_exit_step_pct=trend_exit_step_pct,
+                reserved_cash_amount=min(trend_exit_proceeds, orderable_cash),
             )
 
         buy_orders = [order for order in plan.orders if order.side == "BUY"]
@@ -622,6 +821,7 @@ def main() -> int:
         print("reference_drawdown_from_recent_high_pct", round(signal.drawdown_from_recent_high_pct, 2))
         print("reference_three_month_return_pct", round(signal.three_month_return_pct, 2))
         print("selected_momentum_code", signal.selected_momentum_code)
+        print("momentum_trend_exit_codes", signal.momentum_trend_exit_codes)
     print("total_value", plan.total_value)
     print("cash", plan.cash)
     if args.execute:

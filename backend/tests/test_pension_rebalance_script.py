@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from types import SimpleNamespace
 
 import backend.scripts.run_pension_rebalance_scheduler as scheduler
 from backend.scripts.rebalance_kis_pension_account import (
+    _analyze_pension_momentum_universe,
     _assets_from_env,
     _execute_orders,
     _parking_code_from_env,
@@ -196,6 +198,83 @@ def test_assets_from_env_marks_selected_momentum_buyable_first() -> None:
     assert momentum_assets[0].code == "426030"
     assert momentum_assets[0].buyable
     assert not next(asset for asset in momentum_assets if asset.code == "237350").buyable
+
+
+def test_assets_from_env_marks_broken_country_index_for_partial_exit() -> None:
+    assets = _assets_from_env(
+        {
+            "PENSION_REBALANCE_SP500_CODE": "360200",
+            "PENSION_REBALANCE_KOSPI_CODE": "237350",
+            "PENSION_REBALANCE_NASDAQ_CODE": "426030",
+        },
+        selected_momentum_code="241180",
+        momentum_trend_exit_codes=("237350", "453870"),
+    )
+
+    by_code = {asset.code: asset for asset in assets}
+    assert by_code["241180"].buyable
+    assert not by_code["241180"].trend_exit
+    assert by_code["237350"].trend_exit
+    assert by_code["453870"].trend_exit
+    assert not by_code["453870"].buyable
+
+
+def test_pension_momentum_universe_allows_liquid_country_indices_only(monkeypatch) -> None:
+    master_rows = [
+        SimpleNamespace(code="237350", name="KODEX 코스피100", is_etf=True),
+        SimpleNamespace(code="426030", name="TIME 미국나스닥100액티브", is_etf=True),
+        SimpleNamespace(code="133690", name="TIGER 미국나스닥100", is_etf=True),
+        SimpleNamespace(code="453870", name="TIGER 인도니프티50", is_etf=True),
+        SimpleNamespace(code="241180", name="TIGER 일본니케이225", is_etf=True),
+        SimpleNamespace(code="245340", name="TIGER 미국다우존스30", is_etf=True),
+        SimpleNamespace(code="251350", name="KODEX MSCI선진국", is_etf=True),
+        SimpleNamespace(code="409820", name="KODEX 미국나스닥100레버리지(합성 H)", is_etf=True),
+        SimpleNamespace(code="229200", name="KODEX 코스닥150", is_etf=True),
+        SimpleNamespace(code="379800", name="KODEX 미국S&P500", is_etf=True),
+    ]
+    monkeypatch.setattr(
+        "backend.scripts.rebalance_kis_pension_account.load_stock_master_map",
+        lambda **kwargs: {row.code: row for row in master_rows},
+    )
+
+    avg_values = {
+        "237350": 8_000_000_000,
+        "426030": 6_000_000_000,
+        "133690": 100_000_000_000,
+        "453870": 7_000_000_000,
+        "241180": 4_000_000_000,
+    }
+    requested_codes: list[str] = []
+
+    class Client:
+        @staticmethod
+        def daily_history(code: str, *, end_date: str, lookback: int) -> tuple[list[tuple[str, int]], float]:
+            requested_codes.append(code)
+            start = date(2025, 1, 1)
+            prices = [
+                ((start + timedelta(days=index)).strftime("%Y%m%d"), 100 + index)
+                for index in range(220)
+            ]
+            return prices, avg_values[code]
+
+        @staticmethod
+        def weekly_prices(code: str, *, start_date: str, end_date: str) -> list[tuple[str, int]]:
+            start = date(2025, 1, 3)
+            return [
+                ((start + timedelta(days=index * 7)).strftime("%Y%m%d"), 100 + index)
+                for index in range(30)
+            ]
+
+    candidates = _analyze_pension_momentum_universe(
+        Client(),
+        {"PENSION_REBALANCE_MOMENTUM_MIN_AVG_VALUE_20D": "5000000000"},
+        kospi_code="237350",
+        nasdaq_code="426030",
+        end_date="20260715",
+    )
+
+    assert {candidate.code for candidate in candidates} == {"237350", "426030", "453870"}
+    assert set(requested_codes) == set(avg_values)
 
 
 def test_quarterly_return_uses_quote_when_only_one_daily_price() -> None:

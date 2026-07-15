@@ -13,11 +13,48 @@ from backend.services.trading_engine.day_chart_review import (
     CHART_REVIEW_RESPONSE_FORMAT,
     parse_review_response,
 )
+from backend.services.trading_engine.utils import is_excluded_etf
 
 from .pension_rebalancing import pct_return
 
 
 logger = logging.getLogger(__name__)
+
+_PENSION_INDEX_DISALLOWED_KEYWORDS = (
+    "커버드콜",
+    "채권혼합",
+    "미국채혼합",
+    "혼합50",
+    "버퍼",
+    "vix",
+    "리츠",
+    "헬스케어",
+    "인프라",
+    "섹터",
+    "top10",
+    "전기차",
+    "반도체",
+    "바이오",
+    "테크",
+    "소비",
+    "로봇",
+    "방산",
+    "원유",
+    "골드",
+    "gold",
+    "엔화노출",
+    "배당",
+    "esg",
+    "변동성",
+)
+
+
+@dataclass(frozen=True)
+class PensionIndexCandidate:
+    code: str
+    name: str
+    family: str
+    avg_value_20d: float
 
 
 @dataclass(frozen=True)
@@ -36,6 +73,78 @@ class PensionMomentumCandidate:
     drawdown_26w_pct: float
     volatility_20d_pct: float
     reasons: tuple[str, ...]
+    family: str = ""
+    avg_value_20d: float = 0.0
+
+
+_MOMENTUM_TREND_EXIT_REASONS = {
+    "BELOW_WEEKLY_MA20",
+    "WEEKLY_TREND_BROKEN",
+    "WEAK_13W_MOMENTUM",
+    "DEEP_26W_DRAWDOWN",
+    "EXCESSIVE_VOLATILITY",
+}
+
+
+def requires_momentum_trend_exit(candidate: PensionMomentumCandidate) -> bool:
+    return bool(_MOMENTUM_TREND_EXIT_REASONS & set(candidate.reasons))
+
+
+def pension_index_family(name: str) -> str:
+    compact = str(name or "").strip().lower().replace(" ", "")
+    if not compact or "코스닥" in compact or "kosdaq" in compact:
+        return ""
+    if is_excluded_etf({"name": compact}) or any(
+        keyword in compact for keyword in _PENSION_INDEX_DISALLOWED_KEYWORDS
+    ):
+        return ""
+
+    patterns = (
+        (("나스닥100", "nasdaq100"), "us_nasdaq100"),
+        (("nikkei225", "니케이225"), "japan_nikkei225"),
+        (("일본topix",), "japan_topix"),
+        (("csi300",), "china_csi300"),
+        (("차이나hscei", "차이나h"), "china_h"),
+        (("항셍30",), "hongkong_hangseng30"),
+        (("nifty50", "니프티50"), "india_nifty50"),
+        (("베트남vn30",), "vietnam_vn30"),
+        (("독일dax",), "germany_dax"),
+        (("ftse100",), "uk_ftse100"),
+        (("msci인도네시아",), "indonesia_msci"),
+        (("msci필리핀",), "philippines_msci"),
+        (("msci멕시코",), "mexico_msci"),
+        (("중국mscichina",), "china_msci"),
+        (("msci신흥국", "신흥국msci"), "global_emerging_msci"),
+        (("코스피100", "kospi100"), "korea_kospi"),
+    )
+    for keywords, family in patterns:
+        if any(keyword in compact for keyword in keywords):
+            return family
+    return ""
+
+
+def select_liquid_pension_index_candidates(
+    candidates: list[PensionIndexCandidate],
+    *,
+    min_avg_value_20d: float,
+    preferred_codes: set[str] | None = None,
+) -> list[PensionIndexCandidate]:
+    preferred = {str(code).strip() for code in (preferred_codes or set()) if str(code).strip()}
+    selected_by_family: dict[str, PensionIndexCandidate] = {}
+    for candidate in candidates:
+        if not candidate.family or candidate.avg_value_20d < min_avg_value_20d:
+            continue
+        existing = selected_by_family.get(candidate.family)
+        if existing is None:
+            selected_by_family[candidate.family] = candidate
+            continue
+        candidate_preferred = candidate.code in preferred
+        existing_preferred = existing.code in preferred
+        if (candidate_preferred and not existing_preferred) or (
+            candidate_preferred == existing_preferred and candidate.avg_value_20d > existing.avg_value_20d
+        ):
+            selected_by_family[candidate.family] = candidate
+    return sorted(selected_by_family.values(), key=lambda candidate: candidate.avg_value_20d, reverse=True)
 
 
 @dataclass(frozen=True)
@@ -106,10 +215,17 @@ def analyze_pension_momentum_candidate(
     code: str,
     name: str,
     daily_prices: list[tuple[str, int]],
+    weekly_prices: list[tuple[str, int]] | None = None,
+    family: str = "",
+    avg_value_20d: float = 0.0,
 ) -> PensionMomentumCandidate:
     prices = _normalized_prices(daily_prices)
     closes = [price for _, price in prices]
-    weekly = _weekly_closes(prices)
+    weekly = (
+        [price for _, price in _normalized_prices(weekly_prices)]
+        if weekly_prices is not None
+        else _weekly_closes(prices)
+    )
     if len(closes) < 60 or len(weekly) < 20:
         return PensionMomentumCandidate(
             code=code,
@@ -126,6 +242,8 @@ def analyze_pension_momentum_candidate(
             drawdown_26w_pct=0.0,
             volatility_20d_pct=_annualized_volatility(closes),
             reasons=("INSUFFICIENT_HISTORY",),
+            family=family,
+            avg_value_20d=avg_value_20d,
         )
 
     current_price = closes[-1]
@@ -176,6 +294,8 @@ def analyze_pension_momentum_candidate(
         drawdown_26w_pct=drawdown_26w_pct,
         volatility_20d_pct=volatility_20d_pct,
         reasons=tuple(reasons),
+        family=family,
+        avg_value_20d=avg_value_20d,
     )
 
 
@@ -275,9 +395,13 @@ def review_pension_momentum_candidates(
 
 
 __all__ = [
+    "PensionIndexCandidate",
     "PensionMomentumCandidate",
     "PensionMomentumReview",
     "analyze_pension_momentum_candidate",
+    "pension_index_family",
     "rank_pension_momentum_candidates",
+    "requires_momentum_trend_exit",
     "review_pension_momentum_candidates",
+    "select_liquid_pension_index_candidates",
 ]
