@@ -22,6 +22,7 @@ from backend.services.pension_rebalancing import (
     PensionOrderPlan,
     QuarterlyMarketSignal,
     build_pension_rebalance_plan,
+    max_target_weight_drift_pct,
     normalize_regime,
     pct_return,
     quarter_start,
@@ -331,12 +332,14 @@ def _resolve_quarterly_signal(
 
 
 def _parking_code_from_env(env: dict[str, str]) -> str:
-    return str(
+    parking_code = str(
         env.get("PENSION_REBALANCE_PARKING_CODE")
         or env.get("TRADING_RISK_OFF_PARKING_CODE")
         or TradeEngineConfig().risk_off_parking_code
         or ""
     ).strip()
+    bond_code = str(env.get("PENSION_REBALANCE_US_BOND_CODE") or DEFAULT_US_SHORT_BOND_CODE).strip()
+    return "" if parking_code and parking_code == bond_code else parking_code
 
 
 def _apply_buy_capacity(
@@ -510,7 +513,14 @@ def main() -> int:
     parser.add_argument("--no-sells", action="store_true", help="only plan buys with available cash")
     parser.add_argument("--min-order-amount", type=int, default=50_000)
     parser.add_argument("--cash-sweep", action="store_true", help="daily cash/parking sweep without quarterly rebalance")
+    parser.add_argument(
+        "--if-drift",
+        action="store_true",
+        help="rebalance only when a core bucket differs from its target by the configured threshold",
+    )
     args = parser.parse_args()
+    if args.cash_sweep and args.if_drift:
+        parser.error("--cash-sweep and --if-drift cannot be used together")
 
     env = {**_load_env_file(DEFAULT_RUNTIME_ENV), **os.environ}
     client = PensionKISClient(env)
@@ -520,13 +530,10 @@ def main() -> int:
 
     prices = _refresh_prices(client, holdings, assets)
 
-    orderable_cash = cash
-    if args.execute:
-        orderable_cash = _orderable_cash_for_buys(client=client, assets=assets, prices=prices, cash=cash)
-
+    restore_step = max(0.0, min(0.5, _env_float("PENSION_REBALANCE_EQUITY_RESTORE_STEP_PCT", 0.20)))
     plan = build_pension_rebalance_plan(
         holdings=holdings,
-        cash=orderable_cash,
+        cash=cash,
         assets=assets,
         prices=prices,
         regime=signal.regime,
@@ -534,13 +541,42 @@ def main() -> int:
         allow_sells=not args.cash_sweep and not args.no_sells,
         deploy_leftover_to=None,
         parking_code=_parking_code_from_env(env),
-        gradual_equity_restore_step=max(
-            0.0,
-            min(0.5, _env_float("PENSION_REBALANCE_EQUITY_RESTORE_STEP_PCT", 0.20)),
-        ),
+        gradual_equity_restore_step=restore_step,
     )
 
+    if args.if_drift:
+        drift_threshold_pct = max(
+            0.0,
+            min(100.0, _env_float("PENSION_REBALANCE_DRIFT_THRESHOLD_PCT", 10.0)),
+        )
+        drift_pct = max_target_weight_drift_pct(
+            holdings=holdings,
+            cash=cash,
+            assets=assets,
+            target_weights=plan.target_weights,
+        )
+        print("drift_threshold_pct", drift_threshold_pct)
+        print("max_target_weight_drift_pct", drift_pct)
+        if drift_pct < drift_threshold_pct:
+            print("drift_action", "SKIP")
+            return 0
+        print("drift_action", "REBALANCE")
+
+    orderable_cash = cash
     if args.execute:
+        orderable_cash = _orderable_cash_for_buys(client=client, assets=assets, prices=prices, cash=cash)
+        plan = build_pension_rebalance_plan(
+            holdings=holdings,
+            cash=orderable_cash,
+            assets=assets,
+            prices=prices,
+            regime=signal.regime,
+            min_order_amount=args.min_order_amount,
+            allow_sells=not args.cash_sweep and not args.no_sells,
+            deploy_leftover_to=None,
+            parking_code=_parking_code_from_env(env),
+            gradual_equity_restore_step=restore_step,
+        )
         sell_orders = [order for order in plan.orders if order.side == "SELL"]
         if sell_orders:
             sell_results: list[dict[str, Any]] = []
@@ -568,10 +604,7 @@ def main() -> int:
                 allow_sells=False,
                 deploy_leftover_to=None,
                 parking_code=_parking_code_from_env(env),
-                gradual_equity_restore_step=max(
-                    0.0,
-                    min(0.5, _env_float("PENSION_REBALANCE_EQUITY_RESTORE_STEP_PCT", 0.20)),
-                ),
+                gradual_equity_restore_step=restore_step,
             )
 
         buy_orders = [order for order in plan.orders if order.side == "BUY"]

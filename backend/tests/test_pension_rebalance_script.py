@@ -6,15 +6,18 @@ import backend.scripts.run_pension_rebalance_scheduler as scheduler
 from backend.scripts.rebalance_kis_pension_account import (
     _assets_from_env,
     _execute_orders,
+    _parking_code_from_env,
     _quarterly_return,
     _split_order_qty,
     _wait_for_sell_fills,
 )
 from backend.scripts.run_pension_rebalance_scheduler import (
+    _build_command,
     _is_quarter_window,
     _is_scheduled_trading_day,
     _open_day_from_holiday_rows,
     _quarter_key,
+    _should_use_drift_guard,
 )
 from backend.services.pension_rebalancing import PensionOrderPlan
 
@@ -39,6 +42,67 @@ def test_quarter_window_days_can_be_configured(monkeypatch) -> None:
 def test_quarter_key_matches_quarter_end_month() -> None:
     assert _quarter_key(datetime(2026, 3, 31, 10, 5)) == "2026Q1"
     assert _quarter_key(datetime(2026, 6, 30, 10, 5)) == "2026Q2"
+
+
+def test_schedule_uses_drift_guard_outside_quarter_window() -> None:
+    now = datetime(2026, 7, 16, 10, 5)
+
+    assert _should_use_drift_guard(now, {"last_success_quarter": "2026Q3"})
+
+
+def test_schedule_uses_drift_guard_after_quarterly_rebalance_completed() -> None:
+    now = datetime(2026, 9, 30, 10, 5)
+
+    assert _should_use_drift_guard(now, {"last_success_quarter": "2026Q3"})
+
+
+def test_schedule_runs_normal_rebalance_when_quarterly_rebalance_is_due() -> None:
+    now = datetime(2026, 9, 30, 10, 5)
+
+    assert not _should_use_drift_guard(now, {"last_success_quarter": "2026Q2"})
+
+
+def test_build_command_adds_drift_guard_flag() -> None:
+    command = _build_command(execute=True, if_drift=True)
+
+    assert "--if-drift" in command
+    assert "--execute" in command
+
+
+def test_scheduled_rebalance_runs_drift_guard_after_quarter_is_completed(monkeypatch, tmp_path) -> None:
+    scheduled_at = scheduler.KST.localize(datetime(2026, 7, 16, 10, 5))
+    captured: dict[str, object] = {}
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return scheduled_at
+
+    class Result:
+        returncode = 0
+        stdout = "drift_action REBALANCE"
+        stderr = ""
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        return Result()
+
+    def fake_write_state(path, state) -> None:
+        captured["state"] = dict(state)
+
+    monkeypatch.setenv("PENSION_REBALANCE_EXECUTE", "1")
+    monkeypatch.setattr(scheduler, "datetime", FixedDateTime)
+    monkeypatch.setattr(scheduler, "_state_path", lambda: tmp_path / "state.json")
+    monkeypatch.setattr(scheduler, "_read_state", lambda path: {"last_success_quarter": "2026Q3"})
+    monkeypatch.setattr(scheduler, "_write_state", fake_write_state)
+    monkeypatch.setattr(scheduler, "_is_scheduled_trading_day", lambda now: True)
+    monkeypatch.setattr(scheduler.subprocess, "run", fake_run)
+
+    assert scheduler._run_rebalance(reason="schedule") == 0
+    assert "--if-drift" in captured["command"]
+    assert "--execute" in captured["command"]
+    assert captured["state"]["last_success_quarter"] == "2026Q3"
+    assert captured["state"]["last_reason"] == "drift_schedule"
 
 
 def test_open_day_from_holiday_rows_uses_kis_open_flag() -> None:
@@ -89,6 +153,18 @@ def test_assets_from_env_deduplicates_bond_and_parking_code() -> None:
     codes = [asset.code for asset in assets]
     assert codes.count("0048J0") == 1
     assert [asset.bucket for asset in assets if asset.code == "0048J0"] == ["bond"]
+
+
+def test_parking_code_is_disabled_when_it_matches_bond_code() -> None:
+    assert (
+        _parking_code_from_env(
+            {
+                "PENSION_REBALANCE_US_BOND_CODE": "0048J0",
+                "PENSION_REBALANCE_PARKING_CODE": "0048J0",
+            }
+        )
+        == ""
+    )
 
 
 def test_assets_from_env_blocks_momentum_buy_without_reviewed_candidate() -> None:

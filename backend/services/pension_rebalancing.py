@@ -273,6 +273,37 @@ def bucket_values(
     return values
 
 
+def max_target_weight_drift_pct(
+    *,
+    holdings: list[PensionHolding],
+    cash: int,
+    assets: list[PensionAsset],
+    target_weights: dict[Bucket, float],
+) -> float:
+    total_value = max(0, int(cash)) + sum(max(0, holding.value) for holding in holdings)
+    if total_value <= 0:
+        return 0.0
+
+    current_values = bucket_values(holdings, assets)
+    tracked_buckets: tuple[Bucket, ...] = ("sp500", "momentum", "bond")
+    return round(
+        max(
+            abs((current_values.get(bucket, 0) / total_value) - target_weights.get(bucket, 0.0))
+            for bucket in tracked_buckets
+        )
+        * 100.0,
+        4,
+    )
+
+
+def _validate_no_same_code_round_trip(orders: list[PensionOrderPlan]) -> None:
+    buy_codes = {order.code for order in orders if order.side == "BUY"}
+    sell_codes = {order.code for order in orders if order.side == "SELL"}
+    overlap = sorted(buy_codes & sell_codes)
+    if overlap:
+        raise ValueError(f"same-code buy/sell round trip is not allowed: {','.join(overlap)}")
+
+
 def build_pension_rebalance_plan(
     *,
     holdings: list[PensionHolding],
@@ -406,9 +437,11 @@ def build_pension_rebalance_plan(
     leftover_bucket = deploy_leftover_to
     leftover_code = code_by_bucket.get(leftover_bucket) if leftover_bucket else None
     leftover_price = int(prices.get(leftover_code or "") or 0)
+    sold_codes = {order.code for order in orders if order.side == "SELL"}
     if (
         leftover_bucket
         and leftover_code
+        and leftover_code not in sold_codes
         and leftover_price > 0
         and estimated_cash >= max(min_order_amount, leftover_price)
     ):
@@ -452,6 +485,7 @@ def build_pension_rebalance_plan(
             current_values["parking"] = current_values.get("parking", 0) + amount
             estimated_cash -= amount
 
+    _validate_no_same_code_round_trip(orders)
     return PensionRebalancePlan(
         regime=regime,
         total_value=total_value,
@@ -554,6 +588,7 @@ def build_pension_cash_sweep_plan(
             )
             estimated_cash -= amount
 
+    _validate_no_same_code_round_trip(orders)
     return PensionRebalancePlan(
         regime="neutral",
         total_value=total_value,

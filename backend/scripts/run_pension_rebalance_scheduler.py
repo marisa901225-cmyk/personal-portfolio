@@ -35,6 +35,7 @@ setup_global_logging(
     log_file=str(PROJECT_ROOT / "logs" / "pension_rebalance_scheduler.log"),
 )
 logger = logging.getLogger("pension_rebalance_scheduler")
+_TRADING_JOB_LOCK = asyncio.Lock()
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -71,6 +72,11 @@ def _is_quarter_window(now: datetime) -> bool:
     last_day = calendar.monthrange(now.year, now.month)[1]
     first_window_day = max(1, last_day - window_days + 1)
     return first_window_day <= now.day <= last_day
+
+
+def _should_use_drift_guard(now: datetime, state: dict[str, Any]) -> bool:
+    last_success = str(state.get("last_success_quarter") or "")
+    return not (_is_quarter_window(now) and last_success != _quarter_key(now))
 
 
 def _holiday_row_date(row: dict[str, Any]) -> str:
@@ -168,7 +174,7 @@ def _write_state(path: Path, state: dict) -> None:
     path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _build_command(*, execute: bool) -> list[str]:
+def _build_command(*, execute: bool, if_drift: bool = False) -> list[str]:
     command = [
         sys.executable,
         "-m",
@@ -181,6 +187,8 @@ def _build_command(*, execute: bool) -> list[str]:
         command.extend(["--min-order-amount", min_order_amount])
     if _env_bool("PENSION_REBALANCE_NO_SELLS", False):
         command.append("--no-sells")
+    if if_drift:
+        command.append("--if-drift")
     if execute:
         command.append("--execute")
     return command
@@ -229,24 +237,24 @@ def _run_rebalance(*, reason: str, force: bool = False) -> int:
     quarter_key = _quarter_key(now)
     last_success = str(state.get("last_success_quarter") or "")
     execute = _env_bool("PENSION_REBALANCE_EXECUTE", False)
-
-    if not force and last_success == quarter_key:
-        logger.info("skip pension rebalance: already completed quarter=%s", quarter_key)
-        return 0
-
-    if reason == "schedule" and not _is_quarter_window(now):
-        logger.info("skip pension rebalance: outside quarter window now=%s", now.isoformat())
-        return 0
+    drift_guarded = False
 
     if reason == "schedule" and not _is_scheduled_trading_day(now):
         logger.info("skip pension rebalance: non-trading day now=%s", now.isoformat())
         return 0
 
-    command = _build_command(execute=execute)
+    if reason == "schedule":
+        drift_guarded = _should_use_drift_guard(now, state)
+    elif not force and last_success == quarter_key:
+        logger.info("skip pension rebalance: already completed quarter=%s", quarter_key)
+        return 0
+
+    command = _build_command(execute=execute, if_drift=drift_guarded)
     logger.info(
-        "starting pension rebalance reason=%s quarter=%s mode=%s command=%s",
+        "starting pension rebalance reason=%s quarter=%s guard=%s mode=%s command=%s",
         reason,
         quarter_key,
+        "DRIFT" if drift_guarded else "QUARTERLY",
         "EXECUTE" if execute else "DRY_RUN",
         " ".join(command),
     )
@@ -257,14 +265,17 @@ def _run_rebalance(*, reason: str, force: bool = False) -> int:
         logger.warning("pension rebalance stderr:\n%s", result.stderr.strip())
 
     if result.returncode == 0:
-        state.update(
-            {
-                "last_success_quarter": quarter_key,
-                "last_success_at": now.isoformat(),
-                "last_mode": "EXECUTE" if execute else "DRY_RUN",
-                "last_reason": reason,
-            }
-        )
+        state.update({"last_check_at": now.isoformat(), "last_mode": "EXECUTE" if execute else "DRY_RUN"})
+        if drift_guarded:
+            state.update({"last_drift_check_at": now.isoformat(), "last_reason": "drift_schedule"})
+        else:
+            state.update(
+                {
+                    "last_success_quarter": quarter_key,
+                    "last_success_at": now.isoformat(),
+                    "last_reason": reason,
+                }
+            )
         _write_state(state_path, state)
     else:
         logger.error("pension rebalance failed returncode=%s", result.returncode)
@@ -272,15 +283,17 @@ def _run_rebalance(*, reason: str, force: bool = False) -> int:
 
 
 async def _run_rebalance_async(reason: str, *, force: bool = False) -> None:
-    loop = asyncio.get_running_loop()
-    returncode = await loop.run_in_executor(None, lambda: _run_rebalance(reason=reason, force=force))
+    async with _TRADING_JOB_LOCK:
+        loop = asyncio.get_running_loop()
+        returncode = await loop.run_in_executor(None, lambda: _run_rebalance(reason=reason, force=force))
     if returncode != 0:
         logger.error("pension rebalance job ended with failure returncode=%s", returncode)
 
 
 async def _run_cash_sweep_async(reason: str) -> None:
-    loop = asyncio.get_running_loop()
-    returncode = await loop.run_in_executor(None, lambda: _run_cash_sweep(reason=reason))
+    async with _TRADING_JOB_LOCK:
+        loop = asyncio.get_running_loop()
+        returncode = await loop.run_in_executor(None, lambda: _run_cash_sweep(reason=reason))
     if returncode != 0:
         logger.error("pension cash sweep job ended with failure returncode=%s", returncode)
 
@@ -295,7 +308,7 @@ async def main() -> None:
         _run_rebalance_async,
         CronTrigger(day_of_week="mon-fri", hour=hour, minute=minute, timezone=KST),
         args=["schedule"],
-        id="pension_rebalance_quarterly_guarded",
+        id="pension_rebalance_daily_guarded",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

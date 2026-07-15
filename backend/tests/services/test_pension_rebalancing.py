@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
+
 from backend.services.pension_rebalancing import (
     calculate_equity_trend_metrics,
     EquityTrendMetrics,
@@ -9,6 +11,7 @@ from backend.services.pension_rebalancing import (
     PensionHolding,
     build_pension_cash_sweep_plan,
     build_pension_rebalance_plan,
+    max_target_weight_drift_pct,
     normalize_regime,
     pct_return,
     quarter_start,
@@ -49,6 +52,32 @@ def test_rising_market_targets_sp500_at_40_and_momentum_etf_at_60() -> None:
     assert plan.target_weights["momentum"] == 0.60
     assert any(order.side == "SELL" and order.code == "360200" for order in plan.orders)
     assert any(order.side == "BUY" and order.bucket == "momentum" for order in plan.orders)
+
+
+def test_target_weight_drift_uses_total_account_value_including_cash() -> None:
+    drift_pct = max_target_weight_drift_pct(
+        holdings=[
+            PensionHolding("360200", "ACE 미국S&P500", 40, 10_000, 400_000),
+            PensionHolding("426030", "TIME 미국나스닥100액티브", 40, 10_000, 400_000),
+        ],
+        cash=200_000,
+        assets=ASSETS,
+        target_weights={"sp500": 0.40, "momentum": 0.60, "bond": 0.0, "other": 0.0},
+    )
+
+    assert drift_pct == 20.0
+
+
+def test_target_weight_drift_is_zero_for_empty_account() -> None:
+    assert (
+        max_target_weight_drift_pct(
+            holdings=[],
+            cash=0,
+            assets=ASSETS,
+            target_weights={"sp500": 0.40, "momentum": 0.60, "bond": 0.0, "other": 0.0},
+        )
+        == 0.0
+    )
 
 
 def test_falling_market_reduces_momentum_etf_and_adds_us_bond() -> None:
@@ -158,6 +187,25 @@ def test_parking_stays_put_when_only_unbuyable_momentum_is_underweight() -> None
 
     assert plan.orders == []
     assert plan.estimated_cash_after_orders == 0
+
+
+def test_plan_rejects_same_code_buy_and_sell_round_trip() -> None:
+    with pytest.raises(ValueError, match="same-code buy/sell"):
+        build_pension_rebalance_plan(
+            holdings=[PensionHolding("0048J0", "미국채권 겸 파킹", 10, 10_000, 100_000)],
+            cash=0,
+            assets=[
+                PensionAsset("360200", "sp500", "ACE 미국S&P500"),
+                PensionAsset("426030", "momentum", "TIME 미국나스닥100액티브"),
+                PensionAsset("0048J0", "bond", "미국채권"),
+            ],
+            prices={"360200": 1_000_000, "426030": 1_000_000, "0048J0": 10_000},
+            regime="rising",
+            min_order_amount=10_000,
+            allow_sells=True,
+            deploy_leftover_to=None,
+            parking_code="0048J0",
+        )
 
 
 def test_residual_cash_below_sp500_unit_is_parked() -> None:
