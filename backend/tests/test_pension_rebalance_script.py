@@ -3,13 +3,20 @@ from __future__ import annotations
 from datetime import date, datetime
 
 import backend.scripts.run_pension_rebalance_scheduler as scheduler
-from backend.scripts.rebalance_kis_pension_account import _assets_from_env, _quarterly_return, _wait_for_sell_fills
+from backend.scripts.rebalance_kis_pension_account import (
+    _assets_from_env,
+    _execute_orders,
+    _quarterly_return,
+    _split_order_qty,
+    _wait_for_sell_fills,
+)
 from backend.scripts.run_pension_rebalance_scheduler import (
     _is_quarter_window,
     _is_scheduled_trading_day,
     _open_day_from_holiday_rows,
     _quarter_key,
 )
+from backend.services.pension_rebalancing import PensionOrderPlan
 
 
 def test_quarter_window_uses_quarter_end_month_last_seven_days(monkeypatch) -> None:
@@ -84,7 +91,7 @@ def test_assets_from_env_deduplicates_bond_and_parking_code() -> None:
     assert [asset.bucket for asset in assets if asset.code == "0048J0"] == ["bond"]
 
 
-def test_assets_from_env_marks_momentum_unbuyable_without_candidate() -> None:
+def test_assets_from_env_blocks_momentum_buy_without_reviewed_candidate() -> None:
     assets = _assets_from_env(
         {
             "PENSION_REBALANCE_SP500_CODE": "360200",
@@ -162,3 +169,83 @@ def test_wait_for_sell_fills_rejects_unfilled_daily_order(monkeypatch) -> None:
         Client(),
         [{"success": True, "code": "360200", "order_id": "OD123", "qty": 3}],
     )
+
+
+def test_split_order_qty_balances_tranches_and_handles_small_quantities() -> None:
+    assert _split_order_qty(10, 3) == [4, 3, 3]
+    assert _split_order_qty(2, 3) == [1, 1]
+    assert _split_order_qty(1, 3) == [1]
+    assert _split_order_qty(0, 3) == []
+
+
+def test_execute_orders_splits_buy_and_waits_for_each_fill(monkeypatch) -> None:
+    monkeypatch.setenv("PENSION_REBALANCE_BUY_SPLIT_COUNT", "3")
+    monkeypatch.setenv("PENSION_REBALANCE_BUY_FILL_TIMEOUT_SEC", "0")
+
+    class Client:
+        def __init__(self) -> None:
+            self.placed_qty: list[int] = []
+
+        def place_order(self, *, side: str, code: str, qty: int, price: int) -> dict[str, object]:
+            self.placed_qty.append(qty)
+            return {
+                "success": True,
+                "code": code,
+                "side": side,
+                "qty": qty,
+                "order_id": f"OD{len(self.placed_qty)}",
+            }
+
+        def daily_order_fills(
+            self,
+            *,
+            code: str = "",
+            order_id: str = "",
+            side: str = "00",
+        ) -> list[dict[str, int]]:
+            assert code == "426030"
+            assert side == "02"
+            index = int(order_id.removeprefix("OD")) - 1
+            return [{"filled_qty": self.placed_qty[index]}]
+
+    client = Client()
+    order = PensionOrderPlan("BUY", "426030", "momentum", 10, 50_000, 500_000, "momentum underweight")
+
+    assert _execute_orders(client, [order]) == 0
+    assert client.placed_qty == [4, 3, 3]
+
+
+def test_execute_orders_stops_after_unfilled_buy_tranche(monkeypatch) -> None:
+    monkeypatch.setenv("PENSION_REBALANCE_BUY_SPLIT_COUNT", "3")
+    monkeypatch.setenv("PENSION_REBALANCE_BUY_FILL_TIMEOUT_SEC", "0")
+
+    class Client:
+        def __init__(self) -> None:
+            self.placed_qty: list[int] = []
+
+        def place_order(self, *, side: str, code: str, qty: int, price: int) -> dict[str, object]:
+            self.placed_qty.append(qty)
+            return {
+                "success": True,
+                "code": code,
+                "side": side,
+                "qty": qty,
+                "order_id": f"OD{len(self.placed_qty)}",
+            }
+
+        def daily_order_fills(
+            self,
+            *,
+            code: str = "",
+            order_id: str = "",
+            side: str = "00",
+        ) -> list[dict[str, int]]:
+            if order_id == "OD2":
+                return []
+            return [{"filled_qty": self.placed_qty[int(order_id.removeprefix("OD")) - 1]}]
+
+    client = Client()
+    order = PensionOrderPlan("BUY", "426030", "momentum", 10, 50_000, 500_000, "momentum underweight")
+
+    assert _execute_orders(client, [order]) == 1
+    assert client.placed_qty == [4, 3]

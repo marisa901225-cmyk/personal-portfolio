@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from math import floor
+from math import ceil, floor
 from typing import Iterable, Literal
 
 
@@ -282,7 +282,7 @@ def build_pension_rebalance_plan(
     regime: Regime,
     min_order_amount: int = 50_000,
     allow_sells: bool = True,
-    deploy_leftover_to: Bucket = "sp500",
+    deploy_leftover_to: Bucket | None = "sp500",
     parking_code: str | None = None,
     parking_cash_trigger_amount: int | None = None,
     gradual_equity_restore_step: float | None = None,
@@ -311,29 +311,13 @@ def build_pension_rebalance_plan(
         0,
         int(parking_cash_trigger_amount),
     )
-    exited_parking = False
+    parking_holdings: list[PensionHolding] = []
 
     if allow_sells:
         for holding in holdings:
             bucket = bucket_by_code.get(holding.code, "other")
             if bucket == "parking":
-                if parking_code and holding.code == parking_code and cash >= parking_cash_trigger:
-                    amount = holding.qty * holding.price
-                    if holding.qty > 0 and amount > 0:
-                        orders.append(
-                            PensionOrderPlan(
-                                side="SELL",
-                                code=holding.code,
-                                bucket=bucket,
-                                qty=holding.qty,
-                                price=holding.price,
-                                amount=amount,
-                                reason="parking exit for sp500 cash deployment",
-                            )
-                        )
-                        current_values[bucket] = max(0, current_values.get(bucket, 0) - amount)
-                        estimated_cash += amount
-                        exited_parking = True
+                parking_holdings.append(holding)
                 continue
             target_value = int(total_value * target_weights.get(bucket, 0.0))
             overweight = current_values.get(bucket, 0) - target_value
@@ -357,66 +341,77 @@ def build_pension_rebalance_plan(
             current_values[bucket] = max(0, current_values.get(bucket, 0) - amount)
             estimated_cash += amount
 
-    if exited_parking:
-        sp500_code = code_by_bucket.get("sp500")
-        sp500_price = int(prices.get(sp500_code or "") or 0)
-        if sp500_code and sp500_price > 0:
-            sp500_budget = estimated_cash
-            qty = floor(sp500_budget / sp500_price)
-            if qty > 0:
-                amount = qty * sp500_price
-                orders.append(
-                    PensionOrderPlan(
-                        side="BUY",
-                        code=sp500_code,
-                        bucket="sp500",
-                        qty=qty,
-                        price=sp500_price,
-                        amount=amount,
-                        reason="deploy parking exit cash to sp500",
-                    )
-                )
-                current_values["sp500"] = current_values.get("sp500", 0) + amount
-                estimated_cash -= amount
-    else:
-        buy_gaps: list[tuple[int, Bucket]] = []
-        for bucket, weight in target_weights.items():
-            if bucket == "other" or weight <= 0:
-                continue
-            target_value = int(total_value * weight)
-            gap = target_value - current_values.get(bucket, 0)
-            if gap >= min_order_amount:
-                buy_gaps.append((gap, bucket))
+    buy_gaps: list[tuple[int, Bucket]] = []
+    for bucket, weight in target_weights.items():
+        if bucket == "other" or weight <= 0 or bucket not in code_by_bucket:
+            continue
+        code = code_by_bucket[bucket]
+        if int(prices.get(code) or 0) <= 0:
+            continue
+        target_value = int(total_value * weight)
+        gap = target_value - current_values.get(bucket, 0)
+        if gap >= min_order_amount:
+            buy_gaps.append((gap, bucket))
 
-        for gap, bucket in sorted(buy_gaps, reverse=True):
-            code = code_by_bucket.get(bucket)
-            if not code:
+    funding_shortfall = max(0, sum(gap for gap, _ in buy_gaps) - estimated_cash)
+    if funding_shortfall >= parking_cash_trigger:
+        for holding in parking_holdings:
+            if holding.code != parking_code or holding.qty <= 0 or holding.price <= 0:
                 continue
-            price = int(prices.get(code) or 0)
-            if price <= 0:
-                continue
-            budget = min(gap, estimated_cash)
-            qty = floor(budget / price)
-            if qty <= 0:
-                continue
-            amount = qty * price
+            qty = min(holding.qty, ceil(funding_shortfall / holding.price))
+            amount = qty * holding.price
             orders.append(
                 PensionOrderPlan(
-                    side="BUY",
-                    code=code,
-                    bucket=bucket,
+                    side="SELL",
+                    code=holding.code,
+                    bucket="parking",
                     qty=qty,
-                    price=price,
+                    price=holding.price,
                     amount=amount,
-                    reason=f"{bucket} underweight",
+                    reason="parking exit for target rebalance",
                 )
             )
-            current_values[bucket] = current_values.get(bucket, 0) + amount
-            estimated_cash -= amount
+            current_values["parking"] = max(0, current_values.get("parking", 0) - amount)
+            estimated_cash += amount
+            funding_shortfall = max(0, funding_shortfall - amount)
+            if funding_shortfall == 0:
+                break
 
-    leftover_code = code_by_bucket.get(deploy_leftover_to)
+    for gap, bucket in sorted(buy_gaps, reverse=True):
+        code = code_by_bucket.get(bucket)
+        if not code:
+            continue
+        price = int(prices.get(code) or 0)
+        if price <= 0:
+            continue
+        budget = min(gap, estimated_cash)
+        qty = floor(budget / price)
+        if qty <= 0:
+            continue
+        amount = qty * price
+        orders.append(
+            PensionOrderPlan(
+                side="BUY",
+                code=code,
+                bucket=bucket,
+                qty=qty,
+                price=price,
+                amount=amount,
+                reason=f"{bucket} underweight",
+            )
+        )
+        current_values[bucket] = current_values.get(bucket, 0) + amount
+        estimated_cash -= amount
+
+    leftover_bucket = deploy_leftover_to
+    leftover_code = code_by_bucket.get(leftover_bucket) if leftover_bucket else None
     leftover_price = int(prices.get(leftover_code or "") or 0)
-    if leftover_code and leftover_price > 0 and estimated_cash >= max(min_order_amount, leftover_price):
+    if (
+        leftover_bucket
+        and leftover_code
+        and leftover_price > 0
+        and estimated_cash >= max(min_order_amount, leftover_price)
+    ):
         qty = floor(estimated_cash / leftover_price)
         if qty > 0:
             amount = qty * leftover_price
@@ -424,7 +419,7 @@ def build_pension_rebalance_plan(
                 PensionOrderPlan(
                     side="BUY",
                     code=leftover_code,
-                    bucket=deploy_leftover_to,
+                    bucket=leftover_bucket,
                     qty=qty,
                     price=leftover_price,
                     amount=amount,

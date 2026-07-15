@@ -88,6 +88,78 @@ def test_leftover_cash_is_deployed_to_sp500() -> None:
     assert plan.estimated_cash_after_orders < 10_000
 
 
+def test_disabled_leftover_deployment_keeps_unallocated_cash_out_of_sp500() -> None:
+    plan = build_pension_rebalance_plan(
+        holdings=[PensionHolding("360200", "ACE 미국S&P500", 70, 10_000, 700_000)],
+        cash=300_000,
+        assets=[
+            PensionAsset("360200", "sp500", "ACE 미국S&P500"),
+            PensionAsset("237350", "momentum", "KODEX 코스피100", buyable=False),
+            PensionAsset("426030", "momentum", "TIME 미국나스닥100액티브", buyable=False),
+        ],
+        prices={"360200": 10_000, "237350": 10_000, "426030": 10_000},
+        regime="rising",
+        min_order_amount=10_000,
+        allow_sells=False,
+        deploy_leftover_to=None,
+    )
+
+    assert not any(order.side == "BUY" and order.code == "360200" for order in plan.orders)
+    assert plan.estimated_cash_after_orders == 300_000
+
+
+def test_parking_exit_only_funds_buyable_target_gap() -> None:
+    plan = build_pension_rebalance_plan(
+        holdings=[
+            PensionHolding("360200", "ACE 미국S&P500", 30, 10_000, 300_000),
+            PensionHolding("440650", "파킹 ETF", 70, 10_000, 700_000),
+        ],
+        cash=0,
+        assets=[
+            PensionAsset("360200", "sp500", "ACE 미국S&P500"),
+            PensionAsset("237350", "momentum", "KODEX 코스피100", buyable=False),
+            PensionAsset("426030", "momentum", "TIME 미국나스닥100액티브", buyable=False),
+            PensionAsset("440650", "parking", "파킹 ETF"),
+        ],
+        prices={"360200": 10_000, "237350": 10_000, "426030": 10_000, "440650": 10_000},
+        regime="rising",
+        min_order_amount=10_000,
+        allow_sells=True,
+        deploy_leftover_to=None,
+        parking_code="440650",
+    )
+
+    assert [(order.side, order.code, order.qty) for order in plan.orders] == [
+        ("SELL", "440650", 10),
+        ("BUY", "360200", 10),
+    ]
+
+
+def test_parking_stays_put_when_only_unbuyable_momentum_is_underweight() -> None:
+    plan = build_pension_rebalance_plan(
+        holdings=[
+            PensionHolding("360200", "ACE 미국S&P500", 40, 10_000, 400_000),
+            PensionHolding("440650", "파킹 ETF", 60, 10_000, 600_000),
+        ],
+        cash=0,
+        assets=[
+            PensionAsset("360200", "sp500", "ACE 미국S&P500"),
+            PensionAsset("237350", "momentum", "KODEX 코스피100", buyable=False),
+            PensionAsset("426030", "momentum", "TIME 미국나스닥100액티브", buyable=False),
+            PensionAsset("440650", "parking", "파킹 ETF"),
+        ],
+        prices={"360200": 10_000, "237350": 10_000, "426030": 10_000, "440650": 10_000},
+        regime="rising",
+        min_order_amount=10_000,
+        allow_sells=True,
+        deploy_leftover_to=None,
+        parking_code="440650",
+    )
+
+    assert plan.orders == []
+    assert plan.estimated_cash_after_orders == 0
+
+
 def test_residual_cash_below_sp500_unit_is_parked() -> None:
     plan = build_pension_rebalance_plan(
         holdings=[],
@@ -106,7 +178,7 @@ def test_residual_cash_below_sp500_unit_is_parked() -> None:
     assert plan.estimated_cash_after_orders == 0
 
 
-def test_dividend_cash_trigger_exits_parking_and_buys_sp500() -> None:
+def test_dividend_cash_buys_only_target_gap_without_forcing_parking_exit() -> None:
     plan = build_pension_rebalance_plan(
         holdings=[PensionHolding("440650", "파킹 ETF", 10, 10_000, 100_000)],
         cash=50_000,
@@ -117,12 +189,12 @@ def test_dividend_cash_trigger_exits_parking_and_buys_sp500() -> None:
         parking_code="440650",
     )
 
-    assert plan.orders[0].side == "SELL"
-    assert plan.orders[0].code == "440650"
-    assert plan.orders[0].bucket == "parking"
-    assert plan.orders[1].side == "BUY"
-    assert plan.orders[1].code == "360200"
-    assert plan.orders[1].bucket == "sp500"
+    assert not any(order.side == "SELL" for order in plan.orders)
+    assert plan.orders[0].side == "BUY"
+    assert plan.orders[0].code == "360200"
+    assert plan.orders[0].bucket == "sp500"
+    assert plan.orders[0].qty == 1
+    assert plan.orders[-1].code == "440650"
 
 
 def test_cash_sweep_buys_sp500_when_cash_can_buy_a_share() -> None:

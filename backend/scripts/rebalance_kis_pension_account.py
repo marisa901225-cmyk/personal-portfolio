@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
+import json
 import os
 import time
 from datetime import date, datetime, timedelta
@@ -8,6 +10,10 @@ from pathlib import Path
 from typing import Any
 
 from backend.integrations.kis.trading_adapter import KISDirectCredentials, create_trading_api
+from backend.services.pension_momentum import (
+    analyze_pension_momentum_candidate,
+    review_pension_momentum_candidates,
+)
 from backend.services.pension_rebalancing import (
     DEFAULT_MOMENTUM_OUTPERFORMANCE_THRESHOLD_PCT,
     calculate_equity_trend_metrics,
@@ -15,7 +21,6 @@ from backend.services.pension_rebalancing import (
     PensionHolding,
     PensionOrderPlan,
     QuarterlyMarketSignal,
-    build_pension_cash_sweep_plan,
     build_pension_rebalance_plan,
     normalize_regime,
     pct_return,
@@ -265,32 +270,64 @@ def _resolve_quarterly_signal(
         ),
         trend_metrics=trend_metrics,
     )
-    if requested != "auto":
-        return QuarterlyMarketSignal(
-            regime=normalize_regime(requested),
-            reference_return_pct=signal.reference_return_pct,
-            kospi_return_pct=signal.kospi_return_pct,
-            nasdaq_return_pct=signal.nasdaq_return_pct,
-            selected_momentum_code=signal.selected_momentum_code,
-            current_price=signal.current_price,
-            moving_average_10m=signal.moving_average_10m,
-            drawdown_from_recent_high_pct=signal.drawdown_from_recent_high_pct,
-            three_month_return_pct=signal.three_month_return_pct,
-        )
     configured = str(env.get("PENSION_REBALANCE_REGIME") or "").strip()
-    if configured:
-        return QuarterlyMarketSignal(
-            regime=normalize_regime(configured),
-            reference_return_pct=signal.reference_return_pct,
-            kospi_return_pct=signal.kospi_return_pct,
-            nasdaq_return_pct=signal.nasdaq_return_pct,
-            selected_momentum_code=signal.selected_momentum_code,
-            current_price=signal.current_price,
-            moving_average_10m=signal.moving_average_10m,
-            drawdown_from_recent_high_pct=signal.drawdown_from_recent_high_pct,
-            three_month_return_pct=signal.three_month_return_pct,
-        )
-    return signal
+    if requested != "auto":
+        signal = replace(signal, regime=normalize_regime(requested))
+    elif configured:
+        signal = replace(signal, regime=normalize_regime(configured))
+
+    momentum_candidates = [
+        analyze_pension_momentum_candidate(
+            code=kospi_code,
+            name="KODEX 코스피100",
+            daily_prices=client.daily_prices(kospi_code, start_date=trend_start, end_date=trend_end),
+        ),
+        analyze_pension_momentum_candidate(
+            code=nasdaq_code,
+            name="TIME 미국나스닥100액티브",
+            daily_prices=client.daily_prices(nasdaq_code, start_date=trend_start, end_date=trend_end),
+        ),
+    ]
+    print(
+        "pension_momentum_analysis",
+        json.dumps(
+            [
+                {
+                    "code": candidate.code,
+                    "score": candidate.score,
+                    "eligible": candidate.eligible,
+                    "weekly_ma10": round(candidate.weekly_ma10, 2),
+                    "weekly_ma20": round(candidate.weekly_ma20, 2),
+                    "return_13w_pct": round(candidate.return_13w_pct, 2),
+                    "return_26w_pct": round(candidate.return_26w_pct, 2),
+                    "drawdown_26w_pct": round(candidate.drawdown_26w_pct, 2),
+                    "reasons": candidate.reasons,
+                }
+                for candidate in momentum_candidates
+            ],
+            ensure_ascii=False,
+        ),
+    )
+
+    review_enabled = str(env.get("PENSION_REBALANCE_MOMENTUM_AI_REVIEW_ENABLED") or "1").strip().lower()
+    if review_enabled not in {"1", "true", "t", "yes", "y", "on"}:
+        return replace(signal, selected_momentum_code="")
+
+    review = review_pension_momentum_candidates(
+        momentum_candidates,
+        model=str(env.get("PENSION_REBALANCE_MOMENTUM_AI_MODEL") or "gpt-5.5").strip(),
+        reasoning_effort=str(env.get("PENSION_REBALANCE_MOMENTUM_AI_REASONING_EFFORT") or "low").strip(),
+    )
+    print(
+        "pension_momentum_review",
+        {
+            "selected_code": review.selected_code,
+            "approved_codes": review.approved_codes,
+            "summary": review.summary,
+            "route": review.route,
+        },
+    )
+    return replace(signal, selected_momentum_code=review.selected_code)
 
 
 def _parking_code_from_env(env: dict[str, str]) -> str:
@@ -340,13 +377,63 @@ def _apply_buy_capacity(
     return adjusted_orders
 
 
+def _split_order_qty(qty: int, split_count: int) -> list[int]:
+    normalized_qty = max(0, int(qty))
+    if normalized_qty <= 0:
+        return []
+    tranche_count = min(normalized_qty, max(1, int(split_count)))
+    base_qty, remainder = divmod(normalized_qty, tranche_count)
+    return [base_qty + (1 if index < remainder else 0) for index in range(tranche_count)]
+
+
+def _buy_order_filled(client: PensionKISClient, *, code: str, order_id: str, qty: int) -> bool:
+    fills = client.daily_order_fills(code=code, order_id=order_id, side="02")
+    filled_qty = sum(_to_int(fill.get("filled_qty")) for fill in fills)
+    return filled_qty >= qty
+
+
+def _wait_for_buy_fill(client: PensionKISClient, result: dict[str, Any]) -> bool:
+    code = str(result.get("code") or "").strip()
+    order_id = str(result.get("order_id") or "").strip()
+    qty = _to_int(result.get("qty"))
+    if not order_id or qty <= 0:
+        return False
+
+    timeout_sec = max(0, _env_int("PENSION_REBALANCE_BUY_FILL_TIMEOUT_SEC", 60))
+    poll_sec = max(1, _env_int("PENSION_REBALANCE_BUY_FILL_POLL_SEC", 5))
+    deadline = time.monotonic() + timeout_sec
+    while True:
+        if _buy_order_filled(client, code=code, order_id=order_id, qty=qty):
+            return True
+        if time.monotonic() >= deadline:
+            print("buy_fill_pending", result)
+            return False
+        time.sleep(min(poll_sec, max(0.0, deadline - time.monotonic())))
+
+
 def _execute_orders(client: PensionKISClient, orders: list[PensionOrderPlan]) -> int:
+    buy_split_count = max(1, _env_int("PENSION_REBALANCE_BUY_SPLIT_COUNT", 3))
     for order in orders:
-        order_price = _aggressive_limit_price(side=order.side, price=order.price) if order.side == "SELL" else order.price
-        result = client.place_order(side=order.side, code=order.code, qty=order.qty, price=order_price)
-        print("order_result", result)
-        if not result.get("success"):
-            return 1
+        tranche_qtys = _split_order_qty(order.qty, buy_split_count) if order.side == "BUY" else [order.qty]
+        for tranche_index, tranche_qty in enumerate(tranche_qtys, start=1):
+            order_price = (
+                _aggressive_limit_price(side=order.side, price=order.price)
+                if order.side == "SELL"
+                else order.price
+            )
+            result = client.place_order(side=order.side, code=order.code, qty=tranche_qty, price=order_price)
+            print(
+                "order_result",
+                {
+                    **result,
+                    "tranche_index": tranche_index,
+                    "tranche_count": len(tranche_qtys),
+                },
+            )
+            if not result.get("success"):
+                return 1
+            if order.side == "BUY" and not _wait_for_buy_fill(client, result):
+                return 1
     return 0
 
 
@@ -427,8 +514,8 @@ def main() -> int:
 
     env = {**_load_env_file(DEFAULT_RUNTIME_ENV), **os.environ}
     client = PensionKISClient(env)
-    signal = None if args.cash_sweep else _resolve_quarterly_signal(client, env, args.regime)
-    assets = _assets_from_env(env, selected_momentum_code=signal.selected_momentum_code if signal else None)
+    signal = _resolve_quarterly_signal(client, env, args.regime)
+    assets = _assets_from_env(env, selected_momentum_code=signal.selected_momentum_code)
     holdings, cash = client.balance()
 
     prices = _refresh_prices(client, holdings, assets)
@@ -437,52 +524,21 @@ def main() -> int:
     if args.execute:
         orderable_cash = _orderable_cash_for_buys(client=client, assets=assets, prices=prices, cash=cash)
 
-    lump_sum_threshold = max(0, _env_int("PENSION_CASH_SWEEP_LUMP_SUM_THRESHOLD", 6_000_000))
-    if args.cash_sweep and lump_sum_threshold > 0 and orderable_cash >= lump_sum_threshold:
-        signal = _resolve_quarterly_signal(client, env, args.regime)
-        assets = _assets_from_env(env, selected_momentum_code=signal.selected_momentum_code)
-        for asset in assets:
-            if asset.code not in prices:
-                prices[asset.code] = int(client.quote(asset.code).get("price") or 0)
-        plan = build_pension_rebalance_plan(
-            holdings=holdings,
-            cash=orderable_cash,
-            assets=assets,
-            prices=prices,
-            regime=signal.regime,
-            min_order_amount=args.min_order_amount,
-            allow_sells=False,
-            parking_code=_parking_code_from_env(env),
-            gradual_equity_restore_step=max(
-                0.0,
-                min(0.5, _env_float("PENSION_REBALANCE_EQUITY_RESTORE_STEP_PCT", 0.20)),
-            ),
-        )
-    elif args.cash_sweep:
-        plan = build_pension_cash_sweep_plan(
-            holdings=holdings,
-            cash=orderable_cash,
-            assets=assets,
-            prices=prices,
-            min_order_amount=args.min_order_amount,
-            parking_code=_parking_code_from_env(env),
-        )
-    else:
-        assert signal is not None
-        plan = build_pension_rebalance_plan(
-            holdings=holdings,
-            cash=orderable_cash,
-            assets=assets,
-            prices=prices,
-            regime=signal.regime,
-            min_order_amount=args.min_order_amount,
-            allow_sells=not args.no_sells,
-            parking_code=_parking_code_from_env(env),
-            gradual_equity_restore_step=max(
-                0.0,
-                min(0.5, _env_float("PENSION_REBALANCE_EQUITY_RESTORE_STEP_PCT", 0.20)),
-            ),
-        )
+    plan = build_pension_rebalance_plan(
+        holdings=holdings,
+        cash=orderable_cash,
+        assets=assets,
+        prices=prices,
+        regime=signal.regime,
+        min_order_amount=args.min_order_amount,
+        allow_sells=not args.cash_sweep and not args.no_sells,
+        deploy_leftover_to=None,
+        parking_code=_parking_code_from_env(env),
+        gradual_equity_restore_step=max(
+            0.0,
+            min(0.5, _env_float("PENSION_REBALANCE_EQUITY_RESTORE_STEP_PCT", 0.20)),
+        ),
+    )
 
     if args.execute:
         sell_orders = [order for order in plan.orders if order.side == "SELL"]
@@ -502,31 +558,21 @@ def main() -> int:
             prices = _refresh_prices(client, holdings, assets)
             orderable_cash = _orderable_cash_for_buys(client=client, assets=assets, prices=prices, cash=cash)
 
-            if args.cash_sweep:
-                plan = build_pension_cash_sweep_plan(
-                    holdings=holdings,
-                    cash=orderable_cash,
-                    assets=assets,
-                    prices=prices,
-                    min_order_amount=args.min_order_amount,
-                    parking_code=_parking_code_from_env(env),
-                )
-            else:
-                assert signal is not None
-                plan = build_pension_rebalance_plan(
-                    holdings=holdings,
-                    cash=orderable_cash,
-                    assets=assets,
-                    prices=prices,
-                    regime=signal.regime,
-                    min_order_amount=args.min_order_amount,
-                    allow_sells=False,
-                    parking_code=_parking_code_from_env(env),
-                    gradual_equity_restore_step=max(
-                        0.0,
-                        min(0.5, _env_float("PENSION_REBALANCE_EQUITY_RESTORE_STEP_PCT", 0.20)),
-                    ),
-                )
+            plan = build_pension_rebalance_plan(
+                holdings=holdings,
+                cash=orderable_cash,
+                assets=assets,
+                prices=prices,
+                regime=signal.regime,
+                min_order_amount=args.min_order_amount,
+                allow_sells=False,
+                deploy_leftover_to=None,
+                parking_code=_parking_code_from_env(env),
+                gradual_equity_restore_step=max(
+                    0.0,
+                    min(0.5, _env_float("PENSION_REBALANCE_EQUITY_RESTORE_STEP_PCT", 0.20)),
+                ),
+            )
 
         buy_orders = [order for order in plan.orders if order.side == "BUY"]
         plan.orders[:] = _apply_buy_capacity(client=client, orders=buy_orders, orderable_cash=orderable_cash)
