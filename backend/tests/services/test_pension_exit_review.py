@@ -228,6 +228,10 @@ def test_exit_review_allows_cash_like_sell_without_monthly_chart(tmp_path, bucke
         @staticmethod
         def generate_paid_chat(messages: list[dict], **kwargs) -> str:
             assert not any(part["type"] == "image_url" for part in messages[-1]["content"])
+            payload = json.loads(messages[-1]["content"][0]["text"])
+            cash_like_policy = payload["rules"]["cash_like_chart_policy"]
+            assert "대기자금" in cash_like_policy
+            assert "매도 후 현금 완충분" in cash_like_policy
             return json.dumps(
                 {
                     "summary": "현금성 자산 일부 사용",

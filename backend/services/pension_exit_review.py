@@ -175,7 +175,10 @@ def _account_payload(
             "target_weight_change": "forbidden",
             "new_asset_discovery": "forbidden",
             "monthly_chart_required_buckets": ["sp500", "momentum"],
-            "cash_like_chart_policy": "parking과 bond는 월봉 없이 유동성·목표비중으로 판단",
+            "cash_like_chart_policy": (
+                "parking과 bond는 이미 유동성 높은 대기자금이므로 월봉에서 제외하고, "
+                "목표자산 비중 부족·실제 매수재원 필요액·매도 후 현금 완충분으로 판단"
+            ),
         },
     }
 
