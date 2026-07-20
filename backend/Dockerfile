@@ -1,31 +1,7 @@
-# Base stage with pre-compiled heavy dependencies. Keeping this in the
-# Dockerfile lets CI build from a clean runner without a local base image.
-FROM python:3.12-slim AS base
-
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
-WORKDIR /app
-
-# Install build dependencies + backup utilities
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libstdc++6 \
-    curl \
-    ca-certificates \
-    sqlite3 \
-    zip \
-    && rm -rf /var/lib/apt/lists/*
-
-# Pre-install heavy/compiled dependencies (cached in the base stage)
-RUN pip install --no-cache-dir \
-    pandas==2.3.1 \
-    scikit-learn \
-    llama-cpp-python==0.3.16 \
-    sentence-transformers==2.2.2 \
-    faiss-cpu
-
-FROM base
+# Reuse the named heavy Python base built from Dockerfile.base. This keeps
+# compiled ML dependencies available even after BuildKit cache pruning.
+ARG BACKEND_BASE_IMAGE=myasset-base:py312-v1
+FROM ${BACKEND_BASE_IMAGE}
 
 # Install runtime utilities. xpu-smi is used to check Intel GPU VRAM before upscaling.
 RUN printf 'deb [trusted=yes] https://ppa.launchpadcontent.net/kobuk-team/intel-graphics/ubuntu noble main\n' \
