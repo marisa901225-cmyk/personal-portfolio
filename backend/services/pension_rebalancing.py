@@ -27,6 +27,9 @@ class PensionHolding:
     qty: int
     price: int
     value: int
+    avg_price: float = 0.0
+    pnl: int = 0
+    pnl_rate: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -304,6 +307,40 @@ def _validate_no_same_code_round_trip(orders: list[PensionOrderPlan]) -> None:
     overlap = sorted(buy_codes & sell_codes)
     if overlap:
         raise ValueError(f"same-code buy/sell round trip is not allowed: {','.join(overlap)}")
+
+
+def cap_pension_sell_orders(
+    orders: list[PensionOrderPlan],
+    *,
+    holdings: list[PensionHolding],
+    split_count: int,
+) -> list[PensionOrderPlan]:
+    holding_by_code = {holding.code: holding for holding in holdings}
+    normalized_split_count = max(2, int(split_count))
+    capped: list[PensionOrderPlan] = []
+    for order in orders:
+        if order.side != "SELL":
+            capped.append(order)
+            continue
+        holding = holding_by_code.get(order.code)
+        if holding is None or holding.qty <= 0:
+            continue
+        split_qty = max(1, ceil(holding.qty / normalized_split_count))
+        qty = min(order.qty, holding.qty, split_qty)
+        if qty <= 0:
+            continue
+        capped.append(
+            PensionOrderPlan(
+                side=order.side,
+                code=order.code,
+                bucket=order.bucket,
+                qty=qty,
+                price=order.price,
+                amount=qty * order.price,
+                reason=order.reason,
+            )
+        )
+    return capped
 
 
 def build_pension_rebalance_plan(

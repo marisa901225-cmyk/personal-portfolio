@@ -155,6 +155,43 @@ def render_candidate_chart_png(
     canvas.save_png(path)
 
 
+def render_monthly_chart_png(
+    *,
+    path: str,
+    code: str,
+    monthly_bars: pd.DataFrame,
+) -> None:
+    canvas = _Canvas(_CHART_WIDTH, _CHART_HEIGHT, _BACKGROUND)
+    panel_left = _CHART_MARGIN_LEFT
+    panel_top = _CHART_MARGIN_TOP
+    panel_right = _CHART_WIDTH - _CHART_MARGIN_RIGHT
+    panel_bottom = _CHART_HEIGHT - _CHART_MARGIN_BOTTOM
+    canvas.rect(panel_left, panel_top, panel_right, panel_bottom, outline=_FRAME, fill=(255, 255, 255))
+    _draw_grid(canvas, panel_left, panel_top, panel_right, panel_bottom)
+    _draw_title_strip(canvas, code=code)
+
+    bars = _prepare_ohlc_frame(monthly_bars.tail(60))
+    if not bars.empty:
+        _draw_price_panel(canvas, bars, panel_left, panel_top, panel_right, panel_bottom)
+        closes = pd.to_numeric(bars["close"], errors="coerce")
+        min_price = float(closes.min())
+        max_price = float(closes.max())
+        if max_price <= min_price:
+            max_price = min_price + 1.0
+        x_positions = _x_positions(count=len(closes), left=panel_left + 8, right=panel_right - 8)
+        _draw_line_series(
+            canvas,
+            x_positions,
+            closes,
+            min_price,
+            max_price,
+            panel_top + 6,
+            panel_bottom - 6,
+            _TEXT_STRONG,
+        )
+    canvas.save_png(path)
+
+
 def _draw_title_strip(canvas: _Canvas, *, code: str) -> None:
     strip_top = 4
     strip_bottom = _CHART_MARGIN_TOP - 8

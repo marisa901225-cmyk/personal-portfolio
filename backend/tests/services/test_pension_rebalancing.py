@@ -9,8 +9,10 @@ from backend.services.pension_rebalancing import (
     EquityTrendMetrics,
     PensionAsset,
     PensionHolding,
+    PensionOrderPlan,
     build_pension_cash_sweep_plan,
     build_pension_rebalance_plan,
+    cap_pension_sell_orders,
     max_target_weight_drift_pct,
     normalize_regime,
     pct_return,
@@ -142,6 +144,24 @@ def test_disabled_overweight_sells_still_allows_explicit_trend_exit() -> None:
 
     assert [(order.side, order.code, order.qty) for order in plan.orders] == [
         ("SELL", "426030", 10),
+    ]
+
+
+def test_all_sell_reasons_are_capped_to_configured_split_size() -> None:
+    holdings = [
+        PensionHolding("360200", "ACE 미국S&P500", 10, 10_000, 100_000),
+        PensionHolding("426030", "TIME 미국나스닥100액티브", 10, 20_000, 200_000),
+    ]
+    orders = [
+        PensionOrderPlan("SELL", "360200", "sp500", 10, 10_000, 100_000, "sp500 overweight"),
+        PensionOrderPlan("SELL", "426030", "momentum", 2, 20_000, 40_000, "momentum weekly trend exit"),
+    ]
+
+    capped = cap_pension_sell_orders(orders, holdings=holdings, split_count=3)
+
+    assert [(order.code, order.qty, order.amount) for order in capped] == [
+        ("360200", 4, 40_000),
+        ("426030", 2, 40_000),
     ]
 
 

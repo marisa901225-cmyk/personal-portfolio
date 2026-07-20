@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import replace
+from dataclasses import asdict, replace
 import json
 import os
 import time
@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.integrations.kis.trading_adapter import KISDirectCredentials, create_trading_api
+from backend.services.pension_exit_review import pension_exit_chart_codes, review_pension_sell_orders
 from backend.services.pension_momentum import (
     PensionIndexCandidate,
     PensionMomentumCandidate,
@@ -27,6 +28,7 @@ from backend.services.pension_rebalancing import (
     PensionOrderPlan,
     QuarterlyMarketSignal,
     build_pension_rebalance_plan,
+    cap_pension_sell_orders,
     max_target_weight_drift_pct,
     normalize_regime,
     pct_return,
@@ -46,6 +48,7 @@ from backend.services.trading_engine.utils import compute_avg_value
 DEFAULT_RUNTIME_ENV = Path("/app/runtime/myasset.secrets.env")
 DEFAULT_PROD_URL = "https://openapi.koreainvestment.com:9443"
 DEFAULT_US_SHORT_BOND_CODE = "0048J0"
+DEFAULT_EXIT_REVIEW_OUTPUT_DIR = Path("/app/backend/storage/pension_rebalance/monthly_review")
 
 
 def _load_env_file(path: Path) -> dict[str, str]:
@@ -148,6 +151,9 @@ class PensionKISClient:
                     qty=qty,
                     price=price,
                     value=value,
+                    avg_price=_to_float(row.get("avg_price")),
+                    pnl=_to_int(row.get("pnl")),
+                    pnl_rate=_to_float(row.get("pnl_rate")),
                 )
             )
         return holdings, self.api.cash_available()
@@ -541,6 +547,28 @@ def _allow_overweight_sells(signal: QuarterlyMarketSignal) -> bool:
     return signal.regime != "rising" or bool(signal.selected_momentum_code)
 
 
+def _load_exit_review_monthly_prices(
+    *,
+    client: PensionKISClient,
+    holdings: list[PensionHolding],
+    assets: list[PensionAsset],
+    sell_orders: list[PensionOrderPlan],
+) -> dict[str, list[tuple[str, int]]]:
+    end_date = date.today()
+    start_date = end_date - timedelta(days=365 * 5)
+    histories: dict[str, list[tuple[str, int]]] = {}
+    for code in pension_exit_chart_codes(holdings=holdings, assets=assets, sell_orders=sell_orders):
+        try:
+            histories[code] = client.monthly_prices(
+                code,
+                start_date=start_date.strftime("%Y%m%d"),
+                end_date=end_date.strftime("%Y%m%d"),
+            )
+        except Exception as exc:
+            print("pension_exit_monthly_chart_error", {"code": code, "error": type(exc).__name__})
+    return histories
+
+
 def _apply_buy_capacity(
     *,
     client: PensionKISClient,
@@ -753,6 +781,7 @@ def main() -> int:
         gradual_equity_restore_step=restore_step,
         trend_exit_step_pct=trend_exit_step_pct,
     )
+    account_target_weights = dict(plan.target_weights)
 
     if args.if_drift:
         drift_threshold_pct = max(
@@ -796,7 +825,58 @@ def main() -> int:
             gradual_equity_restore_step=restore_step,
             trend_exit_step_pct=trend_exit_step_pct,
         )
-        sell_orders = [order for order in plan.orders if order.side == "SELL"]
+        sell_split_count = max(
+            2,
+            _env_int("PENSION_REBALANCE_SELL_SPLIT_COUNT", trend_exit_split_count),
+        )
+        sell_orders = cap_pension_sell_orders(
+            [order for order in plan.orders if order.side == "SELL"],
+            holdings=holdings,
+            split_count=sell_split_count,
+        )
+        if sell_orders:
+            exit_review = review_pension_sell_orders(
+                holdings=holdings,
+                cash=cash,
+                assets=assets,
+                target_weights=account_target_weights,
+                sell_orders=sell_orders,
+                regime=signal.regime,
+                monthly_prices_by_code=_load_exit_review_monthly_prices(
+                    client=client,
+                    holdings=holdings,
+                    assets=assets,
+                    sell_orders=sell_orders,
+                ),
+                output_dir=str(
+                    Path(
+                        env.get("PENSION_REBALANCE_EXIT_REVIEW_OUTPUT_DIR")
+                        or DEFAULT_EXIT_REVIEW_OUTPUT_DIR
+                    )
+                    / date.today().strftime("%Y%m%d")
+                ),
+                model=str(
+                    env.get("PENSION_REBALANCE_EXIT_AI_MODEL")
+                    or env.get("PENSION_REBALANCE_MOMENTUM_AI_MODEL")
+                    or "gpt-5.5"
+                ).strip(),
+                reasoning_effort=str(
+                    env.get("PENSION_REBALANCE_EXIT_AI_REASONING_EFFORT") or "high"
+                ).strip(),
+            )
+            print(
+                "pension_exit_review",
+                {
+                    "approved_codes": exit_review.approved_codes,
+                    "summary": exit_review.summary,
+                    "balance_assessment": exit_review.balance_assessment,
+                    "route": exit_review.route,
+                    "chart_paths": exit_review.chart_paths,
+                    "decisions": [asdict(decision) for decision in exit_review.decisions],
+                },
+            )
+            approved_sell_codes = set(exit_review.approved_codes)
+            sell_orders = [order for order in sell_orders if order.code in approved_sell_codes]
         trend_exit_proceeds = sum(
             order.amount for order in sell_orders if order.code in set(signal.momentum_trend_exit_codes)
         )

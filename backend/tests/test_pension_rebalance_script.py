@@ -9,6 +9,7 @@ from backend.scripts.rebalance_kis_pension_account import (
     _allow_overweight_sells,
     _assets_from_env,
     _execute_orders,
+    _load_exit_review_monthly_prices,
     _orderable_cash_for_buys,
     _parking_code_from_env,
     _quarterly_return,
@@ -495,3 +496,38 @@ def test_orderable_cash_skips_unbuyable_assets(monkeypatch) -> None:
 
     assert orderable_cash == 300_000
     assert client.requested_codes == ["360200"]
+
+
+def test_exit_review_monthly_prices_include_equity_holdings_and_sell_candidates() -> None:
+    class Client:
+        def __init__(self) -> None:
+            self.requested_codes: list[str] = []
+
+        def monthly_prices(self, code: str, *, start_date: str, end_date: str) -> list[tuple[str, int]]:
+            self.requested_codes.append(code)
+            return [("20260630", 10_000)]
+
+    holdings = [
+        PensionHolding("360200", "ACE 미국S&P500", 10, 10_000, 100_000),
+        PensionHolding("426030", "TIME 미국나스닥100액티브", 10, 20_000, 200_000),
+        PensionHolding("0048J0", "KODEX 미국머니마켓액티브", 10, 10_000, 100_000),
+    ]
+    assets = [
+        PensionAsset("360200", "sp500", "ACE 미국S&P500"),
+        PensionAsset("426030", "momentum", "TIME 미국나스닥100액티브"),
+        PensionAsset("0048J0", "bond", "KODEX 미국머니마켓액티브"),
+    ]
+    sell_orders = [
+        PensionOrderPlan("SELL", "0048J0", "bond", 4, 10_000, 40_000, "bond overweight"),
+    ]
+    client = Client()
+
+    histories = _load_exit_review_monthly_prices(
+        client=client,
+        holdings=holdings,
+        assets=assets,
+        sell_orders=sell_orders,
+    )
+
+    assert set(histories) == {"360200", "426030", "0048J0"}
+    assert client.requested_codes == ["360200", "426030", "0048J0"]
