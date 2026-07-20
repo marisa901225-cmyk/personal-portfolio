@@ -202,6 +202,7 @@ def _assets_from_env(
     *,
     selected_momentum_code: str | None = None,
     momentum_trend_exit_codes: tuple[str, ...] = (),
+    holdings: list[PensionHolding] | None = None,
 ) -> list[PensionAsset]:
     sp500 = str(env.get("PENSION_REBALANCE_SP500_CODE") or "360200").strip()
     kospi = str(env.get("PENSION_REBALANCE_KOSPI_CODE") or "237350").strip()
@@ -242,6 +243,21 @@ def _assets_from_env(
                 )
             )
             seen.add(code)
+    for holding in holdings or []:
+        code = str(holding.code or "").strip()
+        name = str(holding.name or "").strip()
+        if not code or code in seen or not pension_index_family(name):
+            continue
+        assets.append(
+            PensionAsset(
+                code,
+                "momentum",
+                name or "Momentum ETF",
+                buyable=False,
+                trend_exit=code in trend_exit_codes,
+            )
+        )
+        seen.add(code)
     for code in sorted(trend_exit_codes - seen):
         assets.append(PensionAsset(code, "momentum", "Momentum ETF", buyable=False, trend_exit=True))
         seen.add(code)
@@ -521,6 +537,10 @@ def _parking_code_from_env(env: dict[str, str]) -> str:
     return "" if parking_code and parking_code == bond_code else parking_code
 
 
+def _allow_overweight_sells(signal: QuarterlyMarketSignal) -> bool:
+    return signal.regime != "rising" or bool(signal.selected_momentum_code)
+
+
 def _apply_buy_capacity(
     *,
     client: PensionKISClient,
@@ -655,7 +675,7 @@ def _wait_for_sell_fills(client: PensionKISClient, sell_results: list[dict[str, 
 def _refresh_prices(client: PensionKISClient, holdings: list[PensionHolding], assets: list[PensionAsset]) -> dict[str, int]:
     prices = {holding.code: holding.price for holding in holdings if holding.price > 0}
     for asset in assets:
-        if asset.code not in prices:
+        if asset.buyable and asset.code not in prices:
             prices[asset.code] = int(client.quote(asset.code).get("price") or 0)
     return prices
 
@@ -669,7 +689,7 @@ def _orderable_cash_for_buys(
 ) -> int:
     capacity_values = []
     for asset in assets:
-        if asset.bucket in {"sp500", "momentum", "bond", "parking"}:
+        if asset.buyable and asset.bucket in {"sp500", "momentum", "bond", "parking"}:
             limit_price = _aggressive_limit_price(side="BUY", price=prices.get(asset.code, 0))
             capacity = client.buy_order_capacity(asset.code, price=limit_price, order_type="00")
             capacity_values.append(
@@ -704,18 +724,21 @@ def main() -> int:
     env = {**_load_env_file(DEFAULT_RUNTIME_ENV), **os.environ}
     client = PensionKISClient(env)
     signal = _resolve_quarterly_signal(client, env, args.regime)
+    holdings, cash = client.balance()
     assets = _assets_from_env(
         env,
         selected_momentum_code=signal.selected_momentum_code,
         momentum_trend_exit_codes=signal.momentum_trend_exit_codes,
+        holdings=holdings,
     )
-    holdings, cash = client.balance()
 
     prices = _refresh_prices(client, holdings, assets)
 
     restore_step = max(0.0, min(0.5, _env_float("PENSION_REBALANCE_EQUITY_RESTORE_STEP_PCT", 0.20)))
     trend_exit_split_count = max(1, _env_int("PENSION_REBALANCE_TREND_EXIT_SPLIT_COUNT", 3))
     trend_exit_step_pct = 1.0 / trend_exit_split_count
+    allow_overweight_sells = _allow_overweight_sells(signal)
+    print("overweight_sell_action", "ENABLED" if allow_overweight_sells else "DISABLED_NO_SELECTION")
     plan = build_pension_rebalance_plan(
         holdings=holdings,
         cash=cash,
@@ -724,6 +747,7 @@ def main() -> int:
         regime=signal.regime,
         min_order_amount=args.min_order_amount,
         allow_sells=not args.cash_sweep and not args.no_sells,
+        allow_overweight_sells=allow_overweight_sells,
         deploy_leftover_to=None,
         parking_code=_parking_code_from_env(env),
         gradual_equity_restore_step=restore_step,
@@ -766,6 +790,7 @@ def main() -> int:
             regime=signal.regime,
             min_order_amount=args.min_order_amount,
             allow_sells=not args.cash_sweep and not args.no_sells,
+            allow_overweight_sells=allow_overweight_sells,
             deploy_leftover_to=None,
             parking_code=_parking_code_from_env(env),
             gradual_equity_restore_step=restore_step,
@@ -779,7 +804,11 @@ def main() -> int:
             sell_results: list[dict[str, Any]] = []
             for order in sell_orders:
                 order_price = _aggressive_limit_price(side="SELL", price=order.price)
-                result = client.place_order(side=order.side, code=order.code, qty=order.qty, price=order_price)
+                result = {
+                    **client.place_order(side=order.side, code=order.code, qty=order.qty, price=order_price),
+                    "bucket": order.bucket,
+                    "reason": order.reason,
+                }
                 print("sell_order_result", result)
                 sell_results.append(result)
                 if not result.get("success"):

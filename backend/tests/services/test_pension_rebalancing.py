@@ -101,6 +101,50 @@ def test_falling_market_reduces_momentum_etf_and_adds_us_bond() -> None:
     assert any(order.side == "BUY" and order.bucket == "bond" for order in plan.orders)
 
 
+def test_untracked_holding_is_not_automatically_liquidated() -> None:
+    plan = build_pension_rebalance_plan(
+        holdings=[PensionHolding("999999", "수동 보유 종목", 10, 10_000, 100_000)],
+        cash=0,
+        assets=ASSETS,
+        prices={"360200": 10_000, "237350": 10_000, "426030": 10_000, "BOND01": 10_000},
+        regime="falling",
+        min_order_amount=10_000,
+    )
+
+    assert not any(order.side == "SELL" and order.code == "999999" for order in plan.orders)
+
+
+def test_disabled_overweight_sells_still_allows_explicit_trend_exit() -> None:
+    plan = build_pension_rebalance_plan(
+        holdings=[
+            PensionHolding("360200", "ACE 미국S&P500", 70, 10_000, 700_000),
+            PensionHolding("426030", "TIME 미국나스닥100액티브", 30, 10_000, 300_000),
+        ],
+        cash=0,
+        assets=[
+            PensionAsset("360200", "sp500", "ACE 미국S&P500"),
+            PensionAsset(
+                "426030",
+                "momentum",
+                "TIME 미국나스닥100액티브",
+                buyable=False,
+                trend_exit=True,
+            ),
+            PensionAsset("BOND01", "bond", "미국채권"),
+        ],
+        prices={"360200": 10_000, "426030": 10_000, "BOND01": 10_000},
+        regime="rising",
+        min_order_amount=10_000,
+        allow_overweight_sells=False,
+        trend_exit_step_pct=1.0 / 3.0,
+        deploy_leftover_to=None,
+    )
+
+    assert [(order.side, order.code, order.qty) for order in plan.orders] == [
+        ("SELL", "426030", 10),
+    ]
+
+
 def test_broken_momentum_trend_sells_one_third_and_keeps_proceeds_as_cash() -> None:
     plan = build_pension_rebalance_plan(
         holdings=[

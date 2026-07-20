@@ -6,10 +6,13 @@ from types import SimpleNamespace
 import backend.scripts.run_pension_rebalance_scheduler as scheduler
 from backend.scripts.rebalance_kis_pension_account import (
     _analyze_pension_momentum_universe,
+    _allow_overweight_sells,
     _assets_from_env,
     _execute_orders,
+    _orderable_cash_for_buys,
     _parking_code_from_env,
     _quarterly_return,
+    _refresh_prices,
     _split_order_qty,
     _wait_for_sell_fills,
 )
@@ -21,7 +24,12 @@ from backend.scripts.run_pension_rebalance_scheduler import (
     _quarter_key,
     _should_use_drift_guard,
 )
-from backend.services.pension_rebalancing import PensionOrderPlan
+from backend.services.pension_rebalancing import (
+    PensionAsset,
+    PensionHolding,
+    PensionOrderPlan,
+    QuarterlyMarketSignal,
+)
 
 
 def test_quarter_window_uses_quarter_end_month_last_seven_days(monkeypatch) -> None:
@@ -182,6 +190,40 @@ def test_assets_from_env_blocks_momentum_buy_without_reviewed_candidate() -> Non
     momentum_assets = [asset for asset in assets if asset.bucket == "momentum"]
     assert {asset.code for asset in momentum_assets} == {"237350", "426030"}
     assert not any(asset.buyable for asset in momentum_assets)
+
+
+def test_assets_from_env_keeps_held_country_index_in_momentum_bucket() -> None:
+    assets = _assets_from_env(
+        {
+            "PENSION_REBALANCE_SP500_CODE": "360200",
+            "PENSION_REBALANCE_KOSPI_CODE": "237350",
+            "PENSION_REBALANCE_NASDAQ_CODE": "426030",
+        },
+        selected_momentum_code="",
+        holdings=[
+            PensionHolding("241180", "TIGER 일본니케이225", 199, 35_500, 7_064_500),
+        ],
+    )
+
+    held_asset = next(asset for asset in assets if asset.code == "241180")
+    assert held_asset.bucket == "momentum"
+    assert not held_asset.buyable
+    assert not held_asset.trend_exit
+
+
+def test_overweight_sells_require_a_rising_market_selection() -> None:
+    def signal(*, regime: str, selected_code: str) -> QuarterlyMarketSignal:
+        return QuarterlyMarketSignal(
+            regime=regime,
+            reference_return_pct=0.0,
+            kospi_return_pct=0.0,
+            nasdaq_return_pct=0.0,
+            selected_momentum_code=selected_code,
+        )
+
+    assert not _allow_overweight_sells(signal(regime="rising", selected_code=""))
+    assert _allow_overweight_sells(signal(regime="rising", selected_code="241180"))
+    assert _allow_overweight_sells(signal(regime="falling", selected_code=""))
 
 
 def test_assets_from_env_marks_selected_momentum_buyable_first() -> None:
@@ -404,3 +446,52 @@ def test_execute_orders_stops_after_unfilled_buy_tranche(monkeypatch) -> None:
 
     assert _execute_orders(client, [order]) == 1
     assert client.placed_qty == [4, 3]
+
+
+def test_refresh_prices_skips_unbuyable_asset_without_a_holding() -> None:
+    class Client:
+        def __init__(self) -> None:
+            self.quoted_codes: list[str] = []
+
+        def quote(self, code: str) -> dict[str, int]:
+            self.quoted_codes.append(code)
+            return {"price": 10_000}
+
+    client = Client()
+    prices = _refresh_prices(
+        client,
+        [],
+        [
+            PensionAsset("360200", "sp500", buyable=True),
+            PensionAsset("241180", "momentum", buyable=False),
+        ],
+    )
+
+    assert prices == {"360200": 10_000}
+    assert client.quoted_codes == ["360200"]
+
+
+def test_orderable_cash_skips_unbuyable_assets(monkeypatch) -> None:
+    monkeypatch.setenv("PENSION_REBALANCE_ORDER_CASH_BUFFER_PCT", "0")
+
+    class Client:
+        def __init__(self) -> None:
+            self.requested_codes: list[str] = []
+
+        def buy_order_capacity(self, code: str, *, price: int, order_type: str) -> dict[str, int]:
+            self.requested_codes.append(code)
+            return {"ord_psbl_cash": 300_000}
+
+    client = Client()
+    orderable_cash = _orderable_cash_for_buys(
+        client=client,
+        assets=[
+            PensionAsset("360200", "sp500", buyable=True),
+            PensionAsset("241180", "momentum", buyable=False),
+        ],
+        prices={"360200": 10_000, "241180": 10_000},
+        cash=500_000,
+    )
+
+    assert orderable_cash == 300_000
+    assert client.requested_codes == ["360200"]

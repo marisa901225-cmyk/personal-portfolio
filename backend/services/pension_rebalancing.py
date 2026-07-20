@@ -315,6 +315,7 @@ def build_pension_rebalance_plan(
     regime: Regime,
     min_order_amount: int = 50_000,
     allow_sells: bool = True,
+    allow_overweight_sells: bool = True,
     deploy_leftover_to: Bucket | None = "sp500",
     parking_code: str | None = None,
     parking_cash_trigger_amount: int | None = None,
@@ -356,6 +357,8 @@ def build_pension_rebalance_plan(
             if bucket == "parking":
                 parking_holdings.append(holding)
                 continue
+            if bucket == "other":
+                continue
             if holding.code in trend_exit_codes and holding.qty > 0 and holding.price > 0:
                 exit_fraction = max(0.0, min(1.0, float(trend_exit_step_pct)))
                 qty = min(holding.qty, max(1, ceil(holding.qty * exit_fraction)))
@@ -374,6 +377,8 @@ def build_pension_rebalance_plan(
                 current_values[bucket] = max(0, current_values.get(bucket, 0) - amount)
                 estimated_cash += amount
                 reserved_cash += amount
+                continue
+            if not allow_overweight_sells:
                 continue
             target_value = int(total_value * target_weights.get(bucket, 0.0))
             overweight = current_values.get(bucket, 0) - target_value
