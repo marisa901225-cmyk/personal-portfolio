@@ -550,14 +550,12 @@ def _allow_overweight_sells(signal: QuarterlyMarketSignal) -> bool:
 def _load_exit_review_monthly_prices(
     *,
     client: PensionKISClient,
-    holdings: list[PensionHolding],
     assets: list[PensionAsset],
-    sell_orders: list[PensionOrderPlan],
 ) -> dict[str, list[tuple[str, int]]]:
     end_date = date.today()
     start_date = end_date - timedelta(days=365 * 5)
     histories: dict[str, list[tuple[str, int]]] = {}
-    for code in pension_exit_chart_codes(holdings=holdings, assets=assets, sell_orders=sell_orders):
+    for code in pension_exit_chart_codes(assets=assets):
         try:
             histories[code] = client.monthly_prices(
                 code,
@@ -844,9 +842,7 @@ def main() -> int:
                 regime=signal.regime,
                 monthly_prices_by_code=_load_exit_review_monthly_prices(
                     client=client,
-                    holdings=holdings,
                     assets=assets,
-                    sell_orders=sell_orders,
                 ),
                 output_dir=str(
                     Path(

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from backend.services.pension_exit_review import (
     pension_exit_chart_codes,
     review_pension_sell_orders,
@@ -198,19 +200,61 @@ def test_exit_review_fails_closed_without_ai_backend(tmp_path) -> None:
     assert review.route == "no_backend"
 
 
-def test_exit_chart_codes_include_equity_holdings_and_non_equity_sell() -> None:
-    holdings = [
-        *HOLDINGS,
-        PensionHolding("0048J0", "KODEX 미국머니마켓액티브", 10, 10_000, 100_000),
-    ]
+def test_exit_chart_codes_exclude_non_equity_sell_candidates() -> None:
     assets = [*ASSETS, PensionAsset("0048J0", "bond", "KODEX 미국머니마켓액티브")]
     assets.insert(1, PensionAsset("237350", "momentum", "KODEX 코스피100"))
-    sell_orders = [
-        PensionOrderPlan("SELL", "0048J0", "bond", 4, 10_000, 40_000, "bond overweight"),
-    ]
 
-    assert pension_exit_chart_codes(
-        holdings=holdings,
-        assets=assets,
-        sell_orders=sell_orders,
-    ) == ["360200", "237350", "426030", "0048J0"]
+    assert pension_exit_chart_codes(assets=assets) == ["360200", "237350", "426030"]
+
+
+@pytest.mark.parametrize("bucket", ["parking", "bond"])
+def test_exit_review_allows_cash_like_sell_without_monthly_chart(tmp_path, bucket) -> None:
+    holding = PensionHolding("0048J0", "KODEX 미국머니마켓액티브", 10, 10_000, 100_000)
+    asset = PensionAsset("0048J0", bucket, "KODEX 미국머니마켓액티브")
+    order = PensionOrderPlan("SELL", "0048J0", bucket, 4, 10_000, 40_000, f"{bucket} funding")
+
+    class Settings:
+        @staticmethod
+        def is_paid_configured() -> bool:
+            return True
+
+        @staticmethod
+        def is_remote_configured() -> bool:
+            return False
+
+    class LLM:
+        settings = Settings()
+
+        @staticmethod
+        def generate_paid_chat(messages: list[dict], **kwargs) -> str:
+            assert not any(part["type"] == "image_url" for part in messages[-1]["content"])
+            return json.dumps(
+                {
+                    "summary": "현금성 자산 일부 사용",
+                    "balance_assessment": "목표자산 매수 재원으로 적절",
+                    "decisions": [
+                        {
+                            "code": "0048J0",
+                            "decision": "SELL_PARTIAL",
+                            "reason": "현금성 자산에서 매수 재원 충당",
+                            "confidence": 0.9,
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            )
+
+    review = review_pension_sell_orders(
+        holdings=[holding],
+        cash=0,
+        assets=[asset],
+        target_weights={bucket: 0.0, "sp500": 1.0, "other": 0.0},
+        sell_orders=[order],
+        regime="rising",
+        monthly_prices_by_code={},
+        output_dir=str(tmp_path),
+        llm=LLM(),
+    )
+
+    assert review.approved_codes == ["0048J0"]
+    assert review.decisions[0].decision == "SELL_PARTIAL"

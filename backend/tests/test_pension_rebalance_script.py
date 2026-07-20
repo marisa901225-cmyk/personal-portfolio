@@ -498,7 +498,7 @@ def test_orderable_cash_skips_unbuyable_assets(monkeypatch) -> None:
     assert client.requested_codes == ["360200"]
 
 
-def test_exit_review_monthly_prices_include_equity_holdings_and_sell_candidates() -> None:
+def test_exit_review_monthly_prices_exclude_cash_like_sell_candidates() -> None:
     class Client:
         def __init__(self) -> None:
             self.requested_codes: list[str] = []
@@ -507,27 +507,17 @@ def test_exit_review_monthly_prices_include_equity_holdings_and_sell_candidates(
             self.requested_codes.append(code)
             return [("20260630", 10_000)]
 
-    holdings = [
-        PensionHolding("360200", "ACE 미국S&P500", 10, 10_000, 100_000),
-        PensionHolding("426030", "TIME 미국나스닥100액티브", 10, 20_000, 200_000),
-        PensionHolding("0048J0", "KODEX 미국머니마켓액티브", 10, 10_000, 100_000),
-    ]
     assets = [
         PensionAsset("360200", "sp500", "ACE 미국S&P500"),
         PensionAsset("426030", "momentum", "TIME 미국나스닥100액티브"),
         PensionAsset("0048J0", "bond", "KODEX 미국머니마켓액티브"),
     ]
-    sell_orders = [
-        PensionOrderPlan("SELL", "0048J0", "bond", 4, 10_000, 40_000, "bond overweight"),
-    ]
     client = Client()
 
     histories = _load_exit_review_monthly_prices(
         client=client,
-        holdings=holdings,
         assets=assets,
-        sell_orders=sell_orders,
     )
 
-    assert set(histories) == {"360200", "426030", "0048J0"}
-    assert client.requested_codes == ["360200", "426030", "0048J0"]
+    assert set(histories) == {"360200", "426030"}
+    assert client.requested_codes == ["360200", "426030"]

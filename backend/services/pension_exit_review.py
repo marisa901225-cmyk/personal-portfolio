@@ -92,17 +92,9 @@ class PensionExitReviewer(Protocol):
 
 def pension_exit_chart_codes(
     *,
-    holdings: list[PensionHolding],
     assets: list[PensionAsset],
-    sell_orders: list[PensionOrderPlan],
 ) -> list[str]:
-    holding_codes = {holding.code for holding in holdings}
     codes = [asset.code for asset in assets if asset.bucket in {"sp500", "momentum"}]
-    codes.extend(
-        order.code
-        for order in sell_orders
-        if order.side == "SELL" and order.code in holding_codes
-    )
     return list(dict.fromkeys(codes))
 
 
@@ -182,6 +174,8 @@ def _account_payload(
             "full_liquidation": "forbidden",
             "target_weight_change": "forbidden",
             "new_asset_discovery": "forbidden",
+            "monthly_chart_required_buckets": ["sp500", "momentum"],
+            "cash_like_chart_policy": "parking과 bond는 월봉 없이 유동성·목표비중으로 판단",
         },
     }
 
@@ -255,6 +249,12 @@ def review_pension_sell_orders(
     reasoning_effort: str = "high",
 ) -> PensionExitReview:
     sell_codes = {order.code for order in sell_orders if order.side == "SELL"}
+    asset_by_code = {asset.code: asset for asset in assets}
+    chart_required_codes = {
+        code
+        for code in sell_codes
+        if code in asset_by_code and asset_by_code[code].bucket in {"sp500", "momentum"}
+    }
     if not sell_codes:
         return PensionExitReview(
             approved_codes=[],
@@ -335,7 +335,7 @@ def review_pension_sell_orders(
         if code not in sell_codes or verdict not in {"SELL_PARTIAL", "HOLD"}:
             continue
         reason = str(decision.get("reason") or "").strip()
-        if verdict == "SELL_PARTIAL" and code not in chart_codes:
+        if verdict == "SELL_PARTIAL" and code in chart_required_codes and code not in chart_codes:
             verdict = "HOLD"
             reason = f"{reason} / 월봉 차트 누락으로 매도 보류".strip(" /")
         try:
