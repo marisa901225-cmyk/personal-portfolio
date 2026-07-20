@@ -7,6 +7,8 @@ from typing import Any
 
 import requests
 
+from backend.services.pension_order_safety import resolve_pension_product
+
 
 DEFAULT_RUNTIME_ENV = Path("/app/runtime/myasset.secrets.env")
 DEFAULT_PROD_URL = "https://openapi.koreainvestment.com:9443"
@@ -63,8 +65,14 @@ def main() -> int:
         print("missing", ",".join(missing))
         return 2
 
+    try:
+        resolved_product = resolve_pension_product(account=account, product=product)
+    except RuntimeError as exc:
+        print("invalid_pension_account", str(exc))
+        return 2
+
     cano = account[:8]
-    acnt_prdt_cd = account[8:10] if len(account) >= 10 else (product or "01")
+    acnt_prdt_cd = resolved_product
 
     session = requests.Session()
     auth_response = session.post(

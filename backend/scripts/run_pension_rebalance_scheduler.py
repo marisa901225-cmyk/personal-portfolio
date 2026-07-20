@@ -18,6 +18,7 @@ from pytz import timezone
 
 from backend.core.env_paths import get_project_env_files
 from backend.integrations.kis.trading_adapter import KISDirectCredentials, create_trading_api
+from backend.services.pension_order_safety import resolve_pension_product
 from backend.core.logging_config import setup_global_logging
 
 
@@ -99,7 +100,7 @@ def _build_pension_kis_api():
     app_key = str(os.getenv("KIS_MY_APP2") or "").strip()
     app_secret = str(os.getenv("KIS_MY_SEC2") or "").strip()
     account = str(os.getenv("KIS_MY_ACCT_STOCK2") or "").strip()
-    product = str(os.getenv("KIS_MY_PROD2") or "").strip() or "01"
+    configured_product = str(os.getenv("KIS_MY_PROD2") or "").strip()
     base_url = str(os.getenv("KIS_PROD") or "https://openapi.koreainvestment.com:9443").strip()
     missing = [
         name
@@ -112,6 +113,7 @@ def _build_pension_kis_api():
     ]
     if missing:
         raise RuntimeError(f"missing pension KIS env for trading-day lookup: {','.join(missing)}")
+    product = resolve_pension_product(account=account, product=configured_product)
     return create_trading_api(
         KISDirectCredentials(
             app_key=app_key,

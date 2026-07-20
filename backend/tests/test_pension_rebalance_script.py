@@ -3,11 +3,16 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
+
 import backend.scripts.run_pension_rebalance_scheduler as scheduler
 from backend.scripts.rebalance_kis_pension_account import (
+    PensionKISClient,
+    _apply_buy_capacity,
     _analyze_pension_momentum_universe,
     _allow_overweight_sells,
     _assets_from_env,
+    _build_final_buy_plan,
     _execute_orders,
     _load_exit_review_monthly_prices,
     _orderable_cash_for_buys,
@@ -30,6 +35,16 @@ from backend.services.pension_rebalancing import (
     PensionHolding,
     PensionOrderPlan,
     QuarterlyMarketSignal,
+)
+from backend.services.pension_order_safety import (
+    PensionExecutionJournal,
+    aggregate_and_validate_sell_orders,
+    assert_no_open_orders,
+    normalized_price_history,
+    pension_execution_lock,
+    pension_signal_key,
+    resolve_pension_product,
+    validate_buyable_pension_assets,
 )
 
 
@@ -360,13 +375,22 @@ def test_wait_for_sell_fills_rejects_unfilled_daily_order(monkeypatch) -> None:
     monkeypatch.setenv("PENSION_REBALANCE_SELL_FILL_TIMEOUT_SEC", "0")
 
     class Client:
+        def __init__(self) -> None:
+            self.cancelled: list[str] = []
+
         def daily_order_fills(self, *, code: str = "", order_id: str = "", side: str = "00") -> list[dict[str, int]]:
             return [{"filled_qty": 1}]
 
+        def cancel_order(self, order_id: str) -> dict[str, object]:
+            self.cancelled.append(order_id)
+            return {"success": True, "order_id": order_id}
+
+    client = Client()
     assert not _wait_for_sell_fills(
-        Client(),
+        client,
         [{"success": True, "code": "360200", "order_id": "OD123", "qty": 3}],
     )
+    assert client.cancelled == ["OD123"]
 
 
 def test_split_order_qty_balances_tranches_and_handles_small_quantities() -> None:
@@ -383,6 +407,7 @@ def test_execute_orders_splits_buy_and_waits_for_each_fill(monkeypatch) -> None:
     class Client:
         def __init__(self) -> None:
             self.placed_qty: list[int] = []
+            self.cancelled: list[str] = []
 
         def place_order(self, *, side: str, code: str, qty: int, price: int) -> dict[str, object]:
             self.placed_qty.append(qty)
@@ -420,6 +445,7 @@ def test_execute_orders_stops_after_unfilled_buy_tranche(monkeypatch) -> None:
     class Client:
         def __init__(self) -> None:
             self.placed_qty: list[int] = []
+            self.cancelled: list[str] = []
 
         def place_order(self, *, side: str, code: str, qty: int, price: int) -> dict[str, object]:
             self.placed_qty.append(qty)
@@ -442,11 +468,16 @@ def test_execute_orders_stops_after_unfilled_buy_tranche(monkeypatch) -> None:
                 return []
             return [{"filled_qty": self.placed_qty[int(order_id.removeprefix("OD")) - 1]}]
 
+        def cancel_order(self, order_id: str) -> dict[str, object]:
+            self.cancelled.append(order_id)
+            return {"success": True, "order_id": order_id}
+
     client = Client()
     order = PensionOrderPlan("BUY", "426030", "momentum", 10, 50_000, 500_000, "momentum underweight")
 
     assert _execute_orders(client, [order]) == 1
     assert client.placed_qty == [4, 3]
+    assert client.cancelled == ["OD2"]
 
 
 def test_refresh_prices_skips_unbuyable_asset_without_a_holding() -> None:
@@ -472,7 +503,7 @@ def test_refresh_prices_skips_unbuyable_asset_without_a_holding() -> None:
     assert client.quoted_codes == ["360200"]
 
 
-def test_orderable_cash_skips_unbuyable_assets(monkeypatch) -> None:
+def test_orderable_cash_uses_merged_env_and_enforces_minimum_buffer(monkeypatch) -> None:
     monkeypatch.setenv("PENSION_REBALANCE_ORDER_CASH_BUFFER_PCT", "0")
 
     class Client:
@@ -492,10 +523,20 @@ def test_orderable_cash_skips_unbuyable_assets(monkeypatch) -> None:
         ],
         prices={"360200": 10_000, "241180": 10_000},
         cash=500_000,
+        env={"PENSION_REBALANCE_ORDER_CASH_BUFFER_PCT": "0.20"},
     )
 
-    assert orderable_cash == 300_000
-    assert client.requested_codes == ["360200"]
+    assert orderable_cash == 400_000
+    assert client.requested_codes == []
+
+    minimum_buffer_cash = _orderable_cash_for_buys(
+        client=client,
+        assets=[],
+        prices={},
+        cash=500_000,
+        env={"PENSION_REBALANCE_ORDER_CASH_BUFFER_PCT": "0"},
+    )
+    assert minimum_buffer_cash == 475_000
 
 
 def test_exit_review_monthly_prices_exclude_cash_like_sell_candidates() -> None:
@@ -521,3 +562,308 @@ def test_exit_review_monthly_prices_exclude_cash_like_sell_candidates() -> None:
 
     assert set(histories) == {"360200", "426030"}
     assert client.requested_codes == ["360200", "426030"]
+
+
+def test_pension_product_never_falls_back_to_general_account() -> None:
+    with pytest.raises(RuntimeError, match="KIS_MY_PROD2"):
+        resolve_pension_product(account="12345678", product="")
+    with pytest.raises(RuntimeError, match="product 01"):
+        resolve_pension_product(account="12345678", product="01")
+    with pytest.raises(RuntimeError, match="mismatch"):
+        resolve_pension_product(account="1234567829", product="22")
+
+    assert resolve_pension_product(account="1234567829", product="") == "29"
+
+
+def test_pension_client_refuses_missing_product_before_api_creation(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "backend.scripts.rebalance_kis_pension_account.create_trading_api",
+        lambda credentials: pytest.fail("API must not be created for an ambiguous account"),
+    )
+
+    with pytest.raises(RuntimeError, match="KIS_MY_PROD2"):
+        PensionKISClient(
+            {
+                "KIS_MY_APP2": "app",
+                "KIS_MY_SEC2": "secret",
+                "KIS_MY_ACCT_STOCK2": "12345678",
+            }
+        )
+
+
+def test_assets_from_env_rejects_code_shared_by_equity_and_bond() -> None:
+    with pytest.raises(ValueError, match="duplicate pension asset code"):
+        _assets_from_env(
+            {
+                "PENSION_REBALANCE_SP500_CODE": "360200",
+                "PENSION_REBALANCE_KOSPI_CODE": "237350",
+                "PENSION_REBALANCE_NASDAQ_CODE": "426030",
+                "PENSION_REBALANCE_US_BOND_CODE": "360200",
+            }
+        )
+
+
+def test_price_history_is_sorted_at_adapter_boundary() -> None:
+    assert normalized_price_history(
+        [("20260720", 120), ("20260401", 100), ("20260601", 110)]
+    ) == [
+        ("20260401", 100),
+        ("20260601", 110),
+        ("20260720", 120),
+    ]
+
+    class Client:
+        @staticmethod
+        def daily_prices(code: str, *, start_date: str, end_date: str) -> list[tuple[str, int]]:
+            return [("20260720", 120), ("20260401", 100)]
+
+        @staticmethod
+        def quote(code: str) -> dict[str, int]:
+            raise AssertionError("two sorted prices should be sufficient")
+
+    assert _quarterly_return(Client(), "360200", today=date(2026, 7, 20)) == 20.0
+
+
+def test_buy_capacity_uses_market_query_and_only_non_margin_fields() -> None:
+    class Client:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, int, str]] = []
+
+        def buy_order_capacity(self, code: str, *, price: int, order_type: str) -> dict[str, int]:
+            self.calls.append((code, price, order_type))
+            return {
+                "nrcvb_buy_qty": 3,
+                "nrcvb_buy_amt": 25_000,
+                "max_buy_qty": 999,
+                "max_buy_amt": 9_999_999,
+            }
+
+    client = Client()
+    adjusted = _apply_buy_capacity(
+        client=client,
+        orders=[PensionOrderPlan("BUY", "360200", "sp500", 10, 10_000, 100_000, "buy")],
+        orderable_cash=100_000,
+    )
+
+    assert client.calls == [("360200", 0, "01")]
+    assert len(adjusted) == 1
+    assert adjusted[0].qty == 2
+
+
+def test_buy_capacity_failure_is_fail_closed() -> None:
+    class Client:
+        @staticmethod
+        def buy_order_capacity(code: str, *, price: int, order_type: str) -> dict[str, int]:
+            return {"max_buy_qty": 100, "max_buy_amt": 1_000_000}
+
+    with pytest.raises(RuntimeError, match="buy capacity unavailable"):
+        _apply_buy_capacity(
+            client=Client(),
+            orders=[PensionOrderPlan("BUY", "360200", "sp500", 10, 10_000, 100_000, "buy")],
+            orderable_cash=100_000,
+        )
+
+
+def test_buy_capacity_enforces_single_asset_absolute_weight_cap() -> None:
+    class Client:
+        @staticmethod
+        def buy_order_capacity(code: str, *, price: int, order_type: str) -> dict[str, int]:
+            return {"nrcvb_buy_qty": 100, "nrcvb_buy_amt": 1_000_000}
+
+    adjusted = _apply_buy_capacity(
+        client=Client(),
+        orders=[PensionOrderPlan("BUY", "360200", "sp500", 20, 10_000, 200_000, "buy")],
+        orderable_cash=500_000,
+        holdings=[PensionHolding("360200", "ACE 미국S&P500", 55, 10_000, 550_000)],
+        total_value=1_000_000,
+        max_single_asset_weight_pct=0.60,
+    )
+
+    assert len(adjusted) == 1
+    assert adjusted[0].qty == 4
+    assert adjusted[0].amount <= 50_000
+
+
+def test_sell_safety_aggregates_duplicates_and_rechecks_absolute_cap() -> None:
+    holdings = [PensionHolding("360200", "ACE 미국S&P500", 10, 10_000, 100_000)]
+    safe = aggregate_and_validate_sell_orders(
+        orders=[
+            PensionOrderPlan("SELL", "360200", "sp500", 2, 9_900, 19_800, "drift"),
+            PensionOrderPlan("SELL", "360200", "sp500", 2, 9_900, 19_800, "trend"),
+        ],
+        holdings=holdings,
+        split_count=3,
+    )
+
+    assert [(order.code, order.qty, order.price, order.amount) for order in safe.orders] == [
+        ("360200", 4, 10_000, 40_000)
+    ]
+    assert safe.max_qty_by_code == {"360200": 4}
+
+    with pytest.raises(RuntimeError, match="absolute cap exceeded"):
+        aggregate_and_validate_sell_orders(
+            orders=[PensionOrderPlan("SELL", "360200", "sp500", 5, 10_000, 50_000, "sell")],
+            holdings=holdings,
+            split_count=3,
+        )
+    with pytest.raises(RuntimeError, match="absolute cap exceeded"):
+        aggregate_and_validate_sell_orders(
+            orders=[PensionOrderPlan("SELL", "360200", "sp500", 3, 10_000, 30_000, "sell")],
+            holdings=holdings,
+            split_count=3,
+            sellable_qty_by_code={"360200": 2},
+        )
+
+
+def test_sell_safety_never_liquidates_one_share_holding() -> None:
+    with pytest.raises(RuntimeError, match="fully liquidate"):
+        aggregate_and_validate_sell_orders(
+            orders=[PensionOrderPlan("SELL", "360200", "sp500", 1, 10_000, 10_000, "sell")],
+            holdings=[PensionHolding("360200", "ACE 미국S&P500", 1, 10_000, 10_000)],
+            split_count=3,
+        )
+
+
+def test_open_order_guard_blocks_duplicate_execution() -> None:
+    with pytest.raises(RuntimeError, match="open pension orders exist"):
+        assert_no_open_orders(
+            [
+                {
+                    "order_id": "OD123",
+                    "code": "360200",
+                    "remaining_qty": 2,
+                    "side": "sell",
+                }
+            ]
+        )
+
+    assert_no_open_orders([{"order_id": "OD123", "remaining_qty": 0, "status": "FILLED"}])
+
+
+def test_buyable_asset_validation_uses_master_name_family_and_liquidity() -> None:
+    assets = [PensionAsset("360200", "sp500", "hardcoded")]
+    validated = validate_buyable_pension_assets(
+        assets=assets,
+        master_by_code={
+            "360200": SimpleNamespace(code="360200", name="ACE 미국S&P500", is_etf=True)
+        },
+        avg_value_20d_by_code={"360200": 5_000_000_000},
+        min_avg_value_20d=1_000_000_000,
+    )
+
+    assert validated[0].name == "ACE 미국S&P500"
+
+    with pytest.raises(RuntimeError, match="not ETF"):
+        validate_buyable_pension_assets(
+            assets=assets,
+            master_by_code={
+                "360200": SimpleNamespace(code="360200", name="삼성전자", is_etf=False)
+            },
+            avg_value_20d_by_code={"360200": 5_000_000_000},
+            min_avg_value_20d=1_000_000_000,
+        )
+    with pytest.raises(RuntimeError, match="unsafe pension ETF"):
+        validate_buyable_pension_assets(
+            assets=assets,
+            master_by_code={
+                "360200": SimpleNamespace(
+                    code="360200",
+                    name="ACE 미국S&P500 커버드콜",
+                    is_etf=True,
+                )
+            },
+            avg_value_20d_by_code={"360200": 5_000_000_000},
+            min_avg_value_20d=1_000_000_000,
+        )
+    with pytest.raises(RuntimeError, match="liquidity below minimum"):
+        validate_buyable_pension_assets(
+            assets=assets,
+            master_by_code={
+                "360200": SimpleNamespace(code="360200", name="ACE 미국S&P500", is_etf=True)
+            },
+            avg_value_20d_by_code={"360200": 100_000_000},
+            min_avg_value_20d=1_000_000_000,
+        )
+
+
+def test_execution_journal_blocks_repeat_sell_for_same_quarter_signal(tmp_path) -> None:
+    state_path = tmp_path / "execution_state.json"
+    signal_key = pension_signal_key(
+        asof_date="20260720",
+        job="REBALANCE",
+        regime="falling",
+        selected_momentum_code="",
+        trend_exit_codes=("426030",),
+    )
+    sell_order = PensionOrderPlan(
+        "SELL",
+        "426030",
+        "momentum",
+        3,
+        10_000,
+        30_000,
+        "trend exit",
+    )
+    journal = PensionExecutionJournal(state_path)
+    execution_id, plan_hash = journal.begin(signal_key=signal_key, sell_orders=[sell_order])
+    journal.mark_sell_submitted(execution_id=execution_id, code="426030", qty=3)
+    journal.mark_sells_filled(execution_id=execution_id)
+    journal.mark_success(execution_id=execution_id)
+
+    assert len(plan_hash) == 64
+    saved = journal.state
+    assert saved["last_success_execution_id"] == execution_id
+    assert saved["signals"][signal_key]["completed_sell_qty_by_code"] == {"426030": 3}
+
+    with pytest.raises(RuntimeError, match="already sold"):
+        PensionExecutionJournal(state_path).begin(
+            signal_key=signal_key,
+            sell_orders=[sell_order],
+        )
+
+
+def test_execution_lock_rejects_overlapping_process_run(tmp_path) -> None:
+    lock_path = tmp_path / "execution.lock"
+
+    with pension_execution_lock(lock_path):
+        with pytest.raises(RuntimeError, match="already running"):
+            with pension_execution_lock(lock_path):
+                pytest.fail("overlapping execution must not enter the lock")
+
+
+def test_final_buy_plan_is_recomputed_without_rejected_sell_proceeds() -> None:
+    class Client:
+        @staticmethod
+        def buy_order_capacity(code: str, *, price: int, order_type: str) -> dict[str, int]:
+            raise AssertionError("no cash means no buy capacity lookup")
+
+    signal = QuarterlyMarketSignal(
+        regime="falling",
+        reference_return_pct=-5.0,
+        kospi_return_pct=-7.0,
+        nasdaq_return_pct=-8.0,
+        selected_momentum_code="",
+    )
+    holdings = [PensionHolding("360200", "ACE 미국S&P500", 100, 10_000, 1_000_000)]
+    assets = [
+        PensionAsset("360200", "sp500", "ACE 미국S&P500"),
+        PensionAsset("426030", "momentum", "TIME 미국나스닥100액티브", buyable=False),
+        PensionAsset("0048J0", "bond", "KODEX 미국머니마켓액티브"),
+    ]
+
+    plan, orderable_cash = _build_final_buy_plan(
+        client=Client(),
+        env={"PENSION_REBALANCE_ORDER_CASH_BUFFER_PCT": "0.10"},
+        holdings=holdings,
+        cash=0,
+        assets=assets,
+        prices={"360200": 10_000, "426030": 10_000, "0048J0": 10_000},
+        signal=signal,
+        min_order_amount=10_000,
+        restore_step=0.20,
+        trend_exit_step_pct=1.0 / 3.0,
+        reserved_cash_amount=0,
+    )
+
+    assert orderable_cash == 0
+    assert plan.orders == []
