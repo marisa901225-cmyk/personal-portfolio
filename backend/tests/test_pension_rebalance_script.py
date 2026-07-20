@@ -6,21 +6,23 @@ from types import SimpleNamespace
 import pytest
 
 import backend.scripts.run_pension_rebalance_scheduler as scheduler
-from backend.scripts.rebalance_kis_pension_account import (
+from backend.services.pension_order_execution import (
+    apply_order_buy_capacity as _apply_buy_capacity,
+    build_final_buy_plan as _build_final_buy_plan,
+    execute_orders as _execute_orders,
+    orderable_cash as _orderable_cash_for_buys,
+    split_order_qty as _split_order_qty,
+    wait_for_sell_fills as _wait_for_sell_fills,
+)
+from backend.services.pension_rebalance_context import (
     PensionKISClient,
-    _apply_buy_capacity,
-    _analyze_pension_momentum_universe,
-    _allow_overweight_sells,
-    _assets_from_env,
-    _build_final_buy_plan,
-    _execute_orders,
-    _load_exit_review_monthly_prices,
-    _orderable_cash_for_buys,
-    _parking_code_from_env,
-    _quarterly_return,
-    _refresh_prices,
-    _split_order_qty,
-    _wait_for_sell_fills,
+    allow_overweight_sells as _allow_overweight_sells,
+    analyze_momentum_universe as _analyze_pension_momentum_universe,
+    assets_from_env as _assets_from_env,
+    load_exit_review_monthly_prices as _load_exit_review_monthly_prices,
+    parking_code_from_env as _parking_code_from_env,
+    quarterly_return as _quarterly_return,
+    refresh_prices as _refresh_prices,
 )
 from backend.scripts.run_pension_rebalance_scheduler import (
     _build_command,
@@ -291,7 +293,7 @@ def test_pension_momentum_universe_allows_liquid_country_indices_only(monkeypatc
         SimpleNamespace(code="379800", name="KODEX 미국S&P500", is_etf=True),
     ]
     monkeypatch.setattr(
-        "backend.scripts.rebalance_kis_pension_account.load_stock_master_map",
+        "backend.services.pension_rebalance_context.load_stock_master_map",
         lambda **kwargs: {row.code: row for row in master_rows},
     )
 
@@ -516,12 +518,6 @@ def test_orderable_cash_uses_merged_env_and_enforces_minimum_buffer(monkeypatch)
 
     client = Client()
     orderable_cash = _orderable_cash_for_buys(
-        client=client,
-        assets=[
-            PensionAsset("360200", "sp500", buyable=True),
-            PensionAsset("241180", "momentum", buyable=False),
-        ],
-        prices={"360200": 10_000, "241180": 10_000},
         cash=500_000,
         env={"PENSION_REBALANCE_ORDER_CASH_BUFFER_PCT": "0.20"},
     )
@@ -530,9 +526,6 @@ def test_orderable_cash_uses_merged_env_and_enforces_minimum_buffer(monkeypatch)
     assert client.requested_codes == []
 
     minimum_buffer_cash = _orderable_cash_for_buys(
-        client=client,
-        assets=[],
-        prices={},
         cash=500_000,
         env={"PENSION_REBALANCE_ORDER_CASH_BUFFER_PCT": "0"},
     )
@@ -577,7 +570,7 @@ def test_pension_product_never_falls_back_to_general_account() -> None:
 
 def test_pension_client_refuses_missing_product_before_api_creation(monkeypatch) -> None:
     monkeypatch.setattr(
-        "backend.scripts.rebalance_kis_pension_account.create_trading_api",
+        "backend.services.pension_rebalance_context.create_trading_api",
         lambda credentials: pytest.fail("API must not be created for an ambiguous account"),
     )
 
