@@ -11,7 +11,6 @@ from backend.services.pension_order_execution import (
     build_final_buy_plan as _build_final_buy_plan,
     execute_orders as _execute_orders,
     orderable_cash as _orderable_cash_for_buys,
-    split_order_qty as _split_order_qty,
     wait_for_sell_fills as _wait_for_sell_fills,
 )
 from backend.services.pension_rebalance_context import (
@@ -397,15 +396,7 @@ def test_wait_for_sell_fills_rejects_unfilled_daily_order(monkeypatch) -> None:
     assert client.cancelled == ["OD123"]
 
 
-def test_split_order_qty_balances_tranches_and_handles_small_quantities() -> None:
-    assert _split_order_qty(10, 3) == [4, 3, 3]
-    assert _split_order_qty(2, 3) == [1, 1]
-    assert _split_order_qty(1, 3) == [1]
-    assert _split_order_qty(0, 3) == []
-
-
-def test_execute_orders_splits_buy_and_waits_for_each_fill(monkeypatch) -> None:
-    monkeypatch.setenv("PENSION_REBALANCE_BUY_SPLIT_COUNT", "3")
+def test_execute_orders_submits_prepared_buy_once(monkeypatch) -> None:
     monkeypatch.setenv("PENSION_REBALANCE_BUY_FILL_TIMEOUT_SEC", "0")
 
     class Client:
@@ -439,11 +430,10 @@ def test_execute_orders_splits_buy_and_waits_for_each_fill(monkeypatch) -> None:
     order = PensionOrderPlan("BUY", "426030", "momentum", 10, 50_000, 500_000, "momentum underweight")
 
     assert _execute_orders(client, [order]) == 0
-    assert client.placed_qty == [4, 3, 3]
+    assert client.placed_qty == [10]
 
 
-def test_execute_orders_stops_after_unfilled_buy_tranche(monkeypatch) -> None:
-    monkeypatch.setenv("PENSION_REBALANCE_BUY_SPLIT_COUNT", "3")
+def test_execute_orders_cancels_unfilled_prepared_buy(monkeypatch) -> None:
     monkeypatch.setenv("PENSION_REBALANCE_BUY_FILL_TIMEOUT_SEC", "0")
 
     class Client:
@@ -468,9 +458,7 @@ def test_execute_orders_stops_after_unfilled_buy_tranche(monkeypatch) -> None:
             order_id: str = "",
             side: str = "00",
         ) -> list[dict[str, int]]:
-            if order_id == "OD2":
-                return []
-            return [{"filled_qty": self.placed_qty[int(order_id.removeprefix("OD")) - 1]}]
+            return []
 
         def cancel_order(self, order_id: str) -> dict[str, object]:
             self.cancelled.append(order_id)
@@ -480,8 +468,8 @@ def test_execute_orders_stops_after_unfilled_buy_tranche(monkeypatch) -> None:
     order = PensionOrderPlan("BUY", "426030", "momentum", 10, 50_000, 500_000, "momentum underweight")
 
     assert _execute_orders(client, [order]) == 1
-    assert client.placed_qty == [4, 3]
-    assert client.cancelled == ["OD2"]
+    assert client.placed_qty == [10]
+    assert client.cancelled == ["OD1"]
 
 
 def test_refresh_prices_skips_unbuyable_asset_without_a_holding() -> None:
@@ -815,6 +803,38 @@ def test_execution_journal_blocks_repeat_sell_for_same_quarter_signal(tmp_path) 
             signal_key=signal_key,
             sell_orders=[sell_order],
         )
+
+
+def test_execution_journal_blocks_second_buy_for_same_code_and_date(tmp_path) -> None:
+    state_path = tmp_path / "execution_state.json"
+    signal_key = pension_signal_key(
+        asof_date="20260721",
+        job="REBALANCE",
+        regime="rising",
+        selected_momentum_code="241180",
+        trend_exit_codes=(),
+    )
+    journal = PensionExecutionJournal(state_path)
+    execution_id, _ = journal.begin(signal_key=signal_key, sell_orders=[])
+
+    journal.mark_buy_submitted(
+        execution_id=execution_id,
+        code="241180",
+        qty=10,
+        date_key="20260721",
+    )
+
+    reloaded = PensionExecutionJournal(state_path)
+    assert reloaded.has_buy_submitted_on_date(
+        signal_key=signal_key,
+        code="241180",
+        date_key="20260721",
+    )
+    assert not reloaded.has_buy_submitted_on_date(
+        signal_key=signal_key,
+        code="241180",
+        date_key="20260722",
+    )
 
 
 def test_execution_lock_rejects_overlapping_process_run(tmp_path) -> None:

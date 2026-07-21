@@ -5,7 +5,7 @@ from datetime import date
 import os
 from pathlib import Path
 import time
-from typing import Any
+from typing import Any, Callable
 
 from backend.services.pension_exit_review import review_pension_sell_orders
 from backend.services.pension_order_safety import (
@@ -115,13 +115,66 @@ def apply_order_buy_capacity(
     )
 
 
-def split_order_qty(qty: int, split_count: int) -> list[int]:
-    normalized_qty = max(0, int(qty))
-    if normalized_qty <= 0:
-        return []
-    tranche_count = min(normalized_qty, max(1, int(split_count)))
-    base_qty, remainder = divmod(normalized_qty, tranche_count)
-    return [base_qty + (1 if index < remainder else 0) for index in range(tranche_count)]
+def apply_momentum_buy_timing(
+    *,
+    client: PensionKISClient,
+    orders: list[PensionOrderPlan],
+    env: dict[str, str] | None,
+    signal: QuarterlyMarketSignal,
+    asof_date: date | None = None,
+) -> list[PensionOrderPlan]:
+    selected_code = str(signal.selected_momentum_code or "").strip()
+    date_key = (asof_date or date.today()).strftime("%Y%m%d")
+    split_count = max(1, env_int(env, "PENSION_REBALANCE_BUY_SPLIT_COUNT", 3))
+    timed_orders: list[PensionOrderPlan] = []
+    for order in orders:
+        if order.side != "BUY" or order.bucket != "momentum":
+            timed_orders.append(order)
+            continue
+        if not selected_code or order.code != selected_code:
+            print(
+                "momentum_buy_timing",
+                {"code": order.code, "action": "SKIP", "reason": "LONG_TERM_TREND_NOT_SELECTED"},
+            )
+            continue
+        candle = client.latest_daily_candle(order.code, end_date=date_key)
+        candle_date = "".join(character for character in str(candle.get("date") or "") if character.isdigit())[:8]
+        open_price = to_int(candle.get("open"))
+        close_price = to_int(candle.get("close"))
+        if candle_date != date_key or open_price <= 0 or close_price <= 0:
+            print(
+                "momentum_buy_timing",
+                {"code": order.code, "action": "SKIP", "reason": "CURRENT_CANDLE_UNAVAILABLE"},
+            )
+            continue
+        if close_price >= open_price:
+            print(
+                "momentum_buy_timing",
+                {
+                    "code": order.code,
+                    "action": "WAIT",
+                    "reason": "NOT_BEARISH_CANDLE",
+                    "open": open_price,
+                    "close": close_price,
+                },
+            )
+            continue
+        tranche_qty = max(1, (order.qty + split_count - 1) // split_count)
+        timed_order = replace(order, qty=tranche_qty, amount=tranche_qty * order.price)
+        timed_orders.append(timed_order)
+        print(
+            "momentum_buy_timing",
+            {
+                "code": order.code,
+                "action": "BUY_TRANCHE",
+                "open": open_price,
+                "close": close_price,
+                "remaining_target_qty": order.qty,
+                "order_qty": tranche_qty,
+                "split_count": split_count,
+            },
+        )
+    return timed_orders
 
 
 def _order_filled(
@@ -164,34 +217,30 @@ def execute_orders(
     orders: list[PensionOrderPlan],
     *,
     env: dict[str, str] | None = None,
+    on_buy_submitted: Callable[[PensionOrderPlan], None] | None = None,
 ) -> int:
-    buy_split_count = max(1, env_int(env, "PENSION_REBALANCE_BUY_SPLIT_COUNT", 3))
     for order in orders:
-        split_buy = order.side == "BUY" and order.bucket not in {"bond", "parking"}
-        tranche_qtys = split_order_qty(order.qty, buy_split_count) if split_buy else [order.qty]
-        for tranche_index, tranche_qty in enumerate(tranche_qtys, start=1):
-            order_price = (
-                aggressive_limit_price(side=order.side, price=order.price)
-                if order.side == "SELL"
-                else order.price
-            )
-            result = client.place_order(
-                side=order.side,
-                code=order.code,
-                qty=tranche_qty,
-                price=order_price,
-            )
-            print(
-                "order_result",
-                {**result, "tranche_index": tranche_index, "tranche_count": len(tranche_qtys)},
-            )
-            if not result.get("success"):
-                return 1
-            if order.side == "BUY" and not wait_for_buy_fill(client, result, env=env):
-                order_id = str(result.get("order_id") or "").strip()
-                if order_id:
-                    client.cancel_order(order_id)
-                return 1
+        order_price = (
+            aggressive_limit_price(side=order.side, price=order.price)
+            if order.side == "SELL"
+            else order.price
+        )
+        result = client.place_order(
+            side=order.side,
+            code=order.code,
+            qty=order.qty,
+            price=order_price,
+        )
+        print("order_result", result)
+        if not result.get("success"):
+            return 1
+        if order.side == "BUY" and on_buy_submitted is not None:
+            on_buy_submitted(order)
+        if order.side == "BUY" and not wait_for_buy_fill(client, result, env=env):
+            order_id = str(result.get("order_id") or "").strip()
+            if order_id:
+                client.cancel_order(order_id)
+            return 1
     return 0
 
 
@@ -393,9 +442,15 @@ def build_final_buy_plan(
             reserved_cash_amount=min(cash, reserved_cash_amount + cash_buffer_amount),
         )
     account_total_value = cash + sum(holding.value for holding in holdings)
-    plan.orders[:] = apply_order_buy_capacity(
+    timed_orders = apply_momentum_buy_timing(
         client=client,
         orders=[order for order in plan.orders if order.side == "BUY"],
+        env=env,
+        signal=signal,
+    )
+    plan.orders[:] = apply_order_buy_capacity(
+        client=client,
+        orders=timed_orders,
         orderable_cash=buy_cash,
         holdings=holdings,
         total_value=account_total_value,
@@ -499,6 +554,26 @@ def prepare_pension_execution(
             reason=f"buy plan error: {type(exc).__name__}",
         )
         raise
+    today_key = date.today().strftime("%Y%m%d")
+    pending_buy_orders: list[PensionOrderPlan] = []
+    for order in buy_plan.orders:
+        already_submitted = (
+            order.side == "BUY"
+            and order.bucket == "momentum"
+            and journal.has_buy_submitted_on_date(
+                signal_key=signal_key,
+                code=order.code,
+                date_key=today_key,
+            )
+        )
+        if already_submitted:
+            print(
+                "momentum_buy_timing",
+                {"code": order.code, "action": "SKIP", "reason": "ALREADY_SUBMITTED_TODAY"},
+            )
+            continue
+        pending_buy_orders.append(order)
+    buy_plan.orders[:] = pending_buy_orders
     buy_plan_hash = journal.record_buy_plan(
         execution_id=execution_id,
         signal_key=signal_key,
@@ -531,7 +606,18 @@ def execute_prepared_buys(
 ) -> int:
     try:
         assert_no_open_orders(client.open_orders())
-        result = execute_orders(client, prepared.plan.orders, env=env)
+        today_key = date.today().strftime("%Y%m%d")
+        result = execute_orders(
+            client,
+            prepared.plan.orders,
+            env=env,
+            on_buy_submitted=lambda order: prepared.journal.mark_buy_submitted(
+                execution_id=prepared.execution_id,
+                code=order.code,
+                qty=order.qty,
+                date_key=today_key,
+            ),
+        )
     except Exception as exc:
         prepared.journal.mark_failed(
             execution_id=prepared.execution_id,
@@ -552,6 +638,7 @@ __all__ = [
     "PensionSellExecutionFailed",
     "PreparedPensionExecution",
     "aggressive_limit_price",
+    "apply_momentum_buy_timing",
     "apply_order_buy_capacity",
     "build_final_buy_plan",
     "env_float",
@@ -561,7 +648,6 @@ __all__ = [
     "orderable_cash",
     "prepare_pension_execution",
     "review_and_validate_sell_orders",
-    "split_order_qty",
     "submit_and_wait_sell_orders",
     "wait_for_buy_fill",
     "wait_for_sell_fills",

@@ -161,6 +161,18 @@ class PensionKISClient:
         ]
         return normalized_price_history(prices), float(avg_value_20d or 0.0)
 
+    def latest_daily_candle(self, code: str, *, end_date: str) -> dict[str, int | str]:
+        bars = self.api.daily_bars(code=code, end=end_date, lookback=3)
+        records = bars.to_dict(orient="records")
+        if not records:
+            raise RuntimeError(f"daily candle unavailable: {code}")
+        latest = records[-1]
+        return {
+            "date": str(latest.get("date") or ""),
+            "open": to_int(latest.get("open")),
+            "close": to_int(latest.get("close")),
+        }
+
     def place_order(self, *, side: str, code: str, qty: int, price: int) -> dict[str, Any]:
         result = self.api.place_order(
             side=side,

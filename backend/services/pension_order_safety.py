@@ -328,6 +328,7 @@ class PensionExecutionJournal:
             "sell_orders": [asdict(order) for order in sell_orders],
             "submitted_sell_qty_by_code": {},
             "completed_sell_qty_by_code": {},
+            "submitted_buy_qty_by_code": {},
             "created_at": datetime.now().astimezone().isoformat(),
         }
         self._write()
@@ -382,6 +383,35 @@ class PensionExecutionJournal:
         run["buy_orders"] = [asdict(order) for order in buy_orders]
         self._write()
         return plan_hash
+
+    def has_buy_submitted_on_date(
+        self,
+        *,
+        signal_key: str,
+        code: str,
+        date_key: str,
+    ) -> bool:
+        signal = self.state["signals"].get(signal_key, {})
+        return str(signal.get("last_buy_date_by_code", {}).get(code) or "") == date_key
+
+    def mark_buy_submitted(
+        self,
+        *,
+        execution_id: str,
+        code: str,
+        qty: int,
+        date_key: str,
+    ) -> None:
+        run = self.state["runs"][execution_id]
+        signal_key = str(run["signal_key"])
+        run["status"] = "BUY_SUBMITTED"
+        submitted_by_code = run.setdefault("submitted_buy_qty_by_code", {})
+        submitted_by_code[code] = int(submitted_by_code.get(code, 0) or 0) + int(qty)
+        signal = self.state["signals"].setdefault(signal_key, {})
+        signal_submitted = signal.setdefault("submitted_buy_qty_by_code", {})
+        signal_submitted[code] = int(signal_submitted.get(code, 0) or 0) + int(qty)
+        signal.setdefault("last_buy_date_by_code", {})[code] = date_key
+        self._write()
 
     def mark_success(self, *, execution_id: str) -> None:
         completed_at = datetime.now().astimezone().isoformat()

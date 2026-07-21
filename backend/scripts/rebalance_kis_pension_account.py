@@ -8,6 +8,7 @@ from pathlib import Path
 from backend.services.pension_order_execution import (
     PensionSellExecutionFailed,
     PreparedPensionExecution,
+    apply_momentum_buy_timing,
     env_int,
     execute_prepared_buys,
     prepare_pension_execution,
@@ -177,6 +178,14 @@ def _run_pension_rebalance(args: argparse.Namespace, env: dict[str, str]) -> int
         assets=assets,
     ):
         return 0
+
+    if not args.execute:
+        plan.orders[:] = apply_momentum_buy_timing(
+            client=client,
+            orders=plan.orders,
+            env=env,
+            signal=signal,
+        )
 
     prepared: PreparedPensionExecution | None = None
     if args.execute:
