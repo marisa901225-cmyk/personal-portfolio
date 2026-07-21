@@ -30,6 +30,7 @@ from backend.services.pension_rebalancing import (
     PensionOrderPlan,
     PensionRebalancePlan,
     QuarterlyMarketSignal,
+    build_pension_cash_sweep_plan,
     build_pension_rebalance_plan,
     cap_pension_sell_orders,
 )
@@ -166,7 +167,8 @@ def execute_orders(
 ) -> int:
     buy_split_count = max(1, env_int(env, "PENSION_REBALANCE_BUY_SPLIT_COUNT", 3))
     for order in orders:
-        tranche_qtys = split_order_qty(order.qty, buy_split_count) if order.side == "BUY" else [order.qty]
+        split_buy = order.side == "BUY" and order.bucket not in {"bond", "parking"}
+        tranche_qtys = split_order_qty(order.qty, buy_split_count) if split_buy else [order.qty]
         for tranche_index, tranche_qty in enumerate(tranche_qtys, start=1):
             order_price = (
                 aggressive_limit_price(side=order.side, price=order.price)
@@ -364,22 +366,33 @@ def build_final_buy_plan(
     restore_step: float,
     trend_exit_step_pct: float,
     reserved_cash_amount: int,
+    job: str = "REBALANCE",
 ) -> tuple[PensionRebalancePlan, int]:
     buy_cash = orderable_cash(cash=cash, env=env)
-    plan = build_pension_rebalance_plan(
-        holdings=holdings,
-        cash=buy_cash,
-        assets=assets,
-        prices=prices,
-        regime=signal.regime,
-        min_order_amount=min_order_amount,
-        allow_sells=False,
-        deploy_leftover_to=None,
-        parking_code=parking_code_from_env(env),
-        gradual_equity_restore_step=restore_step,
-        trend_exit_step_pct=trend_exit_step_pct,
-        reserved_cash_amount=min(reserved_cash_amount, buy_cash),
-    )
+    if job == "CASH_SWEEP":
+        plan = build_pension_cash_sweep_plan(
+            holdings=holdings,
+            cash=buy_cash,
+            assets=assets,
+            prices=prices,
+            min_order_amount=min_order_amount,
+            parking_code=parking_code_from_env(env),
+        )
+    else:
+        plan = build_pension_rebalance_plan(
+            holdings=holdings,
+            cash=buy_cash,
+            assets=assets,
+            prices=prices,
+            regime=signal.regime,
+            min_order_amount=min_order_amount,
+            allow_sells=False,
+            deploy_leftover_to=None,
+            parking_code=parking_code_from_env(env),
+            gradual_equity_restore_step=restore_step,
+            trend_exit_step_pct=trend_exit_step_pct,
+            reserved_cash_amount=min(reserved_cash_amount, buy_cash),
+        )
     account_total_value = cash + sum(holding.value for holding in holdings)
     plan.orders[:] = apply_order_buy_capacity(
         client=client,
@@ -481,6 +494,7 @@ def prepare_pension_execution(
             restore_step=restore_step,
             trend_exit_step_pct=trend_exit_step_pct,
             reserved_cash_amount=reserved_proceeds,
+            job=job,
         )
     except Exception as exc:
         journal.mark_failed(

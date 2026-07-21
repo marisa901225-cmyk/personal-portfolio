@@ -215,6 +215,24 @@ def _build_cash_sweep_command(*, execute: bool) -> list[str]:
 
 def _run_cash_sweep(*, reason: str) -> int:
     execute = _env_bool("PENSION_CASH_SWEEP_EXECUTE", _env_bool("PENSION_REBALANCE_EXECUTE", False))
+    now = datetime.now(KST)
+    state = _read_state(_state_path())
+    same_day_rebalance = str(state.get("last_rebalance_date") or "") == now.strftime("%Y%m%d")
+    rebalance_action = str(state.get("last_rebalance_action") or "")
+    rebalance_executed = bool(state.get("last_rebalance_execute"))
+    if (
+        reason == "schedule"
+        and execute
+        and same_day_rebalance
+        and rebalance_executed
+        and rebalance_action != "SKIP"
+    ):
+        logger.info(
+            "skip pension cash sweep: same-day rebalance action=%s date=%s",
+            rebalance_action,
+            now.strftime("%Y%m%d"),
+        )
+        return 0
     command = _build_cash_sweep_command(execute=execute)
     logger.info(
         "starting pension cash sweep reason=%s mode=%s command=%s",
@@ -266,6 +284,20 @@ def _run_rebalance(*, reason: str, force: bool = False) -> int:
     if result.stderr:
         logger.warning("pension rebalance stderr:\n%s", result.stderr.strip())
 
+    if result.returncode == 0 and "drift_action SKIP" in result.stdout:
+        rebalance_action = "SKIP"
+    elif result.returncode == 0:
+        rebalance_action = "EXECUTED"
+    else:
+        rebalance_action = "FAILED"
+    state.update(
+        {
+            "last_rebalance_date": now.strftime("%Y%m%d"),
+            "last_rebalance_action": rebalance_action,
+            "last_rebalance_execute": execute,
+        }
+    )
+
     if result.returncode == 0:
         state.update({"last_check_at": now.isoformat(), "last_mode": "EXECUTE" if execute else "DRY_RUN"})
         if drift_guarded:
@@ -278,9 +310,9 @@ def _run_rebalance(*, reason: str, force: bool = False) -> int:
                     "last_reason": reason,
                 }
             )
-        _write_state(state_path, state)
     else:
         logger.error("pension rebalance failed returncode=%s", result.returncode)
+    _write_state(state_path, state)
     return int(result.returncode)
 
 

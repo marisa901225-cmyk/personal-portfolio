@@ -28,6 +28,7 @@ from backend.services.pension_rebalancing import (
     PensionHolding,
     PensionRebalancePlan,
     QuarterlyMarketSignal,
+    build_pension_cash_sweep_plan,
     build_pension_rebalance_plan,
     max_target_weight_drift_pct,
 )
@@ -147,20 +148,30 @@ def _run_pension_rebalance(args: argparse.Namespace, env: dict[str, str]) -> int
     )
     overweight_sells = allow_overweight_sells(signal)
     print("overweight_sell_action", "ENABLED" if overweight_sells else "DISABLED_NO_SELECTION")
-    plan = build_pension_rebalance_plan(
-        holdings=holdings,
-        cash=cash,
-        assets=assets,
-        prices=prices,
-        regime=signal.regime,
-        min_order_amount=args.min_order_amount,
-        allow_sells=not args.cash_sweep and not args.no_sells,
-        allow_overweight_sells=overweight_sells,
-        deploy_leftover_to=None,
-        parking_code=parking_code_from_env(env),
-        gradual_equity_restore_step=restore_step,
-        trend_exit_step_pct=1.0 / trend_exit_split_count,
-    )
+    if args.cash_sweep:
+        plan = build_pension_cash_sweep_plan(
+            holdings=holdings,
+            cash=cash,
+            assets=assets,
+            prices=prices,
+            min_order_amount=args.min_order_amount,
+            parking_code=parking_code_from_env(env),
+        )
+    else:
+        plan = build_pension_rebalance_plan(
+            holdings=holdings,
+            cash=cash,
+            assets=assets,
+            prices=prices,
+            regime=signal.regime,
+            min_order_amount=args.min_order_amount,
+            allow_sells=not args.no_sells,
+            allow_overweight_sells=overweight_sells,
+            deploy_leftover_to=None,
+            parking_code=parking_code_from_env(env),
+            gradual_equity_restore_step=restore_step,
+            trend_exit_step_pct=1.0 / trend_exit_split_count,
+        )
     if not _drift_allows_execution(
         args=args,
         env=env,

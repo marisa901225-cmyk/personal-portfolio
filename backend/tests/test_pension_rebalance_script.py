@@ -131,6 +131,8 @@ def test_scheduled_rebalance_runs_drift_guard_after_quarter_is_completed(monkeyp
     assert "--execute" in captured["command"]
     assert captured["state"]["last_success_quarter"] == "2026Q3"
     assert captured["state"]["last_reason"] == "drift_schedule"
+    assert captured["state"]["last_rebalance_action"] == "EXECUTED"
+    assert captured["state"]["last_rebalance_execute"] is True
 
 
 def test_open_day_from_holiday_rows_uses_kis_open_flag() -> None:
