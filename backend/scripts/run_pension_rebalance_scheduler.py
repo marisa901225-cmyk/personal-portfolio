@@ -334,10 +334,10 @@ async def _run_cash_sweep_async(reason: str) -> None:
 
 async def main() -> None:
     scheduler = AsyncIOScheduler(timezone=KST)
-    hour = _env_int("PENSION_REBALANCE_HOUR", 10)
-    minute = _env_int("PENSION_REBALANCE_MINUTE", 5)
-    cash_sweep_hour = _env_int("PENSION_CASH_SWEEP_HOUR", 10)
-    cash_sweep_minute = _env_int("PENSION_CASH_SWEEP_MINUTE", 15)
+    hour = _env_int("PENSION_REBALANCE_HOUR", 15)
+    minute = _env_int("PENSION_REBALANCE_MINUTE", 0)
+    cash_sweep_hour = _env_int("PENSION_CASH_SWEEP_HOUR", 15)
+    cash_sweep_minute = _env_int("PENSION_CASH_SWEEP_MINUTE", 10)
     scheduler.add_job(
         _run_rebalance_async,
         CronTrigger(day_of_week="mon-fri", hour=hour, minute=minute, timezone=KST),
