@@ -237,36 +237,6 @@ def resolve_quarterly_market_signal(
     )
 
 
-def _with_gradual_equity_restore(
-    *,
-    base_targets: dict[Bucket, float],
-    current_values: dict[Bucket, int],
-    total_value: int,
-    restore_step: float | None,
-) -> dict[Bucket, float]:
-    target_weights = dict(base_targets)
-    if restore_step is None or restore_step <= 0 or total_value <= 0:
-        return target_weights
-
-    base_equity_weight = target_weights.get("sp500", 0.0) + target_weights.get("momentum", 0.0)
-    if base_equity_weight <= 0:
-        return target_weights
-
-    current_equity_weight = (
-        current_values.get("sp500", 0) + current_values.get("momentum", 0)
-    ) / total_value
-    restored_equity_weight = min(base_equity_weight, max(0.0, current_equity_weight) + restore_step)
-    if restored_equity_weight >= base_equity_weight:
-        return target_weights
-
-    sp500_share = target_weights.get("sp500", 0.0) / base_equity_weight
-    momentum_share = target_weights.get("momentum", 0.0) / base_equity_weight
-    target_weights["sp500"] = restored_equity_weight * sp500_share
-    target_weights["momentum"] = restored_equity_weight * momentum_share
-    target_weights["bond"] = max(0.0, 1.0 - restored_equity_weight)
-    return target_weights
-
-
 def bucket_values(
     holdings: Iterable[PensionHolding],
     assets: Iterable[PensionAsset],
@@ -356,18 +326,12 @@ def build_pension_rebalance_plan(
     deploy_leftover_to: Bucket | None = "sp500",
     parking_code: str | None = None,
     parking_cash_trigger_amount: int | None = None,
-    gradual_equity_restore_step: float | None = None,
     trend_exit_step_pct: float = 1.0 / 3.0,
     reserved_cash_amount: int = 0,
 ) -> PensionRebalancePlan:
     current_values = bucket_values(holdings, assets)
     total_value = max(0, int(cash)) + sum(max(0, h.value) for h in holdings)
-    target_weights = _with_gradual_equity_restore(
-        base_targets=DEFAULT_TARGETS[regime],
-        current_values=current_values,
-        total_value=total_value,
-        restore_step=gradual_equity_restore_step if regime == "rising" else None,
-    )
+    target_weights = dict(DEFAULT_TARGETS[regime])
     if total_value <= 0:
         return PensionRebalancePlan(regime, 0, int(cash), target_weights, current_values, [], int(cash))
 
