@@ -855,7 +855,6 @@ def test_final_buy_plan_is_recomputed_without_rejected_sell_proceeds() -> None:
         prices={"360200": 10_000, "426030": 10_000, "0048J0": 10_000},
         signal=signal,
         min_order_amount=10_000,
-        restore_step=0.20,
         trend_exit_step_pct=1.0 / 3.0,
         reserved_cash_amount=0,
     )

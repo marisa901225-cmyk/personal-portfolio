@@ -153,7 +153,6 @@ def test_final_cash_sweep_buy_plan_uses_cash_sweep_strategy() -> None:
         prices={"360200": 100_000, "440650": 10_000},
         signal=signal,
         min_order_amount=50_000,
-        restore_step=0.20,
         trend_exit_step_pct=1.0 / 3.0,
         reserved_cash_amount=0,
         job="CASH_SWEEP",

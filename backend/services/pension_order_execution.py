@@ -363,7 +363,6 @@ def build_final_buy_plan(
     prices: dict[str, int],
     signal: QuarterlyMarketSignal,
     min_order_amount: int,
-    restore_step: float,
     trend_exit_step_pct: float,
     reserved_cash_amount: int,
     job: str = "REBALANCE",
@@ -379,9 +378,10 @@ def build_final_buy_plan(
             parking_code=parking_code_from_env(env),
         )
     else:
+        cash_buffer_amount = max(0, cash - buy_cash)
         plan = build_pension_rebalance_plan(
             holdings=holdings,
-            cash=buy_cash,
+            cash=cash,
             assets=assets,
             prices=prices,
             regime=signal.regime,
@@ -389,9 +389,8 @@ def build_final_buy_plan(
             allow_sells=False,
             deploy_leftover_to=None,
             parking_code=parking_code_from_env(env),
-            gradual_equity_restore_step=restore_step,
             trend_exit_step_pct=trend_exit_step_pct,
-            reserved_cash_amount=min(reserved_cash_amount, buy_cash),
+            reserved_cash_amount=min(cash, reserved_cash_amount + cash_buffer_amount),
         )
     account_total_value = cash + sum(holding.value for holding in holdings)
     plan.orders[:] = apply_order_buy_capacity(
@@ -420,7 +419,6 @@ def prepare_pension_execution(
     assets: list[PensionAsset],
     signal: QuarterlyMarketSignal,
     min_order_amount: int,
-    restore_step: float,
     trend_exit_step_pct: float,
     sell_split_count: int,
     job: str,
@@ -491,7 +489,6 @@ def prepare_pension_execution(
             prices=prices,
             signal=signal,
             min_order_amount=min_order_amount,
-            restore_step=restore_step,
             trend_exit_step_pct=trend_exit_step_pct,
             reserved_cash_amount=reserved_proceeds,
             job=job,

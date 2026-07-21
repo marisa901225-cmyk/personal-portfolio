@@ -138,10 +138,6 @@ def _run_pension_rebalance(args: argparse.Namespace, env: dict[str, str]) -> int
     )
     assets = validate_buyable_assets(client=client, env=env, assets=assets)
     prices = refresh_prices(client, holdings, assets)
-    restore_step = max(
-        0.0,
-        min(0.5, env_float(env, "PENSION_REBALANCE_EQUITY_RESTORE_STEP_PCT", 0.20)),
-    )
     trend_exit_split_count = max(
         1,
         env_int(env, "PENSION_REBALANCE_TREND_EXIT_SPLIT_COUNT", 3),
@@ -169,7 +165,6 @@ def _run_pension_rebalance(args: argparse.Namespace, env: dict[str, str]) -> int
             allow_overweight_sells=overweight_sells,
             deploy_leftover_to=None,
             parking_code=parking_code_from_env(env),
-            gradual_equity_restore_step=restore_step,
             trend_exit_step_pct=1.0 / trend_exit_split_count,
         )
     if not _drift_allows_execution(
@@ -196,7 +191,6 @@ def _run_pension_rebalance(args: argparse.Namespace, env: dict[str, str]) -> int
                 assets=assets,
                 signal=signal,
                 min_order_amount=args.min_order_amount,
-                restore_step=restore_step,
                 trend_exit_step_pct=1.0 / trend_exit_split_count,
                 sell_split_count=max(
                     2,
