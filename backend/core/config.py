@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     naver_api_client_id: Optional[str] = Field(default=None, validation_alias="NAVER_API_CLIENT_ID")
     naver_api_client_secret: Optional[str] = Field(default=None, validation_alias="NAVER_API_CLIENT_SECRET")
     naver_api: Optional[str] = Field(default=None, validation_alias="NAVER_API")
+    naver_api_daily_limit: int = Field(default=24_000, validation_alias="NAVER_API_DAILY_LIMIT")
+    naver_api_monthly_limit: int = Field(default=744_000, validation_alias="NAVER_API_MONTHLY_LIMIT")
+    naver_api_quota_state_path: str = Field(
+        default=str(BASE_DIR / "data" / "naver_api_quota.json"),
+        validation_alias="NAVER_API_QUOTA_STATE_PATH",
+    )
     kma_service_key: Optional[str] = Field(default=None, validation_alias="KMA_SERVICE_KEY")
     kma_service_key1: Optional[str] = Field(default=None, validation_alias="KMA_SERVICE_KEY1")
     fred_api_key: Optional[str] = Field(default=None, validation_alias="FRED_API_KEY")

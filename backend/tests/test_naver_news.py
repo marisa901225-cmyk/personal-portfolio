@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -46,9 +47,25 @@ class _FakeDb:
         return None
 
 
+def _configure_quota(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    daily_limit: int = 100,
+    monthly_limit: int = 1_000,
+) -> None:
+    monkeypatch.setattr(naver.settings, "naver_api_quota_state_path", str(tmp_path / "quota.json"))
+    monkeypatch.setattr(naver.settings, "naver_api_daily_limit", daily_limit)
+    monkeypatch.setattr(naver.settings, "naver_api_monthly_limit", monthly_limit)
+
+
 @pytest.mark.asyncio
-async def test_collect_naver_news_uses_api_hub_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_collect_naver_news_uses_api_hub_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     calls: list[dict[str, Any]] = []
+    _configure_quota(monkeypatch, tmp_path)
     monkeypatch.setattr(naver.settings, "naver_api_client_id", "hub-client-id")
     monkeypatch.setattr(naver.settings, "naver_api_client_secret", "hub-client-secret")
     monkeypatch.setattr(naver.settings, "naver_api", "hub-api-key")
@@ -83,8 +100,12 @@ async def test_collect_naver_news_skips_request_without_api_key(monkeypatch: pyt
 
 
 @pytest.mark.asyncio
-async def test_collect_naver_news_supports_legacy_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_collect_naver_news_supports_legacy_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     calls: list[dict[str, Any]] = []
+    _configure_quota(monkeypatch, tmp_path)
     monkeypatch.setattr(naver.settings, "naver_api_client_id", "hub-client-id")
     monkeypatch.setattr(naver.settings, "naver_api_client_secret", None)
     monkeypatch.setattr(naver.settings, "naver_api", "legacy-api-key")
@@ -94,3 +115,22 @@ async def test_collect_naver_news_supports_legacy_api_key(monkeypatch: pytest.Mo
 
     assert count == 0
     assert calls[0]["headers"]["X-NCP-APIGW-API-KEY"] == "legacy-api-key"
+
+
+@pytest.mark.asyncio
+async def test_collect_naver_news_blocks_request_when_global_quota_is_exhausted(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    calls: list[dict[str, Any]] = []
+    _configure_quota(monkeypatch, tmp_path, daily_limit=1)
+    monkeypatch.setattr(naver.settings, "naver_api_client_id", "hub-client-id")
+    monkeypatch.setattr(naver.settings, "naver_api_client_secret", "hub-client-secret")
+    monkeypatch.setattr(naver.httpx, "AsyncClient", lambda: _FakeAsyncClient(calls))
+
+    first_count = await naver.collect_naver_news(_FakeDb(), "증시")
+    blocked_count = await naver.collect_naver_news(_FakeDb(), "환율")
+
+    assert first_count == 0
+    assert blocked_count == 0
+    assert len(calls) == 1

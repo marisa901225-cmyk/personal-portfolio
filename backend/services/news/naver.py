@@ -4,6 +4,7 @@ import os
 import re
 import asyncio
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type, before_sleep_log
 from sqlalchemy.orm import Session
 from ...core.config import settings
@@ -15,6 +16,7 @@ from .core import (
     prepare_news_ingest_record,
     persist_news_record,
 )
+from .naver_quota import reserve_naver_api_call
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,22 @@ async def collect_naver_news(db: Session, query: str, category: str = "esports")
     }
     
     try:
+        quota = reserve_naver_api_call(
+            state_path=Path(settings.naver_api_quota_state_path),
+            daily_limit=settings.naver_api_daily_limit,
+            monthly_limit=settings.naver_api_monthly_limit,
+        )
+        if not quota.allowed:
+            logger.warning(
+                "Naver API quota exhausted; skipping request "
+                "(daily=%s/%s, monthly=%s/%s)",
+                quota.daily_used,
+                quota.daily_limit,
+                quota.monthly_used,
+                quota.monthly_limit,
+            )
+            return 0
+
         async with httpx.AsyncClient() as client:
             response = await client.get(
                 NAVER_NEWS_URL, 
