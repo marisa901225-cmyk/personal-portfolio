@@ -50,6 +50,7 @@ class _FakeDb:
 async def test_collect_naver_news_uses_api_hub_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
     monkeypatch.setattr(naver.settings, "naver_api_client_id", "hub-client-id")
+    monkeypatch.setattr(naver.settings, "naver_api_client_secret", "hub-client-secret")
     monkeypatch.setattr(naver.settings, "naver_api", "hub-api-key")
     monkeypatch.setattr(naver.httpx, "AsyncClient", lambda: _FakeAsyncClient(calls))
 
@@ -60,7 +61,7 @@ async def test_collect_naver_news_uses_api_hub_credentials(monkeypatch: pytest.M
     assert calls[0]["url"] == "https://naverapihub.apigw.ntruss.com/search/v1/news"
     assert calls[0]["headers"] == {
         "X-NCP-APIGW-API-KEY-ID": "hub-client-id",
-        "X-NCP-APIGW-API-KEY": "hub-api-key",
+        "X-NCP-APIGW-API-KEY": "hub-client-secret",
     }
     assert calls[0]["params"]["query"] == "증시"
 
@@ -68,6 +69,7 @@ async def test_collect_naver_news_uses_api_hub_credentials(monkeypatch: pytest.M
 @pytest.mark.asyncio
 async def test_collect_naver_news_skips_request_without_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(naver.settings, "naver_api_client_id", "hub-client-id")
+    monkeypatch.setattr(naver.settings, "naver_api_client_secret", None)
     monkeypatch.setattr(naver.settings, "naver_api", None)
 
     def fail_if_called() -> None:
@@ -78,3 +80,17 @@ async def test_collect_naver_news_skips_request_without_api_key(monkeypatch: pyt
     count = await naver.collect_naver_news(_FakeDb(), "증시")
 
     assert count == 0
+
+
+@pytest.mark.asyncio
+async def test_collect_naver_news_supports_legacy_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(naver.settings, "naver_api_client_id", "hub-client-id")
+    monkeypatch.setattr(naver.settings, "naver_api_client_secret", None)
+    monkeypatch.setattr(naver.settings, "naver_api", "legacy-api-key")
+    monkeypatch.setattr(naver.httpx, "AsyncClient", lambda: _FakeAsyncClient(calls))
+
+    count = await naver.collect_naver_news(_FakeDb(), "증시")
+
+    assert count == 0
+    assert calls[0]["headers"]["X-NCP-APIGW-API-KEY"] == "legacy-api-key"

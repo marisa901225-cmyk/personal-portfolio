@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     naver_client_id: Optional[str] = Field(default=None, validation_alias="NAVER_CLIENT_ID")
     naver_client_secret: Optional[str] = Field(default=None, validation_alias="NAVER_CLIENT_SECRET")
     naver_api_client_id: Optional[str] = Field(default=None, validation_alias="NAVER_API_CLIENT_ID")
+    naver_api_client_secret: Optional[str] = Field(default=None, validation_alias="NAVER_API_CLIENT_SECRET")
     naver_api: Optional[str] = Field(default=None, validation_alias="NAVER_API")
     kma_service_key: Optional[str] = Field(default=None, validation_alias="KMA_SERVICE_KEY")
     kma_service_key1: Optional[str] = Field(default=None, validation_alias="KMA_SERVICE_KEY1")

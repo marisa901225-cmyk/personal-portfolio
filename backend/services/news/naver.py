@@ -29,10 +29,13 @@ async def collect_naver_news(db: Session, query: str, category: str = "esports")
     네이버 뉴스 검색 API를 사용하여 뉴스를 수집한다.
     """
     client_id = settings.naver_api_client_id
-    api_key = settings.naver_api
+    api_key = settings.naver_api_client_secret or settings.naver_api
     
     if not client_id or not api_key:
-        logger.warning("NAVER_API_CLIENT_ID or NAVER_API not set. Skipping Naver news collection.")
+        logger.warning(
+            "NAVER_API_CLIENT_ID and NAVER_API_CLIENT_SECRET (or NAVER_API) not set. "
+            "Skipping Naver news collection."
+        )
         return 0
     
     logger.info(f"Collecting Naver news for query: '{query}' (category: {category})")
