@@ -33,6 +33,8 @@ os.environ["TELEGRAM_WEBHOOK_SECRET"] = "test-webhook-secret"
 os.environ.setdefault("JWT_SECRET_KEY", "test-jwt-secret-key-for-testing-only-do-not-use-in-production")
 os.environ.setdefault("NAVER_CLIENT_ID", "test-naver-client-id")
 os.environ.setdefault("NAVER_CLIENT_SECRET", "test-naver-client-secret")
+os.environ.setdefault("NAVER_API_CLIENT_ID", "test-naver-api-client-id")
+os.environ.setdefault("NAVER_API", "test-naver-api-key")
 
 print(f"DEBUG: Using DATABASE_URL={os.environ['DATABASE_URL']}")
 print(f"DEBUG: API_TOKEN={'***' if os.environ.get('API_TOKEN') else 'NOT SET'}")

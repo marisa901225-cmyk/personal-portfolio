@@ -20,7 +20,7 @@ RSS_FEEDS = {
 
 STEAMSPY_URL = "https://steamspy.com/api.php"
 PANDASCORE_URL = "https://api.pandascore.co"
-NAVER_NEWS_URL = "https://openapi.naver.com/v1/search/news.json"
+NAVER_NEWS_URL = "https://naverapihub.apigw.ntruss.com/search/v1/news"
 
 DEFAULT_NAVER_ESPORTS_QUERIES = [
     "T1 티원",
