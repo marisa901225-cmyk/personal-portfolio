@@ -199,7 +199,7 @@ def test_bot_candidate_notification_visible_in_risk_off(tmp_path) -> None:
     candidate_msgs = [t for t in notifier.texts if t.startswith("⚡ [진입창] [단타] 후보 종목 (위험회피)")]
     assert len(candidate_msgs) == 1
     assert "관찰 전용" in candidate_msgs[0]
-    assert "0048J0" in candidate_msgs[0]
+    assert "477080" in candidate_msgs[0]
     assert "005930" in candidate_msgs[0]
 
 def test_bot_candidate_notification_prefers_ranked_display_candidates(tmp_path) -> None:
