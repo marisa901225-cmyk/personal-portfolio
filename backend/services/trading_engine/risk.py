@@ -122,6 +122,8 @@ def should_exit_position(
 
     if position.type == "S":
         if pnl_pct <= config.swing_stop_loss_pct:
+            if pnl_pct <= config.swing_stop_llm_hard_stop_pct:
+                return True, "SL_HARD", pnl_pct
             if not config.swing_sl_requires_trend_break:
                 return True, "SL", pnl_pct
             if bool(swing_trend_broken):

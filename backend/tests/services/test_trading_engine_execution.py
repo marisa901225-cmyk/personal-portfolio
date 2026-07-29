@@ -401,7 +401,7 @@ def test_monitor_positions_swing_stop_uses_llm_before_trend_break(tmp_path) -> N
     assert code not in bot.state.open_positions
     assert f"{code}:2026-04-24T09:10:00" in bot.state.swing_stop_llm_reviewed_positions
 
-def test_monitor_positions_swing_stop_can_hold_after_llm_review(tmp_path) -> None:
+def test_monitor_positions_swing_stop_holds_once_then_exits_if_loss_persists(tmp_path) -> None:
     code = "222222"
     asof = "20260424"
     now = datetime(2026, 4, 24, 10, 0)
@@ -448,11 +448,62 @@ def test_monitor_positions_swing_stop_can_hold_after_llm_review(tmp_path) -> Non
         return_value=review,
     ) as mocked_review:
         bot.monitor_positions(now=now)
+        assert api.order_calls == []
+        assert code in bot.state.open_positions
+
+        bot.monitor_positions(now=datetime(2026, 4, 24, 10, 2))
 
     mocked_review.assert_called_once()
-    assert api.order_calls == []
-    assert code in bot.state.open_positions
+    assert any(call["side"] == "SELL" and call["code"] == code for call in api.order_calls)
+    assert code not in bot.state.open_positions
     assert f"{code}:2026-04-24T09:12:00" in bot.state.swing_stop_llm_reviewed_positions
+
+
+def test_monitor_positions_swing_hard_stop_exits_without_trend_break_or_llm(tmp_path) -> None:
+    code = "555555"
+    asof = "20260424"
+    now = datetime(2026, 4, 24, 10, 0)
+
+    api = FakeAPI()
+    api._quotes[code] = {"price": 91, "change_pct": -9.0}
+    api._bars[(code, asof)] = pd.DataFrame(
+        [
+            {"date": "20260422", "close": 80, "volume": 1_000_000},
+            {"date": "20260423", "close": 82, "volume": 1_000_000},
+            {"date": "20260424", "close": 84, "volume": 1_000_000},
+        ]
+    )
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        swing_stop_loss_pct=-0.03,
+        swing_sl_requires_trend_break=True,
+        swing_trend_ma_window=3,
+        swing_trend_lookback_bars=5,
+        swing_stop_llm_review_enabled=True,
+        swing_stop_llm_hard_stop_pct=-0.08,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.open_positions[code] = PositionState(
+        type="S",
+        entry_time="2026-04-24T09:12:00",
+        entry_price=100.0,
+        qty=10,
+        highest_price=102.0,
+        entry_date=asof,
+    )
+
+    with patch(
+        "backend.services.trading_engine.bot_position_management.review_swing_stop_with_llm"
+    ) as mocked_review:
+        bot.monitor_positions(now=now)
+
+    mocked_review.assert_not_called()
+    assert any(call["side"] == "SELL" and call["code"] == code for call in api.order_calls)
+    assert code not in bot.state.open_positions
+
 
 def test_monitor_positions_swing_trail_can_hold_after_llm_review(tmp_path) -> None:
     code = "333333"

@@ -62,19 +62,25 @@ def monitor_positions(bot, *, now: datetime, logger) -> None:
             )
             if not exit_now:
                 if pos.type == "S" and pnl_pct <= bot.config.swing_stop_loss_pct:
-                    review = bot._review_swing_stop_decision(
-                        code=code,
-                        pos=pos,
-                        quote_price=price,
-                        pnl_pct=pnl_pct,
-                        trend_meta=swing_trend_meta,
-                        trigger_reason=reason or "SL",
-                    )
-                    if review is not None and review.decision == "EXIT":
+                    review_key = bot._day_stop_llm_review_key(code=code, pos=pos)
+                    already_reviewed = review_key in bot.state.swing_stop_llm_reviewed_positions
+                    if already_reviewed:
                         exit_now = True
-                        reason = "SL_LLM"
+                        reason = "SL_RECHECK"
                     else:
-                        continue
+                        review = bot._review_swing_stop_decision(
+                            code=code,
+                            pos=pos,
+                            quote_price=price,
+                            pnl_pct=pnl_pct,
+                            trend_meta=swing_trend_meta,
+                            trigger_reason=reason or "SL",
+                        )
+                        if review is not None and review.decision == "EXIT":
+                            exit_now = True
+                            reason = "SL_LLM"
+                        else:
+                            continue
                 else:
                     continue
             if (
