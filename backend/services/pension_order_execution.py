@@ -147,31 +147,41 @@ def apply_momentum_buy_timing(
                 {"code": order.code, "action": "SKIP", "reason": "CURRENT_CANDLE_UNAVAILABLE"},
             )
             continue
-        if close_price >= open_price:
-            print(
-                "momentum_buy_timing",
-                {
-                    "code": order.code,
-                    "action": "WAIT",
-                    "reason": "NOT_BEARISH_CANDLE",
-                    "open": open_price,
-                    "close": close_price,
-                },
-            )
-            continue
-        tranche_qty = max(1, (order.qty + split_count - 1) // split_count)
+        if close_price < open_price:
+            candle_direction = "BEARISH"
+            allocation_weight = 6
+        elif close_price > open_price:
+            candle_direction = "BULLISH"
+            allocation_weight = 4
+        else:
+            candle_direction = "DOJI"
+            allocation_weight = 5
+        allocation_denominator = split_count * 5
+        tranche_qty = min(
+            order.qty,
+            max(
+                1,
+                (order.qty * allocation_weight + allocation_denominator - 1)
+                // allocation_denominator,
+            ),
+        )
         timed_order = replace(order, qty=tranche_qty, amount=tranche_qty * order.price)
         timed_orders.append(timed_order)
         print(
             "momentum_buy_timing",
             {
                 "code": order.code,
-                "action": "BUY_TRANCHE",
+                "action": "BUY_ADAPTIVE",
+                "candle": candle_direction,
                 "open": open_price,
                 "close": close_price,
                 "remaining_target_qty": order.qty,
                 "order_qty": tranche_qty,
                 "split_count": split_count,
+                "allocation_weight_pct": round(
+                    allocation_weight / allocation_denominator * 100.0,
+                    2,
+                ),
             },
         )
     return timed_orders

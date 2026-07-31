@@ -63,10 +63,10 @@ def test_final_rising_buy_plan_uses_exact_regime_targets() -> None:
     assert plan.total_value == 1_000_000
     assert plan.cash == 600_000
     assert not any(order.bucket == "bond" for order in plan.orders)
-    assert next(order.qty for order in plan.orders if order.bucket == "momentum") == 17
+    assert next(order.qty for order in plan.orders if order.bucket == "momentum") == 20
 
 
-def test_momentum_buy_waits_when_current_daily_candle_is_not_bearish() -> None:
+def test_momentum_buy_uses_reduced_current_gap_weight_on_bullish_candle() -> None:
     class Client:
         @staticmethod
         def latest_daily_candle(code: str, *, end_date: str) -> dict[str, int | str]:
@@ -86,17 +86,20 @@ def test_momentum_buy_waits_when_current_daily_candle_is_not_bearish() -> None:
         asof_date=date(2026, 7, 21),
     )
 
-    assert [(order.code, order.qty) for order in timed] == [("360200", 5)]
+    assert [(order.code, order.qty) for order in timed] == [
+        ("241180", 8),
+        ("360200", 5),
+    ]
 
 
-def test_momentum_buy_uses_one_current_gap_tranche_on_bearish_candle() -> None:
+def test_momentum_buy_uses_increased_current_gap_weight_on_bearish_candle() -> None:
     class Client:
         @staticmethod
         def latest_daily_candle(code: str, *, end_date: str) -> dict[str, int | str]:
             return {"date": end_date, "open": 10_100, "close": 10_000}
 
     signal = QuarterlyMarketSignal("rising", 5.0, 3.0, 4.0, "241180")
-    order = PensionOrderPlan("BUY", "241180", "momentum", 10, 10_000, 100_000, "underweight")
+    order = PensionOrderPlan("BUY", "241180", "momentum", 30, 10_000, 300_000, "underweight")
 
     timed = apply_momentum_buy_timing(
         client=Client(),
@@ -106,4 +109,24 @@ def test_momentum_buy_uses_one_current_gap_tranche_on_bearish_candle() -> None:
         asof_date=date(2026, 7, 21),
     )
 
-    assert [(planned.qty, planned.amount) for planned in timed] == [(4, 40_000)]
+    assert [(planned.qty, planned.amount) for planned in timed] == [(12, 120_000)]
+
+
+def test_momentum_buy_treats_doji_as_one_current_gap_tranche() -> None:
+    class Client:
+        @staticmethod
+        def latest_daily_candle(code: str, *, end_date: str) -> dict[str, int | str]:
+            return {"date": end_date, "open": 10_000, "close": 10_000}
+
+    signal = QuarterlyMarketSignal("rising", 5.0, 3.0, 4.0, "241180")
+    order = PensionOrderPlan("BUY", "241180", "momentum", 30, 10_000, 300_000, "underweight")
+
+    timed = apply_momentum_buy_timing(
+        client=Client(),
+        orders=[order],
+        env={"PENSION_REBALANCE_BUY_SPLIT_COUNT": "3"},
+        signal=signal,
+        asof_date=date(2026, 7, 21),
+    )
+
+    assert [(planned.qty, planned.amount) for planned in timed] == [(10, 100_000)]
