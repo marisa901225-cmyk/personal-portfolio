@@ -367,7 +367,7 @@ def test_day_afternoon_entry_blocks_after_two_stoploss_sized_losses() -> None:
     cfg = TradeEngineConfig()
     state = new_state("20260216")
     state.day_entries_today = 2
-    state.realized_pnl_today = -6_000.0
+    state.day_realized_pnl_today = -6_000.0
 
     ok_afternoon_blocked, reason_afternoon_blocked = can_enter(
         "T",
@@ -378,7 +378,7 @@ def test_day_afternoon_entry_blocks_after_two_stoploss_sized_losses() -> None:
         config=cfg,
     )
 
-    state.realized_pnl_today = -5_900.0
+    state.day_realized_pnl_today = -5_900.0
     ok_afternoon_allowed, reason_afternoon_allowed = can_enter(
         "T",
         state,
@@ -401,7 +401,7 @@ def test_daily_max_loss_blocks_day_entry_but_allows_swing_entry() -> None:
         max_swing_positions=1,
     )
     state = new_state("20260630")
-    state.realized_pnl_today = -36_000.0
+    state.day_realized_pnl_today = -36_000.0
 
     ok_day, reason_day = can_enter(
         "T",
@@ -426,6 +426,31 @@ def test_daily_max_loss_blocks_day_entry_but_allows_swing_entry() -> None:
     assert reason_swing == "OK"
 
 
+def test_swing_losses_do_not_block_day_entry_risk_limits() -> None:
+    cfg = TradeEngineConfig(
+        initial_capital=1_000_000,
+        daily_max_loss_pct=-0.02,
+        max_consecutive_losses=2,
+    )
+    state = new_state("20260731")
+    state.realized_pnl_today = -36_000.0
+    state.consecutive_losses_today = 2
+    state.day_realized_pnl_today = 0.0
+    state.day_consecutive_losses_today = 0
+
+    ok, reason = can_enter(
+        "T",
+        state,
+        regime="RISK_ON",
+        candidates_count=1,
+        now=datetime(2026, 7, 31, 9, 10),
+        config=cfg,
+    )
+
+    assert ok is True
+    assert reason == "OK"
+
+
 def test_day_entry_limit_expands_by_one_slot_when_intraday_win_rate_is_healthy() -> None:
     cfg = TradeEngineConfig(
         max_day_entries_per_day=4,
@@ -436,7 +461,7 @@ def test_day_entry_limit_expands_by_one_slot_when_intraday_win_rate_is_healthy()
     state.day_entries_today = 4
     state.day_wins_today = 2
     state.day_losses_today = 0
-    state.realized_pnl_today = 8_000.0
+    state.day_realized_pnl_today = 8_000.0
     state.day_entry_windows_used_today = {0, 1, 2}
     state.open_positions["SWING01"] = PositionState(
         type="S",

@@ -399,6 +399,9 @@ def test_monitor_positions_swing_stop_uses_llm_before_trend_break(tmp_path) -> N
     mocked_review.assert_called_once()
     assert any(call["side"] == "SELL" and call["code"] == code for call in api.order_calls)
     assert code not in bot.state.open_positions
+    assert bot.state.swing_consecutive_losses_today == 1
+    assert bot.state.day_consecutive_losses_today == 0
+    assert bot.state.day_realized_pnl_today == 0.0
     assert f"{code}:2026-04-24T09:10:00" in bot.state.swing_stop_llm_reviewed_positions
 
 def test_monitor_positions_swing_stop_holds_once_then_exits_if_loss_persists(tmp_path) -> None:

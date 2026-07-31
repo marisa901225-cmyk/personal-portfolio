@@ -128,11 +128,11 @@ def _conditional_day_performance_allows_extra_slots(bot) -> bool:
         return False
 
     min_realized_pnl = float(getattr(config, "day_conditional_extra_min_realized_pnl", 0.0) or 0.0)
-    if float(getattr(state, "realized_pnl_today", 0.0) or 0.0) < min_realized_pnl:
+    if float(getattr(state, "day_realized_pnl_today", 0.0) or 0.0) < min_realized_pnl:
         return False
 
     max_losses = max(0, int(getattr(config, "day_conditional_extra_max_consecutive_losses", 0) or 0))
-    return int(getattr(state, "consecutive_losses_today", 0) or 0) <= max_losses
+    return int(getattr(state, "day_consecutive_losses_today", 0) or 0) <= max_losses
 
 
 def _day_extra_slot_budget_floor(config: TradeEngineConfig) -> float:

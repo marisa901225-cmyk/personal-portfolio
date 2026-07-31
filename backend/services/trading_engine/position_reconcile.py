@@ -285,10 +285,15 @@ def apply_reconciled_exit_fill_to_state(
 
     normalized_reason = str(reason or "").strip().upper()
     if position.type == "T":
+        state.day_realized_pnl_today += pnl
         if pnl > 0:
             state.day_wins_today += 1
         elif pnl < 0:
             state.day_losses_today += 1
+        if pnl < 0:
+            state.day_consecutive_losses_today += 1
+        else:
+            state.day_consecutive_losses_today = 0
 
         if normalized_reason == "SL":
             exclude_after_losses = max(1, int(config.day_stoploss_exclude_after_losses))
@@ -298,8 +303,13 @@ def apply_reconciled_exit_fill_to_state(
                 exclude_after_losses=exclude_after_losses,
             )
             mark_day_stoploss_today(state, code=code)
-    elif position.type == "S" and normalized_reason == "TIME":
-        mark_swing_time_excluded(state, code=code)
+    elif position.type == "S":
+        if pnl < 0:
+            state.swing_consecutive_losses_today += 1
+        else:
+            state.swing_consecutive_losses_today = 0
+        if normalized_reason == "TIME":
+            mark_swing_time_excluded(state, code=code)
 
 
 def collect_exit_fill_meta(

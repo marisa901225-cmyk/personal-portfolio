@@ -280,6 +280,13 @@ def test_assets_from_env_marks_broken_country_index_for_partial_exit() -> None:
     assert not by_code["453870"].buyable
 
 
+def test_pension_parking_code_does_not_inherit_trading_engine_parking_code() -> None:
+    env = {"TRADING_RISK_OFF_PARKING_CODE": "477080"}
+
+    assert _parking_code_from_env(env) == ""
+    assert "477080" not in {asset.code for asset in _assets_from_env(env)}
+
+
 def test_pension_momentum_universe_allows_liquid_country_indices_only(monkeypatch) -> None:
     master_rows = [
         SimpleNamespace(code="237350", name="KODEX 코스피100", is_etf=True),

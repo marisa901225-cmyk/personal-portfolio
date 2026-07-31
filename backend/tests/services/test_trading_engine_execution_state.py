@@ -177,7 +177,9 @@ def test_reconcile_state_drop_links_pending_exit_fill_from_daily_ccld() -> None:
     assert journal_rows[0][1]["exit_fill_avg_price"] == 35_400.0
     assert round(journal_rows[0][1]["exit_fill_pnl_pct"], 4) == -1.1173
     assert state.day_losses_today == 1
+    assert state.day_consecutive_losses_today == 1
     assert state.consecutive_losses_today == 1
+    assert state.day_realized_pnl_today == -3_200.0
     assert state.realized_pnl_today == -3_200.0
     assert state.realized_pnl_total == -3_200.0
     assert notifications == [
@@ -233,7 +235,9 @@ def test_reconcile_state_drop_counts_stoploss_fill_for_day_reentry_block() -> No
     )
 
     assert state.day_losses_today == 1
+    assert state.day_consecutive_losses_today == 1
     assert state.consecutive_losses_today == 1
+    assert state.day_realized_pnl_today == -5_200.0
     assert state.realized_pnl_today == -5_200.0
     assert get_day_stoploss_codes_today(state) == {"047040"}
 
@@ -313,6 +317,9 @@ def test_reconcile_state_skips_broker_only_position_without_hint(tmp_path) -> No
 def test_save_state_roundtrip_uses_atomic_replace(tmp_path) -> None:
     state_path = tmp_path / "state.json"
     state = new_state("20260415")
+    state.day_realized_pnl_today = -3_200.0
+    state.day_consecutive_losses_today = 1
+    state.swing_consecutive_losses_today = 2
     state.open_positions["005930"] = PositionState(
         type="S",
         entry_time="2026-04-14T09:00:00",
@@ -326,6 +333,9 @@ def test_save_state_roundtrip_uses_atomic_replace(tmp_path) -> None:
     loaded = load_state(str(state_path))
 
     assert loaded.trade_date == "20260415"
+    assert loaded.day_realized_pnl_today == -3_200.0
+    assert loaded.day_consecutive_losses_today == 1
+    assert loaded.swing_consecutive_losses_today == 2
     assert loaded.open_positions["005930"].qty == 5
     assert state_path.read_text(encoding="utf-8").endswith("\n")
 
@@ -459,6 +469,9 @@ def test_rollover_state_prunes_closed_day_carry_keys() -> None:
     from backend.services.trading_engine.state import rollover_state_for_date
 
     state = new_state("20260424")
+    state.day_realized_pnl_today = -5_000.0
+    state.day_consecutive_losses_today = 2
+    state.swing_consecutive_losses_today = 1
     state.open_positions["005930"] = PositionState(
         type="T",
         entry_time="2026-04-24T10:00:00",
@@ -474,6 +487,9 @@ def test_rollover_state_prunes_closed_day_carry_keys() -> None:
 
     rolled = rollover_state_for_date(state, "20260425")
 
+    assert rolled.day_realized_pnl_today == 0.0
+    assert rolled.day_consecutive_losses_today == 0
+    assert rolled.swing_consecutive_losses_today == 0
     assert rolled.day_overnight_carry_positions == {"005930:2026-04-24T10:00:00": "20260424"}
 
 def test_run_once_skips_when_run_lock_already_held(tmp_path) -> None:

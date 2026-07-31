@@ -38,14 +38,13 @@ def can_enter(
     if candidates_count <= 0:
         return False, "NO_CANDIDATE"
 
-    if state.consecutive_losses_today >= config.max_consecutive_losses:
-        return False, "MAX_CONSECUTIVE_LOSSES"
-
     now_minute = now.hour * 60 + now.minute
     if now_minute >= _hhmm_to_minutes(config.no_new_entry_after):
         return False, "NO_NEW_ENTRY_AFTER"
 
     if normalized_entry_type == "S":
+        if state.swing_consecutive_losses_today >= config.max_consecutive_losses:
+            return False, "MAX_CONSECUTIVE_LOSSES"
         if state.swing_entries_today >= config.max_swing_entries_per_day:
             return False, "MAX_SWING_ENTRIES_DAY"
         if state.swing_entries_week >= config.max_swing_entries_per_week:
@@ -53,8 +52,10 @@ def can_enter(
         if _count_reserved_positions(state, "S") >= config.max_swing_positions:
             return False, "MAX_SWING_POSITIONS"
     else:
+        if state.day_consecutive_losses_today >= config.max_consecutive_losses:
+            return False, "MAX_CONSECUTIVE_LOSSES"
         daily_loss_limit = config.initial_capital * config.daily_max_loss_pct
-        if state.realized_pnl_today <= daily_loss_limit:
+        if state.day_realized_pnl_today <= daily_loss_limit:
             return False, "DAILY_MAX_LOSS"
         if state.day_entries_today >= _effective_max_day_entries_per_day(
             state,
@@ -250,11 +251,11 @@ def _conditional_extra_performance_allows(*, state: TradeState, cfg: TradeEngine
         return False
 
     min_realized_pnl = float(getattr(cfg, "day_conditional_extra_min_realized_pnl", 0.0))
-    if float(state.realized_pnl_today) < min_realized_pnl:
+    if float(state.day_realized_pnl_today) < min_realized_pnl:
         return False
 
     max_losses = max(0, int(getattr(cfg, "day_conditional_extra_max_consecutive_losses", 0)))
-    return int(state.consecutive_losses_today) <= max_losses
+    return int(state.day_consecutive_losses_today) <= max_losses
 
 
 def _unused_swing_budget_for_day(*, state: TradeState, cfg: TradeEngineConfig) -> float:
@@ -375,7 +376,7 @@ def _should_block_day_afternoon_entry(
     if loss_limit_amount is None:
         return False
 
-    return state.realized_pnl_today <= -loss_limit_amount
+    return state.day_realized_pnl_today <= -loss_limit_amount
 
 
 def _day_afternoon_loss_limit_amount(cfg: TradeEngineConfig) -> float | None:

@@ -279,12 +279,7 @@ def assets_from_env(
 
 
 def parking_code_from_env(env: dict[str, str], *, allow_bond_duplicate: bool = False) -> str:
-    parking_code = str(
-        env.get("PENSION_REBALANCE_PARKING_CODE")
-        or env.get("TRADING_RISK_OFF_PARKING_CODE")
-        or TradeEngineConfig().risk_off_parking_code
-        or ""
-    ).strip()
+    parking_code = str(env.get("PENSION_REBALANCE_PARKING_CODE") or "").strip()
     bond_code = str(env.get("PENSION_REBALANCE_US_BOND_CODE") or DEFAULT_US_SHORT_BOND_CODE).strip()
     if not allow_bond_duplicate and parking_code and parking_code == bond_code:
         return ""

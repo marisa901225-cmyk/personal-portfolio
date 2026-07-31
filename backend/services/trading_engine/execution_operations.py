@@ -507,10 +507,20 @@ def exit_position(
     else:
         state.consecutive_losses_today = 0
     if pos.type == "T":
+        state.day_realized_pnl_today += pnl
         if pnl > 0:
             state.day_wins_today += 1
         elif pnl < 0:
             state.day_losses_today += 1
+        if pnl < 0:
+            state.day_consecutive_losses_today += 1
+        else:
+            state.day_consecutive_losses_today = 0
+    elif pos.type == "S":
+        if pnl < 0:
+            state.swing_consecutive_losses_today += 1
+        else:
+            state.swing_consecutive_losses_today = 0
 
     if pos.type == "T" and reason == "SL":
         exclude_after_losses = 3

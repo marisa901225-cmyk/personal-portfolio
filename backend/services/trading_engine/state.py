@@ -41,6 +41,9 @@ class TradeState:
     day_entries_today: int = 0
     day_wins_today: int = 0
     day_losses_today: int = 0
+    day_realized_pnl_today: float = 0.0
+    day_consecutive_losses_today: int = 0
+    swing_consecutive_losses_today: int = 0
     realized_pnl_today: float = 0.0
     realized_pnl_total: float = 0.0
     consecutive_losses_today: int = 0
@@ -168,6 +171,9 @@ def rollover_state_for_date(state: TradeState, today: str) -> TradeState:
     state.day_entries_today = 0
     state.day_wins_today = 0
     state.day_losses_today = 0
+    state.day_realized_pnl_today = 0.0
+    state.day_consecutive_losses_today = 0
+    state.swing_consecutive_losses_today = 0
     state.realized_pnl_today = 0.0
     state.consecutive_losses_today = 0
     state.blacklist_today.clear()
@@ -214,6 +220,9 @@ def load_state(path: str) -> TradeState:
             day_entries_today=int(raw.get("day_entries_today", 0)),
             day_wins_today=int(raw.get("day_wins_today", 0)),
             day_losses_today=int(raw.get("day_losses_today", 0)),
+            day_realized_pnl_today=float(raw.get("day_realized_pnl_today", 0.0)),
+            day_consecutive_losses_today=int(raw.get("day_consecutive_losses_today", 0)),
+            swing_consecutive_losses_today=int(raw.get("swing_consecutive_losses_today", 0)),
             realized_pnl_today=float(raw.get("realized_pnl_today", 0.0)),
             realized_pnl_total=float(raw.get("realized_pnl_total", 0.0)),
             consecutive_losses_today=int(raw.get("consecutive_losses_today", 0)),
