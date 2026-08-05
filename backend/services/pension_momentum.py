@@ -15,7 +15,7 @@ from backend.services.trading_engine.day_chart_review import (
 )
 from backend.services.trading_engine.utils import is_excluded_etf
 
-from .pension_rebalancing import pct_return
+from .pension_rebalancing import PensionHolding, pct_return
 
 
 logger = logging.getLogger(__name__)
@@ -305,7 +305,42 @@ def rank_pension_momentum_candidates(
     return sorted(candidates, key=lambda candidate: (candidate.eligible, candidate.score), reverse=True)
 
 
-def _review_messages(candidates: list[PensionMomentumCandidate]) -> list[dict]:
+def _holding_review_context(
+    candidates: list[PensionMomentumCandidate],
+    holdings: list[PensionHolding],
+) -> list[dict]:
+    candidate_by_code = {candidate.code: candidate for candidate in candidates}
+    context: list[dict] = []
+    for holding in holdings:
+        candidate = candidate_by_code.get(holding.code)
+        if candidate is None or holding.qty <= 0:
+            continue
+        current_price = candidate.current_price or holding.price
+        avg_price = float(holding.avg_price)
+        context.append(
+            {
+                "code": holding.code,
+                "name": holding.name,
+                "qty": holding.qty,
+                "avg_price": avg_price,
+                "current_price": current_price,
+                "value": holding.value,
+                "pnl": holding.pnl,
+                "pnl_rate": holding.pnl_rate,
+                "return_from_avg_price_pct": (
+                    round(pct_return(avg_price, float(current_price)), 2)
+                    if avg_price > 0 and current_price > 0
+                    else None
+                ),
+            }
+        )
+    return context
+
+
+def _review_messages(
+    candidates: list[PensionMomentumCandidate],
+    holdings: list[PensionHolding],
+) -> list[dict]:
     payload = {
         "task": "연금 성장주 모멘텀 최종 검토",
         "rules": {
@@ -314,6 +349,7 @@ def _review_messages(candidates: list[PensionMomentumCandidate]) -> list[dict]:
             "allowed_decisions": ["ENTER", "UNSURE", "PASS"],
         },
         "candidates": [asdict(candidate) for candidate in candidates],
+        "existing_holdings": _holding_review_context(candidates, holdings),
     }
     return [
         {"role": "system", "content": load_prompt("pension_momentum_review_system")},
@@ -324,6 +360,7 @@ def _review_messages(candidates: list[PensionMomentumCandidate]) -> list[dict]:
 def review_pension_momentum_candidates(
     candidates: list[PensionMomentumCandidate],
     *,
+    holdings: list[PensionHolding] | None = None,
     llm: PensionMomentumReviewer | None = None,
     model: str = "gpt-5.5",
     reasoning_effort: str = "low",
@@ -342,7 +379,7 @@ def review_pension_momentum_candidates(
 
         llm = LLMService.get_instance()
 
-    messages = _review_messages(shortlist)
+    messages = _review_messages(shortlist, holdings or [])
     if llm.settings.is_paid_configured():
         raw = llm.generate_paid_chat(
             messages,

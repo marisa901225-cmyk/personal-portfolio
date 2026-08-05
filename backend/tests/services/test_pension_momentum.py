@@ -14,6 +14,7 @@ from backend.services.pension_momentum import (
     requires_momentum_trend_exit,
     select_liquid_pension_index_candidates,
 )
+from backend.services.pension_rebalancing import PensionHolding
 
 
 def _prices(values: list[int]) -> list[tuple[str, int]]:
@@ -172,6 +173,71 @@ def test_ai_review_can_only_select_quantitatively_eligible_candidate() -> None:
 
     assert review.selected_code == "426030"
     assert review.approved_codes == ["426030"]
+
+
+def test_ai_review_receives_existing_holding_average_price_context() -> None:
+    intact = analyze_pension_momentum_candidate(
+        code="426030",
+        name="TIME 미국나스닥100액티브",
+        daily_prices=_prices([100 + index for index in range(220)]),
+    )
+
+    class Settings:
+        @staticmethod
+        def is_paid_configured() -> bool:
+            return True
+
+        @staticmethod
+        def is_remote_configured() -> bool:
+            return False
+
+    class LLM:
+        settings = Settings()
+
+        @staticmethod
+        def generate_paid_chat(messages: list[dict], **kwargs) -> str:
+            payload = json.loads(messages[-1]["content"])
+            assert payload["existing_holdings"] == [
+                {
+                    "code": "426030",
+                    "name": "TIME 미국나스닥100액티브",
+                    "qty": 10,
+                    "avg_price": 280.0,
+                    "current_price": 319,
+                    "value": 3_190,
+                    "pnl": 390,
+                    "pnl_rate": 13.93,
+                    "return_from_avg_price_pct": 13.93,
+                }
+            ]
+            return json.dumps(
+                {
+                    "candidates": [
+                        {"code": "426030", "decision": "ENTER", "reason": "기존 분할매수 지속"}
+                    ],
+                    "selected_code": "426030",
+                    "summary": "장기 추세가 유지된 기존 보유분의 분할매수 승인",
+                }
+            )
+
+    review = review_pension_momentum_candidates(
+        [intact],
+        holdings=[
+            PensionHolding(
+                "426030",
+                "TIME 미국나스닥100액티브",
+                10,
+                319,
+                3_190,
+                avg_price=280.0,
+                pnl=390,
+                pnl_rate=13.93,
+            )
+        ],
+        llm=LLM(),
+    )
+
+    assert review.selected_code == "426030"
 
 
 def test_ai_review_fails_closed_for_out_of_shortlist_selection() -> None:

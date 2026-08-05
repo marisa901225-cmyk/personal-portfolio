@@ -409,6 +409,7 @@ def resolve_quarterly_signal(
     client: PensionKISClient,
     env: dict[str, str],
     requested: str,
+    holdings: list[PensionHolding] | None = None,
 ) -> QuarterlyMarketSignal:
     sp500_code = str(env.get("PENSION_REBALANCE_SP500_CODE") or "360200").strip()
     kospi_code = str(env.get("PENSION_REBALANCE_KOSPI_CODE") or "237350").strip()
@@ -484,6 +485,7 @@ def resolve_quarterly_signal(
         return replace(signal, selected_momentum_code="", momentum_trend_exit_codes=trend_exit_codes)
     review = review_pension_momentum_candidates(
         candidates,
+        holdings=holdings,
         model=str(env.get("PENSION_REBALANCE_MOMENTUM_AI_MODEL") or "gpt-5.5").strip(),
         reasoning_effort=str(env.get("PENSION_REBALANCE_MOMENTUM_AI_REASONING_EFFORT") or "low").strip(),
     )

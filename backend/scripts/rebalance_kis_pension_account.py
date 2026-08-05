@@ -129,8 +129,8 @@ def _run_pension_rebalance(args: argparse.Namespace, env: dict[str, str]) -> int
     client = PensionKISClient(env)
     if args.execute:
         assert_no_open_orders(client.open_orders())
-    signal = resolve_quarterly_signal(client, env, args.regime)
     holdings, cash = client.balance()
+    signal = resolve_quarterly_signal(client, env, args.regime, holdings)
     assets = assets_from_env(
         env,
         selected_momentum_code=signal.selected_momentum_code,
