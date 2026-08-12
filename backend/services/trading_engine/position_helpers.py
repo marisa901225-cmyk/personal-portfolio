@@ -83,6 +83,51 @@ def swing_trend_break_meta(
     }
 
 
+def swing_scale_in_candidates(
+    api: TradingAPI,
+    state: TradeState,
+    config: TradeEngineConfig,
+    *,
+    now: datetime,
+    trigger_pct: float,
+    logger: logging.Logger | None = None,
+) -> list[tuple[float, str, float, dict[str, object]]]:
+    eligible: list[tuple[float, str, float, dict[str, object]]] = []
+    for code, position in state.open_positions.items():
+        if position.type != "S" or position.entry_date == state.trade_date:
+            continue
+        if code in state.blacklist_today or position.entry_price <= 0:
+            continue
+        try:
+            quote = api.quote(code)
+        except Exception:
+            if logger is not None:
+                logger.debug(
+                    "scale-in quote lookup failed code=%s", code, exc_info=True
+                )
+            continue
+        quote_price = parse_numeric(quote.get("price"))
+        if quote_price is None or quote_price <= 0:
+            continue
+        pnl_pct = (float(quote_price) / float(position.entry_price)) - 1.0
+        if pnl_pct > trigger_pct:
+            continue
+        trend_meta = swing_trend_break_meta(
+            api,
+            config,
+            code=code,
+            quote_price=float(quote_price),
+            now=now,
+            logger=logger,
+        )
+        if trend_meta.get("reason") != "OK":
+            continue
+        if bool(trend_meta.get("trend_broken", False)):
+            continue
+        eligible.append((pnl_pct, code, float(quote_price), trend_meta))
+    return sorted(eligible)
+
+
 def lock_profitable_existing_position(
     api: TradingAPI,
     state: TradeState,
@@ -191,5 +236,6 @@ __all__ = [
     "is_swing_trend_broken",
     "lock_profitable_existing_position",
     "reconcile_state_with_broker_positions",
+    "swing_scale_in_candidates",
     "swing_trend_break_meta",
 ]

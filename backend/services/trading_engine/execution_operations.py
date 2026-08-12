@@ -64,17 +64,20 @@ def enter_position(
     strategy_budget_cash_cap: float | None = None,
     budget_overrun_tolerance_pct: float = 0.0,
     min_order_amount_krw: int = 0,
+    allow_existing_position: bool = False,
     on_order_accepted: Callable[[OrderPayload], None] | None = None,
 ) -> FillResult | None:
     existing_position = state.open_positions.get(code)
     broker_before_qty, _ = get_broker_position_snapshot(api=api, code=code)
-    if position_type != "P" and code in state.blacklist_today:
+    if not allow_existing_position and position_type != "P" and code in state.blacklist_today:
         return None
     if position_type == "T" and code in get_day_reentry_blocked_codes(state):
         return None
     if code in state.pending_entry_orders:
         return None
-    if existing_position is not None:
+    if existing_position is not None and not allow_existing_position:
+        return None
+    if existing_position is not None and existing_position.type != position_type:
         return None
 
     quote = api.quote(code)
@@ -387,16 +390,28 @@ def enter_position(
     order_id = extract_order_id(resp)
 
     state.pending_entry_orders.pop(code, None)
-    state.open_positions[code] = PositionState(
-        type=position_type,
-        entry_time=now.isoformat(timespec="seconds"),
-        entry_price=float(avg_price),
-        qty=filled_qty,
-        highest_price=float(avg_price),
-        entry_date=asof_date,
-        locked_profit_pct=None,
-        bars_held=0,
-    )
+    result_avg_price = float(avg_price)
+    if existing_position is not None:
+        broker_after_qty, broker_avg_price = get_broker_position_snapshot(api=api, code=code)
+        result_avg_price = _merge_existing_position_fill(
+            existing_position,
+            filled_qty=filled_qty,
+            fill_avg_price=float(avg_price),
+            broker_after_qty=broker_after_qty,
+            broker_avg_price=broker_avg_price,
+        )
+        sizing_meta["position_add_on"] = True
+    else:
+        state.open_positions[code] = PositionState(
+            type=position_type,
+            entry_time=now.isoformat(timespec="seconds"),
+            entry_price=float(avg_price),
+            qty=filled_qty,
+            highest_price=float(avg_price),
+            entry_date=asof_date,
+            locked_profit_pct=None,
+            bars_held=0,
+        )
     if position_type != "P":
         state.blacklist_today.add(code)
 
@@ -410,11 +425,45 @@ def enter_position(
         code=code,
         side="BUY",
         qty=filled_qty,
-        avg_price=float(avg_price),
+        avg_price=result_avg_price,
         order_id=order_id,
         raw=resp,
         sizing=sizing_meta,
     )
+
+
+def _merge_existing_position_fill(
+    existing_position: PositionState,
+    *,
+    filled_qty: int,
+    fill_avg_price: float,
+    broker_after_qty: int,
+    broker_avg_price: float | None,
+) -> float:
+    existing_qty = max(0, int(existing_position.qty))
+    if filled_qty <= 0:
+        return float(existing_position.entry_price)
+
+    if (
+        broker_after_qty > existing_qty
+        and broker_avg_price is not None
+        and broker_avg_price > 0
+    ):
+        existing_position.qty = broker_after_qty
+        existing_position.entry_price = float(broker_avg_price)
+    else:
+        combined_qty = existing_qty + int(filled_qty)
+        total_cost = (
+            float(existing_qty) * float(existing_position.entry_price)
+            + float(filled_qty) * float(fill_avg_price)
+        )
+        existing_position.qty = combined_qty
+        existing_position.entry_price = total_cost / combined_qty
+    existing_position.highest_price = max(
+        float(existing_position.highest_price or 0.0),
+        float(fill_avg_price),
+    )
+    return float(existing_position.entry_price)
 
 
 def exit_position(

@@ -94,3 +94,34 @@ def test_runtime_config_applies_frequently_tuned_scoring_and_global_signal_overr
     assert cfg.day_conditional_extra_min_order_amount_krw == 150_000
     assert cfg.day_reuse_unused_swing_cash_min_krw == 120_000
     assert cfg.day_overnight_carry_max_calendar_gap_days == 4
+
+
+def test_runtime_config_loads_ranked_swing_budget_and_scale_in_overrides() -> None:
+    with patch.dict(
+        "os.environ",
+        {
+            "TRADING_ENGINE_MAX_SWING_POSITIONS": "2",
+            "TRADING_ENGINE_SWING_RANK_BUDGET_ENABLED": "1",
+            "TRADING_ENGINE_SWING_RANK_BUDGET_WEIGHTS": "0.50,0.375",
+            "TRADING_ENGINE_SWING_SCALE_IN_ENABLED": "1",
+            "TRADING_ENGINE_SWING_SCALE_IN_TRIGGER_PCT": "-0.03",
+            "TRADING_ENGINE_SWING_MULTI_POSITION_ACTIVATION_AT": "2026-08-12T14:10:00+09:00",
+        },
+        clear=False,
+    ):
+        cfg = load_trade_engine_config_from_env()
+
+    assert cfg.max_swing_positions == 2
+    assert cfg.swing_rank_budget_enabled is True
+    assert cfg.swing_rank_budget_weights == (0.50, 0.375)
+    assert cfg.swing_scale_in_enabled is True
+    assert cfg.swing_scale_in_trigger_pct == -0.03
+    assert cfg.swing_multi_position_activation_at == "2026-08-12T14:10:00+09:00"
+
+
+def test_runtime_config_rejects_ranked_swing_weights_above_full_pool() -> None:
+    default_weights = TradeEngineConfig().swing_rank_budget_weights
+    with patch.dict("os.environ", {"TRADING_ENGINE_SWING_RANK_BUDGET_WEIGHTS": "0.8,0.6"}):
+        cfg = load_trade_engine_config_from_env()
+
+    assert cfg.swing_rank_budget_weights == default_weights

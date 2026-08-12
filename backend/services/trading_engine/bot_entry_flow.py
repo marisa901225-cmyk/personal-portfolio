@@ -26,9 +26,11 @@ from .entry_recovery import (
     refresh_pending_entry_orders as _refresh_pending_entry_orders_helper,
     sync_broker_filled_position as _sync_broker_filled_position_helper,
 )
+from .bot_runtime_support import swing_scale_in_budget_cash_cap
 from .execution import FillResult, enter_position
 from .notification_text import format_entry_message
-from .risk import can_enter, current_entry_window_index
+from .position_helpers import swing_scale_in_candidates
+from .risk import can_enter, can_scale_in_swing, current_entry_window_index
 from .types import OrderPayload, Quote, QuoteMap
 
 if TYPE_CHECKING:
@@ -137,6 +139,17 @@ class BotEntryFlowMixin:
             news_signal=news_signal,
             global_signal=global_signal,
         )
+        if self._try_scale_in_swing(now=now, regime=regime):
+            return
+        if bool(getattr(self.config, "swing_rank_budget_enabled", False)):
+            ranked_codes = [
+                code
+                for code in ranked_codes
+                if code not in self.state.open_positions
+                and code not in self.state.pending_entry_orders
+            ]
+            if not ranked_codes and any(pos.type == "S" for pos in self.state.open_positions.values()):
+                return
         code = ranked_codes[0] if ranked_codes else None
         if code and self._should_hold_profitable_existing_position(
             code=code,
@@ -279,6 +292,91 @@ class BotEntryFlowMixin:
                     regime=regime,
                 )
             )
+
+    def _try_scale_in_swing(
+        self,
+        *,
+        now: datetime,
+        regime: str,
+    ) -> bool:
+        ok, _ = can_scale_in_swing(
+            self.state,
+            regime=regime,
+            now=now,
+            config=self.config,
+        )
+        if not ok:
+            return False
+
+        budget_cash = swing_scale_in_budget_cash_cap(self)
+        if budget_cash <= 0:
+            return False
+
+        trigger_pct = float(getattr(self.config, "swing_scale_in_trigger_pct", -0.03))
+        eligible = swing_scale_in_candidates(
+            self.api,
+            self.state,
+            self.config,
+            now=now,
+            trigger_pct=trigger_pct,
+            logger=logger,
+        )
+        for pnl_pct, code, quote_price, trend_meta in eligible:
+            order_type, price = _resolve_swing_entry_order(
+                quote={"price": quote_price},
+                configured_order_type=self.config.swing_entry_order_type,
+            )
+            result = enter_position(
+                self.api,
+                self.state,
+                position_type="S",
+                code=code,
+                cash_ratio=1.0,
+                strategy_budget_cash_cap=budget_cash,
+                budget_overrun_tolerance_pct=self.config.entry_budget_overrun_tolerance_pct,
+                asof_date=self.state.trade_date,
+                now=now,
+                order_type=order_type,
+                price=price,
+                allow_existing_position=True,
+                on_order_accepted=lambda order: self._record_pending_entry_order(
+                    order,
+                    strategy_type="S",
+                ),
+            )
+            if result is None:
+                if code in self.state.pending_entry_orders:
+                    self.state.swing_entries_today += 1
+                    self.state.swing_entries_week += 1
+                    self.state.blacklist_today.add(code)
+                    return True
+                continue
+
+            self._journal(
+                "SWING_SCALE_IN_FILL",
+                asof_date=self.state.trade_date,
+                code=code,
+                side="BUY",
+                qty=result.qty,
+                avg_price=result.avg_price,
+                pnl_pct_before=round(pnl_pct * 100.0, 4),
+                trend_ma=trend_meta.get("ma_value"),
+                strategy_type="S",
+                regime=regime,
+                **self._entry_sizing_fields(result),
+            )
+            self._notify_text(
+                format_entry_message(
+                    strategy="S",
+                    code=code,
+                    qty=result.qty,
+                    avg_price=result.avg_price,
+                    regime=regime,
+                    scale_in=True,
+                )
+            )
+            return True
+        return False
 
     def _try_enter_day(
         self,

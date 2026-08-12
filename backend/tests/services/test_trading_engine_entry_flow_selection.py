@@ -302,3 +302,205 @@ def test_swing_entry_sweeps_same_sector_peer_when_top_and_second_pick_fail_budge
     assert "LIGTOP" not in bot.state.open_positions
     assert "RANK2" not in bot.state.open_positions
     assert bot.state.pass_reasons_today == {}
+
+
+def test_ranked_swing_entry_skips_held_first_pick_and_buys_second_with_600k_budget(tmp_path) -> None:
+    api = FakeAPI()
+    api._cash_available = 1_200_000
+    api._quotes["FIRST"] = {"price": 100_000, "change_pct": 1.0}
+    api._quotes["SECOND"] = {"price": 100_000, "change_pct": 0.8}
+    api._positions = [
+        {"code": "FIRST", "qty": 8, "avg_price": 100_000.0, "current_price": 100_000},
+    ]
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        max_swing_positions=2,
+        swing_rank_budget_enabled=True,
+        swing_rank_budget_weights=(0.50, 0.375),
+        swing_multi_position_activation_at="2026-08-12T14:00:00+09:00",
+        swing_chart_review_enabled=False,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.trade_date = "20260813"
+    bot.state.open_positions["FIRST"] = PositionState(
+        type="S",
+        entry_time="2026-08-13T09:05:00+09:00",
+        entry_price=100_000.0,
+        qty=8,
+        highest_price=100_000.0,
+        entry_date="20260813",
+    )
+    candidates = SimpleNamespace(
+        model=pd.DataFrame(
+            [
+                {"code": "FIRST", "name": "1순위"},
+                {"code": "SECOND", "name": "2순위"},
+            ]
+        ),
+        etf=pd.DataFrame(),
+    )
+
+    with patch(
+        "backend.services.trading_engine.bot.rank_swing_codes",
+        return_value=["FIRST", "SECOND"],
+    ):
+        bot._try_enter_swing(
+            now=datetime(2026, 8, 13, 13, 5),
+            regime="RISK_ON",
+            candidates=candidates,
+            quotes={
+                "FIRST": api.quote("FIRST"),
+                "SECOND": api.quote("SECOND"),
+            },
+        )
+
+    assert api.order_calls == [
+        {"side": "BUY", "code": "SECOND", "qty": 6, "order_type": "limit", "price": 100_100},
+    ]
+    assert bot.state.open_positions["SECOND"].qty == 6
+
+
+def test_ranked_swing_activation_blocks_legacy_position_until_it_is_gone() -> None:
+    cfg = TradeEngineConfig(
+        max_swing_positions=2,
+        swing_rank_budget_enabled=True,
+        swing_multi_position_activation_at="2026-08-12T14:00:00+09:00",
+    )
+    state = new_state("20260812")
+    state.open_positions["028260"] = PositionState(
+        type="S",
+        entry_time="2026-08-12T09:20:00+09:00",
+        entry_price=358_000.0,
+        qty=4,
+        highest_price=361_000.0,
+        entry_date="20260812",
+    )
+
+    ok, reason = can_enter(
+        "S",
+        state,
+        regime="RISK_ON",
+        candidates_count=1,
+        now=datetime(2026, 8, 12, 14, 5),
+        config=cfg,
+    )
+
+    assert ok is False
+    assert reason == "MAX_SWING_POSITIONS"
+
+    state.open_positions.clear()
+    state.open_positions["FIRST"] = PositionState(
+        type="S",
+        entry_time="2026-08-13T09:05:00+09:00",
+        entry_price=100_000.0,
+        qty=8,
+        highest_price=100_000.0,
+        entry_date="20260813",
+    )
+    state.trade_date = "20260813"
+
+    ok, reason = can_enter(
+        "S",
+        state,
+        regime="RISK_ON",
+        candidates_count=1,
+        now=datetime(2026, 8, 13, 14, 5),
+        config=cfg,
+    )
+
+    assert ok is True
+    assert reason == "OK"
+
+
+def test_ranked_swing_mode_limits_concurrent_day_position_to_one() -> None:
+    cfg = TradeEngineConfig(
+        max_day_positions=2,
+        swing_rank_budget_enabled=True,
+    )
+    state = new_state("20260813")
+    state.open_positions["DAY01"] = PositionState(
+        type="T",
+        entry_time="2026-08-13T13:00:00+09:00",
+        entry_price=100_000.0,
+        qty=2,
+        highest_price=100_000.0,
+        entry_date="20260813",
+    )
+
+    ok, reason = can_enter(
+        "T",
+        state,
+        regime="RISK_ON",
+        candidates_count=1,
+        now=datetime(2026, 8, 13, 14, 5),
+        config=cfg,
+        available_cash_krw=1_000_000,
+    )
+
+    assert ok is False
+    assert reason == "MAX_DAY_POSITIONS"
+
+
+def test_swing_scale_in_fails_closed_without_chart_then_buys_when_trend_is_alive(tmp_path) -> None:
+    api = FakeAPI()
+    api._cash_available = 624_000
+    api._quotes["FIRST"] = {"price": 97_000, "change_pct": -3.0}
+    api._quotes["SECOND"] = {"price": 100_000, "change_pct": 0.0}
+    api._positions = [
+        {"code": "FIRST", "qty": 8, "avg_price": 100_000.0, "current_price": 97_000},
+        {"code": "SECOND", "qty": 6, "avg_price": 100_000.0, "current_price": 100_000},
+    ]
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        max_swing_positions=2,
+        swing_rank_budget_enabled=True,
+        swing_scale_in_enabled=True,
+        swing_scale_in_trigger_pct=-0.03,
+        swing_multi_position_activation_at="2026-02-15T00:00:00+09:00",
+        swing_trend_ma_window=3,
+        swing_trend_lookback_bars=5,
+        swing_chart_review_enabled=False,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.trade_date = "20260216"
+    for code, qty in (("FIRST", 8), ("SECOND", 6)):
+        bot.state.open_positions[code] = PositionState(
+            type="S",
+            entry_time="2026-02-15T09:05:00+09:00",
+            entry_price=100_000.0,
+            qty=qty,
+            highest_price=100_000.0,
+            entry_date="20260215",
+        )
+    candidates = SimpleNamespace(model=pd.DataFrame(), etf=pd.DataFrame())
+
+    with patch("backend.services.trading_engine.bot.rank_swing_codes", return_value=[]):
+        bot._try_enter_swing(
+            now=datetime(2026, 2, 16, 13, 5),
+            regime="RISK_ON",
+            candidates=candidates,
+            quotes={},
+        )
+
+    assert api.order_calls == []
+
+    api._bars[("FIRST", "20260216")] = pd.DataFrame(
+        {"close": [95_000, 95_000, 96_000, 96_000, 96_000]}
+    )
+    with patch("backend.services.trading_engine.bot.rank_swing_codes", return_value=[]):
+        bot._try_enter_swing(
+            now=datetime(2026, 2, 16, 13, 5),
+            regime="RISK_ON",
+            candidates=candidates,
+            quotes={},
+        )
+
+    assert api.order_calls == [
+        {"side": "BUY", "code": "FIRST", "qty": 3, "order_type": "limit", "price": 97_100},
+    ]
+    assert bot.state.open_positions["FIRST"].qty == 11
+    assert "FIRST" in bot.state.blacklist_today

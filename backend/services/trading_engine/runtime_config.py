@@ -88,6 +88,26 @@ def _apply_general_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_DAY_ENTRY_BUDGET_CAP_KRW",
         cfg.day_entry_budget_cap_krw,
     )
+    cfg.swing_rank_budget_enabled = _env_bool(
+        "TRADING_ENGINE_SWING_RANK_BUDGET_ENABLED",
+        cfg.swing_rank_budget_enabled,
+    )
+    cfg.swing_rank_budget_weights = _env_float_csv_tuple(
+        "TRADING_ENGINE_SWING_RANK_BUDGET_WEIGHTS",
+        cfg.swing_rank_budget_weights,
+    )
+    cfg.swing_scale_in_enabled = _env_bool(
+        "TRADING_ENGINE_SWING_SCALE_IN_ENABLED",
+        cfg.swing_scale_in_enabled,
+    )
+    cfg.swing_scale_in_trigger_pct = _env_float(
+        "TRADING_ENGINE_SWING_SCALE_IN_TRIGGER_PCT",
+        cfg.swing_scale_in_trigger_pct,
+    )
+    cfg.swing_multi_position_activation_at = _env_text(
+        "TRADING_ENGINE_SWING_MULTI_POSITION_ACTIVATION_AT",
+        cfg.swing_multi_position_activation_at,
+    )
     cfg.entry_budget_overrun_tolerance_pct = _env_float(
         "TRADING_ENGINE_ENTRY_BUDGET_OVERRUN_TOLERANCE_PCT",
         cfg.entry_budget_overrun_tolerance_pct,
@@ -947,6 +967,27 @@ def _env_csv_tuple(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
         if str(part).strip()
     )
     return values or default
+
+
+def _env_float_csv_tuple(name: str, default: tuple[float, ...]) -> tuple[float, ...]:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+
+    try:
+        values = tuple(
+            float(part.strip())
+            for part in str(raw).split(",")
+            if str(part).strip()
+        )
+    except ValueError:
+        return default
+
+    if not values or any(value < 0.0 or value > 1.0 for value in values):
+        return default
+    if sum(values) > 1.0:
+        return default
+    return values
 
 
 def _env_entry_windows(

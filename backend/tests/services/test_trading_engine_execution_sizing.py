@@ -5,6 +5,9 @@ from backend.services.trading_engine.day_stop_review import (
     DayStopReviewResult,
 )
 from backend.services.trading_engine.execution_sizing import calc_buy_qty
+from backend.services.trading_engine.bot_runtime_support import (
+    swing_scale_in_budget_cash_cap,
+)
 
 
 def test_swing_budget_uses_account_total_ratio(tmp_path) -> None:
@@ -1248,3 +1251,134 @@ def test_enter_position_fills_missing_limit_price_from_quote() -> None:
     assert api.order_calls == [
         {"side": "BUY", "code": "100790", "qty": 4, "order_type": "limit", "price": 60_300},
     ]
+
+
+def test_ranked_swing_budgets_split_two_million_account_into_800k_and_600k(tmp_path) -> None:
+    api = FakeAPI()
+    api._cash_available = 2_000_000
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        swing_cash_ratio=0.80,
+        swing_rank_budget_enabled=True,
+        swing_rank_budget_weights=(0.50, 0.375),
+        use_realized_profit_buffer=True,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+
+    assert bot._strategy_budget_cash_cap(cash_ratio=cfg.swing_cash_ratio, position_type="S") == 800_000
+
+    api._cash_available = 1_200_000
+    api._positions = [
+        {"code": "FIRST", "qty": 8, "avg_price": 100_000.0, "current_price": 100_000},
+    ]
+    bot.state.open_positions["FIRST"] = PositionState(
+        type="S",
+        entry_time="2026-08-13T09:05:00+09:00",
+        entry_price=100_000.0,
+        qty=8,
+        highest_price=100_000.0,
+        entry_date="20260813",
+    )
+
+    assert bot._strategy_budget_cash_cap(cash_ratio=cfg.swing_cash_ratio, position_type="S") == 600_000
+
+
+def test_scale_in_budget_combines_swing_reserve_and_unused_day_cap(tmp_path) -> None:
+    api = FakeAPI()
+    api._cash_available = 600_000
+    api._positions = [
+        {"code": "FIRST", "qty": 8, "avg_price": 100_000.0, "current_price": 100_000},
+        {"code": "SECOND", "qty": 6, "avg_price": 100_000.0, "current_price": 100_000},
+    ]
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        swing_cash_ratio=0.80,
+        day_cash_ratio=0.20,
+        day_entry_budget_cap_krw=300_000,
+        swing_scale_in_enabled=True,
+        use_realized_profit_buffer=True,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    for code, qty in (("FIRST", 8), ("SECOND", 6)):
+        bot.state.open_positions[code] = PositionState(
+            type="S",
+            entry_time="2026-08-13T09:05:00+09:00",
+            entry_price=100_000.0,
+            qty=qty,
+            highest_price=100_000.0,
+            entry_date="20260813",
+        )
+
+    assert swing_scale_in_budget_cash_cap(bot) == 300_000
+
+
+def test_enter_position_scale_in_merges_quantity_and_weighted_average() -> None:
+    from backend.services.trading_engine.execution import enter_position
+
+    api = FakeAPI()
+    api._cash_available = 300_000
+    api._quotes["FIRST"] = {"price": 90_000, "change_pct": -3.0}
+    state = new_state("20260814")
+    state.open_positions["FIRST"] = PositionState(
+        type="S",
+        entry_time="2026-08-13T09:05:00+09:00",
+        entry_price=100_000.0,
+        qty=2,
+        highest_price=105_000.0,
+        entry_date="20260813",
+    )
+
+    result = enter_position(
+        api,
+        state,
+        position_type="S",
+        code="FIRST",
+        cash_ratio=1.0,
+        strategy_budget_cash_cap=100_000,
+        asof_date="20260814",
+        now=datetime(2026, 8, 14, 13, 5),
+        allow_existing_position=True,
+    )
+
+    assert result is not None
+    assert result.qty == 1
+    assert result.avg_price == 290_000 / 3
+    assert state.open_positions["FIRST"].qty == 3
+    assert state.open_positions["FIRST"].entry_price == 290_000 / 3
+    assert state.open_positions["FIRST"].entry_time == "2026-08-13T09:05:00+09:00"
+
+
+def test_ranked_swing_mode_does_not_lend_reserved_cash_to_day_trade(tmp_path) -> None:
+    api = FakeAPI()
+    api._cash_available = 600_000
+    api._positions = [
+        {"code": "FIRST", "qty": 4, "avg_price": 100_000.0, "current_price": 100_000},
+    ]
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        swing_cash_ratio=0.80,
+        day_cash_ratio=0.20,
+        day_entry_budget_cap_krw=300_000,
+        swing_rank_budget_enabled=True,
+        use_realized_profit_buffer=True,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.open_positions["FIRST"] = PositionState(
+        type="S",
+        entry_time="2026-08-13T09:05:00+09:00",
+        entry_price=100_000.0,
+        qty=4,
+        highest_price=100_000.0,
+        entry_date="20260813",
+    )
+
+    assert bot._strategy_budget_cash_cap(
+        cash_ratio=cfg.day_cash_ratio,
+        position_type="T",
+    ) == 200_000

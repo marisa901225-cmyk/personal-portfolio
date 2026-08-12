@@ -135,10 +135,12 @@ def format_entry_message(
     avg_price: float,
     regime: str,
     sync: bool = False,
+    scale_in: bool = False,
 ) -> str:
     sync_text = "[동기화]" if sync else ""
+    action = "[물타기]" if scale_in else "[진입]"
     return (
-        f"[진입][{strategy_label(strategy)}]{sync_text} {code} "
+        f"{action}[{strategy_label(strategy)}]{sync_text} {code} "
         f"수량={qty} 평균가={avg_price:.0f} 장세={regime_label(regime)}"
     )
 

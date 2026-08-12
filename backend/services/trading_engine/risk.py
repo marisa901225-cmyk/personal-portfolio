@@ -49,6 +49,11 @@ def can_enter(
             return False, "MAX_SWING_ENTRIES_DAY"
         if state.swing_entries_week >= config.max_swing_entries_per_week:
             return False, "MAX_SWING_ENTRIES_WEEK"
+        if bool(getattr(config, "swing_rank_budget_enabled", False)):
+            if _has_pending_swing_entry(state):
+                return False, "PENDING_SWING_ENTRY"
+            if _has_pre_activation_swing_position(state, config):
+                return False, "MAX_SWING_POSITIONS"
         if _count_reserved_positions(state, "S") >= config.max_swing_positions:
             return False, "MAX_SWING_POSITIONS"
     else:
@@ -84,6 +89,47 @@ def can_enter(
     ):
         return False, "ENTRY_WINDOW_CLOSED"
 
+    return True, "OK"
+
+
+def can_scale_in_swing(
+    state: TradeState,
+    *,
+    regime: str,
+    now: datetime,
+    config: TradeEngineConfig,
+    is_trading_day_value: bool = True,
+) -> tuple[bool, str]:
+    if not bool(getattr(config, "swing_scale_in_enabled", False)):
+        return False, "SCALE_IN_DISABLED"
+    if not is_trading_day_value:
+        return False, "HOLIDAY"
+    if regime == "RISK_OFF":
+        return False, "RISK_OFF"
+
+    now_minute = now.hour * 60 + now.minute
+    if now_minute >= _hhmm_to_minutes(config.no_new_entry_after):
+        return False, "NO_NEW_ENTRY_AFTER"
+    if state.swing_consecutive_losses_today >= config.max_consecutive_losses:
+        return False, "MAX_CONSECUTIVE_LOSSES"
+    if state.swing_entries_today >= config.max_swing_entries_per_day:
+        return False, "MAX_SWING_ENTRIES_DAY"
+    if state.swing_entries_week >= config.max_swing_entries_per_week:
+        return False, "MAX_SWING_ENTRIES_WEEK"
+    if _has_pending_swing_entry(state):
+        return False, "PENDING_SWING_ENTRY"
+    if _has_pre_activation_swing_position(state, config):
+        return False, "MAX_SWING_POSITIONS"
+    if _count_reserved_positions(state, "S") < config.max_swing_positions:
+        return False, "SWING_SLOT_AVAILABLE"
+    if not _is_entry_window_open(
+        "S",
+        now,
+        config,
+        day_entries_today=state.day_entries_today,
+        day_entry_windows_used_today=state.day_entry_windows_used_today,
+    ):
+        return False, "ENTRY_WINDOW_CLOSED"
     return True, "OK"
 
 
@@ -224,6 +270,8 @@ def _effective_max_day_positions(
     configured_limit = max(0, int(getattr(cfg, "max_day_positions", 0) or 0))
     if configured_limit <= 1:
         return configured_limit
+    if bool(getattr(cfg, "swing_rank_budget_enabled", False)):
+        return 1
     if not bool(getattr(cfg, "day_conditional_extra_entries_enabled", True)):
         return 1
     if not _conditional_extra_performance_allows(state=state, cfg=cfg):
@@ -394,6 +442,49 @@ def _day_afternoon_loss_limit_amount(cfg: TradeEngineConfig) -> float | None:
         return None
 
     return initial_capital * cash_ratio * stop_loss_pct * loss_count
+
+
+def _has_pending_swing_entry(state: TradeState) -> bool:
+    return any(
+        pending_type == "S"
+        for pending_type in state.pending_entry_orders.values()
+    )
+
+
+def _has_pre_activation_swing_position(
+    state: TradeState,
+    cfg: TradeEngineConfig,
+) -> bool:
+    activation_text = str(getattr(cfg, "swing_multi_position_activation_at", "") or "").strip()
+    if not activation_text:
+        return False
+
+    swing_positions = [
+        position
+        for position in state.open_positions.values()
+        if position.type == "S"
+    ]
+    if not swing_positions:
+        return False
+
+    try:
+        activation_at = datetime.fromisoformat(activation_text)
+    except ValueError:
+        return True
+
+    for position in swing_positions:
+        entry_text = str(position.entry_time or "").strip()
+        try:
+            entry_at = datetime.fromisoformat(entry_text)
+        except ValueError:
+            return True
+        if entry_at.tzinfo is None and activation_at.tzinfo is not None:
+            entry_at = entry_at.replace(tzinfo=activation_at.tzinfo)
+        elif entry_at.tzinfo is not None and activation_at.tzinfo is None:
+            activation_at = activation_at.replace(tzinfo=entry_at.tzinfo)
+        if entry_at < activation_at:
+            return True
+    return False
 
 
 def _count_reserved_positions(state: TradeState, position_type: str) -> int:

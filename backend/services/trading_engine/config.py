@@ -31,6 +31,11 @@ class TradeEngineConfig:
     swing_cash_ratio: float = 0.80
     day_cash_ratio: float = 0.20
     day_entry_budget_cap_krw: int = 300_000
+    swing_rank_budget_weights: tuple[float, ...] = (0.50, 0.375)
+    swing_rank_budget_enabled: bool = False
+    swing_scale_in_enabled: bool = False
+    swing_scale_in_trigger_pct: float = -0.03
+    swing_multi_position_activation_at: str = ""
     entry_budget_overrun_tolerance_pct: float = 0.01
     use_realized_profit_buffer: bool = True
     day_reuse_unused_swing_cash_enabled: bool = True

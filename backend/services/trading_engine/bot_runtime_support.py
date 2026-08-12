@@ -44,7 +44,10 @@ def strategy_budget_cash_cap(bot, *, cash_ratio: float, position_type: str | Non
     unused_swing_budget = 0.0
     budget_cap = base_cap
     if normalized_position_type == "S":
-        budget_cap = max(0.0, base_cap - deployed_swing_cost_from_state(bot))
+        if bool(getattr(bot.config, "swing_rank_budget_enabled", False)):
+            budget_cap = swing_entry_budget_cash_cap(bot, cash_ratio=cash_ratio)
+        else:
+            budget_cap = max(0.0, base_cap - deployed_swing_cost_from_state(bot))
     elif normalized_position_type == "T":
         unused_swing_budget = unused_swing_budget_for_day(bot)
         budget_cap += unused_swing_budget
@@ -59,6 +62,63 @@ def strategy_budget_cash_cap(bot, *, cash_ratio: float, position_type: str | Non
         ),
         normalized_position_type,
     )
+
+
+def swing_entry_budget_cash_cap(bot, *, cash_ratio: float) -> float:
+    account_budget_total = account_budget_total_from_account(bot, logger=logging.getLogger(__name__))
+    swing_pool = max(0.0, account_budget_total * float(cash_ratio))
+    if swing_pool <= 0:
+        return 0.0
+
+    weights = tuple(
+        max(0.0, float(weight))
+        for weight in getattr(bot.config, "swing_rank_budget_weights", ())
+    )
+    if not weights or sum(weights) > 1.0:
+        return max(0.0, swing_pool - deployed_swing_cost_from_state(bot))
+
+    reserved_codes = {
+        code
+        for code, position in bot.state.open_positions.items()
+        if getattr(position, "type", "") == "S"
+    }
+    reserved_codes.update(
+        code
+        for code, pending_type in bot.state.pending_entry_orders.items()
+        if pending_type == "S"
+    )
+    rank_index = len(reserved_codes)
+    if rank_index >= len(weights):
+        return 0.0
+
+    remaining_pool = max(0.0, swing_pool - deployed_swing_cost_from_state(bot))
+    rank_cap = swing_pool * weights[rank_index]
+    return max(0.0, min(remaining_pool, rank_cap))
+
+
+def swing_scale_in_budget_cash_cap(bot) -> float:
+    if not bool(getattr(bot.config, "swing_scale_in_enabled", False)):
+        return 0.0
+
+    account_budget_total = account_budget_total_from_account(bot, logger=logging.getLogger(__name__))
+    if account_budget_total <= 0:
+        return 0.0
+
+    swing_pool = max(
+        0.0,
+        account_budget_total * float(bot.config.swing_cash_ratio),
+    )
+    day_pool = max(
+        0.0,
+        account_budget_total * float(bot.config.day_cash_ratio),
+    )
+    day_entry_cap = max(
+        0.0,
+        float(getattr(bot.config, "day_entry_budget_cap_krw", 0) or 0),
+    )
+    unused_day_budget = max(0.0, day_pool - day_entry_cap)
+    total_scale_in_ceiling = swing_pool + unused_day_budget
+    return max(0.0, total_scale_in_ceiling - deployed_swing_cost_from_state(bot))
 
 
 def _cap_day_entry_budget(bot, budget_cap: float, position_type: str) -> float:
@@ -143,6 +203,8 @@ def _day_extra_slot_budget_floor(config: TradeEngineConfig) -> float:
 
 def unused_swing_budget_for_day(bot) -> float:
     if not bool(getattr(bot.config, "day_reuse_unused_swing_cash_enabled", True)):
+        return 0.0
+    if bool(getattr(bot.config, "swing_rank_budget_enabled", False)):
         return 0.0
 
     account_budget_total = account_budget_total_from_account(bot, logger=logging.getLogger(__name__))
