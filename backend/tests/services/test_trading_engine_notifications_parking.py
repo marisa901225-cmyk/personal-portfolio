@@ -339,11 +339,11 @@ def test_bot_risk_off_uses_broker_buyable_amount_before_parking_order(tmp_path) 
     assert bot.state.open_positions["440650"].qty == 19
     assert any(text.startswith("[진입][파킹] 440650 수량=19") for text in notifier.texts)
 
-def test_bot_risk_off_does_not_top_up_existing_parking_position(tmp_path) -> None:
+def test_bot_risk_off_tops_up_existing_parking_position(tmp_path) -> None:
     class BuyableAPI(FakeAPI):
         def buy_order_capacity(self, code: str, order_type: str, price: int | None) -> dict:
             assert code == "440650"
-            assert order_type == "best"
+            assert order_type == "limit"
             assert price is None or price > 0
             return {
                 "ord_psbl_cash": 100_000,
@@ -414,6 +414,8 @@ def test_bot_risk_off_does_not_top_up_existing_parking_position(tmp_path) -> Non
 
     assert out["status"] == "OK"
     assert out["regime"] == "RISK_OFF"
-    assert api.order_calls == []
-    assert bot.state.open_positions["440650"].qty == 50
-    assert not any(text.startswith("[진입][파킹] 440650") for text in notifier.texts)
+    assert api.order_calls == [
+        {"side": "BUY", "code": "440650", "qty": 9, "order_type": "limit", "price": 10_000}
+    ]
+    assert bot.state.open_positions["440650"].qty == 59
+    assert any(text.startswith("[진입][파킹] 440650 수량=9") for text in notifier.texts)

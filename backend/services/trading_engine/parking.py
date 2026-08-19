@@ -145,7 +145,7 @@ def manage_risk_off_parking(
 
     if not can_enter_risk_off_parking(config, now):
         return
-    if existing_parking is not None or parking_code in state.pending_entry_orders:
+    if parking_code in state.pending_entry_orders:
         return
     if existing_parking is None and len(state.open_positions) >= config.max_total_positions:
         return
@@ -158,6 +158,7 @@ def manage_risk_off_parking(
         cash_ratio=config.risk_off_parking_cash_ratio,
         budget_overrun_tolerance_pct=config.entry_budget_overrun_tolerance_pct,
         asof_date=trade_date,
+        allow_existing_position=existing_parking is not None,
         now=now,
         order_type=config.risk_off_parking_order_type,
     )
