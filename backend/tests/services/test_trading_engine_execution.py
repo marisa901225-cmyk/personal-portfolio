@@ -7,6 +7,7 @@ from backend.services.trading_engine.day_stop_review import (
     DayOvernightCarryReviewResult,
     DayStopReviewResult,
     SwingStopReviewResult,
+    review_swing_stop_with_llm,
 )
 from backend.services.trading_engine.day_chart_review import (
     DayChartReviewResult,
@@ -462,13 +463,176 @@ def test_monitor_positions_swing_stop_holds_once_then_exits_if_loss_persists(tmp
     assert f"{code}:2026-04-24T09:12:00" in bot.state.swing_stop_llm_reviewed_positions
 
 
+def test_monitor_positions_swing_stop_holds_while_trend_is_intact_until_hard_stop(tmp_path) -> None:
+    code = "232323"
+    asof = "20260424"
+    now = datetime(2026, 4, 24, 10, 0)
+    api = FakeAPI()
+    api._quotes[code] = {"price": 96, "change_pct": -4.0}
+    api._bars[(code, asof)] = pd.DataFrame(
+        [
+            {"date": "20260422", "close": 80, "volume": 1_000_000},
+            {"date": "20260423", "close": 82, "volume": 1_000_000},
+            {"date": "20260424", "close": 84, "volume": 1_000_000},
+        ]
+    )
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        swing_stop_loss_pct=-0.03,
+        swing_sl_requires_trend_break=True,
+        swing_trend_ma_window=3,
+        swing_trend_lookback_bars=5,
+        swing_stop_llm_review_enabled=True,
+        swing_stop_llm_hard_stop_pct=-0.06,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.open_positions[code] = PositionState(
+        type="S",
+        entry_time="2026-04-24T09:12:00",
+        entry_price=100.0,
+        qty=10,
+        highest_price=102.0,
+        entry_date=asof,
+    )
+    review = SwingStopReviewResult(
+        decision="HOLD",
+        confidence=0.81,
+        reason="이동평균 위에서 스윙 추세 유지",
+        route="paid",
+        raw_response={},
+    )
+    with patch(
+        "backend.services.trading_engine.bot_position_management.review_swing_stop_with_llm",
+        return_value=review,
+    ) as mocked_review:
+        bot.monitor_positions(now=now)
+        bot.monitor_positions(now=datetime(2026, 4, 24, 10, 2))
+
+        assert api.order_calls == []
+        assert code in bot.state.open_positions
+
+        api._quotes[code] = {"price": 93, "change_pct": -7.0}
+        bot.monitor_positions(now=datetime(2026, 4, 24, 10, 4))
+
+    mocked_review.assert_called_once()
+    assert any(call["side"] == "SELL" and call["code"] == code for call in api.order_calls)
+    assert code not in bot.state.open_positions
+    review_key = f"{code}:2026-04-24T09:12:00"
+    assert review_key in bot.state.swing_stop_llm_reviewed_positions
+    assert review_key in bot.state.swing_stop_llm_hold_positions
+
+
+def test_monitor_positions_swing_stop_exits_after_llm_retry_failure(tmp_path) -> None:
+    code = "242424"
+    asof = "20260424"
+    now = datetime(2026, 4, 24, 10, 0)
+    api = FakeAPI()
+    api._quotes[code] = {"price": 96, "change_pct": -4.0}
+    api._bars[(code, asof)] = pd.DataFrame(
+        [
+            {"date": "20260422", "close": 80, "volume": 1_000_000},
+            {"date": "20260423", "close": 82, "volume": 1_000_000},
+            {"date": "20260424", "close": 84, "volume": 1_000_000},
+        ]
+    )
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        swing_stop_loss_pct=-0.03,
+        swing_sl_requires_trend_break=True,
+        swing_trend_ma_window=3,
+        swing_trend_lookback_bars=5,
+        swing_stop_llm_review_enabled=True,
+        swing_stop_llm_hard_stop_pct=-0.06,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.open_positions[code] = PositionState(
+        type="S",
+        entry_time="2026-04-24T09:12:00",
+        entry_price=100.0,
+        qty=10,
+        highest_price=102.0,
+        entry_date=asof,
+    )
+    with patch(
+        "backend.services.trading_engine.bot_position_management.review_swing_stop_with_llm",
+        return_value=None,
+    ) as mocked_review:
+        bot.monitor_positions(now=now)
+        bot.monitor_positions(now=datetime(2026, 4, 24, 10, 2))
+
+    mocked_review.assert_called_once()
+    assert any(call["side"] == "SELL" and call["code"] == code for call in api.order_calls)
+    assert code not in bot.state.open_positions
+
+
+def test_review_swing_stop_with_llm_retries_once_after_parse_failure(tmp_path) -> None:
+    class RetryLLMStub(_ChartReviewLLMStub):
+        def __init__(self, responses: list[str]) -> None:
+            super().__init__(paid_raw="")
+            self.responses = list(responses)
+
+        def generate_paid_chat(self, messages, **kwargs):
+            self.paid_calls.append({"messages": messages, "kwargs": kwargs})
+            return self.responses.pop(0)
+
+    stub = RetryLLMStub(
+        [
+            '{"decision":"HOLD"',
+            '{"decision":"HOLD","confidence":0.81,"reason":"추세 유지"}',
+        ]
+    )
+    cfg = TradeEngineConfig(output_dir=str(tmp_path / "output"), swing_stop_llm_review_use_paid=True)
+    position = PositionState(
+        type="S", entry_time="2026-04-24T09:12:00", entry_price=100.0, qty=10,
+        highest_price=102.0, entry_date="20260424",
+    )
+    with patch("backend.services.trading_engine.day_stop_review.LLMService.get_instance", return_value=stub):
+        result = review_swing_stop_with_llm(
+            code="252525", position=position, quote_price=96.0, pnl_pct=-0.04,
+            trend_meta={"trend_broken": False}, config=cfg,
+        )
+
+    assert result is not None
+    assert result.decision == "HOLD"
+    assert len(stub.paid_calls) == 2
+
+
+def test_review_swing_stop_with_llm_returns_none_after_retry_parse_failure(tmp_path) -> None:
+    class RetryLLMStub(_ChartReviewLLMStub):
+        def __init__(self) -> None:
+            super().__init__(paid_raw="")
+
+        def generate_paid_chat(self, messages, **kwargs):
+            self.paid_calls.append({"messages": messages, "kwargs": kwargs})
+            return '{"decision":"HOLD"'
+
+    stub = RetryLLMStub()
+    cfg = TradeEngineConfig(output_dir=str(tmp_path / "output"), swing_stop_llm_review_use_paid=True)
+    position = PositionState(
+        type="S", entry_time="2026-04-24T09:12:00", entry_price=100.0, qty=10,
+        highest_price=102.0, entry_date="20260424",
+    )
+    with patch("backend.services.trading_engine.day_stop_review.LLMService.get_instance", return_value=stub):
+        result = review_swing_stop_with_llm(
+            code="262626", position=position, quote_price=96.0, pnl_pct=-0.04,
+            trend_meta={"trend_broken": False}, config=cfg,
+        )
+
+    assert result is None
+    assert len(stub.paid_calls) == 2
+
+
 def test_monitor_positions_swing_hard_stop_exits_without_trend_break_or_llm(tmp_path) -> None:
     code = "555555"
     asof = "20260424"
     now = datetime(2026, 4, 24, 10, 0)
 
     api = FakeAPI()
-    api._quotes[code] = {"price": 91, "change_pct": -9.0}
+    api._quotes[code] = {"price": 93, "change_pct": -7.0}
     api._bars[(code, asof)] = pd.DataFrame(
         [
             {"date": "20260422", "close": 80, "volume": 1_000_000},
@@ -486,7 +650,6 @@ def test_monitor_positions_swing_hard_stop_exits_without_trend_break_or_llm(tmp_
         swing_trend_ma_window=3,
         swing_trend_lookback_bars=5,
         swing_stop_llm_review_enabled=True,
-        swing_stop_llm_hard_stop_pct=-0.08,
     )
     bot = HybridTradingBot(api, config=cfg)
     bot.state.open_positions[code] = PositionState(
@@ -551,7 +714,9 @@ def test_monitor_positions_swing_trail_can_hold_after_llm_review(tmp_path) -> No
     assert api.order_calls == []
     assert code in bot.state.open_positions
     assert bot.state.open_positions[code].highest_price == 110.0
-    assert f"{code}:2026-04-24T09:12:00" in bot.state.swing_stop_llm_reviewed_positions
+    review_key = f"{code}:2026-04-24T09:12:00"
+    assert review_key in bot.state.swing_stop_llm_reviewed_positions
+    assert review_key not in bot.state.swing_stop_llm_hold_positions
 
 def test_monitor_positions_swing_trail_exits_when_llm_rejects_hold(tmp_path) -> None:
     code = "444444"

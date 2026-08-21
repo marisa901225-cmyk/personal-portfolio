@@ -340,31 +340,40 @@ def review_swing_stop_with_llm(
         trigger_reason=trigger_reason,
     )
 
-    try:
-        if bool(getattr(config, "swing_stop_llm_review_use_paid", False)) and _paid_available(llm):
-            raw = llm.generate_paid_chat(
-                messages,
-                max_tokens=240,
-                temperature=0.0,
-                model=getattr(config, "swing_stop_llm_review_model", None),
-                reasoning_effort=getattr(config, "swing_stop_llm_review_reasoning_effort", "low"),
-                response_format=_SWING_STOP_REVIEW_RESPONSE_FORMAT,
-            )
-        else:
-            raw = llm.generate_chat(
-                messages,
-                max_tokens=240,
-                temperature=0.0,
-                response_format=_SWING_STOP_REVIEW_RESPONSE_FORMAT,
-                allow_paid_fallback=False,
-            )
-    except Exception:
-        logger.warning("swing stop LLM review failed code=%s", code, exc_info=True)
-        return None
+    parsed: dict[str, object] | None = None
+    for attempt in range(2):
+        try:
+            if bool(getattr(config, "swing_stop_llm_review_use_paid", False)) and _paid_available(llm):
+                raw = llm.generate_paid_chat(
+                    messages,
+                    max_tokens=240,
+                    temperature=0.0,
+                    model=getattr(config, "swing_stop_llm_review_model", None),
+                    reasoning_effort=getattr(config, "swing_stop_llm_review_reasoning_effort", "low"),
+                    response_format=_SWING_STOP_REVIEW_RESPONSE_FORMAT,
+                )
+            else:
+                raw = llm.generate_chat(
+                    messages,
+                    max_tokens=240,
+                    temperature=0.0,
+                    response_format=_SWING_STOP_REVIEW_RESPONSE_FORMAT,
+                    allow_paid_fallback=False,
+                )
+        except Exception:
+            logger.warning("swing stop LLM review failed code=%s", code, exc_info=True)
+            return None
 
-    parsed = _parse_review_response(raw)
-    if not parsed:
-        logger.warning("swing stop LLM review parse failed code=%s raw=%s", code, (raw or "")[:400])
+        parsed = _parse_review_response(raw)
+        if parsed:
+            break
+        logger.warning(
+            "swing stop LLM review parse failed code=%s attempt=%s/2 raw=%s",
+            code,
+            attempt + 1,
+            (raw or "")[:400],
+        )
+    if parsed is None:
         return None
 
     decision = str(parsed.get("decision") or "").strip().upper()

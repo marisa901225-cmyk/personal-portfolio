@@ -320,6 +320,9 @@ def test_save_state_roundtrip_uses_atomic_replace(tmp_path) -> None:
     state.day_realized_pnl_today = -3_200.0
     state.day_consecutive_losses_today = 1
     state.swing_consecutive_losses_today = 2
+    review_key = "005930:2026-04-14T09:00:00"
+    state.swing_stop_llm_reviewed_positions.add(review_key)
+    state.swing_stop_llm_hold_positions.add(review_key)
     state.open_positions["005930"] = PositionState(
         type="S",
         entry_time="2026-04-14T09:00:00",
@@ -337,6 +340,8 @@ def test_save_state_roundtrip_uses_atomic_replace(tmp_path) -> None:
     assert loaded.day_consecutive_losses_today == 1
     assert loaded.swing_consecutive_losses_today == 2
     assert loaded.open_positions["005930"].qty == 5
+    assert loaded.swing_stop_llm_reviewed_positions == {review_key}
+    assert loaded.swing_stop_llm_hold_positions == {review_key}
     assert state_path.read_text(encoding="utf-8").endswith("\n")
 
 def test_reconcile_state_records_unknown_broker_only_position_once_per_day(tmp_path) -> None:

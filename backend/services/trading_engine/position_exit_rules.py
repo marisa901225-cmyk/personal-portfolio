@@ -170,6 +170,14 @@ def review_swing_stop_decision(
     except Exception:
         logger.warning("swing stop LLM review helper failed code=%s", code, exc_info=True)
         review = None
+    if (
+        str(trigger_reason or "").strip().upper() != "TRAIL"
+        and review is not None
+        and review.decision == "HOLD"
+    ):
+        bot.state.swing_stop_llm_hold_positions.add(review_key)
+    else:
+        bot.state.swing_stop_llm_hold_positions.discard(review_key)
     journal_swing_stop_llm_review(
         bot,
         code=code,

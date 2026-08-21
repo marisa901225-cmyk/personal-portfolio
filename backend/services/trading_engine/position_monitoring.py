@@ -65,6 +65,8 @@ def monitor_positions(bot, *, now: datetime, logger) -> None:
                     review_key = bot._day_stop_llm_review_key(code=code, pos=pos)
                     already_reviewed = review_key in bot.state.swing_stop_llm_reviewed_positions
                     if already_reviewed:
+                        if review_key in bot.state.swing_stop_llm_hold_positions:
+                            continue
                         exit_now = True
                         reason = "SL_RECHECK"
                     else:
