@@ -2,8 +2,18 @@
 import os
 import tempfile
 import unittest
+from pathlib import Path
 
 from backend.services import prompt_loader
+
+
+def test_weather_prompt_forbids_absolute_exchange_rate_judgment() -> None:
+    prompt_path = Path(__file__).resolve().parents[1] / "prompts" / "weather_message.txt"
+
+    prompt = prompt_path.read_text(encoding="utf-8")
+
+    assert "환율의 절대 수준" in prompt
+    assert "명시적인 비교 기준" in prompt
 
 
 class PromptLoaderTests(unittest.TestCase):
