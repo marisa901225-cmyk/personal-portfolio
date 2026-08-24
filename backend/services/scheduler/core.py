@@ -255,24 +255,21 @@ async def job_check_index_oversold():
                 raise e
 
 
-async def job_check_changdong_registration():
-    """창동문화체육센터 재등록 공지를 확인하고 새 공지만 텔레그램으로 알린다."""
+async def job_send_changdong_registration_reminder():
+    """아침 브리핑 전에 최신 재등록 공지 이미지를 비전 분석해 매일 알린다."""
     from backend.services.changdong_registration import (
-        check_changdong_registration_notice,
+        send_daily_changdong_registration_reminder,
     )
 
     with SessionLocal() as db:
-        async with monitor_job_async("check_changdong_registration", db):
-            logger.info("Starting Changdong registration notice check...")
-            notice = await check_changdong_registration_notice()
-            if notice is None:
-                logger.info("Changdong registration notice check completed without a new notice.")
-            else:
-                logger.info(
-                    "Changdong registration notice delivered: id=%s title=%s",
-                    notice.notice_id,
-                    notice.title,
-                )
+        async with monitor_job_async("changdong_registration_reminder", db):
+            logger.info("Starting daily Changdong registration reminder...")
+            notice = await send_daily_changdong_registration_reminder()
+            logger.info(
+                "Daily Changdong registration reminder delivered: id=%s title=%s",
+                notice.notice_id,
+                notice.title,
+            )
 
 
 async def job_check_rate_changes():
@@ -528,9 +525,9 @@ def start_scheduler():
             )
 
             scheduler.add_job(
-                job_check_changdong_registration,
-                CronTrigger(hour=10, minute=10),
-                id="check_changdong_registration",
+                job_send_changdong_registration_reminder,
+                CronTrigger(hour=6, minute=50),
+                id="changdong_registration_reminder",
                 replace_existing=True,
                 max_instances=1,
             )

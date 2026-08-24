@@ -52,6 +52,7 @@ data_backup_reference/*
 # Runtime Storage (DB and dynamic data - never track these)
 backend/storage/db/
 backend/storage/economy_snapshot/
+backend/storage/changdong_registration/
 backend/storage/weather_cache/
 backend/storage/kis_config/
 backend/storage/kis_holiday_cache/
