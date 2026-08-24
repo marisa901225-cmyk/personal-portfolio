@@ -183,10 +183,20 @@ class TestSchedulerRoleSplit(unittest.TestCase):
         registered_ids = [call.kwargs["id"] for call in fake_scheduler.add_job.call_args_list]
         self.assertIn("collect_game_news", registered_ids)
         self.assertIn("morning_briefing", registered_ids)
+        self.assertIn("check_changdong_registration", registered_ids)
         self.assertIn("cleanup_old_spam_data", registered_ids)
         self.assertNotIn("trading_engine_cycle_preopen", registered_ids)
         self.assertNotIn("trading_engine_cycle_intraday_morning", registered_ids)
         self.assertNotIn("trading_engine_finalize", registered_ids)
+
+        changdong_call = next(
+            call
+            for call in fake_scheduler.add_job.call_args_list
+            if call.kwargs["id"] == "check_changdong_registration"
+        )
+        changdong_trigger = changdong_call.args[1]
+        self.assertEqual(str(changdong_trigger.fields[5]), "10")
+        self.assertEqual(str(changdong_trigger.fields[6]), "10")
 
         cleanup_call = next(
             call for call in fake_scheduler.add_job.call_args_list if call.kwargs["id"] == "cleanup_old_spam_data"

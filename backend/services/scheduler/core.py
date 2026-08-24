@@ -255,6 +255,26 @@ async def job_check_index_oversold():
                 raise e
 
 
+async def job_check_changdong_registration():
+    """창동문화체육센터 재등록 공지를 확인하고 새 공지만 텔레그램으로 알린다."""
+    from backend.services.changdong_registration import (
+        check_changdong_registration_notice,
+    )
+
+    with SessionLocal() as db:
+        async with monitor_job_async("check_changdong_registration", db):
+            logger.info("Starting Changdong registration notice check...")
+            notice = await check_changdong_registration_notice()
+            if notice is None:
+                logger.info("Changdong registration notice check completed without a new notice.")
+            else:
+                logger.info(
+                    "Changdong registration notice delivered: id=%s title=%s",
+                    notice.notice_id,
+                    notice.title,
+                )
+
+
 async def job_check_rate_changes():
     """
     한국은행 기준금리 / 미국 기준금리 변경 알림 체크
@@ -503,6 +523,14 @@ def start_scheduler():
                 job_check_rate_changes,
                 CronTrigger(hour=9, minute=5),
                 id="check_rate_changes",
+                replace_existing=True,
+                max_instances=1,
+            )
+
+            scheduler.add_job(
+                job_check_changdong_registration,
+                CronTrigger(hour=10, minute=10),
+                id="check_changdong_registration",
                 replace_existing=True,
                 max_instances=1,
             )
