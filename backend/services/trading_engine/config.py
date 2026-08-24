@@ -282,6 +282,7 @@ class TradeEngineConfig:
     intraday_cb_1bar_drop_pct: float = -2.5
     intraday_cb_window_minutes: int = 5
     intraday_cb_window_drop_pct: float = -4.0
+    intraday_cb_confirmations_required: int = 2
 
     # Paths
     state_path: str = "backend/storage/trading_engine/state.json"

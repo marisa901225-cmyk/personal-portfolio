@@ -54,6 +54,7 @@ class TradeState:
     last_run_timestamp: str | None = None
     last_bar_date_seen: str | None = None
     last_panic_date: str | None = None
+    intraday_cb_consecutive_triggers: int = 0
     pass_reasons_today: dict[str, int] = field(default_factory=dict)
     pending_notifications: list[dict[str, object]] = field(default_factory=list)
     unknown_broker_positions: dict[str, str] = field(default_factory=dict)
@@ -177,6 +178,7 @@ def rollover_state_for_date(state: TradeState, today: str) -> TradeState:
     state.swing_consecutive_losses_today = 0
     state.realized_pnl_today = 0.0
     state.consecutive_losses_today = 0
+    state.intraday_cb_consecutive_triggers = 0
     state.blacklist_today.clear()
     state.pass_reasons_today.clear()
     state.pending_entry_orders.clear()
@@ -235,6 +237,10 @@ def load_state(path: str) -> TradeState:
             last_run_timestamp=raw.get("last_run_timestamp"),
             last_bar_date_seen=raw.get("last_bar_date_seen"),
             last_panic_date=raw.get("last_panic_date"),
+            intraday_cb_consecutive_triggers=max(
+                0,
+                int(raw.get("intraday_cb_consecutive_triggers", 0)),
+            ),
             pass_reasons_today=dict(raw.get("pass_reasons_today", {})),
             pending_notifications=list(raw.get("pending_notifications", [])),
             unknown_broker_positions=parse_string_map(raw.get("unknown_broker_positions", {})),

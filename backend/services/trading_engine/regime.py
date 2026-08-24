@@ -107,8 +107,12 @@ def _live_change_pct(api: TradingAPI, code: str) -> float | None:
     return parse_numeric(q.get("change_pct"))
 
 
+def get_live_change_pct(api: TradingAPI, code: str) -> float | None:
+    return _live_change_pct(api, code)
+
+
 def _is_live_risk_on(api: TradingAPI, code: str, *, threshold_pct: float = 0.0) -> bool:
-    live_change_pct = _live_change_pct(api, code)
+    live_change_pct = get_live_change_pct(api, code)
     return live_change_pct is not None and live_change_pct > threshold_pct
 
 
@@ -221,43 +225,39 @@ def get_regime(
     """
     Returns (regime_string, detected_panic_date)
     """
-    # 1. Primary 로직: KIS에서 다시 받은 현재 일봉/시세를 먼저 신뢰한다.
+    # 1. 코스피 일봉과 두 시장의 실시간 시세를 먼저 확인한다.
     primary_regime, primary_panic_date = _single_regime(api, asof, primary_code, vol_threshold)
 
-    # 로컬 state의 last_panic_date 또는 최근 일봉 패닉은 오염될 수 있다.
-    # KIS 실시간 proxy가 상승이면 과거/로컬 위험회피 신호를 무시한다.
+    # 코스피·코스닥 중 하나라도 실시간 상승이면 과거 패닉과 쿨다운을 해제한다.
     if _is_live_risk_on(api, primary_code):
         return "RISK_ON", None
+    if use_confirmation and _is_live_risk_on(api, confirmation_code):
+        return "RISK_ON", None
 
-    # 장중 CB로 오늘 패닉이 찍힌 뒤에는 파란불/약반등 동안 신규 진입을 막는다.
-    # 단, KIS 실시간 proxy가 빨간불로 회복하면 위 live-risk-on 분기에서 해제된다.
+    # 장중 CB로 오늘 패닉이 찍힌 뒤에는 두 시장 모두 반등하지 못한 동안만 유지한다.
     if _is_same_day_panic(asof, last_panic_date):
         return "RISK_OFF", None
 
-    # 2. 로컬 쿨다운은 KIS 실시간 상승장 검증 뒤에만 적용한다.
+    # 로컬 쿨다운도 두 시장의 실시간 상승 검증 뒤에만 적용한다.
     if _is_in_cooldown(asof, last_panic_date, days=3):
         return "RISK_OFF", None
 
     if not use_confirmation:
         return primary_regime, primary_panic_date
 
-    # 3. Confirmation 로직
-    confirm_regime, confirm_panic_date = _single_regime(api, asof, confirmation_code, vol_threshold)
-    detected_panic_date = _pick_panic_date(primary_panic_date, confirm_panic_date)
+    confirm_regime, confirm_panic_date = _single_regime(
+        api,
+        asof,
+        confirmation_code,
+        vol_threshold,
+    )
 
-    if _is_live_risk_on(api, confirmation_code):
-        return "RISK_ON", None
-    
+    # 코스닥 단독 급락은 시장 전체 위험회피로 승격하지 않는다.
     if primary_regime == "RISK_OFF" and confirm_regime == "RISK_OFF":
-        return "RISK_OFF", detected_panic_date
-    if primary_regime == "RISK_ON" and confirm_regime == "RISK_ON":
-        return "RISK_ON", detected_panic_date
+        return "RISK_OFF", _pick_panic_date(primary_panic_date, confirm_panic_date)
     if primary_regime == "RISK_ON" or confirm_regime == "RISK_ON":
         return "RISK_ON", None
-    if primary_regime == "RISK_OFF" or confirm_regime == "RISK_OFF":
-        return "RISK_OFF", detected_panic_date
-        
-    return "NEUTRAL", detected_panic_date
+    return "NEUTRAL", None
 
 
 def _normalize_yyyymmdd(text: str) -> str:

@@ -38,7 +38,7 @@ from .journal import TradeJournal
 from .news_sentiment import build_news_sentiment_signal
 from .notifier import BestEffortNotifier
 from .notification_text import format_error_message, format_pass_message, format_run_start_message
-from .regime import detect_intraday_circuit_breaker, get_regime
+from .regime import detect_intraday_circuit_breaker, get_live_change_pct, get_regime
 from .run_context import CachedTradingAPI, TradingRunMetrics
 from .runtime import get_last_trading_day, is_trading_day
 from .state import (
@@ -249,6 +249,122 @@ class HybridTradingBot(
             "open_positions": len(self.state.open_positions),
         }
 
+    def _evaluate_intraday_circuit_breaker(
+        self,
+        *,
+        today: str,
+        now: datetime,
+        regime: str,
+    ) -> tuple[bool, bool]:
+        if (
+            not self.config.use_intraday_circuit_breaker
+            or regime == "RISK_OFF"
+            or not (9, 0) <= (now.hour, now.minute) <= (15, 30)
+        ):
+            return False, False
+
+        primary_change_pct = get_live_change_pct(self.api, self.config.market_proxy_code)
+        confirmation_change_pct = (
+            get_live_change_pct(self.api, self.config.kosdaq_proxy_code)
+            if self.config.use_kosdaq_confirmation
+            else None
+        )
+        any_market_positive = (
+            primary_change_pct is not None and primary_change_pct > 0.0
+        ) or (
+            confirmation_change_pct is not None and confirmation_change_pct > 0.0
+        )
+        if any_market_positive:
+            self.state.intraday_cb_consecutive_triggers = 0
+            return False, False
+
+        triggered, cb_meta = detect_intraday_circuit_breaker(
+            self.api,
+            asof=today,
+            code=self.config.market_proxy_code,
+            one_bar_drop_pct=self.config.intraday_cb_1bar_drop_pct,
+            window_minutes=self.config.intraday_cb_window_minutes,
+            window_drop_pct=self.config.intraday_cb_window_drop_pct,
+            day_change_pct=self.config.intraday_cb_day_change_pct,
+            index_code=self.config.intraday_cb_index_code,
+            index_day_change_pct=self.config.intraday_cb_index_day_change_pct,
+        )
+        if not triggered:
+            self.state.intraday_cb_consecutive_triggers = 0
+            return False, False
+
+        if self.config.use_kosdaq_confirmation and confirmation_change_pct is None:
+            self.state.intraday_cb_consecutive_triggers = 0
+            logger.warning(
+                "INTRADAY CB PENDING date=%s code=%s confirmation=unavailable meta=%s",
+                today,
+                self.config.market_proxy_code,
+                cb_meta,
+            )
+            self._journal(
+                "INTRADAY_CB_PENDING",
+                asof_date=today,
+                code=self.config.market_proxy_code,
+                reason="CONFIRMATION_UNAVAILABLE",
+                confirmations=0,
+                confirmations_required=max(
+                    2,
+                    int(self.config.intraday_cb_confirmations_required),
+                ),
+            )
+            return False, True
+
+        required = max(2, int(self.config.intraday_cb_confirmations_required))
+        self.state.intraday_cb_consecutive_triggers = min(
+            required,
+            self.state.intraday_cb_consecutive_triggers + 1,
+        )
+        confirmations = self.state.intraday_cb_consecutive_triggers
+        if confirmations < required:
+            logger.warning(
+                "INTRADAY CB PENDING date=%s code=%s confirmations=%s/%s meta=%s",
+                today,
+                self.config.market_proxy_code,
+                confirmations,
+                required,
+                cb_meta,
+            )
+            self._journal(
+                "INTRADAY_CB_PENDING",
+                asof_date=today,
+                code=self.config.market_proxy_code,
+                reason=cb_meta.get("reason"),
+                confirmations=confirmations,
+                confirmations_required=required,
+                confirmation_change_pct=confirmation_change_pct,
+            )
+            return False, True
+
+        logger.warning(
+            "INTRADAY CB TRIGGERED date=%s code=%s confirmations=%s/%s meta=%s",
+            today,
+            self.config.market_proxy_code,
+            confirmations,
+            required,
+            cb_meta,
+        )
+        self._journal(
+            "INTRADAY_CB",
+            asof_date=today,
+            code=self.config.market_proxy_code,
+            index_code=cb_meta.get("index_code"),
+            reason=cb_meta.get("reason"),
+            confirmations=confirmations,
+            confirmations_required=required,
+            confirmation_change_pct=confirmation_change_pct,
+            day_change_pct=cb_meta.get("day_change_pct"),
+            index_day_change_pct=cb_meta.get("index_day_change_pct"),
+            last_bar_drop_pct=cb_meta.get("last_bar_drop_pct"),
+            window_drop_pct=cb_meta.get("window_drop_pct"),
+            window_minutes=cb_meta.get("window_minutes"),
+        )
+        return True, False
+
     def run_once(self, now: datetime | None = None) -> dict[str, object]:
         if not self._run_lock.acquire(blocking=False):
             return {"status": "SKIP", "reason": "RUN_ALREADY_IN_PROGRESS"}
@@ -295,43 +411,14 @@ class HybridTradingBot(
                 vol_threshold=self.config.regime_vol_threshold,
             )
 
-            if (
-                self.config.use_intraday_circuit_breaker
-                and regime != "RISK_OFF"
-                and (9, 0) <= (now.hour, now.minute) <= (15, 30)
-            ):
-                triggered, cb_meta = detect_intraday_circuit_breaker(
-                    self.api,
-                    asof=today,
-                    code=self.config.market_proxy_code,
-                    one_bar_drop_pct=self.config.intraday_cb_1bar_drop_pct,
-                    window_minutes=self.config.intraday_cb_window_minutes,
-                    window_drop_pct=self.config.intraday_cb_window_drop_pct,
-                    day_change_pct=self.config.intraday_cb_day_change_pct,
-                    index_code=self.config.intraday_cb_index_code,
-                    index_day_change_pct=self.config.intraday_cb_index_day_change_pct,
-                )
-                if triggered:
-                    regime = "RISK_OFF"
-                    detected_panic_date = today
-                    logger.warning(
-                        "INTRADAY CB TRIGGERED date=%s code=%s meta=%s",
-                        today,
-                        self.config.market_proxy_code,
-                        cb_meta,
-                    )
-                    self._journal(
-                        "INTRADAY_CB",
-                        asof_date=today,
-                        code=self.config.market_proxy_code,
-                        index_code=cb_meta.get("index_code"),
-                        reason=cb_meta.get("reason"),
-                        day_change_pct=cb_meta.get("day_change_pct"),
-                        index_day_change_pct=cb_meta.get("index_day_change_pct"),
-                        last_bar_drop_pct=cb_meta.get("last_bar_drop_pct"),
-                        window_drop_pct=cb_meta.get("window_drop_pct"),
-                        window_minutes=cb_meta.get("window_minutes"),
-                    )
+            cb_triggered, intraday_cb_pending = self._evaluate_intraday_circuit_breaker(
+                today=today,
+                now=now,
+                regime=regime,
+            )
+            if cb_triggered:
+                regime = "RISK_OFF"
+                detected_panic_date = today
 
             if detected_panic_date:
                 current_panic_date = self.state.last_panic_date
@@ -358,6 +445,9 @@ class HybridTradingBot(
                 self._notify_text(format_pass_message(reason, today))
                 self.state.state_recovery_required = False
                 self.state.state_recovery_reason = None
+
+            if intraday_cb_pending:
+                return self._pass_and_return("INTRADAY_CB_PENDING", now, regime=regime)
 
             news_signal = build_news_sentiment_signal(self.config)
             build_started_at = perf_counter()

@@ -241,6 +241,43 @@ def test_get_regime_releases_kospi_only_risk_off_when_kosdaq_quote_is_positive()
     assert regime == "RISK_ON"
     assert panic_date is None
 
+
+def test_get_regime_releases_cooldown_when_kosdaq_quote_is_positive() -> None:
+    asof = "20260511"
+    api = FakeAPI()
+    panic_closes = [float(100 + idx) for idx in range(77)] + [166.0, 168.0, 170.0]
+    api._bars[("069500", asof)] = _make_bars_from_closes(asof, panic_closes)
+    api._bars[("229200", asof)] = _make_bars_from_closes(asof, panic_closes)
+    api._quotes["069500"] = {"price": 170.0, "change_pct": -2.0}
+    api._quotes["229200"] = {"price": 170.0, "change_pct": 1.25}
+
+    regime, panic_date = get_regime(
+        api,
+        asof,
+        use_confirmation=True,
+        last_panic_date="20260508",
+    )
+
+    assert regime == "RISK_ON"
+    assert panic_date is None
+
+
+def test_get_regime_does_not_use_kosdaq_only_panic_as_market_risk_off() -> None:
+    asof = "20260511"
+    api = FakeAPI()
+    neutral_closes = [100.0] * 80
+    panic_closes = [float(100 + idx) for idx in range(77)] + [166.0, 168.0, 170.0]
+    api._bars[("069500", asof)] = _make_bars_from_closes(asof, neutral_closes)
+    api._bars[("229200", asof)] = _make_bars_from_closes(asof, panic_closes)
+    api._quotes["069500"] = {"price": 100.0, "change_pct": 0.0}
+    api._quotes["229200"] = {"price": 170.0, "change_pct": -5.5}
+
+    regime, panic_date = get_regime(api, asof, use_confirmation=True)
+
+    assert regime == "NEUTRAL"
+    assert panic_date is None
+
+
 def test_get_regime_requires_both_markets_for_confirmed_dual_risk_off() -> None:
     asof = "20260511"
     api = FakeAPI()
@@ -327,6 +364,7 @@ def test_bot_intraday_cb_forces_risk_off(tmp_path) -> None:
     api = IntradayAPI()
     api._bars[("069500", asof)] = _make_bars(asof, 80, 100.0, 1.0)
     api._intraday[("069500", asof)] = _make_intraday_bars(asof, [100.0, 100.4, 98.8])
+    api._quotes["229200"] = {"price": 100.0, "change_pct": -1.0}
 
     cfg = TradeEngineConfig(
         state_path=str(tmp_path / "state.json"),
@@ -335,14 +373,101 @@ def test_bot_intraday_cb_forces_risk_off(tmp_path) -> None:
         use_news_sentiment=False,
         use_intraday_circuit_breaker=True,
         intraday_cb_1bar_drop_pct=-1.0,
+        risk_off_parking_enabled=False,
     )
     bot = HybridTradingBot(api, config=cfg)
-    out = bot.run_once(now=datetime(2026, 3, 4, 10, 5))
+    first = bot.run_once(now=datetime(2026, 3, 4, 10, 5))
+
+    assert first == {"status": "PASS", "reason": "INTRADAY_CB_PENDING"}
+    assert bot.state.intraday_cb_consecutive_triggers == 1
+    assert bot.state.last_panic_date is None
+
+    bot.close()
+    bot = HybridTradingBot(api, config=cfg)
+    out = bot.run_once(now=datetime(2026, 3, 4, 10, 7))
 
     assert out["status"] == "OK"
     assert out["regime"] == "RISK_OFF"
     assert bot.state.last_panic_date == asof
+    assert bot.state.intraday_cb_consecutive_triggers == 2
     assert int(bot.state.pass_reasons_today.get("RISK_OFF", 0)) >= 1
+
+
+def test_bot_intraday_cb_is_cancelled_when_kosdaq_quote_is_positive(tmp_path) -> None:
+    class IntradayAPI(FakeAPI):
+        def __init__(self) -> None:
+            super().__init__()
+            self._intraday: dict[tuple[str, str], pd.DataFrame] = {}
+
+        def intraday_bars(self, code: str, asof: str, lookback: int = 120) -> pd.DataFrame:
+            del lookback
+            return self._intraday.get((code, asof), pd.DataFrame())
+
+    asof = "20260304"
+    api = IntradayAPI()
+    api._bars[("069500", asof)] = _make_bars(asof, 80, 100.0, 1.0)
+    api._bars[("229200", asof)] = _make_bars(asof, 80, 100.0, 1.0)
+    api._intraday[("069500", asof)] = _make_intraday_bars(asof, [100.0, 100.4, 98.8])
+    api._quotes["069500"] = {"price": 98.8, "change_pct": -3.5}
+    api._quotes["229200"] = {"price": 180.0, "change_pct": 1.25}
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        use_news_sentiment=False,
+        use_intraday_circuit_breaker=True,
+        intraday_cb_1bar_drop_pct=-1.0,
+        risk_off_parking_enabled=False,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+
+    out = bot.run_once(now=datetime(2026, 3, 4, 10, 5))
+
+    assert out["status"] == "OK"
+    assert out["regime"] == "RISK_ON"
+    assert bot.state.intraday_cb_consecutive_triggers == 0
+    assert bot.state.last_panic_date is None
+
+
+def test_bot_intraday_cb_blocks_entries_when_kosdaq_quote_is_unavailable(tmp_path) -> None:
+    class IntradayAPI(FakeAPI):
+        def __init__(self) -> None:
+            super().__init__()
+            self._intraday: dict[tuple[str, str], pd.DataFrame] = {}
+
+        def intraday_bars(self, code: str, asof: str, lookback: int = 120) -> pd.DataFrame:
+            del lookback
+            return self._intraday.get((code, asof), pd.DataFrame())
+
+        def quote(self, code: str) -> dict:
+            if code == "229200":
+                raise RuntimeError("kosdaq quote unavailable")
+            return super().quote(code)
+
+    asof = "20260304"
+    api = IntradayAPI()
+    api._bars[("069500", asof)] = _make_bars(asof, 80, 100.0, 1.0)
+    api._intraday[("069500", asof)] = _make_intraday_bars(asof, [100.0, 100.4, 98.8])
+
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        use_news_sentiment=False,
+        use_intraday_circuit_breaker=True,
+        intraday_cb_1bar_drop_pct=-1.0,
+        risk_off_parking_enabled=False,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+
+    out = bot.run_once(now=datetime(2026, 3, 4, 10, 5))
+
+    assert out == {"status": "PASS", "reason": "INTRADAY_CB_PENDING"}
+    assert bot.state.intraday_cb_consecutive_triggers == 0
+    assert bot.state.last_panic_date is None
+    assert api.order_calls == []
+
 
 def test_runtime_loads_position_limit_overrides_from_env() -> None:
     with patch.dict(
