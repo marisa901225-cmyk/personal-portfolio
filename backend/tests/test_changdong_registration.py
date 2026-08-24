@@ -96,7 +96,7 @@ async def test_analyze_registration_notice_uses_gpt56_vision() -> None:
 
 
 @pytest.mark.asyncio
-async def test_daily_reminder_analyzes_and_sends_every_run(
+async def test_daily_reminder_reuses_analysis_until_notice_or_image_changes(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
@@ -132,12 +132,64 @@ async def test_daily_reminder_analyzes_and_sends_every_run(
 
     assert first.notice_id == 2460
     assert second.notice_id == 2460
-    assert llm.generate_paid_chat.call_count == 2
+    assert llm.generate_paid_chat.call_count == 1
     assert send.await_count == 2
     assert "엄마 강좌" in send.await_args.args[0]
     state = json.loads(state_path.read_text(encoding="utf-8"))
     assert state["notice_id"] == 2460
     assert state["model"] == "gpt-5.6"
+
+
+@pytest.mark.asyncio
+async def test_changed_image_url_triggers_new_vision_analysis(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    notice_url = (
+        "https://www.dobongsiseol.or.kr/xs_board/"
+        "board_content.html?num=2460"
+    )
+    old_image_url = "https://www.dobongsiseol.or.kr/rx99/rxPhotos/old.jpg"
+    new_image_url = "https://www.dobongsiseol.or.kr/rx99/rxPhotos/new.jpg"
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "notice_id": 2460,
+                "image_url": old_image_url,
+                "analysis": "이전 분석",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    client = _FakeClient(
+        {
+            monitor.NOTICE_LIST_URL: _notice_page(
+                (2460, "2026년 8월 재등록 접수일 안내")
+            ),
+            notice_url: f'<img src="{new_image_url}">',
+            new_image_url: b"new-image-bytes",
+        }
+    )
+    llm = MagicMock()
+    llm.generate_paid_chat.return_value = "변경된 이미지 분석"
+    monkeypatch.setattr(
+        monitor,
+        "send_telegram_message",
+        AsyncMock(return_value=True),
+    )
+
+    await monitor.send_daily_changdong_registration_reminder(
+        state_path=state_path,
+        client=client,
+        llm=llm,
+    )
+
+    llm.generate_paid_chat.assert_called_once()
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["image_url"] == new_image_url
+    assert state["analysis"] == "변경된 이미지 분석"
 
 
 @pytest.mark.asyncio

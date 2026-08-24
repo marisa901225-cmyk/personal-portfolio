@@ -181,6 +181,24 @@ async def analyze_registration_notice(
     return analysis
 
 
+def _load_cached_analysis(
+    state_path: Path,
+    notice: RegistrationNotice,
+    image_url: str,
+) -> Optional[str]:
+    if not state_path.exists():
+        return None
+
+    payload = json.loads(state_path.read_text(encoding="utf-8"))
+    if payload.get("notice_id") != notice.notice_id:
+        return None
+    if payload.get("image_url") != image_url:
+        return None
+
+    analysis = str(payload.get("analysis") or "").strip()
+    return analysis or None
+
+
 def _save_analysis_state(
     state_path: Path,
     notice: RegistrationNotice,
@@ -228,13 +246,22 @@ async def send_daily_changdong_registration_reminder(
 ) -> RegistrationNotice:
     notice = await fetch_latest_registration_notice(client)
     image_url = await fetch_notice_image_url(notice, client)
-    image_data_url = await fetch_notice_image_data_url(image_url, client)
-    analysis = await analyze_registration_notice(
-        notice,
-        image_data_url,
-        model=model,
-        llm=llm,
-    )
+    analysis = _load_cached_analysis(state_path, notice, image_url)
+    analyzed_now = analysis is None
+
+    if analyzed_now:
+        image_data_url = await fetch_notice_image_data_url(image_url, client)
+        analysis = await analyze_registration_notice(
+            notice,
+            image_data_url,
+            model=model,
+            llm=llm,
+        )
+    else:
+        logger.info(
+            "Reusing cached Changdong registration analysis: notice_id=%s",
+            notice.notice_id,
+        )
 
     sent = await send_telegram_message(
         _build_notification_message(notice, analysis),
@@ -243,10 +270,12 @@ async def send_daily_changdong_registration_reminder(
     if not sent:
         raise RuntimeError("창동문화체육센터 재등록 알림 텔레그램 발송에 실패했습니다.")
 
-    _save_analysis_state(state_path, notice, image_url, analysis)
+    if analyzed_now:
+        _save_analysis_state(state_path, notice, image_url, analysis)
     logger.info(
-        "Daily Changdong registration reminder sent: notice_id=%s model=%s",
+        "Daily Changdong registration reminder sent: notice_id=%s model=%s analyzed_now=%s",
         notice.notice_id,
         model,
+        analyzed_now,
     )
     return notice
