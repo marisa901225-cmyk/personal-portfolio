@@ -15,7 +15,7 @@ class _FakeResponse:
 
 
 class _FakeClient:
-    def __init__(self, responses: dict[str, str]) -> None:
+    def __init__(self, responses: dict[str, str | bytes]) -> None:
         self._responses = responses
         self.calls = []
 
@@ -24,97 +24,75 @@ class _FakeClient:
         return _FakeResponse(self._responses[url])
 
 
-def _notice_page(*rows: tuple[int, str]) -> str:
-    return "".join(
-        f'<a href="./board_content.html?num={notice_id}">{title}</a>'
-        for notice_id, title in rows
-    )
+def _popup_page(*paths: str) -> str:
+    return "".join(f'<img src="{path}">' for path in paths)
 
 
-def test_parse_registration_notices_filters_and_deduplicates() -> None:
-    page = _notice_page(
-        (2461, "2026년 8월 신규 접수 안내"),
-        (2460, "2026년 8월 재등록 접수일 안내"),
-        (2460, "2026년 8월 재등록 접수일 안내"),
-        (2439, "2026년 7월 재등록 접수일 안내"),
-    )
-
-    notices = monitor.parse_registration_notices(page)
-
-    assert [notice.notice_id for notice in notices] == [2460, 2439]
-    assert notices[0].url.endswith("/xs_board/board_content.html?num=2460")
-
-
-def test_extract_notice_image_url_prefers_notice_content_image() -> None:
-    detail_html = (
+def test_parse_popup_image_urls_keeps_only_active_sport_popups() -> None:
+    page = (
         '<img src="/images/common/logo.png">'
-        '<img src="https://www.dobongsiseol.or.kr/rx99/rxPhotos/notice.jpg">'
-        '<img src="/image_up/attachment.jpg">'
+        + _popup_page(
+            "/layerpopup/images/sport/sport_260806.png",
+            "/layerpopup/images/sport/sport_260730.jpg",
+            "/layerpopup/images/sport/sport_260730.jpg",
+        )
     )
 
-    image_url = monitor.extract_notice_image_url(
-        detail_html,
-        "https://www.dobongsiseol.or.kr/xs_board/board_content.html?num=2460",
-    )
+    urls = monitor.parse_popup_image_urls(page)
 
-    assert image_url.endswith("/rx99/rxPhotos/notice.jpg")
+    assert urls == (
+        "https://www.dobongsiseol.or.kr/layerpopup/images/sport/sport_260730.jpg",
+        "https://www.dobongsiseol.or.kr/layerpopup/images/sport/sport_260806.png",
+    )
 
 
 @pytest.mark.asyncio
-async def test_fetch_notice_image_data_url_encodes_downloaded_image() -> None:
-    image_url = "https://example.com/notice.jpg"
-    client = _FakeClient({image_url: b"image-bytes"})
-
-    data_url = await monitor.fetch_notice_image_data_url(image_url, client)
-
-    assert data_url.startswith("data:image/jpeg;base64,")
-    assert not data_url.endswith("image-bytes")
-
-
-@pytest.mark.asyncio
-async def test_analyze_registration_notice_uses_gpt56_vision() -> None:
-    notice = monitor.RegistrationNotice(
-        notice_id=2460,
-        title="2026년 8월 재등록 접수일 안내",
-        url="https://example.com/notice",
+async def test_analyze_popup_snapshot_sends_all_images_to_gpt56() -> None:
+    snapshot = monitor.PopupSnapshot(
+        image_urls=(
+            "https://example.com/sport_1.jpg",
+            "https://example.com/sport_2.png",
+        )
     )
     llm = MagicMock()
-    llm.generate_paid_chat.return_value = "재등록 접수: 7월 15일 오전 9시"
+    llm.generate_paid_chat.return_value = "9월 재등록은 8월 18일부터 24일까지입니다."
 
-    result = await monitor.analyze_registration_notice(
-        notice,
-        "data:image/jpeg;base64,AAAA",
+    result = await monitor.analyze_popup_snapshot(
+        snapshot,
+        [
+            (snapshot.image_urls[0], "data:image/jpeg;base64,AAAA"),
+            (snapshot.image_urls[1], "data:image/png;base64,BBBB"),
+        ],
         llm=llm,
     )
 
-    assert "7월 15일" in result
+    assert "8월 18일" in result
     _, kwargs = llm.generate_paid_chat.call_args
     assert kwargs["model"] == "gpt-5.6"
     content = llm.generate_paid_chat.call_args.args[0][0]["content"]
-    image_part = next(part for part in content if part["type"] == "image_url")
-    assert image_part["image_url"]["url"] == "data:image/jpeg;base64,AAAA"
+    image_parts = [part for part in content if part["type"] == "image_url"]
+    assert len(image_parts) == 2
 
 
 @pytest.mark.asyncio
-async def test_daily_reminder_reuses_analysis_until_notice_or_image_changes(
+async def test_daily_reminder_reuses_analysis_until_popup_urls_change(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    notice_url = (
-        "https://www.dobongsiseol.or.kr/xs_board/"
-        "board_content.html?num=2460"
+    first_image = (
+        "https://www.dobongsiseol.or.kr/"
+        "layerpopup/images/sport/sport_260730.jpg"
     )
     client = _FakeClient(
         {
-            monitor.NOTICE_LIST_URL: _notice_page(
-                (2460, "2026년 8월 재등록 접수일 안내")
+            monitor.POPUP_PAGE_URL: _popup_page(
+                "/layerpopup/images/sport/sport_260730.jpg"
             ),
-            notice_url: '<img src="/rx99/rxPhotos/notice.jpg">',
-            "https://www.dobongsiseol.or.kr/rx99/rxPhotos/notice.jpg": b"image-bytes",
+            first_image: b"image-bytes",
         }
     )
     llm = MagicMock()
-    llm.generate_paid_chat.return_value = "재등록 접수는 7월 15일 오전 9시입니다."
+    llm.generate_paid_chat.return_value = "9월 재등록은 8월 18일부터 24일까지입니다."
     send = AsyncMock(return_value=True)
     monkeypatch.setattr(monitor, "send_telegram_message", send)
     state_path = tmp_path / "state.json"
@@ -130,33 +108,26 @@ async def test_daily_reminder_reuses_analysis_until_notice_or_image_changes(
         llm=llm,
     )
 
-    assert first.notice_id == 2460
-    assert second.notice_id == 2460
+    assert first == second
     assert llm.generate_paid_chat.call_count == 1
     assert send.await_count == 2
     assert "엄마 강좌" in send.await_args.args[0]
     state = json.loads(state_path.read_text(encoding="utf-8"))
-    assert state["notice_id"] == 2460
-    assert state["model"] == "gpt-5.6"
+    assert state["popup_image_urls"] == [first_image]
 
 
 @pytest.mark.asyncio
-async def test_changed_image_url_triggers_new_vision_analysis(
+async def test_changed_popup_url_triggers_new_vision_analysis(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    notice_url = (
-        "https://www.dobongsiseol.or.kr/xs_board/"
-        "board_content.html?num=2460"
-    )
-    old_image_url = "https://www.dobongsiseol.or.kr/rx99/rxPhotos/old.jpg"
-    new_image_url = "https://www.dobongsiseol.or.kr/rx99/rxPhotos/new.jpg"
+    old_image = "https://www.dobongsiseol.or.kr/layerpopup/images/sport/old.jpg"
+    new_image = "https://www.dobongsiseol.or.kr/layerpopup/images/sport/new.jpg"
     state_path = tmp_path / "state.json"
     state_path.write_text(
         json.dumps(
             {
-                "notice_id": 2460,
-                "image_url": old_image_url,
+                "popup_image_urls": [old_image],
                 "analysis": "이전 분석",
             },
             ensure_ascii=False,
@@ -165,15 +136,14 @@ async def test_changed_image_url_triggers_new_vision_analysis(
     )
     client = _FakeClient(
         {
-            monitor.NOTICE_LIST_URL: _notice_page(
-                (2460, "2026년 8월 재등록 접수일 안내")
+            monitor.POPUP_PAGE_URL: _popup_page(
+                "/layerpopup/images/sport/new.jpg"
             ),
-            notice_url: f'<img src="{new_image_url}">',
-            new_image_url: b"new-image-bytes",
+            new_image: b"new-image-bytes",
         }
     )
     llm = MagicMock()
-    llm.generate_paid_chat.return_value = "변경된 이미지 분석"
+    llm.generate_paid_chat.return_value = "변경된 팝업 분석"
     monkeypatch.setattr(
         monitor,
         "send_telegram_message",
@@ -188,8 +158,8 @@ async def test_changed_image_url_triggers_new_vision_analysis(
 
     llm.generate_paid_chat.assert_called_once()
     state = json.loads(state_path.read_text(encoding="utf-8"))
-    assert state["image_url"] == new_image_url
-    assert state["analysis"] == "변경된 이미지 분석"
+    assert state["popup_image_urls"] == [new_image]
+    assert state["analysis"] == "변경된 팝업 분석"
 
 
 @pytest.mark.asyncio
@@ -197,17 +167,13 @@ async def test_failed_send_does_not_write_state(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    notice_url = (
-        "https://www.dobongsiseol.or.kr/xs_board/"
-        "board_content.html?num=2460"
-    )
+    image_url = "https://www.dobongsiseol.or.kr/layerpopup/images/sport/new.jpg"
     client = _FakeClient(
         {
-            monitor.NOTICE_LIST_URL: _notice_page(
-                (2460, "2026년 8월 재등록 접수일 안내")
+            monitor.POPUP_PAGE_URL: _popup_page(
+                "/layerpopup/images/sport/new.jpg"
             ),
-            notice_url: '<img src="/rx99/rxPhotos/notice.jpg">',
-            "https://www.dobongsiseol.or.kr/rx99/rxPhotos/notice.jpg": b"image-bytes",
+            image_url: b"new-image-bytes",
         }
     )
     llm = MagicMock()

@@ -264,11 +264,10 @@ async def job_send_changdong_registration_reminder():
     with SessionLocal() as db:
         async with monitor_job_async("changdong_registration_reminder", db):
             logger.info("Starting daily Changdong registration reminder...")
-            notice = await send_daily_changdong_registration_reminder()
+            snapshot = await send_daily_changdong_registration_reminder()
             logger.info(
-                "Daily Changdong registration reminder delivered: id=%s title=%s",
-                notice.notice_id,
-                notice.title,
+                "Daily Changdong registration reminder delivered: popup_count=%s",
+                len(snapshot.image_urls),
             )
 
 
