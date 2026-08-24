@@ -133,7 +133,7 @@ class EconomyServiceFormatSnapshotTests(unittest.TestCase):
         self.assertIn("- 코스닥(20260307): <b>740.10</b>", formatted)
         self.assertNotIn("20260306", formatted)
 
-    def test_format_snapshot_keeps_today_and_yesterday_for_comparison(self):
+    def test_format_snapshot_omits_zero_change_for_premarket_row(self):
         snapshot = {
             "us": {},
             "kr": {
@@ -160,7 +160,9 @@ class EconomyServiceFormatSnapshotTests(unittest.TestCase):
 
         formatted = EconomyService.format_snapshot_for_llm(snapshot)
 
-        self.assertIn("- 코스피(20260312): <b>5609.95</b> (전일대비 +0.00, +0.00%)", formatted)
+        self.assertIn("- 코스피(20260312): <b>5609.95</b>", formatted)
+        self.assertNotIn("전일대비 +0.00", formatted)
+        self.assertNotIn("+0.00%", formatted)
         self.assertIn("- 코스피(20260311): <b>5609.95</b> (전일대비 +77.36, +1.40%)", formatted)
 
     def test_format_snapshot_can_skip_intraday_kr_indices_for_premarket(self):

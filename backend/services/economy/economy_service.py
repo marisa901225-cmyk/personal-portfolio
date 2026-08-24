@@ -296,9 +296,9 @@ class EconomyService:
                 continue
 
             detail = []
-            if delta is not None:
+            if delta is not None and round(delta, 2) != 0:
                 detail.append(f"전일대비 {delta:+.2f}")
-            if pct is not None:
+            if pct is not None and round(pct, 2) != 0:
                 detail.append(f"{pct:+.2f}%")
             detail_str = f" ({', '.join(detail)})" if detail else ""
             date_label = str(date).strip() if date else "날짜미상"
