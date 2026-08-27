@@ -36,7 +36,7 @@ def test_archive_sync_scheduler_log_keeps_high_signal_events_and_trims_file(tmp_
                 '2026-04-21 15:50:00,462 - backend.services.alarm.filters - INFO - LLM classified as SPAM: [문피아] 테스트...',
                 '{"timestamp": "2026-04-21 16:05:00,466", "level": "ERROR", "logger": "sync_prices_scheduler", "message": "Alarm processing job failed: boom"}',
                 '{"timestamp": "2026-04-21 16:10:00,050", "level": "INFO", "logger": "backend.services.alarm.random_topic_service", "message": "Generating random wisdom (Attempt 1/2)..."}',
-                '{"timestamp": "2026-04-21 16:12:00,000", "level": "INFO", "logger": "sync_prices_scheduler", "message": "KODEX KOSPI100 daily warning sent=False"}',
+                '{"timestamp": "2026-04-21 16:12:00,000", "level": "INFO", "logger": "sync_prices_scheduler", "message": "Market prices synced successfully. Tickers: 42"}',
             ]
         )
         + "\n",
@@ -71,7 +71,7 @@ def test_archive_sync_scheduler_log_keeps_high_signal_events_and_trims_file(tmp_
     ]
     assert log_path.read_text(encoding="utf-8").splitlines() == [
         '{"timestamp": "2026-04-21 16:10:00,050", "level": "INFO", "logger": "backend.services.alarm.random_topic_service", "message": "Generating random wisdom (Attempt 1/2)..."}',
-        '{"timestamp": "2026-04-21 16:12:00,000", "level": "INFO", "logger": "sync_prices_scheduler", "message": "KODEX KOSPI100 daily warning sent=False"}',
+        '{"timestamp": "2026-04-21 16:12:00,000", "level": "INFO", "logger": "sync_prices_scheduler", "message": "Market prices synced successfully. Tickers: 42"}',
     ]
 
     engine.dispose()

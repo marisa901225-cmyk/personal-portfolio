@@ -27,8 +27,6 @@ _HIGH_SIGNAL_INFO_PATTERNS = (
     "DB Backup completed successfully",
     "Rate change alert sent.",
     "No rate changes detected.",
-    "KODEX KOSPI100 daily warning sent=",
-    "KODEX KOSPI100 weekly confirmation sent=",
     "LLM classified as SPAM:",
     "Spam filtered by DB rule",
     "Election/Political spam filtered:",
