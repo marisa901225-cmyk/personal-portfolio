@@ -56,7 +56,40 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _raise_for_status_with_kis_detail(
+    response: requests.Response,
+    data: dict[str, Any] | None,
+) -> None:
+    try:
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as exc:
+        payload = data if isinstance(data, dict) else {}
+        rt_cd = str(payload.get("rt_cd") or "").strip()
+        msg_cd = str(payload.get("msg_cd") or "").strip()
+        msg1 = str(payload.get("msg1") or "").strip()
+        details = " ".join(
+            part
+            for part in (
+                f"rt_cd={rt_cd}" if rt_cd else "",
+                f"msg_cd={msg_cd}" if msg_cd else "",
+                f"msg1={msg1}" if msg1 else "",
+            )
+            if part
+        )
+        if not details:
+            raise
+        raise requests.exceptions.HTTPError(
+            f"{exc}; KIS response: {details}",
+            response=response,
+            request=getattr(response, "request", None),
+        ) from exc
+
+
 _KIS_HTTP_PATH_MIN_GAP_SEC = {
+    "/uapi/domestic-stock/v1/trading/inquire-balance": _env_float(
+        "KIS_BALANCE_MIN_GAP_SEC",
+        1.0,
+    ),
     "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice": _env_float(
         "KIS_DAILY_CHART_MIN_GAP_SEC",
         0.12,
@@ -480,7 +513,7 @@ class KISTradingBase:
                     force_refreshed = True
                     continue
 
-                res.raise_for_status()
+                _raise_for_status_with_kis_detail(res, data)
                 if not isinstance(data, dict):
                     data = res.json()
                 if data.get("rt_cd") != "0":

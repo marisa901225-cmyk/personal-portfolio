@@ -348,13 +348,16 @@ class KISTradingAdapterTests(unittest.TestCase):
             "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
         )
 
-    def test_throttle_path_min_gap_skips_non_target_paths(self) -> None:
+    def test_throttle_path_min_gap_applies_to_balance_path(self) -> None:
         api = object.__new__(KISTradingAPI)
 
         with patch("backend.integrations.kis.trading_adapter.throttle_rest_min_gap") as gap_mock:
             api._throttle_path_min_gap("/uapi/domestic-stock/v1/trading/inquire-balance")
 
-        gap_mock.assert_not_called()
+        gap_mock.assert_called_once_with(
+            scope="kis_get:/uapi/domestic-stock/v1/trading/inquire-balance",
+            min_gap_sec=1.0,
+        )
 
     def test_throttle_path_min_gap_applies_to_quote_path(self) -> None:
         api = object.__new__(KISTradingAPI)
@@ -413,6 +416,39 @@ class KISTradingAdapterTests(unittest.TestCase):
 
         self.assertEqual(api._session.get.call_count, 1)
         sleep_mock.assert_not_called()
+
+    def test_get_preserves_kis_error_details_in_http_error(self) -> None:
+        api = object.__new__(KISTradingAPI)
+        api._core = Mock()
+        api._base_url = Mock(return_value="https://example.test")
+        api._headers = Mock(return_value={"Authorization": "Bearer token"})
+        api._rest_throttle = Mock()
+        api._throttle_path_min_gap = Mock()
+
+        response = Mock()
+        response.status_code = 500
+        response.request = Mock()
+        response.json.return_value = {
+            "rt_cd": "1",
+            "msg_cd": "EGW00304",
+            "msg1": "고객식별키가 유효하지 않습니다.",
+        }
+        response.raise_for_status.side_effect = requests.exceptions.HTTPError(
+            "500 Server Error",
+            response=response,
+        )
+
+        api._session = Mock()
+        api._session.get.return_value = response
+
+        with patch("backend.integrations.kis.trading_adapter.time.sleep"):
+            with self.assertRaisesRegex(
+                requests.exceptions.HTTPError,
+                "msg_cd=EGW00304 msg1=고객식별키가 유효하지 않습니다",
+            ):
+                api._get("/path", "TRID", {"a": "b"})
+
+        self.assertEqual(api._session.get.call_count, 3)
 
     def test_get_force_reauths_once_on_expired_token_response(self) -> None:
         api = object.__new__(KISTradingAPI)
