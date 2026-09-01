@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -46,8 +47,61 @@ def test_parse_popup_image_urls_keeps_only_active_sport_popups() -> None:
     )
 
 
+def test_filter_unexpired_registration_sections_removes_past_course_month() -> None:
+    analysis = (
+        "- **9월 강좌** 재등록 기간: **2026년 8월 18일~8월 24일**.\n"
+        "- 9월 신규접수: **도봉구민 8월 26일**, **타구민 8월 27일**.\n"
+        "- 9월 유의사항: 모든 강좌 반 변경 불가.\n"
+        "- **10월 강좌** 재등록 기간: **2026년 9월 14일~9월 19일**.\n"
+        "- 10월 신규접수: **도봉구민 9월 29일**, **타구민 9월 30일**."
+    )
+
+    filtered = monitor._filter_unexpired_registration_sections(
+        analysis,
+        today=date(2026, 9, 2),
+    )
+
+    assert filtered is not None
+    assert "9월 강좌" not in filtered
+    assert "9월 신규접수" not in filtered
+    assert "9월 유의사항" not in filtered
+    assert "10월 강좌" in filtered
+    assert "10월 신규접수" in filtered
+
+
+@pytest.mark.parametrize(
+    ("today", "expected"),
+    (
+        (date(2026, 8, 24), True),
+        (date(2026, 8, 25), False),
+    ),
+)
+def test_filter_unexpired_registration_sections_includes_end_date(
+    today: date,
+    expected: bool,
+) -> None:
+    analysis = "- **9월 강좌** 재등록 기간: **2026년 8월 18일부터 24일까지**입니다."
+
+    filtered = monitor._filter_unexpired_registration_sections(
+        analysis,
+        today=today,
+    )
+
+    assert (filtered is not None) is expected
+
+
+def test_filter_unexpired_registration_sections_requires_end_date() -> None:
+    with pytest.raises(ValueError, match="재등록 종료일을 찾지 못했습니다"):
+        monitor._filter_unexpired_registration_sections(
+            "- **10월 강좌** 재등록 일정은 팝업을 확인해 주세요.",
+            today=date(2026, 9, 2),
+        )
+
+
 @pytest.mark.asyncio
-async def test_analyze_popup_snapshot_sends_all_images_to_gpt56() -> None:
+async def test_analyze_popup_snapshot_sends_all_images_to_gpt56(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     snapshot = monitor.PopupSnapshot(
         image_urls=(
             "https://example.com/sport_1.jpg",
@@ -56,6 +110,11 @@ async def test_analyze_popup_snapshot_sends_all_images_to_gpt56() -> None:
     )
     llm = MagicMock()
     llm.generate_paid_chat.return_value = "9월 재등록은 8월 18일부터 24일까지입니다."
+
+    async def run_inline(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(monitor.asyncio, "to_thread", run_inline)
 
     result = await monitor.analyze_popup_snapshot(
         snapshot,
@@ -91,29 +150,73 @@ async def test_daily_reminder_reuses_analysis_until_popup_urls_change(
             first_image: b"image-bytes",
         }
     )
-    llm = MagicMock()
-    llm.generate_paid_chat.return_value = "9월 재등록은 8월 18일부터 24일까지입니다."
+    analyze = AsyncMock(
+        return_value=(
+            "- **10월 강좌** 재등록 기간: "
+            "**2026년 9월 14일부터 19일까지**입니다."
+        )
+    )
     send = AsyncMock(return_value=True)
+    monkeypatch.setattr(monitor, "analyze_popup_snapshot", analyze)
     monkeypatch.setattr(monitor, "send_telegram_message", send)
     state_path = tmp_path / "state.json"
 
     first = await monitor.send_daily_changdong_registration_reminder(
         state_path=state_path,
         client=client,
-        llm=llm,
+        current_date=date(2026, 9, 2),
     )
     second = await monitor.send_daily_changdong_registration_reminder(
         state_path=state_path,
         client=client,
-        llm=llm,
+        current_date=date(2026, 9, 2),
     )
 
     assert first == second
-    assert llm.generate_paid_chat.call_count == 1
+    assert analyze.await_count == 1
     assert send.await_count == 2
     assert "엄마 강좌" in send.await_args.args[0]
     state = json.loads(state_path.read_text(encoding="utf-8"))
     assert state["popup_image_urls"] == [first_image]
+
+
+@pytest.mark.asyncio
+async def test_daily_reminder_skips_send_when_registration_period_expired(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    image_url = "https://www.dobongsiseol.or.kr/layerpopup/images/sport/old.jpg"
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "popup_image_urls": [image_url],
+                "analysis": (
+                    "- **9월 강좌** 재등록 기간: "
+                    "**2026년 8월 18일부터 24일까지**입니다."
+                ),
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    client = _FakeClient(
+        {
+            monitor.POPUP_PAGE_URL: _popup_page(
+                "/layerpopup/images/sport/old.jpg"
+            ),
+        }
+    )
+    send = AsyncMock(return_value=True)
+    monkeypatch.setattr(monitor, "send_telegram_message", send)
+
+    await monitor.send_daily_changdong_registration_reminder(
+        state_path=state_path,
+        client=client,
+        current_date=date(2026, 9, 2),
+    )
+
+    send.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -142,8 +245,13 @@ async def test_changed_popup_url_triggers_new_vision_analysis(
             new_image: b"new-image-bytes",
         }
     )
-    llm = MagicMock()
-    llm.generate_paid_chat.return_value = "변경된 팝업 분석"
+    analyze = AsyncMock(
+        return_value=(
+            "- **10월 강좌** 재등록 기간: "
+            "**2026년 9월 14일부터 19일까지**입니다."
+        )
+    )
+    monkeypatch.setattr(monitor, "analyze_popup_snapshot", analyze)
     monkeypatch.setattr(
         monitor,
         "send_telegram_message",
@@ -153,13 +261,13 @@ async def test_changed_popup_url_triggers_new_vision_analysis(
     await monitor.send_daily_changdong_registration_reminder(
         state_path=state_path,
         client=client,
-        llm=llm,
+        current_date=date(2026, 9, 2),
     )
 
-    llm.generate_paid_chat.assert_called_once()
+    analyze.assert_awaited_once()
     state = json.loads(state_path.read_text(encoding="utf-8"))
     assert state["popup_image_urls"] == [new_image]
-    assert state["analysis"] == "변경된 팝업 분석"
+    assert "10월 강좌" in state["analysis"]
 
 
 @pytest.mark.asyncio
@@ -176,8 +284,13 @@ async def test_failed_send_does_not_write_state(
             image_url: b"new-image-bytes",
         }
     )
-    llm = MagicMock()
-    llm.generate_paid_chat.return_value = "재등록 일정"
+    analyze = AsyncMock(
+        return_value=(
+            "- **10월 강좌** 재등록 기간: "
+            "**2026년 9월 14일부터 19일까지**입니다."
+        )
+    )
+    monkeypatch.setattr(monitor, "analyze_popup_snapshot", analyze)
     monkeypatch.setattr(
         monitor,
         "send_telegram_message",
@@ -189,7 +302,7 @@ async def test_failed_send_does_not_write_state(
         await monitor.send_daily_changdong_registration_reminder(
             state_path=state_path,
             client=client,
-            llm=llm,
+            current_date=date(2026, 9, 2),
         )
 
     assert not state_path.exists()

@@ -256,7 +256,7 @@ async def job_check_index_oversold():
 
 
 async def job_send_changdong_registration_reminder():
-    """아침 브리핑 전에 최신 재등록 공지 이미지를 비전 분석해 매일 알린다."""
+    """아침 브리핑 전에 최신 재등록 공지에서 유효한 일정만 알린다."""
     from backend.services.changdong_registration import (
         send_daily_changdong_registration_reminder,
     )
@@ -266,7 +266,7 @@ async def job_send_changdong_registration_reminder():
             logger.info("Starting daily Changdong registration reminder...")
             snapshot = await send_daily_changdong_registration_reminder()
             logger.info(
-                "Daily Changdong registration reminder delivered: popup_count=%s",
+                "Daily Changdong registration reminder processed: popup_count=%s",
                 len(snapshot.image_urls),
             )
 

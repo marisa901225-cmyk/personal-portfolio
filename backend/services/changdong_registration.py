@@ -7,7 +7,7 @@ import mimetypes
 import os
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urljoin
@@ -32,6 +32,14 @@ VISION_MODEL = os.getenv("CHANGDONG_REGISTRATION_VISION_MODEL", "gpt-5.6").strip
 _POPUP_IMAGE_RE = re.compile(
     r"""<img\s+[^>]*src=["'](?P<src>/layerpopup/images/sport/[^"']+)["'][^>]*>""",
     re.IGNORECASE,
+)
+_COURSE_MONTH_LINE_RE = re.compile(
+    r"^\s*[-*]?\s*(?:\*\*)?(?P<month>1[0-2]|[1-9])월(?=\s|\*)",
+)
+_SCHEDULE_DATE_RE = re.compile(
+    r"(?:(?P<year>\d{4})년\s*)?"
+    r"(?:(?P<month>1[0-2]|[1-9])월\s*)?"
+    r"(?P<day>3[01]|[12]\d|[1-9])일",
 )
 
 
@@ -133,6 +141,7 @@ async def analyze_popup_snapshot(
                 "도봉구민/타구민 신규접수 날짜와 시간, 꼭 알아야 할 유의사항을 "
                 "한국어 4~8줄로 정확히 정리하세요. 같은 일정이 여러 이미지에 있으면 "
                 "정보를 합쳐 가장 구체적인 내용으로 한 번만 정리하세요. "
+                "각 대상 월의 첫 줄에는 재등록 시작일과 종료일을 연도까지 포함해 적으세요. "
                 "이미지에 없는 내용은 추측하지 마세요."
             ),
         }
@@ -213,12 +222,87 @@ def _build_notification_message(analysis: str) -> str:
     )
 
 
+def _registration_end_date(
+    lines: list[str],
+    *,
+    today: date,
+) -> Optional[date]:
+    parsed_dates: list[date] = []
+
+    for line in lines:
+        if "재등록" not in line:
+            continue
+
+        inferred_year = today.year
+        inferred_month: Optional[int] = None
+        for match in _SCHEDULE_DATE_RE.finditer(line):
+            explicit_year = match.group("year")
+            explicit_month = match.group("month")
+            if explicit_year:
+                inferred_year = int(explicit_year)
+            if explicit_month:
+                month = int(explicit_month)
+                if (
+                    not explicit_year
+                    and inferred_month is not None
+                    and month < inferred_month
+                ):
+                    inferred_year += 1
+                inferred_month = month
+            if inferred_month is None:
+                continue
+
+            try:
+                parsed_dates.append(
+                    date(inferred_year, inferred_month, int(match.group("day")))
+                )
+            except ValueError:
+                logger.warning("Invalid Changdong registration date line: %s", line)
+                return None
+
+    return max(parsed_dates) if parsed_dates else None
+
+
+def _filter_unexpired_registration_sections(
+    analysis: str,
+    *,
+    today: date,
+) -> Optional[str]:
+    sections: list[tuple[int, list[str]]] = []
+
+    for line in analysis.splitlines():
+        month_match = _COURSE_MONTH_LINE_RE.match(line)
+        if month_match:
+            course_month = int(month_match.group("month"))
+            if not sections or sections[-1][0] != course_month:
+                sections.append((course_month, []))
+        if sections:
+            sections[-1][1].append(line)
+
+    parsed_section_count = 0
+    unexpired_sections: list[list[str]] = []
+    for _, lines in sections:
+        end_date = _registration_end_date(lines, today=today)
+        if end_date is None:
+            continue
+        parsed_section_count += 1
+        if end_date >= today:
+            unexpired_sections.append(lines)
+
+    if parsed_section_count == 0:
+        raise ValueError("창동 재등록 분석에서 재등록 종료일을 찾지 못했습니다.")
+    if not unexpired_sections:
+        return None
+    return "\n".join("\n".join(lines) for lines in unexpired_sections)
+
+
 async def send_daily_changdong_registration_reminder(
     *,
     state_path: Path = STATE_PATH,
     client: Optional[httpx.AsyncClient] = None,
     llm: Optional[LLMService] = None,
     model: str = VISION_MODEL,
+    current_date: Optional[date] = None,
 ) -> PopupSnapshot:
     snapshot = await fetch_active_popup_snapshot(client)
     analysis = _load_cached_analysis(state_path, snapshot)
@@ -238,8 +322,24 @@ async def send_daily_changdong_registration_reminder(
             len(snapshot.image_urls),
         )
 
+    filtered_analysis = _filter_unexpired_registration_sections(
+        analysis,
+        today=current_date or datetime.now(KST).date(),
+    )
+    if filtered_analysis is None:
+        if analyzed_now:
+            _save_analysis_state(state_path, snapshot, analysis)
+        logger.info(
+            "Skipping Changdong popup reminder without an unexpired registration period: "
+            "popup_count=%s model=%s analyzed_now=%s",
+            len(snapshot.image_urls),
+            model,
+            analyzed_now,
+        )
+        return snapshot
+
     sent = await send_telegram_message(
-        _build_notification_message(analysis),
+        _build_notification_message(filtered_analysis),
         bot_type="main",
     )
     if not sent:
