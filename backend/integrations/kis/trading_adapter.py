@@ -24,7 +24,10 @@ from typing import Any
 
 import pandas as pd
 import requests
-from backend.integrations.kis.rest_rate_limiter import throttle_rest_min_gap
+from backend.integrations.kis.rest_rate_limiter import (
+    throttle_rest_min_gap,
+    throttle_rest_requests,
+)
 from backend.integrations.kis.secondary_market_context import build_secondary_market_context
 from backend.integrations.kis.token_store import (
     kis_token_issue_lock,
@@ -342,7 +345,7 @@ class KISTradingBase:
         if callable(throttle):
             throttle()
             return
-        time.sleep(0.05)
+        throttle_rest_requests()
 
     def _throttle_path_min_gap(self, path: str) -> None:
         min_gap_sec = _KIS_HTTP_PATH_MIN_GAP_SEC.get(str(path or "").strip())
@@ -600,6 +603,7 @@ class KISTradingBase:
             return data
 
     def _set_direct_order_hash_key(self, headers: dict[str, str], body: dict) -> None:
+        self._throttle_rest()
         response = self._session.post(
             f"{self._base_url()}/uapi/hashkey",
             headers=headers,
@@ -610,6 +614,7 @@ class KISTradingBase:
         if self._is_expired_token_response(response, data=data):
             self._force_reauth_current_env()
             headers.update(self._headers(str(headers.get("tr_id") or "")))
+            self._throttle_rest()
             response = self._session.post(
                 f"{self._base_url()}/uapi/hashkey",
                 headers=headers,

@@ -293,6 +293,39 @@ class KISTradingAdapterTests(unittest.TestCase):
         self.assertEqual(kwargs["status_code"], 403)
         self.assertEqual(kwargs["error_code"], "EGW00133")
 
+    def test_direct_adapter_uses_shared_rest_throttle(self) -> None:
+        api = object.__new__(KISTradingAPI)
+        api._rest_throttle = None
+
+        with patch(
+            "backend.integrations.kis.trading_adapter.throttle_rest_requests"
+        ) as throttle_mock, patch(
+            "backend.integrations.kis.trading_adapter.time.sleep"
+        ) as sleep_mock:
+            api._throttle_rest()
+
+        throttle_mock.assert_called_once_with()
+        sleep_mock.assert_not_called()
+
+    def test_direct_hashkey_request_uses_shared_rest_throttle(self) -> None:
+        api = object.__new__(KISTradingAPI)
+        api._rest_throttle = Mock()
+        api._base_url = Mock(return_value="https://example.test")
+        api._session = Mock()
+
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {"HASH": "hash-value"}
+        response.raise_for_status.return_value = None
+        api._session.post.return_value = response
+
+        headers = {"tr_id": "TTTC0802U"}
+        api._set_direct_order_hash_key(headers, {"PDNO": "360200"})
+
+        api._rest_throttle.assert_called_once_with()
+        api._session.post.assert_called_once()
+        self.assertEqual(headers["hashkey"], "hash-value")
+
     def test_direct_auth_rechecks_db_inside_issue_lock(self) -> None:
         api = object.__new__(KISTradingAPI)
         api._direct_credentials = KISDirectCredentials(
