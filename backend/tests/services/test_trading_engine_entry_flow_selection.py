@@ -504,3 +504,54 @@ def test_swing_scale_in_fails_closed_without_chart_then_buys_when_trend_is_alive
     ]
     assert bot.state.open_positions["FIRST"].qty == 11
     assert "FIRST" in bot.state.blacklist_today
+
+
+def test_swing_scale_in_uses_trigger_tolerance_outside_regular_entry_windows(tmp_path) -> None:
+    api = FakeAPI()
+    api._cash_available = 624_000
+    api._quotes["FIRST"] = {"price": 97_050, "change_pct": -2.95}
+    api._positions = [
+        {"code": "FIRST", "qty": 8, "avg_price": 100_000.0, "current_price": 97_050},
+        {"code": "SECOND", "qty": 6, "avg_price": 100_000.0, "current_price": 100_000},
+    ]
+    api._bars[("FIRST", "20260216")] = pd.DataFrame(
+        {"close": [95_000, 95_000, 96_000, 96_000, 96_000]}
+    )
+    cfg = TradeEngineConfig(
+        state_path=str(tmp_path / "state.json"),
+        output_dir=str(tmp_path / "output"),
+        runlog_path=str(tmp_path / "run.log"),
+        max_swing_positions=2,
+        swing_rank_budget_enabled=True,
+        swing_scale_in_enabled=True,
+        swing_scale_in_trigger_pct=-0.03,
+        swing_scale_in_trigger_tolerance_pct=0.001,
+        swing_multi_position_activation_at="2026-02-15T00:00:00+09:00",
+        swing_trend_ma_window=3,
+        swing_trend_lookback_bars=5,
+        swing_chart_review_enabled=False,
+    )
+    bot = HybridTradingBot(api, config=cfg)
+    bot.state.trade_date = "20260216"
+    for code, qty in (("FIRST", 8), ("SECOND", 6)):
+        bot.state.open_positions[code] = PositionState(
+            type="S",
+            entry_time="2026-02-15T09:05:00+09:00",
+            entry_price=100_000.0,
+            qty=qty,
+            highest_price=100_000.0,
+            entry_date="20260215",
+        )
+    candidates = SimpleNamespace(model=pd.DataFrame(), etf=pd.DataFrame())
+
+    with patch("backend.services.trading_engine.bot.rank_swing_codes", return_value=[]):
+        bot._try_enter_swing(
+            now=datetime(2026, 2, 16, 10, 30),
+            regime="RISK_ON",
+            candidates=candidates,
+            quotes={},
+        )
+
+    assert api.order_calls == [
+        {"side": "BUY", "code": "FIRST", "qty": 3, "order_type": "limit", "price": 97_200},
+    ]

@@ -104,6 +104,10 @@ def _apply_general_overrides(cfg: TradeEngineConfig) -> None:
         "TRADING_ENGINE_SWING_SCALE_IN_TRIGGER_PCT",
         cfg.swing_scale_in_trigger_pct,
     )
+    cfg.swing_scale_in_trigger_tolerance_pct = _env_float(
+        "TRADING_ENGINE_SWING_SCALE_IN_TRIGGER_TOLERANCE_PCT",
+        cfg.swing_scale_in_trigger_tolerance_pct,
+    )
     cfg.swing_multi_position_activation_at = _env_text(
         "TRADING_ENGINE_SWING_MULTI_POSITION_ACTIVATION_AT",
         cfg.swing_multi_position_activation_at,

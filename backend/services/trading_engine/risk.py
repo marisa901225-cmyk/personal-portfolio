@@ -108,6 +108,12 @@ def can_scale_in_swing(
         return False, "RISK_OFF"
 
     now_minute = now.hour * 60 + now.minute
+    first_entry_minute = min(
+        (_hhmm_to_minutes(start) for start, _ in config.entry_windows),
+        default=0,
+    )
+    if now_minute < first_entry_minute:
+        return False, "ENTRY_WINDOW_CLOSED"
     if now_minute >= _hhmm_to_minutes(config.no_new_entry_after):
         return False, "NO_NEW_ENTRY_AFTER"
     if state.swing_consecutive_losses_today >= config.max_consecutive_losses:
@@ -122,14 +128,6 @@ def can_scale_in_swing(
         return False, "MAX_SWING_POSITIONS"
     if _count_reserved_positions(state, "S") < config.max_swing_positions:
         return False, "SWING_SLOT_AVAILABLE"
-    if not _is_entry_window_open(
-        "S",
-        now,
-        config,
-        day_entries_today=state.day_entries_today,
-        day_entry_windows_used_today=state.day_entry_windows_used_today,
-    ):
-        return False, "ENTRY_WINDOW_CLOSED"
     return True, "OK"
 
 

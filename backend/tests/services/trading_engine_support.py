@@ -28,7 +28,7 @@ from backend.services.trading_engine.industry_master import (
 )
 from backend.services.trading_engine.news_sentiment import NewsSentimentSignal
 from backend.services.trading_engine.regime import detect_intraday_circuit_breaker, get_regime
-from backend.services.trading_engine.risk import can_enter, should_exit_position
+from backend.services.trading_engine.risk import can_enter, can_scale_in_swing, should_exit_position
 from backend.services.trading_engine.runtime import _load_config_from_env, get_last_trading_day, is_trading_day
 from backend.services.trading_engine.screeners import etf_swing_screener, model_screener, popular_screener
 from backend.services.trading_engine.state import (
@@ -255,6 +255,7 @@ __all__ = [
     "detect_intraday_circuit_breaker",
     "get_regime",
     "can_enter",
+    "can_scale_in_swing",
     "should_exit_position",
     "_load_config_from_env",
     "StockMasterInfo",

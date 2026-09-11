@@ -1,5 +1,44 @@
 from .trading_engine_support import *  # noqa: F401,F403
 
+
+def test_swing_scale_in_stays_open_between_first_entry_window_and_cutoff() -> None:
+    cfg = TradeEngineConfig(
+        max_swing_positions=1,
+        swing_scale_in_enabled=True,
+    )
+    state = new_state("20260216")
+    state.open_positions["FIRST"] = PositionState(
+        type="S",
+        entry_time="2026-02-15T09:05:00+09:00",
+        entry_price=100_000.0,
+        qty=1,
+        highest_price=100_000.0,
+        entry_date="20260215",
+    )
+
+    before_open = can_scale_in_swing(
+        state,
+        regime="RISK_ON",
+        now=datetime(2026, 2, 16, 9, 4),
+        config=cfg,
+    )
+    between_windows = can_scale_in_swing(
+        state,
+        regime="RISK_ON",
+        now=datetime(2026, 2, 16, 10, 30),
+        config=cfg,
+    )
+    at_cutoff = can_scale_in_swing(
+        state,
+        regime="RISK_ON",
+        now=datetime(2026, 2, 16, 15, 0),
+        config=cfg,
+    )
+
+    assert before_open == (False, "ENTRY_WINDOW_CLOSED")
+    assert between_windows == (True, "OK")
+    assert at_cutoff == (False, "NO_NEW_ENTRY_AFTER")
+
 def test_swing_position_does_not_exit_on_day_lock_retrace(tmp_path) -> None:
     cfg = TradeEngineConfig(
         state_path=str(tmp_path / "state.json"),

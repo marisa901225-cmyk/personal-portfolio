@@ -35,6 +35,7 @@ class TradeEngineConfig:
     swing_rank_budget_enabled: bool = False
     swing_scale_in_enabled: bool = False
     swing_scale_in_trigger_pct: float = -0.03
+    swing_scale_in_trigger_tolerance_pct: float = 0.001
     swing_multi_position_activation_at: str = ""
     entry_budget_overrun_tolerance_pct: float = 0.01
     use_realized_profit_buffer: bool = True

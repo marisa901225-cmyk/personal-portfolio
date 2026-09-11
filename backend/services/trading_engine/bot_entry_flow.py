@@ -313,6 +313,10 @@ class BotEntryFlowMixin:
             return False
 
         trigger_pct = float(getattr(self.config, "swing_scale_in_trigger_pct", -0.03))
+        trigger_pct += max(
+            0.0,
+            float(getattr(self.config, "swing_scale_in_trigger_tolerance_pct", 0.001)),
+        )
         eligible = swing_scale_in_candidates(
             self.api,
             self.state,

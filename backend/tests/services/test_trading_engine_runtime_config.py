@@ -105,6 +105,7 @@ def test_runtime_config_loads_ranked_swing_budget_and_scale_in_overrides() -> No
             "TRADING_ENGINE_SWING_RANK_BUDGET_WEIGHTS": "0.50,0.375",
             "TRADING_ENGINE_SWING_SCALE_IN_ENABLED": "1",
             "TRADING_ENGINE_SWING_SCALE_IN_TRIGGER_PCT": "-0.03",
+            "TRADING_ENGINE_SWING_SCALE_IN_TRIGGER_TOLERANCE_PCT": "0.001",
             "TRADING_ENGINE_SWING_MULTI_POSITION_ACTIVATION_AT": "2026-08-12T14:10:00+09:00",
         },
         clear=False,
@@ -116,6 +117,7 @@ def test_runtime_config_loads_ranked_swing_budget_and_scale_in_overrides() -> No
     assert cfg.swing_rank_budget_weights == (0.50, 0.375)
     assert cfg.swing_scale_in_enabled is True
     assert cfg.swing_scale_in_trigger_pct == -0.03
+    assert cfg.swing_scale_in_trigger_tolerance_pct == 0.001
     assert cfg.swing_multi_position_activation_at == "2026-08-12T14:10:00+09:00"
 
 
