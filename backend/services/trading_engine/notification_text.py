@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .utils import parse_numeric
@@ -113,8 +114,47 @@ def format_run_start_message(trade_date: str) -> str:
     return f"[시작] 거래 엔진 시작 {trade_date}"
 
 
+def _friendly_error_text(error_text: str) -> str:
+    raw = " ".join(str(error_text or "").split())
+    lowered = raw.lower()
+    status_match = re.search(r"\b([45]\d{2})\s+(?:client|server) error\b", lowered)
+    status_code = status_match.group(1) if status_match else None
+
+    if "inquire-balance" in lowered or "주식잔고조회" in raw:
+        target = "한국투자증권 잔고조회"
+    elif "koreainvestment.com" in lowered or "kis" in lowered:
+        target = "한국투자증권 API 요청"
+    else:
+        target = "거래 처리"
+
+    if status_code:
+        if status_code == "429":
+            reason = "호출 한도 초과"
+        elif status_code in {"401", "403"}:
+            reason = "인증 오류"
+        elif status_code.startswith("5"):
+            reason = "서버 오류"
+        else:
+            reason = "요청 오류"
+        return f"{target} 실패({reason} {status_code})"
+
+    if "timeout" in lowered or "timed out" in lowered:
+        return f"{target} 실패(응답 시간 초과)"
+    if "connection" in lowered:
+        return f"{target} 실패(연결 오류)"
+
+    sanitized = re.sub(r"https?://\S+", "외부 API", raw, flags=re.IGNORECASE)
+    sanitized = re.sub(
+        r"\b(?:CANO|ACNT_PRDT_CD)=[^&\s]*",
+        "계좌정보=숨김",
+        sanitized,
+        flags=re.IGNORECASE,
+    )
+    return f"{target} 실패: {sanitized[:100] or '원인 미확인'}"
+
+
 def format_error_message(trade_date: str, error_text: str) -> str:
-    return f"[오류] {trade_date} {error_text}"
+    return f"[오류] {trade_date} {_friendly_error_text(error_text)}"
 
 
 def format_chart_review_skip_message(

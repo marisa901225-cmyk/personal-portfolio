@@ -581,7 +581,7 @@ class HybridTradingBot(
         except Exception as exc:
             logger.exception("bot run failed: %s", exc)
             self._journal("ERROR", asof_date=today, reason=str(exc))
-            self._notify_text(format_error_message(today, str(exc)[:180]))
+            self._notify_text(format_error_message(today, str(exc)))
             with self._state_lock:
                 save_state(self.config.state_path, self.state)
             return {"status": "ERROR", "error": str(exc)}

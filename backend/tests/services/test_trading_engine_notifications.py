@@ -1,4 +1,21 @@
+from backend.services.trading_engine.notification_text import format_error_message
+
 from .trading_engine_support import *  # noqa: F401,F403
+
+
+def test_error_notification_summarizes_kis_balance_500_without_account_details() -> None:
+    raw_error = (
+        "500 Server Error: Internal Server Error for url: "
+        "https://openapi.koreainvestment.com:9443/uapi/domestic-stock/v1/trading/"
+        "inquire-balance?CANO=68694229&ACNT_PRDT_CD=01&AFHR_FLPR_YN="
+    )
+
+    message = format_error_message("20260914", raw_error)
+
+    assert message == "[오류] 20260914 한국투자증권 잔고조회 실패(서버 오류 500)"
+    assert "http" not in message
+    assert "68694229" not in message
+
 
 def test_bot_passes_on_holiday_without_order(tmp_path) -> None:
     api = FakeAPI()
