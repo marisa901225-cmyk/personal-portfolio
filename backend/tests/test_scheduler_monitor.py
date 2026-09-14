@@ -1,7 +1,6 @@
 # backend/tests/test_scheduler_monitor.py
 import asyncio
 import unittest
-from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend.core.db import Base, engine
@@ -9,6 +8,7 @@ from backend.main import app
 from backend.services.retry import async_retry, sync_retry
 from backend.services.scheduler import core
 from backend.services import scheduler_monitor
+from backend.tests.asgi_test_client import asgi_request
 
 
 class _FakeSchedulerState:
@@ -97,17 +97,16 @@ class TestSchedulerMonitor(unittest.TestCase):
 class TestSchedulerSupport(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         Base.metadata.create_all(bind=engine)
-        self.client = TestClient(app)
 
     def tearDown(self):
         Base.metadata.drop_all(bind=engine)
 
-    def test_get_scheduler_state(self):
+    async def test_get_scheduler_state(self):
         from backend.core.auth import verify_api_token
 
         app.dependency_overrides[verify_api_token] = lambda: True
         try:
-            response = self.client.get("/api/scheduler/state")
+            response = await asgi_request(app, "GET", "/api/scheduler/state")
             self.assertEqual(response.status_code, 200)
             self.assertIsInstance(response.json(), list)
         finally:

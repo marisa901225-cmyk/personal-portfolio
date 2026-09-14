@@ -3,14 +3,13 @@ import os
 import tempfile
 import unittest
 
-from fastapi.testclient import TestClient
-
 # DATABASE_URL is managed by conftest.py
 os.environ["API_TOKEN"] = "test-token"
 
 from backend.main import api_health, app, health, root  # noqa: E402
 from backend.core.auth import create_access_token  # noqa: E402
 from backend.core.db_migrations import ensure_schema # noqa: E402
+from backend.tests.asgi_test_client import ASGITestClient  # noqa: E402
 
 
 class MainHealthTests(unittest.TestCase):
@@ -35,19 +34,19 @@ class MainHealthTests(unittest.TestCase):
         self.assertIn("MyAsset Portfolio Backend", body)
 
     def test_settings_path_works_without_api_prefix(self) -> None:
-        client = TestClient(app)
+        client = ASGITestClient(app)
         response = client.get("/settings", headers=self.headers)
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertIn("target_index_allocations", payload)
 
     def test_expenses_endpoints_are_closed(self) -> None:
-        client = TestClient(app)
+        client = ASGITestClient(app)
         response = client.get("/api/expenses", headers=self.headers)
         self.assertEqual(response.status_code, 404)
 
     def test_trade_create_succeeds(self) -> None:
-        client = TestClient(app)
+        client = ASGITestClient(app)
         asset_response = client.post(
             "/api/assets",
             headers=self.headers,
@@ -67,7 +66,7 @@ class MainHealthTests(unittest.TestCase):
         self.assertEqual(payload["type"], "BUY")
 
     def test_portfolio_excludes_soft_deleted_assets(self) -> None:
-        client = TestClient(app)
+        client = ASGITestClient(app)
 
         create_res = client.post(
             "/api/assets",

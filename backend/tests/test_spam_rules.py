@@ -3,7 +3,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -22,6 +21,7 @@ from backend.services.spam_rule_service import (  # noqa: E402
     list_spam_rules,
     set_spam_rule_enabled,
 )
+from backend.tests.asgi_test_client import ASGITestClient  # noqa: E402
 
 
 class SpamRulesTests(unittest.TestCase):
@@ -45,7 +45,7 @@ class SpamRulesTests(unittest.TestCase):
                 db.close()
 
         app.dependency_overrides[get_db] = _override_get_db
-        self.client = TestClient(app)
+        self.client = ASGITestClient(app)
         self.headers = {
             "X-API-Token": "test-token",
             "Authorization": f"Bearer {create_access_token({'sub': 'test-user'})}",

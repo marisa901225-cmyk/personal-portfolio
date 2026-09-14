@@ -97,7 +97,12 @@ def test_ai_memo_delete_rejects_other_ids() -> None:
 @pytest.mark.asyncio
 async def test_create_ai_chat_message_uses_memo_context(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeLLM()
+
+    async def run_inline(func, *args, **kwargs):  # type: ignore[no-untyped-def]
+        return func(*args, **kwargs)
+
     monkeypatch.setattr("backend.routers.ai_chat.LLMService.get_instance", lambda: fake)
+    monkeypatch.setattr("backend.routers.ai_chat.run_in_threadpool", run_inline)
 
     response = await create_ai_chat_message(
         AiChatMessageRequest(

@@ -21,7 +21,7 @@ class _FakeTokenizer:
         self.template_kwargs = kwargs
         return "PROMPT"
 
-    def __call__(self, prompt, return_tensors="pt"):
+    def __call__(self, text, return_tensors="pt"):
         return {"input_ids": _FakeIds([1, 2, 3])}
 
     def decode(self, token_ids, skip_special_tokens=True):
