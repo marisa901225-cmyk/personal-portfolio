@@ -334,6 +334,58 @@ class TradingStrategyDayTests(TradingStrategyTestCase):
 
         self.assertEqual(ranked[0], "CHASE1")
 
+    def test_rank_daytrade_codes_default_cap_excludes_overextended_momentum_chase(self) -> None:
+        pool = pd.DataFrame(
+            [
+                {
+                    "code": "CHASE1",
+                    "name": "Overextended Leader",
+                    "is_etf": False,
+                    "mcap": "1600000000000",
+                    "avg_value_5d": "90000000000",
+                    "change_pct": "18.0",
+                    "close": 118.0,
+                    "retrace_from_high_10d_pct": -1.0,
+                },
+                {
+                    "code": "SAFE01",
+                    "name": "Safe Follower",
+                    "is_etf": False,
+                    "mcap": "1600000000000",
+                    "avg_value_5d": "85000000000",
+                    "change_pct": "5.0",
+                    "close": 105.0,
+                    "retrace_from_high_10d_pct": -1.5,
+                },
+                {
+                    "code": "EDGE12",
+                    "name": "Guarded Leader",
+                    "is_etf": False,
+                    "mcap": "1600000000000",
+                    "avg_value_5d": "88000000000",
+                    "change_pct": "12.0",
+                    "close": 112.0,
+                    "retrace_from_high_10d_pct": -1.0,
+                },
+            ]
+        )
+        quotes = {
+            "CHASE1": {"price": 118.0, "open": 109.0, "high": 119.0, "low": 108.5, "change_pct": 18.0},
+            "SAFE01": {"price": 105.0, "open": 102.0, "high": 106.0, "low": 101.0, "change_pct": 5.0},
+            "EDGE12": {"price": 112.0, "open": 107.0, "high": 112.5, "low": 106.5, "change_pct": 12.0},
+        }
+        cfg = TradeEngineConfig(
+            include_etf=False,
+            day_stock_min_avg_value_5d=0,
+            day_stock_min_mcap=0,
+        )
+
+        ranked = rank_daytrade_codes(self._candidates_with_popular(pool), quotes=quotes, config=cfg)
+
+        self.assertNotIn("CHASE1", ranked)
+        self.assertIn("EDGE12", ranked)
+        self.assertIn("SAFE01", ranked)
+
     @patch("backend.services.trading_engine.strategy._score_day_row")
     def test_rank_daytrade_promotes_only_top_stock_preference(self, mock_score) -> None:
         pool = pd.DataFrame(

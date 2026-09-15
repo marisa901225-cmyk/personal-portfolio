@@ -166,12 +166,12 @@ class TradeEngineConfig:
     day_global_market_negative_penalty_max: float = 1.5
     day_hts_top_view_top_n: int = 20
     day_hts_top_view_bonus_max: float = 3.0
-    day_momentum_chase_max_change_pct: float = 26.0
+    day_momentum_chase_max_change_pct: float = 12.0
     day_momentum_chase_min_intraday_score: float = 3.0
     day_momentum_pullback_min_day_change_pct: float = 8.0
-    day_momentum_pullback_min_window_change_pct: float = -2.0
-    day_momentum_pullback_min_last_bar_change_pct: float = -0.35
-    day_momentum_pullback_max_retrace_from_high_pct: float = -2.2
+    day_momentum_pullback_min_window_change_pct: float = -0.8
+    day_momentum_pullback_min_last_bar_change_pct: float = 0.1
+    day_momentum_pullback_max_retrace_from_high_pct: float = -1.2
     day_min_change_pct: float = 0.5
     day_max_change_pct: float = 6.0
     day_etf_max_change_pct: float = 4.0
