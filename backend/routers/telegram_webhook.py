@@ -26,6 +26,7 @@ JELLYFIN_CONTAINER_NAME = os.getenv("TELEGRAM_JELLYFIN_CONTAINER_NAME", "jellyfi
 JELLYFIN_COMPOSE_SERVICE = os.getenv("TELEGRAM_JELLYFIN_COMPOSE_SERVICE", "jellyfin")
 JELLYFIN_COMPOSE_PROJECT = os.getenv("TELEGRAM_JELLYFIN_COMPOSE_PROJECT", "my-home-server")
 COMFYUI_CONTAINER_NAME = os.getenv("TELEGRAM_COMFYUI_CONTAINER_NAME", "myasset-comfyui")
+PALWORLD_CONTAINER_NAME = os.getenv("TELEGRAM_PALWORLD_CONTAINER_NAME", "palworld-dedicated-server")
 DOCKER_STATUS_PROJECTS = {
     item.strip()
     for item in os.getenv("TELEGRAM_DOCKER_STATUS_PROJECTS", "personal-portfolio").split(",")
@@ -123,6 +124,8 @@ async def _handle_command(text: str, chat_id: str):
         "com_off",
         "haruhi_llm_start",
         "haruhi_llm_stop",
+        "palworld_on",
+        "palworld_off",
     ]
     if cmd not in SUPPORTED_CMDS:
         return
@@ -145,7 +148,9 @@ async def _handle_command(text: str, chat_id: str):
             "• /com_on 또는 /com on - ComfyUI 그림서버를 시작합니다.\n"
             "• /com_off 또는 /com off - ComfyUI 그림서버를 정지합니다.\n"
             "• /haruhi_llm_start - 하루히 LLM(채팅) 인벤토리 서비스를 시작합니다.\n"
-            "• /haruhi_llm_stop - 하루히 LLM 서비스를 정지하여 자원을 확보합니다.\n\n"
+            "• /haruhi_llm_stop - 하루히 LLM 서비스를 정지하여 자원을 확보합니다.\n"
+            "• /palworld_on - 팰월드 전용 서버를 시작합니다.\n"
+            "• /palworld_off - 팰월드 전용 서버를 안전하게 정지합니다.\n\n"
             "<b>📈 분석 및 리포트</b>\n"
             "• /report [게임명] - 스팀 실시간 트렌드 및 관련 소식 요약을 생성합니다.\n\n"
             "<b>💡 기타</b>\n"
@@ -187,6 +192,16 @@ async def _handle_command(text: str, chat_id: str):
 
     if cmd == "haruhi_llm_stop":
         response_text = await _control_haruhi_llm("stop")
+        await send_telegram_message(response_text)
+        return
+
+    if cmd == "palworld_on":
+        response_text = await _control_palworld("start")
+        await send_telegram_message(response_text)
+        return
+
+    if cmd == "palworld_off":
+        response_text = await _control_palworld("stop")
         await send_telegram_message(response_text)
         return
     
@@ -316,6 +331,15 @@ async def _control_comfyui(action: str) -> str:
     )
 
 
+async def _control_palworld(action: str) -> str:
+    return await _control_container(
+        action=action,
+        container_name=PALWORLD_CONTAINER_NAME,
+        label="팰월드 서버",
+        stop_timeout_seconds=120,
+    )
+
+
 def _write_llm_manual_stop_flag() -> None:
     LLM_MANUAL_STOP_FLAG_FILE.parent.mkdir(parents=True, exist_ok=True)
     resume_epoch = _next_llm_manual_stop_resume_epoch()
@@ -342,7 +366,13 @@ def _clear_llm_manual_stop_flag() -> None:
         return
 
 
-async def _control_container(*, action: str, container_name: str, label: str) -> str:
+async def _control_container(
+    *,
+    action: str,
+    container_name: str,
+    label: str,
+    stop_timeout_seconds: int = 10,
+) -> str:
     if action not in {"start", "stop"}:
         logger.error("Unsupported container control action: %s", action)
         return f"❌ 지원하지 않는 동작입니다: <code>{action}</code>"
@@ -355,11 +385,11 @@ async def _control_container(*, action: str, container_name: str, label: str) ->
             if not container_id:
                 return f"❌ {label} 컨테이너를 찾지 못했습니다: <code>{container_name}</code>"
 
-            params = {"t": 10} if action == "stop" else None
+            params = {"t": stop_timeout_seconds} if action == "stop" else None
             response = await client.post(f"/containers/{container_id}/{action}", params=params)
             if response.status_code == 304:
                 state_kr = "이미 실행 중입니다" if action == "start" else "이미 정지 상태입니다"
-                return f"ℹ️ {label}은 {state_kr}: <code>{container_name}</code>"
+                return f"ℹ️ {label} - {state_kr}: <code>{container_name}</code>"
             response.raise_for_status()
 
         return f"✅ {label} {action_kr} 명령을 보냈습니다: <code>{container_name}</code>"

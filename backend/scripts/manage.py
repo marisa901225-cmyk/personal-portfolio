@@ -490,6 +490,8 @@ def _telegram_bot_commands() -> list[dict[str, str]]:
         {"command": "com_off", "description": "ComfyUI 그림서버 정지"},
         {"command": "haruhi_llm_start", "description": "하루히 LLM 시작"},
         {"command": "haruhi_llm_stop", "description": "하루히 LLM 정지"},
+        {"command": "palworld_on", "description": "팰월드 서버 시작"},
+        {"command": "palworld_off", "description": "팰월드 서버 정지"},
         {"command": "report", "description": "리포트 생성 (예: /report 스팀)"},
         {"command": "list", "description": "스팸 필터 목록"},
         {"command": "add", "description": "스팸 필터 추가"},

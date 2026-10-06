@@ -10,5 +10,7 @@ def test_registered_telegram_commands_include_webhook_server_commands():
     assert "com_off" in commands
     assert "haruhi_llm_start" in commands
     assert "haruhi_llm_stop" in commands
+    assert "palworld_on" in commands
+    assert "palworld_off" in commands
     assert "night_llm_on" not in commands
     assert "night_llm_off" not in commands

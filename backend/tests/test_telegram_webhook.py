@@ -26,6 +26,7 @@ class TelegramWebhookAuthTests(unittest.TestCase):
         self._orig_restart = telegram_webhook._restart_jellyfin_container
         self._orig_haruhi = telegram_webhook._control_haruhi_llm
         self._orig_comfyui = telegram_webhook._control_comfyui
+        self._orig_palworld = telegram_webhook._control_palworld
         self._orig_control_container = telegram_webhook._control_container
         self._orig_manual_stop_flag = telegram_webhook.LLM_MANUAL_STOP_FLAG_FILE
         self._tmpdir = TemporaryDirectory()
@@ -39,6 +40,7 @@ class TelegramWebhookAuthTests(unittest.TestCase):
         telegram_webhook._restart_jellyfin_container = self._orig_restart
         telegram_webhook._control_haruhi_llm = self._orig_haruhi
         telegram_webhook._control_comfyui = self._orig_comfyui
+        telegram_webhook._control_palworld = self._orig_palworld
         telegram_webhook._control_container = self._orig_control_container
         telegram_webhook.LLM_MANUAL_STOP_FLAG_FILE = self._orig_manual_stop_flag
         self._tmpdir.cleanup()
@@ -133,13 +135,14 @@ class TelegramWebhookAuthTests(unittest.TestCase):
         self.assertEqual(res.json(), {"ok": True})
         self.assertEqual(sent_messages, ["✅ Jellyfin 재시작 명령을 보냈습니다"])
 
-    def test_docker_status_command_sends_result(self):
+    def test_docker_status_command_variants_send_result(self):
         telegram_webhook.WEBHOOK_SECRET = self.valid_secret
         telegram_webhook.ALLOWED_CHAT_ID = self.valid_chat_id
         sent_messages: list[str] = []
+        expected_message = "📦 <b>Docker 상태</b>\n🟢 <code>jaw-agent</code> - Up 1 hour"
 
         async def fake_docker_status():
-            return "📦 <b>Docker 상태</b>\n🟢 <code>jaw-agent</code> - Up 1 hour"
+            return expected_message
 
         async def fake_send(text: str):
             sent_messages.append(text)
@@ -148,38 +151,17 @@ class TelegramWebhookAuthTests(unittest.TestCase):
         telegram_webhook._get_docker_status = fake_docker_status
         telegram_webhook.send_telegram_message = fake_send
 
-        res = self.client.post(
-            "/api/telegram/webhook",
-            headers=self._headers(),
-            json={"message": {"chat": {"id": self.valid_chat_id}, "text": "/docker_status"}},
-        )
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json(), {"ok": True})
-        self.assertEqual(sent_messages, ["📦 <b>Docker 상태</b>\n🟢 <code>jaw-agent</code> - Up 1 hour"])
-
-    def test_docker_status_command_with_bot_mention_sends_result(self):
-        telegram_webhook.WEBHOOK_SECRET = self.valid_secret
-        telegram_webhook.ALLOWED_CHAT_ID = self.valid_chat_id
-        sent_messages: list[str] = []
-
-        async def fake_docker_status():
-            return "📦 <b>Docker 상태</b>\n🟢 <code>jaw-agent</code> - Up 1 hour"
-
-        async def fake_send(text: str):
-            sent_messages.append(text)
-            return True
-
-        telegram_webhook._get_docker_status = fake_docker_status
-        telegram_webhook.send_telegram_message = fake_send
-
-        res = self.client.post(
-            "/api/telegram/webhook",
-            headers=self._headers(),
-            json={"message": {"chat": {"id": self.valid_chat_id}, "text": "/docker_status@AlarmRelayBot"}},
-        )
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json(), {"ok": True})
-        self.assertEqual(sent_messages, ["📦 <b>Docker 상태</b>\n🟢 <code>jaw-agent</code> - Up 1 hour"])
+        for command in ("/docker_status", "/docker_status@AlarmRelayBot"):
+            with self.subTest(command=command):
+                sent_messages.clear()
+                res = self.client.post(
+                    "/api/telegram/webhook",
+                    headers=self._headers(),
+                    json={"message": {"chat": {"id": self.valid_chat_id}, "text": command}},
+                )
+                self.assertEqual(res.status_code, 200)
+                self.assertEqual(res.json(), {"ok": True})
+                self.assertEqual(sent_messages, [expected_message])
 
     def test_filter_docker_status_containers_includes_all_running_and_only_related_stopped(self):
         containers = [
@@ -254,6 +236,8 @@ class TelegramWebhookAuthTests(unittest.TestCase):
         self.assertIn("/com off", sent_messages[0])
         self.assertIn("/haruhi_llm_start", sent_messages[0])
         self.assertIn("/haruhi_llm_stop", sent_messages[0])
+        self.assertIn("/palworld_on", sent_messages[0])
+        self.assertIn("/palworld_off", sent_messages[0])
         self.assertIn("주요 컨테이너의 가동 상태와 포트 정보", sent_messages[0])
         self.assertIn("ComfyUI 그림서버", sent_messages[0])
         self.assertIn("하루히 LLM 서비스를 정지", sent_messages[0])
@@ -261,80 +245,64 @@ class TelegramWebhookAuthTests(unittest.TestCase):
         self.assertNotIn("/model", sent_messages[0])
         self.assertNotIn("/reset", sent_messages[0])
 
-    def test_comfyui_off_alias_command_sends_result(self):
+    def test_server_control_commands_send_result(self):
         telegram_webhook.WEBHOOK_SECRET = self.valid_secret
         telegram_webhook.ALLOWED_CHAT_ID = self.valid_chat_id
         sent_messages: list[str] = []
-
-        async def fake_control(action: str):
-            self.assertEqual(action, "stop")
-            return "✅ ComfyUI 그림서버 정지 명령을 보냈습니다"
 
         async def fake_send(text: str):
             sent_messages.append(text)
             return True
 
-        telegram_webhook._control_comfyui = fake_control
         telegram_webhook.send_telegram_message = fake_send
-
-        res = self.client.post(
-            "/api/telegram/webhook",
-            headers=self._headers(),
-            json={"message": {"chat": {"id": self.valid_chat_id}, "text": "/com off"}},
+        cases = (
+            ("/com off", "_control_comfyui", "stop", "✅ ComfyUI 그림서버 정지 명령을 보냈습니다"),
+            ("/com_on", "_control_comfyui", "start", "✅ ComfyUI 그림서버 시작 명령을 보냈습니다"),
+            ("/haruhi_llm_stop", "_control_haruhi_llm", "stop", "✅ 하루히 LLM 정지 명령을 보냈습니다"),
+            ("/palworld_off", "_control_palworld", "stop", "✅ 팰월드 서버 정지 명령을 보냈습니다"),
         )
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json(), {"ok": True})
-        self.assertEqual(sent_messages, ["✅ ComfyUI 그림서버 정지 명령을 보냈습니다"])
 
-    def test_comfyui_on_command_sends_result(self):
-        telegram_webhook.WEBHOOK_SECRET = self.valid_secret
-        telegram_webhook.ALLOWED_CHAT_ID = self.valid_chat_id
-        sent_messages: list[str] = []
+        for command, handler_name, expected_action, expected_message in cases:
+            with self.subTest(command=command):
+                sent_messages.clear()
 
-        async def fake_control(action: str):
-            self.assertEqual(action, "start")
-            return "✅ ComfyUI 그림서버 시작 명령을 보냈습니다"
+                async def fake_control(action: str):
+                    self.assertEqual(action, expected_action)
+                    return expected_message
 
-        async def fake_send(text: str):
-            sent_messages.append(text)
-            return True
+                setattr(telegram_webhook, handler_name, fake_control)
+                res = self.client.post(
+                    "/api/telegram/webhook",
+                    headers=self._headers(),
+                    json={"message": {"chat": {"id": self.valid_chat_id}, "text": command}},
+                )
+                self.assertEqual(res.status_code, 200)
+                self.assertEqual(res.json(), {"ok": True})
+                self.assertEqual(sent_messages, [expected_message])
 
-        telegram_webhook._control_comfyui = fake_control
-        telegram_webhook.send_telegram_message = fake_send
+    def test_palworld_control_uses_long_graceful_stop_timeout(self):
+        calls: list[dict[str, object]] = []
 
-        res = self.client.post(
-            "/api/telegram/webhook",
-            headers=self._headers(),
-            json={"message": {"chat": {"id": self.valid_chat_id}, "text": "/com_on"}},
+        async def fake_control_container(**kwargs):
+            calls.append(kwargs)
+            return "ok"
+
+        telegram_webhook._control_container = fake_control_container
+
+        result = asyncio.run(telegram_webhook._control_palworld("stop"))
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(
+            calls,
+            [
+                {
+                    "action": "stop",
+                    "container_name": telegram_webhook.PALWORLD_CONTAINER_NAME,
+                    "label": "팰월드 서버",
+                    "stop_timeout_seconds": 120,
+                }
+            ],
         )
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json(), {"ok": True})
-        self.assertEqual(sent_messages, ["✅ ComfyUI 그림서버 시작 명령을 보냈습니다"])
-
-    def test_haruhi_llm_stop_command_sends_result(self):
-        telegram_webhook.WEBHOOK_SECRET = self.valid_secret
-        telegram_webhook.ALLOWED_CHAT_ID = self.valid_chat_id
-        sent_messages: list[str] = []
-
-        async def fake_control(action: str):
-            self.assertEqual(action, "stop")
-            return "✅ 하루히 LLM 정지 명령을 보냈습니다"
-
-        async def fake_send(text: str):
-            sent_messages.append(text)
-            return True
-
-        telegram_webhook._control_haruhi_llm = fake_control
-        telegram_webhook.send_telegram_message = fake_send
-
-        res = self.client.post(
-            "/api/telegram/webhook",
-            headers=self._headers(),
-            json={"message": {"chat": {"id": self.valid_chat_id}, "text": "/haruhi_llm_stop"}},
-        )
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.json(), {"ok": True})
-        self.assertEqual(sent_messages, ["✅ 하루히 LLM 정지 명령을 보냈습니다"])
 
     def test_haruhi_llm_control_sets_and_clears_manual_stop_flag(self):
         calls: list[str] = []

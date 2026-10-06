@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Callable, Optional
@@ -14,6 +15,37 @@ from ..llm_service import LLMService
 logger = logging.getLogger(__name__)
 
 _DEFAULT_SESSION_TOKENS_THRESHOLD = 40_000
+
+
+def _random_topic_pause_file() -> str:
+    default_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "data", "random_topic_pause.flag")
+    )
+    return os.getenv("RANDOM_TOPIC_PAUSE_FILE", default_path)
+
+
+def _random_topic_is_paused() -> bool:
+    path = _random_topic_pause_file()
+    try:
+        with open(path, "r", encoding="utf-8") as file:
+            line = next((item.strip() for item in file if item.strip()), "")
+        if not line.startswith("resume_epoch="):
+            return True
+        resume_epoch = int(line.split("=", 1)[1])
+    except FileNotFoundError:
+        return False
+    except (OSError, ValueError) as exc:
+        logger.warning("Failed to read random topic pause file %s: %s", path, exc)
+        return True
+
+    if time.time() < resume_epoch:
+        return True
+
+    try:
+        os.remove(path)
+    except OSError as exc:
+        logger.warning("Failed to remove expired random topic pause file %s: %s", path, exc)
+    return False
 
 
 def _random_topic_session_state_path() -> str:
@@ -140,6 +172,8 @@ def _should_send_random_topic(
     load_last_random_topic_sent_at: Callable[[], Optional[datetime]],
     min_gap_minutes: int = 12,
 ) -> bool:
+    if _random_topic_is_paused():
+        return False
     if now.weekday() >= 5:
         return False
     if _is_kr_public_holiday(now):

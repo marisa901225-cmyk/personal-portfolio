@@ -287,6 +287,8 @@ services:
       - TELEGRAM_JELLYFIN_CONTAINER_NAME=jellyfin
       - TELEGRAM_JELLYFIN_COMPOSE_PROJECT=my-home-server
       - TELEGRAM_JELLYFIN_COMPOSE_SERVICE=jellyfin
+      - TELEGRAM_PALWORLD_CONTAINER_NAME=palworld-dedicated-server
+      - TELEGRAM_DOCKER_STATUS_PROJECTS=personal-portfolio,palworld
       - TELEGRAM_DOCKER_SOCKET_PATH=/var/run/docker.sock
       - TZ=Asia/Seoul
     env_file: *backend_env_files
